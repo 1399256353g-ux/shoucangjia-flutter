@@ -122,6 +122,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   List cols = [];
+  final Map<String, String> covers = {};
   String? err;
 
   @override
@@ -134,7 +135,21 @@ class _HomePageState extends State<HomePage> {
     try {
       final r = await http.get(cfg.u('/api/index.json'), headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      setState(() => cols = (jsonDecode(r.body)['collections'] as List));
+      final list = (jsonDecode(r.body)['collections'] as List);
+      setState(() => cols = list);
+      for (final c in list) {
+        http
+            .get(cfg.u('/api/c/${c['idx']}.json'), headers: cfg.headers)
+            .then((rr) {
+          if (rr.statusCode != 200) return;
+          final ws = (jsonDecode(rr.body)['works'] as List);
+          if (ws.isEmpty) return;
+          final t = (ws[0]['th'] ?? '').toString();
+          if (t.isNotEmpty && mounted) {
+            setState(() => covers['${c['idx']}'] = t);
+          }
+        }).catchError((_) {});
+      }
     } catch (e) {
       setState(() => err = '$e');
     }
@@ -163,8 +178,22 @@ class _HomePageState extends State<HomePage> {
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (_, i) {
                     final c = cols[i];
+                    final cover = covers['${c['idx']}'];
                     return ListTile(
-                      leading: const Icon(Icons.video_library_outlined),
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 48,
+                          height: 64,
+                          child: cover == null
+                              ? Container(color: Colors.black26)
+                              : CachedNetworkImage(
+                                  imageUrl: cfg.base + cover,
+                                  httpHeaders: cfg.headers,
+                                  fit: BoxFit.cover,
+                                  memCacheWidth: 144),
+                        ),
+                      ),
                       title: Text('(${c['idx']}) ${c['name']}'),
                       trailing: Text('${c['count']}',
                           style: const TextStyle(color: Colors.grey)),
@@ -189,6 +218,22 @@ class CollectionPage extends StatefulWidget {
 
 class _CollectionPageState extends State<CollectionPage> {
   List works = [];
+  String filter = 'all';
+  String sort = 'new';
+
+  List get view {
+    var v = List.from(works);
+    if (filter == 'v') v = v.where((w) => w['t'] == 'v').toList();
+    if (filter == 'p') v = v.where((w) => w['t'] == 'p').toList();
+    if (sort == 'old') {
+      v.sort((a, b) => '${a['d']}'.compareTo('${b['d']}'));
+    } else if (sort == 'title') {
+      v.sort((a, b) => '${a['ti']}'.compareTo('${b['ti']}'));
+    } else {
+      v.sort((a, b) => '${b['d']}'.compareTo('${a['d']}'));
+    }
+    return v;
+  }
 
   @override
   void initState() {
@@ -505,18 +550,18 @@ class _PlayerPageState extends State<PlayerPage> {
                   );
                 }
                 return GestureDetector(
-                  onTapUp: (d) {
+                  onTap: togglePause,
+                  onHorizontalDragEnd: (d) {
                     stopAuto();
-                    final width = MediaQuery.of(context).size.width;
+                    final v = d.primaryVelocity ?? 0;
                     setState(() {
-                      if (d.localPosition.dx < width / 2) {
-                        img = (idx - 1).clamp(0, pics.length - 1);
-                      } else {
+                      if (v < -100) {
                         img = (idx + 1).clamp(0, pics.length - 1);
+                      } else if (v > 100) {
+                        img = (idx - 1).clamp(0, pics.length - 1);
                       }
                     });
                   },
-                  onLongPressStart: (_) {},
                   child: Stack(fit: StackFit.expand, children: [
                     CachedNetworkImage(
                         imageUrl: cfg.base + pics[idx],
