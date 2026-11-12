@@ -663,7 +663,7 @@ class _PlayerPageState extends State<PlayerPage> {
                           backgroundColor: Colors.black45)),
                   IconButton(
                       onPressed: cycleSpeed,
-                      child: Text('${speed}x',
+                      icon: Text('${speed}x',
                           style: const TextStyle(fontSize: 11)),
                       style: IconButton.styleFrom(
                           backgroundColor: Colors.black45)),
