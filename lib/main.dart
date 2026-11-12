@@ -21,10 +21,25 @@ class Cfg {
   String base = '';
   String user = 'zzx';
   String pass = '';
+  String lib = '';
+  String libName = '';
   Map<String, String> get headers => {
         'Authorization': 'Basic ${base64Encode(utf8.encode('$user:$pass'))}',
       };
-  Uri u(String path) => Uri.parse('$base$path');
+  Uri u(String path) {
+    if (base.isEmpty || lib.isEmpty) return Uri.parse('$base$path');
+    final sep = path.contains('?') ? '&' : '?';
+    return Uri.parse('$base$path${sep}lib=${Uri.encodeQueryComponent(lib)}');
+  }
+
+  // 媒体路径统一带库前缀：/media/<lib>/<相对路径>
+  String media(String p) {
+    if (lib.isEmpty || !p.startsWith('/media/')) return p;
+    final rest = p.substring(7);
+    if (rest.startsWith('$lib/')) return p;
+    return '/media/${Uri.encodeComponent(lib)}/$rest';
+  }
+
 }
 
 final cfg = Cfg();
@@ -94,6 +109,7 @@ class _AppState extends State<App> {
     cfg.base = sp.getString('base') ?? '';
     cfg.user = sp.getString('user') ?? 'zzx';
     cfg.pass = sp.getString('pass') ?? '';
+    cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
     if (mounted) setState(() => ready = true);
   }
@@ -278,6 +294,13 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: Text(cfg.base.isEmpty ? '未设置' : cfg.base),
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.library_books_outlined),
+          title: const Text('媒体库与爬虫'),
+          subtitle: const Text('选择 / 添加 / 删除库 · 库根爬虫 · 维护检查'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const LibraryPage())),
         ),
         ListTile(
           leading: const Icon(Icons.folder_special),
@@ -795,6 +818,570 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
   }
 }
 
+class LibraryPage extends StatefulWidget {
+  const LibraryPage({super.key});
+  @override
+  State<LibraryPage> createState() => _LibraryPageState();
+}
+
+class _LibraryPageState extends State<LibraryPage> {
+  List<Map<String, dynamic>> libs = [];
+  String? defaultId;
+  bool loading = true;
+  String? err;
+  bool changed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Uri _u(String path, [String? lib]) {
+    final sep = path.contains('?') ? '&' : '?';
+    return Uri.parse(
+        '${cfg.base}$path${sep}lib=${Uri.encodeQueryComponent(lib ?? cfg.lib)}');
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      err = null;
+    });
+    try {
+      final r = await http
+          .get(_u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 10));
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = ((j['libraries'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        libs = list;
+        defaultId = '${j['default'] ?? ''}';
+      });
+    } catch (e) {
+      if (mounted) setState(() => err = '$e');
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _switchTo(Map<String, dynamic> l) async {
+    cfg.lib = '${l['id']}';
+    cfg.libName = '${l['name'] ?? l['id']}';
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString('lib', cfg.lib);
+    if (!mounted) return;
+    Navigator.of(context).pop(true);
+  }
+
+  Future<void> _setDefault(Map<String, dynamic> l) async {
+    try {
+      final r = await http.post(_u('/api/libraries/default'),
+          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({'id': l['id']}));
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('已将「${l['name']}」设为默认库')));
+      await load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('设置失败：$e')));
+      }
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> l) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('删除库「${l['name']}」？'),
+        content: const Text('仅从注册表移除，不删除数据目录和媒体文件。当前库或唯一库不能删除。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final r = await http.post(_u('/api/libraries/delete'),
+          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({'id': l['id']}));
+      final j = jsonDecode(r.body);
+      if (r.statusCode != 200 || j['ok'] == false) {
+        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已移除库注册（数据保留）')));
+      await load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('删除失败：$e')));
+      }
+    }
+  }
+
+  Future<void> _add() async {
+    final id = TextEditingController();
+    final name = TextEditingController();
+    final desc = TextEditingController();
+    final base = TextEditingController(text: '/vol1/1000/');
+    final dir = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('添加媒体库'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+                controller: id,
+                decoration: const InputDecoration(
+                    labelText: '库 ID（小写字母/数字/-/_）')),
+            TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: '显示名称')),
+            TextField(
+                controller: desc,
+                decoration: const InputDecoration(labelText: '描述（可选）')),
+            TextField(
+                controller: base,
+                decoration: const InputDecoration(
+                    labelText: '媒体根目录（绝对路径）',
+                    hintText: '/vol1/1000/...')),
+            TextField(
+                controller: dir,
+                decoration: const InputDecoration(
+                    labelText: '数据目录（可选，默认服务端 libs/<id>）')),
+          ]),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true), child: const Text('添加')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final lid = id.text.trim().toLowerCase();
+    if (!RegExp(r'^[a-z0-9][a-z0-9_-]{0,31}$').hasMatch(lid)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('库 ID 格式不正确')));
+      return;
+    }
+    if (name.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('名称不能为空')));
+      return;
+    }
+    try {
+      final r = await http.post(_u('/api/libraries'),
+          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'id': lid,
+            'name': name.text.trim(),
+            'desc': desc.text.trim(),
+            'base': base.text.trim(),
+            'dir': dir.text.trim(),
+          }));
+      final j = jsonDecode(r.body);
+      if (r.statusCode != 200 || j['ok'] == false) {
+        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('媒体库已添加')));
+      await load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('添加失败：$e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) Navigator.of(context).pop(changed);
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('媒体库'), actions: [
+          IconButton(
+              icon: const Icon(Icons.refresh), onPressed: load, tooltip: '刷新'),
+          IconButton(
+              icon: const Icon(Icons.add), onPressed: _add, tooltip: '添加库'),
+        ]),
+        body: err != null
+            ? Center(child: Text('加载失败：$err'))
+            : loading
+                ? const Center(child: CircularProgressIndicator())
+                : ListView.separated(
+                    itemCount: libs.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final l = libs[i];
+                      final id = '${l['id']}';
+                      final isCur = id == cfg.lib;
+                      final isDef = id == defaultId;
+                      final cr = (l['crawler'] as Map?) ?? const {};
+                      final scripts = (l['crawlerScripts'] as List?) ?? const [];
+                      return ListTile(
+                        leading: Icon(
+                            isCur
+                                ? Icons.radio_button_checked
+                                : Icons.radio_button_unchecked,
+                            color: isCur ? Colors.amber : Colors.grey),
+                        title: Text('${l['name']}  ${isDef ? '★' : ''}'),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                                '$id · ${l['count'] ?? 0} 条 / ${l['cols'] ?? 0} 个收藏夹',
+                                style: const TextStyle(fontSize: 12)),
+                            Text('${l['base']}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.grey)),
+                            Text(
+                                '爬虫：${cr['enabled'] == true ? '已启用' : '未启用'} · ${cr['schedule'] ?? '04:10'} · 脚本 ${scripts.length} 个 · ${(l['indexOk'] == true) ? '索引正常' : '索引缺失'}',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: l['indexOk'] == true
+                                        ? Colors.grey
+                                        : Colors.redAccent)),
+                          ],
+                        ),
+                        isThreeLine: true,
+                        trailing: PopupMenuButton<String>(
+                          onSelected: (v) {
+                            if (v == 'default') _setDefault(l);
+                            if (v == 'crawler') {
+                              Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) =>
+                                      CrawlerConfigPage(lib: l))).then(
+                                  (_) => load());
+                            }
+                            if (v == 'maint') {
+                              Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => MaintenancePage(lib: l)));
+                            }
+                            if (v == 'delete') _delete(l);
+                          },
+                          itemBuilder: (_) => [
+                            const PopupMenuItem(
+                                value: 'default', child: Text('设为默认库')),
+                            const PopupMenuItem(
+                                value: 'crawler', child: Text('爬虫配置')),
+                            const PopupMenuItem(
+                                value: 'maint', child: Text('维护检查')),
+                            const PopupMenuItem(
+                                value: 'delete', child: Text('删除库（保留文件）')),
+                          ],
+                        ),
+                        onTap: () {
+                          changed = changed || !isCur;
+                          _switchTo(l);
+                        },
+                      );
+                    },
+                  ),
+      ),
+    );
+  }
+}
+
+class CrawlerConfigPage extends StatefulWidget {
+  final Map<String, dynamic> lib;
+  const CrawlerConfigPage({super.key, required this.lib});
+  @override
+  State<CrawlerConfigPage> createState() => _CrawlerConfigPageState();
+}
+
+class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
+  bool loading = true;
+  bool saving = false;
+  String? err;
+  bool enabled = false;
+  String schedule = '04:10';
+  int intervalMin = 0;
+  String note = '';
+  List scripts = [];
+
+  String get libId => '${widget.lib['id']}';
+
+  Uri _u(String path) =>
+      Uri.parse('${cfg.base}$path?lib=${Uri.encodeQueryComponent(libId)}');
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      err = null;
+    });
+    try {
+      final r = await http
+          .get(_u('/api/crawler'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 10));
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      if (r.statusCode != 200 || j['ok'] == false) {
+        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
+      }
+      final c = (j['crawler'] as Map?) ?? const {};
+      if (!mounted) return;
+      setState(() {
+        enabled = c['enabled'] == true;
+        schedule = '${c['schedule'] ?? '04:10'}';
+        intervalMin = (c['intervalMin'] as num?)?.toInt() ?? 0;
+        note = '${c['note'] ?? ''}';
+        scripts = (j['scripts'] as List?) ?? const [];
+      });
+    } catch (e) {
+      if (mounted) setState(() => err = '$e');
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> save() async {
+    setState(() => saving = true);
+    try {
+      final r = await http.post(_u('/api/crawler'),
+          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'enabled': enabled,
+            'schedule': schedule.trim(),
+            'intervalMin': intervalMin,
+            'note': note,
+          }));
+      final j = jsonDecode(r.body);
+      if (r.statusCode != 200 || j['ok'] == false) {
+        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('爬虫配置已保存')));
+      await load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('保存失败：$e')));
+      }
+    }
+    if (mounted) setState(() => saving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('爬虫配置 · ${widget.lib['name']}'), actions: [
+        TextButton(
+            onPressed: saving ? null : save,
+            child: Text(saving ? '保存中…' : '保存')),
+      ]),
+      body: err != null
+          ? Center(child: Text('加载失败：$err'))
+          : loading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(padding: const EdgeInsets.all(16), children: [
+                  Text('库根：${widget.lib['base']}',
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.grey)),
+                  const SizedBox(height: 10),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('启用爬虫调度'),
+                    subtitle: const Text('仅保存配置；实际调度由 NAS cron / 维护接口触发'),
+                    value: enabled,
+                    onChanged: (v) => setState(() => enabled = v),
+                  ),
+                  const Divider(),
+                  TextFormField(
+                    initialValue: schedule,
+                    decoration: const InputDecoration(
+                        labelText: '每日执行时间（HH:MM）',
+                        hintText: '04:10'),
+                    onChanged: (v) => schedule = v,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    const Expanded(child: Text('间隔（分钟，0 = 仅按时间）')),
+                    Text('$intervalMin'),
+                  ]),
+                  Slider(
+                    value: intervalMin.toDouble().clamp(0, 1440),
+                    min: 0,
+                    max: 1440,
+                    divisions: 48,
+                    onChanged: (v) =>
+                        setState(() => intervalMin = v.round()),
+                  ),
+                  TextFormField(
+                    initialValue: note,
+                    decoration: const InputDecoration(labelText: '备注'),
+                    maxLines: 2,
+                    onChanged: (v) => note = v,
+                  ),
+                  const Divider(height: 28),
+                  const Text('库根脚本',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  if (scripts.isEmpty)
+                    const Text('未发现脚本（保存后服务端会在库根 crawler/ 生成模板）',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  for (final s in scripts)
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.terminal, size: 18),
+                      title: Text('${(s as Map)['name']}'),
+                      subtitle: Text(
+                          '${((s['size'] as num?)?.toInt() ?? 0)} B',
+                          style: const TextStyle(fontSize: 11)),
+                    ),
+                ]),
+    );
+  }
+}
+
+class MaintenancePage extends StatefulWidget {
+  final Map<String, dynamic> lib;
+  const MaintenancePage({super.key, required this.lib});
+  @override
+  State<MaintenancePage> createState() => _MaintenancePageState();
+}
+
+class _MaintenancePageState extends State<MaintenancePage> {
+  bool loading = true;
+  bool running = false;
+  String? err;
+  Map<String, dynamic> data = {};
+
+  String get libId => '${widget.lib['id']}';
+  Uri _u(String path) =>
+      Uri.parse('${cfg.base}$path?lib=${Uri.encodeQueryComponent(libId)}');
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      err = null;
+    });
+    try {
+      final r = await http
+          .get(_u('/api/maintenance'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 15));
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      if (r.statusCode != 200 || j['ok'] == false) {
+        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
+      }
+      if (mounted) setState(() => data = j);
+    } catch (e) {
+      if (mounted) setState(() => err = '$e');
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> runCrawler() async {
+    setState(() => running = true);
+    try {
+      final r = await http.post(_u('/api/maintenance'),
+          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({'action': 'run-crawler', 'lib': libId}));
+      final j = jsonDecode(r.body);
+      if (r.statusCode != 200 || j['ok'] == false) {
+        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('爬虫已启动 pid=${j['pid']}，日志：${j['log']}')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('启动失败：$e')));
+      }
+    }
+    if (mounted) setState(() => running = false);
+  }
+
+  String _list(Object? v) =>
+      ((v as List?) ?? const []).map((e) => '$e').join(', ');
+
+  @override
+  Widget build(BuildContext context) {
+    final ok = data['indexOk'] == true && data['baseOk'] == true;
+    return Scaffold(
+      appBar: AppBar(title: Text('维护 · ${widget.lib['name']}'), actions: [
+        IconButton(
+            icon: const Icon(Icons.refresh), onPressed: load, tooltip: '重新扫描'),
+      ]),
+      body: err != null
+          ? Center(child: Text('加载失败：$err'))
+          : loading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(padding: const EdgeInsets.all(16), children: [
+                  Row(children: [
+                    Icon(ok ? Icons.check_circle : Icons.warning_amber,
+                        color: ok ? Colors.green : Colors.orange),
+                    const SizedBox(width: 8),
+                    Text(ok ? '基础检查通过' : '发现问题',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ]),
+                  const Divider(height: 24),
+                  _row('库 ID', libId),
+                  _row('数据目录', '${data['dir']}'),
+                  _row('媒体目录', '${data['base']}'),
+                  _row('索引', '${data['indexOk'] == true ? '正常' : '缺失/损坏'}'),
+                  _row('作品/收藏夹', '${data['total'] ?? 0} / ${data['collections'] ?? 0}'),
+                  _row('索引文件', '${data['cFiles'] ?? 0} 个'),
+                  _row('缺失', _list(data['missing'])),
+                  _row('孤儿', _list(data['orphans'])),
+                  _row('损坏', _list(data['bad'])),
+                  _row('媒体目录存在', '${data['baseOk'] == true ? '是' : '否'}'),
+                  _row('爬虫目录', '${data['crawlerDir'] ?? '未创建'}'),
+                  const Divider(height: 24),
+                  FilledButton.icon(
+                    onPressed: running ? null : runCrawler,
+                    icon: const Icon(Icons.play_arrow),
+                    label: Text(running ? '启动中…' : '运行库根爬虫 sync.sh'),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('运行前请确认脚本已在库根 crawler/ 中就绪；日志写在 crawler/run.log。',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ]),
+    );
+  }
+
+  Widget _row(String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(width: 110, child: Text(k, style: const TextStyle(color: Colors.grey))),
+          Expanded(child: SelectableText(v)),
+        ]),
+      );
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -815,6 +1402,40 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> load() async {
     try {
+      final libsR = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (libsR.statusCode == 200) {
+        final lj = jsonDecode(libsR.body) as Map<String, dynamic>;
+        final ls = ((lj['libraries'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        Map<String, dynamic>? pick;
+        for (final e in ls) {
+          if (e['id'] == cfg.lib) {
+            pick = e;
+            break;
+          }
+        }
+        if (pick == null) {
+          for (final e in ls) {
+            if (e['id'] == lj['default']) {
+              pick = e;
+              break;
+            }
+          }
+        }
+        if (pick == null && ls.isNotEmpty) pick = ls.first;
+        if (pick != null) {
+          final changed = cfg.lib != pick['id'];
+          cfg.lib = '${pick['id']}';
+          cfg.libName = '${pick['name'] ?? cfg.lib}';
+          if (changed) {
+            final sp = await SharedPreferences.getInstance();
+            await sp.setString('lib', cfg.lib);
+          }
+        }
+      }
       final rs = await Future.wait([
         http.get(cfg.u('/api/index.json'), headers: cfg.headers),
         http.get(cfg.u('/api/settings'), headers: cfg.headers),
@@ -884,7 +1505,17 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('抖音收藏夹'), actions: [
+      appBar: AppBar(
+          title: Text(cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName),
+          actions: [
+        IconButton(
+            icon: const Icon(Icons.library_books_outlined),
+            tooltip: '媒体库',
+            onPressed: () async {
+              final changed = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(builder: (_) => const LibraryPage()));
+              if (changed == true) await load();
+            }),
         if (defaultIdx != null)
           IconButton(
               icon: const Icon(Icons.star, color: Colors.amber),
@@ -939,7 +1570,7 @@ class _HomePageState extends State<HomePage> {
                           child: cover == null
                               ? Container(color: Colors.black26)
                               : CachedNetworkImage(
-                                  imageUrl: cfg.base + cover,
+                                  imageUrl: cfg.base + cfg.media(cover),
                                   httpHeaders: cfg.headers,
                                   fit: BoxFit.cover,
                                   memCacheWidth: 144),
@@ -1349,7 +1980,7 @@ class _RankPageState extends State<RankPage> {
                                                     style: const TextStyle(
                                                         fontSize: 18)))
                                             : CachedNetworkImage(
-                                                imageUrl: cfg.base + av,
+                                                imageUrl: cfg.base + cfg.media(av),
                                                 httpHeaders: cfg.headers,
                                                 fit: BoxFit.cover,
                                                 memCacheWidth: 126,
@@ -1621,7 +2252,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                                         style: const TextStyle(
                                                             fontSize: 24)))
                                                 : CachedNetworkImage(
-                                                    imageUrl: cfg.base + av,
+                                                    imageUrl: cfg.base + cfg.media(av),
                                                     httpHeaders: cfg.headers,
                                                     fit: BoxFit.cover,
                                                     memCacheWidth: 174,
@@ -1793,9 +2424,9 @@ class _PlayerPageState extends State<PlayerPage> {
     try {
       if (w['t'] == 'v') {
         await player
-            .open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
+            .open(Media(cfg.base + cfg.media(w['m'][0].toString()), httpHeaders: cfg.headers));
       } else if ((w['au'] ?? '').toString().isNotEmpty) {
-        await player.open(Media(cfg.base + w['au'], httpHeaders: cfg.headers));
+        await player.open(Media(cfg.base + cfg.media(w['au'].toString()), httpHeaders: cfg.headers));
       }
     } catch (_) {}
     if (my != _openToken) return;
@@ -1819,7 +2450,7 @@ class _PlayerPageState extends State<PlayerPage> {
           my == _openToken &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
-        player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
+        player.open(Media(cfg.base + cfg.media(w['m'][0].toString()), httpHeaders: cfg.headers));
         player.play();
       }
     });
@@ -2156,11 +2787,11 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget picView(String path) {
     final low = path.toLowerCase();
     if (low.endsWith('.gif') || low.contains('.gif?')) {
-      return Image.network(cfg.base + path,
+      return Image.network(cfg.base + cfg.media(path),
           headers: cfg.headers, fit: BoxFit.contain, gaplessPlayback: true);
     }
     return CachedNetworkImage(
-        imageUrl: cfg.base + path,
+        imageUrl: cfg.base + cfg.media(path),
         httpHeaders: cfg.headers,
         fit: BoxFit.contain);
   }
@@ -2241,7 +2872,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     return (it['th'] ?? '').toString().isEmpty
                         ? Container(color: Colors.black)
                         : CachedNetworkImage(
-                            imageUrl: cfg.base + it['th'],
+                            imageUrl: cfg.base + cfg.media(it['th'].toString()),
                             httpHeaders: cfg.headers,
                             fit: BoxFit.contain);
                   }
@@ -2258,7 +2889,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       child: Stack(fit: StackFit.expand, children: [
                         if ((it['th'] ?? '').toString().isNotEmpty)
                           CachedNetworkImage(
-                              imageUrl: cfg.base + it['th'],
+                              imageUrl: cfg.base + cfg.media(it['th'].toString()),
                               httpHeaders: cfg.headers,
                               fit: BoxFit.contain),
                         Video(controller: vc, controls: NoVideoControls),
@@ -2350,7 +2981,7 @@ class _PlayerPageState extends State<PlayerPage> {
                         if ((w['av'] ?? '').toString().isNotEmpty)
                           ClipOval(
                               child: CachedNetworkImage(
-                                  imageUrl: cfg.base + w['av'],
+                                  imageUrl: cfg.base + cfg.media(w['av'].toString()),
                                   httpHeaders: cfg.headers,
                                   width: 38,
                                   height: 38,
@@ -2705,7 +3336,7 @@ class _RecommendPageState extends State<RecommendPage> {
                               (w['th'] ?? '').toString().isEmpty
                                   ? Container(color: Colors.black26)
                                   : CachedNetworkImage(
-                                      imageUrl: cfg.base + w['th'],
+                                      imageUrl: cfg.base + cfg.media(w['th'].toString()),
                                       httpHeaders: cfg.headers,
                                       fit: BoxFit.cover,
                                       errorWidget: (_, __, ___) => Container(
@@ -2825,7 +3456,7 @@ class _SearchPageState extends State<SearchPage> {
                           child: (w['th'] ?? '').toString().isEmpty
                               ? Container(color: Colors.black26)
                               : CachedNetworkImage(
-                                  imageUrl: cfg.base + w['th'],
+                                  imageUrl: cfg.base + cfg.media(w['th'].toString()),
                                   httpHeaders: cfg.headers,
                                   fit: BoxFit.cover)),
                       title: Text('${w['ti']}',
@@ -2908,7 +3539,7 @@ class _AuthorPageState extends State<AuthorPage> {
                                           style:
                                               const TextStyle(fontSize: 26))))
                               : CachedNetworkImage(
-                                  imageUrl: cfg.base + av,
+                                  imageUrl: cfg.base + cfg.media(av),
                                   httpHeaders: cfg.headers,
                                   width: 64,
                                   height: 64,
@@ -2957,7 +3588,7 @@ class WorkGrid extends StatelessWidget {
             (w['th'] ?? '').toString().isEmpty
                 ? Container(color: Colors.black26)
                 : CachedNetworkImage(
-                    imageUrl: cfg.base + w['th'],
+                    imageUrl: cfg.base + cfg.media(w['th'].toString()),
                     httpHeaders: cfg.headers,
                     fit: BoxFit.cover,
                     errorWidget: (_, __, ___) =>
