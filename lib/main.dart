@@ -896,6 +896,11 @@ class _HomePageState extends State<HomePage> {
             onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const AuthorGridPage()))),
         IconButton(
+            icon: const Icon(Icons.leaderboard_outlined),
+            tooltip: '排行榜',
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const RankPage()))),
+        IconButton(
             icon: const Icon(Icons.search),
             tooltip: '搜索',
             onPressed: () => Navigator.of(context)
@@ -1132,6 +1137,255 @@ class _CollectionPageState extends State<CollectionPage> {
                         : WorkGrid(works: list)),
               ),
             ]),
+    );
+  }
+}
+
+// 排行榜：按周/月/年/总统计作者播放量或小水滴
+class RankPage extends StatefulWidget {
+  const RankPage({super.key});
+  @override
+  State<RankPage> createState() => _RankPageState();
+}
+
+class _RankPageState extends State<RankPage> {
+  static const _periods = <String, String>{
+    'week': '周榜',
+    'month': '月榜',
+    'year': '年榜',
+    'all': '总榜',
+  };
+  String period = 'week';
+  String metric = 'play';
+  List rows = [];
+  bool loading = true;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    if (mounted) setState(() => err = null);
+    try {
+      final r = await http.get(
+          cfg.u('/api/rank?period=$period&metric=$metric'),
+          headers: cfg.headers);
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final j = jsonDecode(r.body);
+      if (!mounted) return;
+      setState(() {
+        rows = (j is Map && j['authors'] is List) ? j['authors'] as List : [];
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          err = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  int _n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+
+  Future<void> _open(String name) async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    if (mounted) load();
+  }
+
+  Color _rankColor(int i) {
+    if (i == 0) return const Color(0xFFFFC107);
+    if (i == 1) return const Color(0xFFB0BEC5);
+    if (i == 2) return const Color(0xFFBF8970);
+    return Colors.white38;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('排行榜'), actions: [
+        IconButton(
+            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+      ]),
+      body: Column(children: [
+        SizedBox(
+          height: 46,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            children: [
+              for (final p in _periods.entries)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(p.value),
+                    selected: period == p.key,
+                    onSelected: (_) {
+                      setState(() {
+                        period = p.key;
+                        loading = true;
+                      });
+                      load();
+                    },
+                  ),
+                ),
+              const SizedBox(width: 8),
+              const VerticalDivider(width: 1, indent: 10, endIndent: 10),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('播放量'),
+                selected: metric == 'play',
+                onSelected: (_) {
+                  if (metric == 'play') return;
+                  setState(() {
+                    metric = 'play';
+                    loading = true;
+                  });
+                  load();
+                },
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('小水滴'),
+                selected: metric == 'drop',
+                onSelected: (_) {
+                  if (metric == 'drop') return;
+                  setState(() {
+                    metric = 'drop';
+                    loading = true;
+                  });
+                  load();
+                },
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+          child: Row(children: [
+            const Icon(Icons.leaderboard, size: 13, color: Colors.grey),
+            const SizedBox(width: 6),
+            Expanded(
+                child: Text(
+                    metric == 'drop'
+                        ? '按${_periods[period]}统计作者收到的小水滴'
+                        : '按${_periods[period]}统计作者播放量',
+                    style:
+                        const TextStyle(fontSize: 11, color: Colors.grey))),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : err != null
+                  ? Center(
+                      child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                          Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 24),
+                              child: Text('加载失败：$err',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(fontSize: 12))),
+                          const SizedBox(height: 12),
+                          FilledButton(
+                              onPressed: load, child: const Text('重试')),
+                        ]))
+                  : rows.isEmpty
+                      ? Center(
+                          child: Text(
+                              metric == 'drop'
+                                  ? '本期还没有小水滴，去播放页送一颗吧'
+                                  : '本期还没有播放记录',
+                              style: const TextStyle(
+                                  color: Colors.grey, fontSize: 12)))
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                          itemCount: rows.length,
+                          separatorBuilder: (_, __) =>
+                              const Divider(height: 1),
+                          itemBuilder: (_, i) {
+                            final e = rows[i] is Map
+                                ? Map<String, dynamic>.from(rows[i] as Map)
+                                : <String, dynamic>{};
+                            final name = '${e['name'] ?? ''}';
+                            final av = '${e['avatar'] ?? ''}';
+                            final score = _n(e['score']);
+                            return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 4),
+                              leading: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    SizedBox(
+                                        width: 30,
+                                        child: Text('${i + 1}',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: _rankColor(i)))),
+                                    ClipOval(
+                                      child: SizedBox(
+                                        width: 42,
+                                        height: 42,
+                                        child: av.isEmpty
+                                            ? Container(
+                                                color: Colors.blueGrey,
+                                                alignment: Alignment.center,
+                                                child: Text(
+                                                    name.isEmpty ? '?' : name[0],
+                                                    style: const TextStyle(
+                                                        fontSize: 18)))
+                                            : CachedNetworkImage(
+                                                imageUrl: cfg.base + av,
+                                                httpHeaders: cfg.headers,
+                                                fit: BoxFit.cover,
+                                                memCacheWidth: 126,
+                                                errorWidget: (_, __, ___) =>
+                                                    Container(
+                                                        color: Colors.blueGrey,
+                                                        alignment:
+                                                            Alignment.center,
+                                                        child: Text(
+                                                            name.isEmpty
+                                                                ? '?'
+                                                                : name[0],
+                                                            style:
+                                                                const TextStyle(
+                                                                    fontSize:
+                                                                        18)))),
+                                      ),
+                                    ),
+                                  ]),
+                              title: Text(name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600)),
+                              subtitle: Text(
+                                  '播放 ${_n(e['plays'])} · 水滴 ${_n(e['drops'])} · ${_n(e['works'])} 作品',
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Colors.white60)),
+                              trailing: Text(
+                                  metric == 'drop' ? '💧 $score' : '$score',
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.lightBlueAccent)),
+                              onTap: name.isEmpty ? null : () => _open(name),
+                            );
+                          },
+                        ),
+        ),
+      ]),
     );
   }
 }
