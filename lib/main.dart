@@ -30,7 +30,7 @@ class Cfg {
 final cfg = Cfg();
 final navKey = GlobalKey<NavigatorState>();
 
-// 作者统计上报（播放/访问/水滴），失败静默，不影响播放
+// 作者统计上报（播放/访问），失败静默，不影响播放
 void postStat(String type, String author) {
   if (cfg.base.isEmpty || author.isEmpty) return;
   try {
@@ -40,6 +40,38 @@ void postStat(String type, String author) {
             body: jsonEncode({'type': type, 'author': author}))
         .ignore();
   } catch (_) {}
+}
+
+// 小水滴：每个作品每日 1 颗、每周 3 颗，服务端按作者累计
+Future<Map<String, dynamic>?> fetchDropStatus(String id) async {
+  if (cfg.base.isEmpty || id.isEmpty) return null;
+  try {
+    final r = await http
+        .get(cfg.u('/api/drops?id=${Uri.encodeQueryComponent(id)}'),
+            headers: cfg.headers)
+        .timeout(const Duration(seconds: 8));
+    final j = jsonDecode(r.body);
+    if (j is Map) {
+      return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
+    }
+  } catch (_) {}
+  return null;
+}
+
+Future<Map<String, dynamic>?> sendDrop(String id, String author) async {
+  if (cfg.base.isEmpty || id.isEmpty || author.isEmpty) return null;
+  try {
+    final r = await http
+        .post(cfg.u('/api/drops'),
+            headers: {...cfg.headers, 'Content-Type': 'application/json'},
+            body: jsonEncode({'id': id, 'author': author}))
+        .timeout(const Duration(seconds: 8));
+    final j = jsonDecode(r.body);
+    if (j is Map) {
+      return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
+    }
+  } catch (_) {}
+  return null;
 }
 
 class App extends StatefulWidget {
@@ -1411,6 +1443,10 @@ class _PlayerPageState extends State<PlayerPage> {
   bool loopOne = false;
   double? dragFrac;
   bool resumeAfterDrag = false;
+  bool dropBusy = false;
+  int dropDayLeft = 1;
+  int dropWeekLeft = 3;
+  int dropTotal = 0;
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
@@ -1484,12 +1520,16 @@ class _PlayerPageState extends State<PlayerPage> {
       img = 0;
       loading = true;
       paused = false;
+      dropDayLeft = 1;
+      dropWeekLeft = 3;
+      dropTotal = 0;
     });
     try {
       await player.stop();
     } catch (_) {}
     if (my != _openToken) return;
     final w = widget.works[i];
+    _refreshDrop('${w['id'] ?? ''}', my);
     postStat('play', '${w['a'] ?? ''}');
     try {
       if (w['t'] == 'v') {
@@ -1525,6 +1565,63 @@ class _PlayerPageState extends State<PlayerPage> {
       }
     });
     if (w['t'] != 'v') startAuto();
+  }
+
+  Future<void> _refreshDrop(String id, int token) async {
+    if (id.isEmpty) return;
+    final r = await fetchDropStatus(id);
+    if (!mounted || token != _openToken || r == null) return;
+    setState(() {
+      dropDayLeft = _intOf(r['dayLeft'], 1);
+      dropWeekLeft = _intOf(r['weekLeft'], 3);
+      dropTotal = _intOf(r['total'], 0);
+    });
+  }
+
+  int _intOf(dynamic v, int fallback) =>
+      v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? fallback);
+
+  Future<void> _sendDrop() async {
+    final w = widget.works[cur];
+    final id = '${w['id'] ?? ''}';
+    final author = '${w['a'] ?? ''}';
+    if (dropBusy || id.isEmpty || author.isEmpty) return;
+    if (dropDayLeft <= 0) {
+      _toast('今天已经送过小水滴了');
+      return;
+    }
+    if (dropWeekLeft <= 0) {
+      _toast('本周小水滴已送完（3/3）');
+      return;
+    }
+    setState(() => dropBusy = true);
+    final r = await sendDrop(id, author);
+    if (!mounted) return;
+    setState(() {
+      dropBusy = false;
+      if (r != null) {
+        dropDayLeft = _intOf(r['dayLeft'], dropDayLeft);
+        dropWeekLeft = _intOf(r['weekLeft'], dropWeekLeft);
+        dropTotal = _intOf(r['total'], dropTotal);
+      }
+    });
+    if (r != null && r['ok'] == true) {
+      _toast('已送 1 颗小水滴 · 今日剩余 $dropDayLeft · 本周剩余 $dropWeekLeft');
+    } else {
+      _toast('${r?['error'] ?? '发送失败，请检查网络'}');
+    }
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(msg, style: const TextStyle(fontSize: 13)),
+        backgroundColor: const Color(0xE6222222),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(milliseconds: 1600),
+      ));
   }
 
   void startAuto() {
@@ -2216,6 +2313,26 @@ class _PlayerPageState extends State<PlayerPage> {
                                   color: loopOne
                                       ? Colors.white70
                                       : Colors.white24)),
+                          IconButton(
+                              onPressed: (dropBusy ||
+                                      dropDayLeft <= 0 ||
+                                      dropWeekLeft <= 0)
+                                  ? null
+                                  : _sendDrop,
+                              tooltip:
+                                  '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
+                              icon: dropBusy
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white54))
+                                  : Icon(Icons.water_drop,
+                                      size: 21,
+                                      color: dropDayLeft > 0 && dropWeekLeft > 0
+                                          ? Colors.lightBlueAccent
+                                          : Colors.white24)),
                           const Spacer(),
                           IconButton(
                               onPressed: toggleFs,
