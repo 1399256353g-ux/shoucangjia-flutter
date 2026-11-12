@@ -344,7 +344,10 @@ class _PlayerPageState extends State<PlayerPage> {
   void initState() {
     super.initState();
     cur = widget.start;
-    player.setPlaylistMode(PlaylistMode.loop);
+    player.setPlaylistMode(PlaylistMode.none);
+    player.stream.completed.listen((done) {
+      if (done && autoplay && !loopOne && mounted) next();
+    });
     player.stream.playing.listen((v) {
       if (mounted && widget.works[cur]['t'] == 'v' && v != !paused) {
         setState(() => paused = !v);
@@ -455,6 +458,22 @@ class _PlayerPageState extends State<PlayerPage> {
   void toggleMute() {
     setState(() => muted = !muted);
     player.setVolume(muted ? 0 : 100);
+  }
+
+  void toggleLoop() {
+    setState(() {
+      loopOne = !loopOne;
+      if (loopOne) autoplay = false;
+    });
+    player.setPlaylistMode(loopOne ? PlaylistMode.single : PlaylistMode.none);
+  }
+
+  void toggleAutoplay() {
+    setState(() {
+      autoplay = !autoplay;
+      if (autoplay) loopOne = false;
+    });
+    player.setPlaylistMode(loopOne ? PlaylistMode.single : PlaylistMode.none);
   }
 
   void cycleSpeed() {
@@ -813,6 +832,20 @@ class _PlayerPageState extends State<PlayerPage> {
                             icon: Text('${speed}x',
                                 style: const TextStyle(
                                     fontSize: 11, color: Colors.white70))),
+                        IconButton(
+                            onPressed: toggleAutoplay,
+                            tooltip: '自动连播',
+                            icon: Icon(Icons.skip_next,
+                                color: autoplay
+                                    ? Colors.white70
+                                    : Colors.white24)),
+                        IconButton(
+                            onPressed: toggleLoop,
+                            tooltip: '单条循环',
+                            icon: Icon(Icons.repeat_one,
+                                color: loopOne
+                                    ? Colors.white70
+                                    : Colors.white24)),
                         const Spacer(),
                         IconButton(
                             onPressed: toggleFs,
