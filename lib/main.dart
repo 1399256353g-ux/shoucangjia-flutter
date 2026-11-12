@@ -87,7 +87,11 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController pass = TextEditingController(text: cfg.pass);
 
   Future<void> save() async {
-    cfg.base = base.text.trim().replaceAll(RegExp(r'/+$'), '');
+    var b = base.text.trim().replaceAll(RegExp(r'/+$'), '');
+    if (!b.startsWith('http://') && !b.startsWith('https://')) {
+      b = 'http://' + b;
+    }
+    cfg.base = b;
     cfg.user = user.text.trim();
     cfg.pass = pass.text;
     final sp = await SharedPreferences.getInstance();
