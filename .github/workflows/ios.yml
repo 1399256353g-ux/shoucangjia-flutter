@@ -1,0 +1,37 @@
+name: ios
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Gen platform
+        run: flutter create --platforms=ios,android --org com.zzx --project-name shoucangjia .
+      - name: ATS
+        run: |
+          PL=ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PL" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PL" || true
+          /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 访问局域网图库" "$PL" || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Dizi" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Dizi" "$PL"
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: flutter build ios --release --no-codesign
+      - name: Package IPA
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry "Dizi-${VER}-unsigned.ipa" Payload
+          ls -lh Dizi-${VER}-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa
+          path: Dizi-*-unsigned.ipa
