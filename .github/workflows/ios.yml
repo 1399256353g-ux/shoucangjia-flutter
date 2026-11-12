@@ -1,4 +1,6 @@
 name: ios
+permissions:
+  contents: write
 on:
   push:
     branches: [ main ]
@@ -35,3 +37,10 @@ jobs:
         with:
           name: ios-ipa
           path: Dizi-*-unsigned.ipa
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          gh release create "v$VER" --title "Dizi $VER" --notes "auto build $VER" || true
+          gh release upload "v$VER" "Dizi-${VER}-unsigned.ipa" --clobber
