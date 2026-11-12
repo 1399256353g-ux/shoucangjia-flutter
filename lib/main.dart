@@ -337,6 +337,7 @@ class _PlayerPageState extends State<PlayerPage> {
   bool autoplay = true;
   bool loopOne = false;
   double? dragFrac;
+  bool resumeAfterDrag = false;
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
@@ -805,22 +806,34 @@ class _PlayerPageState extends State<PlayerPage> {
                             return GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onTapDown: (d) => seekAt(d.localPosition),
-                              onHorizontalDragStart: (_) => setState(() {
-                                    dragging = true;
-                                    dragFrac = progress;
-                                  }),
+                              onHorizontalDragStart: (_) {
+                                resumeAfterDrag = !paused;
+                                if (!paused) player.pause();
+                                setState(() {
+                                  dragging = true;
+                                  dragFrac = progress;
+                                });
+                              },
                               onHorizontalDragUpdate: (d) {
                                 final f = (d.localPosition.dx / cons.maxWidth)
                                     .clamp(0.0, 1.0);
                                 setState(() => dragFrac = f);
+                              },
+                              onHorizontalDragEnd: (_) {
+                                final f = dragFrac ?? progress;
                                 if (isV && dur.inMilliseconds > 0) {
                                   player.seek(dur * f);
+                                  if (resumeAfterDrag) player.play();
+                                } else if (!isV && pics.isNotEmpty) {
+                                  setState(() => img = (f * (pics.length - 1))
+                                      .round()
+                                      .clamp(0, pics.length - 1));
                                 }
+                                setState(() {
+                                  dragging = false;
+                                  dragFrac = null;
+                                });
                               },
-                              onHorizontalDragEnd: (_) => setState(() {
-                                    dragging = false;
-                                    dragFrac = null;
-                                  }),
                               child: SizedBox(
                                 height: 30,
                                 child: Stack(
