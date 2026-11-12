@@ -28,6 +28,7 @@ class Cfg {
 }
 
 final cfg = Cfg();
+final navKey = GlobalKey<NavigatorState>();
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -56,8 +57,18 @@ class _AppState extends State<App> {
           home: Scaffold(body: Center(child: CircularProgressIndicator())));
     }
     return MaterialApp(
-      title: '收藏夹',
+      title: '抖音收藏夹',
+      navigatorKey: navKey,
       theme: ThemeData.dark(useMaterial3: true),
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+      },
+      actions: {
+        DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
+          navKey.currentState?.maybePop();
+          return null;
+        }),
+      },
       home: cfg.base.isEmpty ? const SettingsPage() : const HomePage(),
     );
   }
@@ -335,7 +346,9 @@ class _PlayerPageState extends State<PlayerPage> {
     cur = widget.start;
     player.setPlaylistMode(PlaylistMode.loop);
     player.stream.playing.listen((v) {
-      if (mounted && v != !paused) setState(() => paused = !v);
+      if (mounted && widget.works[cur]['t'] == 'v' && v != !paused) {
+        setState(() => paused = !v);
+      }
     });
     subPos = player.stream.position.listen((p) {
       if (mounted) setState(() => pos = p);
@@ -382,7 +395,12 @@ class _PlayerPageState extends State<PlayerPage> {
         await player.play();
       } catch (_) {}
     }
-    if (mounted && my == _openToken) setState(() => loading = false);
+    if (mounted && my == _openToken) {
+      setState(() {
+        loading = false;
+        if (w['t'] != 'v') paused = false;
+      });
+    }
     retryTimer = Timer(const Duration(milliseconds: 1800), () {
       if (mounted && my == _openToken && w['t'] == 'v' && dur.inMilliseconds == 0) {
         player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
@@ -677,8 +695,12 @@ class _PlayerPageState extends State<PlayerPage> {
                   opacity: ui ? 1 : 0,
                   duration: const Duration(milliseconds: 200),
                   child: GestureDetector(
-                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => AuthorPage(name: '${w['a']}'))),
+                    onTap: () async {
+                      player.pause();
+                      await Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => AuthorPage(name: '${w['a']}')));
+                      if (!paused && mounted) player.play();
+                    },
                     child: Row(children: [
                       if ((w['av'] ?? '').toString().isNotEmpty)
                         ClipOval(
