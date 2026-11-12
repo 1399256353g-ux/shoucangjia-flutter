@@ -891,6 +891,11 @@ class _HomePageState extends State<HomePage> {
               tooltip: '打开默认收藏夹',
               onPressed: openDefault),
         IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: '推荐',
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const RecommendPage()))),
+        IconButton(
             icon: const Icon(Icons.people_alt_outlined),
             tooltip: '作者',
             onPressed: () => Navigator.of(context).push(
@@ -2603,6 +2608,145 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class RecommendPage extends StatefulWidget {
+  const RecommendPage({super.key});
+  @override
+  State<RecommendPage> createState() => _RecommendPageState();
+}
+
+class _RecommendPageState extends State<RecommendPage> {
+  List works = [];
+  bool loading = true;
+  String? err;
+  int batch = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    load(refresh: false);
+  }
+
+  Future<void> load({required bool refresh}) async {
+    if (refresh) batch++;
+    final seed = DateTime.now().millisecondsSinceEpoch ~/ 1000 + batch * 7919;
+    setState(() {
+      loading = true;
+      err = null;
+    });
+    try {
+      final r = await http.get(
+          cfg.u('/api/recommend?n=40&seed=$seed'),
+          headers: cfg.headers);
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final j = jsonDecode(r.body);
+      if (!mounted) return;
+      setState(() {
+        works = (j is Map && j['works'] is List) ? j['works'] as List : [];
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          err = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('推荐'), actions: [
+        IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: '换一批',
+            onPressed: loading ? null : () => load(refresh: true)),
+      ]),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : err != null
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text('加载失败：$err'),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                      onPressed: () => load(refresh: false),
+                      child: const Text('重试')),
+                ]))
+              : works.isEmpty
+                  ? const Center(
+                      child: Text('暂无推荐',
+                          style: TextStyle(color: Colors.grey)))
+                  : RefreshIndicator(
+                      onRefresh: () => load(refresh: true),
+                      child: GridView.builder(
+                        padding: const EdgeInsets.all(2),
+                        gridDelegate:
+                            const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 180,
+                                childAspectRatio: 3 / 4,
+                                mainAxisSpacing: 2,
+                                crossAxisSpacing: 2),
+                        itemCount: works.length,
+                        itemBuilder: (_, i) {
+                          final w = works[i];
+                          return GestureDetector(
+                            onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => PlayerPage(
+                                        works: works, start: i))),
+                            child:
+                                Stack(fit: StackFit.expand, children: [
+                              (w['th'] ?? '').toString().isEmpty
+                                  ? Container(color: Colors.black26)
+                                  : CachedNetworkImage(
+                                      imageUrl: cfg.base + w['th'],
+                                      httpHeaders: cfg.headers,
+                                      fit: BoxFit.cover,
+                                      errorWidget: (_, __, ___) => Container(
+                                          color: Colors.black26)),
+                              Positioned(
+                                  left: 4,
+                                  top: 4,
+                                  child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 4, vertical: 2),
+                                      color: Colors.black54,
+                                      child: Text(
+                                          w['t'] == 'v' ? '视频' : '图文',
+                                          style:
+                                              const TextStyle(fontSize: 10)))),
+                              Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  child: Container(
+                                      padding: const EdgeInsets.fromLTRB(
+                                          6, 10, 6, 5),
+                                      decoration: const BoxDecoration(
+                                          gradient: LinearGradient(
+                                              begin: Alignment.topCenter,
+                                              end: Alignment.bottomCenter,
+                                              colors: [
+                                            Colors.transparent,
+                                            Colors.black87
+                                          ])),
+                                      child: Text(
+                                          '@${w['a'] ?? ''} · ${w['d'] ?? ''}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style:
+                                              const TextStyle(fontSize: 10)))),
+                            ]),
+                          );
+                        },
+                      ),
+                    ),
     );
   }
 }
