@@ -489,11 +489,11 @@ class _PlayerPageState extends State<PlayerPage> {
   void onWheel(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastWheel < 260) return;
-    if (e.scrollDelta.dy > 8) {
+    if (now - _lastWheel < 150) return;
+    if (e.scrollDelta.dy > 1) {
       _lastWheel = now;
       next();
-    } else if (e.scrollDelta.dy < -8) {
+    } else if (e.scrollDelta.dy < -1) {
       _lastWheel = now;
       prev();
     }
