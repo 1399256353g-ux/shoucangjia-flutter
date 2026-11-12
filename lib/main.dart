@@ -918,6 +918,7 @@ class CollectionPage extends StatefulWidget {
 
 class _CollectionPageState extends State<CollectionPage> {
   List works = [];
+  List deleted = [];
   String filter = 'all';
   String sort = 'new';
 
@@ -925,7 +926,6 @@ class _CollectionPageState extends State<CollectionPage> {
     var v = List.from(works);
     if (filter == 'v') v = v.where((w) => w['t'] == 'v').toList();
     if (filter == 'p') v = v.where((w) => w['t'] == 'p').toList();
-    if (filter == 'del') v = v.where((w) => w['del'] == 1).toList();
     if (sort == 'old') {
       v.sort((a, b) => '${a['d']}'.compareTo('${b['d']}'));
     } else if (sort == 'title') {
@@ -942,7 +942,11 @@ class _CollectionPageState extends State<CollectionPage> {
     http
         .get(cfg.u('/api/c/${widget.idx}.json'), headers: cfg.headers)
         .then((r) {
-      setState(() => works = (jsonDecode(r.body)['works'] as List));
+      final m = jsonDecode(r.body);
+      setState(() {
+        works = (m['works'] as List);
+        deleted = (m['deleted'] as List?) ?? [];
+      });
     });
   }
 
@@ -988,11 +992,41 @@ class _CollectionPageState extends State<CollectionPage> {
                       selected: filter == 'del',
                       onSelected: (_) => setState(() => filter = 'del')),
                   const Spacer(),
-                  Text('${list.length}',
+                  Text('${filter == 'del' ? deleted.length : list.length}',
                       style: const TextStyle(color: Colors.grey)),
                 ]),
               ),
-              Expanded(child: WorkGrid(works: list)),
+              Expanded(
+                child: filter == 'del'
+                    ? (deleted.isEmpty
+                        ? const Center(
+                            child: Text('暂无已删除记录',
+                                style: TextStyle(color: Colors.grey)))
+                        : ListView.separated(
+                            itemCount: deleted.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
+                            itemBuilder: (_, i) {
+                              final d = deleted[i];
+                              return ListTile(
+                                leading: const Icon(Icons.delete_outline,
+                                    color: Colors.grey),
+                                title: Text('${d['ti'] ?? ''}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                                subtitle: Text(
+                                    '@${d['a'] ?? ''} · ${d['d'] ?? ''} · 已在抖音删除',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                                trailing: Text(
+                                    '${(d['at'] ?? '').toString().split('T').first}',
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.grey)),
+                              );
+                            },
+                          ))
+                    : WorkGrid(works: list),
+              ),
             ]),
     );
   }
