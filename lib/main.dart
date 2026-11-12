@@ -22,14 +22,25 @@ class Cfg {
   String user = 'zzx';
   String pass = '';
   Map<String, String> get headers => {
-        'Authorization':
-            'Basic ${base64Encode(utf8.encode('$user:$pass'))}',
+        'Authorization': 'Basic ${base64Encode(utf8.encode('$user:$pass'))}',
       };
   Uri u(String path) => Uri.parse('$base$path');
 }
 
 final cfg = Cfg();
 final navKey = GlobalKey<NavigatorState>();
+
+// 作者统计上报（播放/访问/水滴），失败静默，不影响播放
+void postStat(String type, String author) {
+  if (cfg.base.isEmpty || author.isEmpty) return;
+  try {
+    http
+        .post(cfg.u('/api/stats'),
+            headers: {...cfg.headers, 'Content-Type': 'application/json'},
+            body: jsonEncode({'type': type, 'author': author}))
+        .ignore();
+  } catch (_) {}
+}
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -206,8 +217,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: Text(testMsg,
                       style: TextStyle(
                           fontSize: 12,
-                          color:
-                              testOk == true ? Colors.green : Colors.redAccent))),
+                          color: testOk == true
+                              ? Colors.green
+                              : Colors.redAccent))),
             ]),
           ),
         const SizedBox(height: 16),
@@ -253,8 +265,8 @@ class SettingsHubPage extends StatelessWidget {
           leading: const Icon(Icons.keyboard),
           title: const Text('按键绑定'),
           subtitle: const Text('Windows / 桌面端快捷键 · 播放、翻页、全屏'),
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const KeyBindingsPage())),
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const KeyBindingsPage())),
         ),
         const Divider(),
         ListTile(
@@ -297,8 +309,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         ),
       ]),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        const Text('默认播放倍速',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('默认播放倍速', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
         const Text('进入播放器时自动应用，播放中仍可用倍速按钮临时切换。',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
@@ -848,6 +859,11 @@ class _HomePageState extends State<HomePage> {
               tooltip: '打开默认收藏夹',
               onPressed: openDefault),
         IconButton(
+            icon: const Icon(Icons.people_alt_outlined),
+            tooltip: '作者',
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AuthorGridPage()))),
+        IconButton(
             icon: const Icon(Icons.search),
             tooltip: '搜索',
             onPressed: () => Navigator.of(context)
@@ -1032,6 +1048,281 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 }
 
+// 作者网格页：头像平铺，按播放量/访问次数/访问日期/作品数/小水滴排序
+class AuthorGridPage extends StatefulWidget {
+  const AuthorGridPage({super.key});
+  @override
+  State<AuthorGridPage> createState() => _AuthorGridPageState();
+}
+
+class _AuthorGridPageState extends State<AuthorGridPage> {
+  static const _sorts = <String, String>{
+    'plays': '播放量',
+    'visits': '访问次数',
+    'visited': '访问日期',
+    'works': '作品数',
+    'drops': '小水滴',
+  };
+
+  List<MapEntry<String, Map<String, dynamic>>> authors = [];
+  Map<String, dynamic> stats = {};
+  String sort = 'plays';
+  bool loading = true;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    if (mounted) setState(() => err = null);
+    try {
+      final rs = await Future.wait([
+        http.get(cfg.u('/api/authors.json'), headers: cfg.headers),
+        http.get(cfg.u('/api/author_stats.json'), headers: cfg.headers),
+      ]);
+      if (rs[0].statusCode != 200) throw Exception('HTTP ${rs[0].statusCode}');
+      final m = jsonDecode(rs[0].body) as Map<String, dynamic>;
+      dynamic sj;
+      if (rs[1].statusCode == 200) {
+        try {
+          sj = jsonDecode(rs[1].body);
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() {
+        authors = m.entries
+            .where((e) => e.value is Map)
+            .map((e) =>
+                MapEntry(e.key, Map<String, dynamic>.from(e.value as Map)))
+            .toList();
+        stats = (sj is Map && sj['authors'] is Map)
+            ? Map<String, dynamic>.from(sj['authors'] as Map)
+            : {};
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          err = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  Map<String, dynamic> _s(String name) => stats[name] is Map
+      ? Map<String, dynamic>.from(stats[name] as Map)
+      : const {};
+
+  int _num(dynamic v) =>
+      v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+
+  int _metric(MapEntry<String, Map<String, dynamic>> e) {
+    final s = _s(e.key);
+    switch (sort) {
+      case 'visits':
+        return _num(s['v']);
+      case 'visited':
+        return _num(s['lv']);
+      case 'works':
+        return _num(e.value['n']);
+      case 'drops':
+        return _num(s['dr']);
+      default:
+        return _num(s['p']);
+    }
+  }
+
+  List<MapEntry<String, Map<String, dynamic>>> get sorted {
+    final list = List.of(authors);
+    list.sort((a, b) {
+      final c = _metric(b).compareTo(_metric(a));
+      if (c != 0) return c;
+      final w = _num(b.value['n']).compareTo(_num(a.value['n']));
+      if (w != 0) return w;
+      return a.key.compareTo(b.key);
+    });
+    return list;
+  }
+
+  String _fmtDate(int sec) {
+    if (sec <= 0) return '未访问';
+    final d = DateTime.fromMillisecondsSinceEpoch(sec * 1000).toLocal();
+    String p(int v) => v.toString().padLeft(2, '0');
+    return '${d.year}-${p(d.month)}-${p(d.day)}';
+  }
+
+  String _sub(MapEntry<String, Map<String, dynamic>> e) {
+    final s = _s(e.key);
+    switch (sort) {
+      case 'visits':
+        return '访问 ${_num(s['v'])} 次';
+      case 'visited':
+        return '最近 ${_fmtDate(_num(s['lv']))}';
+      case 'works':
+        return '${_num(e.value['n'])} 个作品';
+      case 'drops':
+        return '水滴 ${_num(s['dr'])}';
+      default:
+        return '播放 ${_num(s['p'])}';
+    }
+  }
+
+  Future<void> _open(String name) async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    if (mounted) load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('作者'), actions: [
+        IconButton(
+            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+      ]),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : err != null
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text('加载失败：$err',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12))),
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: load, child: const Text('重试')),
+                ]))
+              : Column(children: [
+                  SizedBox(
+                    height: 46,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      children: [
+                        for (final s in _sorts.entries)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(s.value),
+                              selected: sort == s.key,
+                              onSelected: (_) => setState(() => sort = s.key),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                    child: Row(children: [
+                      const Icon(Icons.info_outline,
+                          size: 13, color: Colors.grey),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: Text(
+                              '${authors.length} 位作者 · 播放/访问/水滴为本机统计，随使用累积',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.grey))),
+                    ]),
+                  ),
+                  Expanded(
+                    child: authors.isEmpty
+                        ? const Center(
+                            child: Text('暂无作者数据',
+                                style: TextStyle(color: Colors.grey)))
+                        : GridView.builder(
+                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                            gridDelegate:
+                                const SliverGridDelegateWithMaxCrossAxisExtent(
+                                    maxCrossAxisExtent: 132,
+                                    childAspectRatio: 0.80,
+                                    mainAxisSpacing: 10,
+                                    crossAxisSpacing: 10),
+                            itemCount: sorted.length,
+                            itemBuilder: (_, i) {
+                              final e = sorted[i];
+                              final av = '${e.value['av'] ?? ''}';
+                              return InkWell(
+                                borderRadius: BorderRadius.circular(12),
+                                onTap: () => _open(e.key),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 10),
+                                  decoration: BoxDecoration(
+                                      color: Colors.white10,
+                                      borderRadius: BorderRadius.circular(12)),
+                                  child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        ClipOval(
+                                          child: SizedBox(
+                                            width: 58,
+                                            height: 58,
+                                            child: av.isEmpty
+                                                ? Container(
+                                                    color: Colors.blueGrey,
+                                                    alignment: Alignment.center,
+                                                    child: Text(
+                                                        e.key.isEmpty
+                                                            ? '?'
+                                                            : e.key[0],
+                                                        style: const TextStyle(
+                                                            fontSize: 24)))
+                                                : CachedNetworkImage(
+                                                    imageUrl: cfg.base + av,
+                                                    httpHeaders: cfg.headers,
+                                                    fit: BoxFit.cover,
+                                                    memCacheWidth: 174,
+                                                    errorWidget: (_, __, ___) =>
+                                                        Container(
+                                                            color:
+                                                                Colors.blueGrey,
+                                                            alignment: Alignment
+                                                                .center,
+                                                            child: Text(
+                                                                e.key.isEmpty
+                                                                    ? '?'
+                                                                    : e.key[0],
+                                                                style: const TextStyle(
+                                                                    fontSize:
+                                                                        24)))),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(e.key,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600)),
+                                        const SizedBox(height: 2),
+                                        Text(_sub(e),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.white60)),
+                                        Text('${_num(e.value['n'])} 作品',
+                                            maxLines: 1,
+                                            style: const TextStyle(
+                                                fontSize: 9,
+                                                color: Colors.white38)),
+                                      ]),
+                                ),
+                              );
+                            }),
+                  ),
+                ]),
+    );
+  }
+}
+
 class PlayerPage extends StatefulWidget {
   final List works;
   final int start;
@@ -1143,6 +1434,7 @@ class _PlayerPageState extends State<PlayerPage> {
     } catch (_) {}
     if (my != _openToken) return;
     final w = widget.works[i];
+    postStat('play', '${w['a'] ?? ''}');
     try {
       if (w['t'] == 'v') {
         await player
@@ -1183,8 +1475,8 @@ class _PlayerPageState extends State<PlayerPage> {
     autoTimer?.cancel();
     autoTimer = null;
     if (manualPic || paused) return;
-    final t = Timer.periodic(
-        Duration(seconds: AppSettings.imageIntervalSec), (timer) {
+    final t = Timer.periodic(Duration(seconds: AppSettings.imageIntervalSec),
+        (timer) {
       if (!identical(timer, autoTimer)) return;
       if (!mounted || paused) return;
       final w = widget.works[cur];
@@ -1221,8 +1513,7 @@ class _PlayerPageState extends State<PlayerPage> {
   // 连点/连按方向键时直接跳页，避免动画未结束把后续按键吃掉
   void _step(int delta) {
     final base = _pendingPage ?? cur;
-    final target =
-        (base + delta).clamp(0, widget.works.length - 1).toInt();
+    final target = (base + delta).clamp(0, widget.works.length - 1).toInt();
     if (target == base) return;
     _pendingPage = target;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -1253,8 +1544,8 @@ class _PlayerPageState extends State<PlayerPage> {
     try {
       player.pause();
     } catch (_) {}
-    await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
     if (resume && mounted && !fs) {
       try {
         player.play();
@@ -1617,8 +1908,8 @@ class _PlayerPageState extends State<PlayerPage> {
                     child: SafeArea(
                       child: IconButton(
                           onPressed: () => Navigator.of(context).maybePop(),
-                          icon:
-                              const Icon(Icons.arrow_back, color: Colors.white70),
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white70),
                           style: IconButton.styleFrom(
                               backgroundColor: Colors.black45)),
                     ),
@@ -1642,64 +1933,63 @@ class _PlayerPageState extends State<PlayerPage> {
                     opacity: ui ? 1 : 0,
                     duration: const Duration(milliseconds: 200),
                     child: GestureDetector(
-                    onTap: openAuthor,
-                    child: Row(children: [
-                      if ((w['av'] ?? '').toString().isNotEmpty)
-                        ClipOval(
-                            child: CachedNetworkImage(
-                                imageUrl: cfg.base + w['av'],
-                                httpHeaders: cfg.headers,
-                                width: 38,
-                                height: 38,
-                                fit: BoxFit.cover))
-                      else
-                        const CircleAvatar(
-                            radius: 19, child: Icon(Icons.person)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                            Row(children: [
-                              Flexible(
-                                child: Text('@${w['a']}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold)),
-                              ),
-                              if (('${w['d'] ?? ''}').isNotEmpty) ...[
-                                const SizedBox(width: 8),
-                                Text('${w['d']}',
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.white54)),
-                              ],
-                            ]),
-                            Row(children: [
-                              Expanded(
-                                child: Text('${w['ti'] ?? ''}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.white70)),
-                              ),
-                              if (('${w['ti'] ?? ''}').length > 24)
-                                GestureDetector(
-                                  onTap: () =>
-                                      showCaption('${w['ti'] ?? ''}'),
-                                  child: const Padding(
-                                    padding: EdgeInsets.only(
-                                        left: 6, top: 2, bottom: 2),
-                                    child: Icon(Icons.unfold_more,
-                                        size: 16, color: Colors.white54),
-                                  ),
+                      onTap: openAuthor,
+                      child: Row(children: [
+                        if ((w['av'] ?? '').toString().isNotEmpty)
+                          ClipOval(
+                              child: CachedNetworkImage(
+                                  imageUrl: cfg.base + w['av'],
+                                  httpHeaders: cfg.headers,
+                                  width: 38,
+                                  height: 38,
+                                  fit: BoxFit.cover))
+                        else
+                          const CircleAvatar(
+                              radius: 19, child: Icon(Icons.person)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                              Row(children: [
+                                Flexible(
+                                  child: Text('@${w['a']}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
                                 ),
-                            ]),
-                          ])),
-                    ]),
+                                if (('${w['d'] ?? ''}').isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Text('${w['d']}',
+                                      style: const TextStyle(
+                                          fontSize: 11, color: Colors.white54)),
+                                ],
+                              ]),
+                              Row(children: [
+                                Expanded(
+                                  child: Text('${w['ti'] ?? ''}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 12, color: Colors.white70)),
+                                ),
+                                if (('${w['ti'] ?? ''}').length > 24)
+                                  GestureDetector(
+                                    onTap: () =>
+                                        showCaption('${w['ti'] ?? ''}'),
+                                    child: const Padding(
+                                      padding: EdgeInsets.only(
+                                          left: 6, top: 2, bottom: 2),
+                                      child: Icon(Icons.unfold_more,
+                                          size: 16, color: Colors.white54),
+                                    ),
+                                  ),
+                              ]),
+                            ])),
+                      ]),
+                    ),
                   ),
-                ),
                 ),
               ),
               if (showVol && ui)
@@ -1752,132 +2042,134 @@ class _PlayerPageState extends State<PlayerPage> {
                     opacity: ui ? 1 : 0,
                     duration: const Duration(milliseconds: 200),
                     child: Container(
-                    decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Colors.transparent, Colors.black87])),
-                    padding: EdgeInsets.only(
-                        left: 12,
-                        right: 12,
-                        top: 10,
-                        bottom: 6 + MediaQuery.of(context).padding.bottom),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Row(children: [
-                        Text(
-                            isV
-                                ? '${fmt(pos)} / ${fmt(dur)}'
-                                : '${idx + 1}/${pics.length}',
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.white60)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: LayoutBuilder(builder: (ctx, cons) {
-                            void seekAt(Offset p) {
-                              if (!isV || dur.inMilliseconds == 0) return;
-                              final f = (p.dx / cons.maxWidth).clamp(0.0, 1.0);
-                              player.seek(dur * f);
-                            }
+                      decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Colors.black87])),
+                      padding: EdgeInsets.only(
+                          left: 12,
+                          right: 12,
+                          top: 10,
+                          bottom: 6 + MediaQuery.of(context).padding.bottom),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Row(children: [
+                          Text(
+                              isV
+                                  ? '${fmt(pos)} / ${fmt(dur)}'
+                                  : '${idx + 1}/${pics.length}',
+                              style: const TextStyle(
+                                  fontSize: 10, color: Colors.white60)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: LayoutBuilder(builder: (ctx, cons) {
+                              void seekAt(Offset p) {
+                                if (!isV || dur.inMilliseconds == 0) return;
+                                final f =
+                                    (p.dx / cons.maxWidth).clamp(0.0, 1.0);
+                                player.seek(dur * f);
+                              }
 
-                            return GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTapUp: (d) => seekAt(d.localPosition),
-                              onHorizontalDragStart: (_) {
-                                resumeAfterDrag = !paused;
-                                if (!paused) player.pause();
-                                setState(() {
-                                  dragging = true;
-                                  dragFrac = progress;
-                                });
-                              },
-                              onHorizontalDragUpdate: (d) {
-                                final f = (d.localPosition.dx / cons.maxWidth)
-                                    .clamp(0.0, 1.0);
-                                setState(() => dragFrac = f);
-                              },
-                              onHorizontalDragEnd: (_) {
-                                final f = dragFrac ?? progress;
-                                if (isV && dur.inMilliseconds > 0) {
-                                  player.seek(dur * f);
-                                  if (resumeAfterDrag) player.play();
-                                } else if (!isV && pics.isNotEmpty) {
-                                  setState(() => img = (f * (pics.length - 1))
-                                      .round()
-                                      .clamp(0, pics.length - 1));
-                                }
-                                setState(() {
-                                  dragging = false;
-                                  dragFrac = null;
-                                });
-                              },
-                              child: SizedBox(
-                                height: 30,
-                                child: Stack(
-                                  alignment: Alignment.centerLeft,
-                                  children: [
-                                    Container(
-                                        height: dragging ? 7 : 3,
-                                        color: Colors.white24),
-                                    FractionallySizedBox(
-                                      alignment: Alignment.centerLeft,
-                                      widthFactor: dragFrac ?? progress,
-                                      child: Container(
+                              return GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTapUp: (d) => seekAt(d.localPosition),
+                                onHorizontalDragStart: (_) {
+                                  resumeAfterDrag = !paused;
+                                  if (!paused) player.pause();
+                                  setState(() {
+                                    dragging = true;
+                                    dragFrac = progress;
+                                  });
+                                },
+                                onHorizontalDragUpdate: (d) {
+                                  final f = (d.localPosition.dx / cons.maxWidth)
+                                      .clamp(0.0, 1.0);
+                                  setState(() => dragFrac = f);
+                                },
+                                onHorizontalDragEnd: (_) {
+                                  final f = dragFrac ?? progress;
+                                  if (isV && dur.inMilliseconds > 0) {
+                                    player.seek(dur * f);
+                                    if (resumeAfterDrag) player.play();
+                                  } else if (!isV && pics.isNotEmpty) {
+                                    setState(() => img = (f * (pics.length - 1))
+                                        .round()
+                                        .clamp(0, pics.length - 1));
+                                  }
+                                  setState(() {
+                                    dragging = false;
+                                    dragFrac = null;
+                                  });
+                                },
+                                child: SizedBox(
+                                  height: 30,
+                                  child: Stack(
+                                    alignment: Alignment.centerLeft,
+                                    children: [
+                                      Container(
                                           height: dragging ? 7 : 3,
-                                          color: dragging
-                                              ? Colors.white
-                                              : Colors.white70),
-                                    ),
-                                  ],
+                                          color: Colors.white24),
+                                      FractionallySizedBox(
+                                        alignment: Alignment.centerLeft,
+                                        widthFactor: dragFrac ?? progress,
+                                        child: Container(
+                                            height: dragging ? 7 : 3,
+                                            color: dragging
+                                                ? Colors.white
+                                                : Colors.white70),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          }),
-                        ),
-                        const SizedBox(width: 8),
-                        Text('${cur + 1} / ${widget.works.length}',
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.white54)),
+                              );
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          Text('${cur + 1} / ${widget.works.length}',
+                              style: const TextStyle(
+                                  fontSize: 10, color: Colors.white54)),
+                        ]),
+                        Row(children: [
+                          IconButton(
+                              onPressed: () =>
+                                  setState(() => showVol = !showVol),
+                              tooltip: '音量',
+                              icon: Icon(
+                                  muted || volume == 0
+                                      ? Icons.volume_off
+                                      : (volume < 50
+                                          ? Icons.volume_down
+                                          : Icons.volume_up),
+                                  color: Colors.white70)),
+                          IconButton(
+                              onPressed: cycleSpeed,
+                              icon: Text('${speed}x',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.white70))),
+                          IconButton(
+                              onPressed: toggleAutoplay,
+                              tooltip: '自动连播',
+                              icon: Icon(Icons.skip_next,
+                                  color: autoplay
+                                      ? Colors.white70
+                                      : Colors.white24)),
+                          IconButton(
+                              onPressed: toggleLoop,
+                              tooltip: '单条循环',
+                              icon: Icon(Icons.repeat_one,
+                                  color: loopOne
+                                      ? Colors.white70
+                                      : Colors.white24)),
+                          const Spacer(),
+                          IconButton(
+                              onPressed: toggleFs,
+                              icon: Icon(
+                                  fs ? Icons.fullscreen_exit : Icons.fullscreen,
+                                  color: Colors.white70)),
+                        ]),
                       ]),
-                      Row(children: [
-                        IconButton(
-                            onPressed: () =>
-                                setState(() => showVol = !showVol),
-                            tooltip: '音量',
-                            icon: Icon(
-                                muted || volume == 0
-                                    ? Icons.volume_off
-                                    : (volume < 50
-                                        ? Icons.volume_down
-                                        : Icons.volume_up),
-                                color: Colors.white70)),
-                        IconButton(
-                            onPressed: cycleSpeed,
-                            icon: Text('${speed}x',
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.white70))),
-                        IconButton(
-                            onPressed: toggleAutoplay,
-                            tooltip: '自动连播',
-                            icon: Icon(Icons.skip_next,
-                                color: autoplay
-                                    ? Colors.white70
-                                    : Colors.white24)),
-                        IconButton(
-                            onPressed: toggleLoop,
-                            tooltip: '单条循环',
-                            icon: Icon(Icons.repeat_one,
-                                color:
-                                    loopOne ? Colors.white70 : Colors.white24)),
-                        const Spacer(),
-                        IconButton(
-                            onPressed: toggleFs,
-                            icon: Icon(
-                                fs ? Icons.fullscreen_exit : Icons.fullscreen,
-                                color: Colors.white70)),
-                      ]),
-                    ]),
+                    ),
                   ),
-                ),
                 ),
               ),
             ]),
@@ -2013,6 +2305,7 @@ class _AuthorPageState extends State<AuthorPage> {
         bio = (m['bio'] ?? '').toString();
         av = (m['av'] ?? '').toString();
         works = (m['works'] as List);
+        postStat('visit', widget.name);
       }
     } catch (_) {}
     if (mounted) setState(() => loading = false);
