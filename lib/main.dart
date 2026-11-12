@@ -1050,12 +1050,18 @@ class _PlayerPageState extends State<PlayerPage> {
       if (!done || !mounted) return;
       final w = widget.works[cur];
       if (w['t'] != 'v') {
-        // image work: loop its background audio instead of jumping away
-        if (!paused) {
+        // 图文：整首歌放完才切下一条；单条循环时重新播放；都不开就停下图片轮播
+        if (paused) return;
+        if (autoplay && !loopOne) {
+          next();
+        } else if (loopOne) {
           try {
             player.seek(Duration.zero);
             player.play();
+            setState(() => img = 0);
           } catch (_) {}
+        } else {
+          pauseAuto();
         }
         return;
       }
@@ -1142,8 +1148,12 @@ class _PlayerPageState extends State<PlayerPage> {
       final w = widget.works[cur];
       if (w['t'] == 'v') return;
       final n = (w['m'] as List).length;
+      final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
       if (img < n - 1) {
         setState(() => img++);
+      } else if (hasAudio) {
+        // 有背景音乐时循环图片，等整首歌播完再切下一条
+        setState(() => img = 0);
       } else {
         next();
       }
@@ -1380,6 +1390,47 @@ class _PlayerPageState extends State<PlayerPage> {
     super.dispose();
   }
 
+  // 长简介/文案：弹出完整内容，避免被单行截断
+  void showCaption(String text) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF151515),
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.7),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                const Expanded(
+                  child: Text('作品简介',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white70)),
+                ),
+                IconButton(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    icon: const Icon(Icons.close,
+                        size: 18, color: Colors.white54)),
+              ]),
+              const SizedBox(height: 4),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: SelectableText(text,
+                      style: const TextStyle(
+                          fontSize: 14, height: 1.5, color: Colors.white)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   String fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -1555,11 +1606,27 @@ class _PlayerPageState extends State<PlayerPage> {
                                         fontSize: 11, color: Colors.white54)),
                               ],
                             ]),
-                            Text('${w['ti'] ?? ''}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontSize: 12, color: Colors.white70)),
+                            Row(children: [
+                              Expanded(
+                                child: Text('${w['ti'] ?? ''}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white70)),
+                              ),
+                              if (('${w['ti'] ?? ''}').length > 24)
+                                GestureDetector(
+                                  onTap: () =>
+                                      showCaption('${w['ti'] ?? ''}'),
+                                  child: const Padding(
+                                    padding: EdgeInsets.only(
+                                        left: 6, top: 2, bottom: 2),
+                                    child: Icon(Icons.unfold_more,
+                                        size: 16, color: Colors.white54),
+                                  ),
+                                ),
+                            ]),
                           ])),
                     ]),
                   ),
