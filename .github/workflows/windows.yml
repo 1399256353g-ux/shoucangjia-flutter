@@ -39,6 +39,7 @@ jobs:
           name: windows-app
           path: Dizi-*-windows.zip
       - name: Publish release asset
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
