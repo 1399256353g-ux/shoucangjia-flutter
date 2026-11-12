@@ -18,6 +18,18 @@ jobs:
           channel: stable
       - name: Gen platform
         run: flutter create --platforms=android --org com.zzx --project-name shoucangjia .
+      - name: Patch manifest (INTERNET + cleartext)
+        run: |
+          python3 - <<'PY'
+          p='android/app/src/main/AndroidManifest.xml'
+          s=open(p).read()
+          if 'android.permission.INTERNET' not in s:
+              s=s.replace('<application', '<uses-permission android:name="android.permission.INTERNET"/>\n    <application', 1)
+          if 'usesCleartextTraffic' not in s:
+              s=s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          open(p,'w').write(s)
+          print(s[:400])
+          PY
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
