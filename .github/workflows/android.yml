@@ -1,4 +1,6 @@
 name: android
+permissions:
+  contents: write
 on:
   push:
     branches: [ main ]
@@ -45,3 +47,10 @@ jobs:
         with:
           name: android-apk
           path: Dizi-*-android.apk
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          gh release create "v$VER" --title "Dizi $VER" --notes "auto build $VER" || true
+          gh release upload "v$VER" "Dizi-${VER}-android.apk" --clobber
