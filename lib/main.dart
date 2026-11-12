@@ -158,7 +158,7 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('收藏夹'), actions: [
+      appBar: AppBar(title: const Text('抖音收藏夹'), actions: [
         IconButton(
             icon: const Icon(Icons.search),
             tooltip: '搜索',
@@ -225,6 +225,7 @@ class _CollectionPageState extends State<CollectionPage> {
     var v = List.from(works);
     if (filter == 'v') v = v.where((w) => w['t'] == 'v').toList();
     if (filter == 'p') v = v.where((w) => w['t'] == 'p').toList();
+    if (filter == 'del') v = v.where((w) => w['del'] == 1).toList();
     if (sort == 'old') {
       v.sort((a, b) => '${a['d']}'.compareTo('${b['d']}'));
     } else if (sort == 'title') {
@@ -279,6 +280,11 @@ class _CollectionPageState extends State<CollectionPage> {
                       label: const Text('图文'),
                       selected: filter == 'p',
                       onSelected: (_) => setState(() => filter = 'p')),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                      label: const Text('已删除'),
+                      selected: filter == 'del',
+                      onSelected: (_) => setState(() => filter = 'del')),
                   const Spacer(),
                   Text('${list.length}',
                       style: const TextStyle(color: Colors.grey)),
@@ -312,6 +318,7 @@ class _PlayerPageState extends State<PlayerPage> {
   bool muted = false;
   bool ui = true;
   bool fs = false;
+  bool dragging = false;
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
@@ -590,8 +597,7 @@ class _PlayerPageState extends State<PlayerPage> {
                               imageUrl: cfg.base + it['th'],
                               httpHeaders: cfg.headers,
                               fit: BoxFit.contain),
-                        if (!loading)
-                          Video(controller: vc, controls: NoVideoControls),
+                        Video(controller: vc, controls: NoVideoControls),
                         if (loading)
                           const Center(
                               child: CircularProgressIndicator(
@@ -718,39 +724,45 @@ class _PlayerPageState extends State<PlayerPage> {
                                 fontSize: 10, color: Colors.white60)),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: GestureDetector(
-                            onTapDown: (d) {},
-                            onHorizontalDragUpdate: (d) {
+                          child: LayoutBuilder(builder: (ctx, cons) {
+                            void seekAt(Offset p) {
                               if (!isV || dur.inMilliseconds == 0) return;
-                              final box =
-                                  context.findRenderObject() as RenderBox?;
-                              if (box == null) return;
-                              final width = box.size.width - 24;
-                              final target =
-                                  dur * (d.localPosition.dx / width).clamp(0.0, 1.0);
-                              player.seek(target);
-                            },
-                            child: SizedBox(
-                              height: 22,
-                              child: Center(
-                                child: Container(
-                                  height: 3,
-                                  decoration: BoxDecoration(
-                                      color: Colors.white24,
-                                      borderRadius: BorderRadius.circular(2)),
-                                  child: FractionallySizedBox(
-                                    alignment: Alignment.centerLeft,
-                                    widthFactor: progress,
-                                    child: Container(
-                                        decoration: BoxDecoration(
-                                            color: Colors.white70,
-                                            borderRadius:
-                                                BorderRadius.circular(2))),
-                                  ),
+                              final f =
+                                  (p.dx / cons.maxWidth).clamp(0.0, 1.0);
+                              player.seek(dur * f);
+                            }
+
+                            return GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTapDown: (d) => seekAt(d.localPosition),
+                              onHorizontalDragStart: (_) =>
+                                  setState(() => dragging = true),
+                              onHorizontalDragUpdate: (d) =>
+                                  seekAt(d.localPosition),
+                              onHorizontalDragEnd: (_) =>
+                                  setState(() => dragging = false),
+                              child: SizedBox(
+                                height: 30,
+                                child: Stack(
+                                  alignment: Alignment.centerLeft,
+                                  children: [
+                                    Container(
+                                        height: dragging ? 7 : 3,
+                                        color: Colors.white24),
+                                    FractionallySizedBox(
+                                      alignment: Alignment.centerLeft,
+                                      widthFactor: progress,
+                                      child: Container(
+                                          height: dragging ? 7 : 3,
+                                          color: dragging
+                                              ? Colors.white
+                                              : Colors.white70),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ),
-                          ),
+                            );
+                          }),
                         ),
                         const SizedBox(width: 8),
                         Text('${cur + 1} / ${widget.works.length}',
@@ -758,9 +770,6 @@ class _PlayerPageState extends State<PlayerPage> {
                                 fontSize: 10, color: Colors.white54)),
                       ]),
                       Row(children: [
-                        IconButton(
-                            onPressed: () => Navigator.of(context).maybePop(),
-                            icon: const Icon(Icons.arrow_back, color: Colors.white70)),
                         IconButton(
                             onPressed: toggleMute,
                             icon: Icon(muted ? Icons.volume_off : Icons.volume_up,
