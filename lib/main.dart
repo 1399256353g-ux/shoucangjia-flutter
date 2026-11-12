@@ -650,6 +650,18 @@ class _PlayerPageState extends State<PlayerPage> {
                   );
                 },
               ),
+              Positioned(
+                left: 8,
+                top: 8,
+                child: SafeArea(
+                  child: IconButton(
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      icon:
+                          const Icon(Icons.arrow_back, color: Colors.white70),
+                      style: IconButton.styleFrom(
+                          backgroundColor: Colors.black45)),
+                ),
+              ),
               if (paused)
                 const IgnorePointer(
                   child: Center(
