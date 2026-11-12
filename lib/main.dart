@@ -1065,7 +1065,15 @@ class _PlayerPageState extends State<PlayerPage> {
         }
         return;
       }
-      if (autoplay && !loopOne) next();
+      // 视频播完：单条循环就重播本条，否则按连播设置切下一条
+      if (loopOne) {
+        try {
+          player.seek(Duration.zero);
+          player.play();
+        } catch (_) {}
+      } else if (autoplay) {
+        next();
+      }
     });
     player.stream.playing.listen((v) {
       if (mounted && widget.works[cur]['t'] == 'v' && v != !paused) {
@@ -1151,8 +1159,8 @@ class _PlayerPageState extends State<PlayerPage> {
       final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
       if (img < n - 1) {
         setState(() => img++);
-      } else if (hasAudio) {
-        // 有背景音乐时循环图片，等整首歌播完再切下一条
+      } else if (loopOne || hasAudio) {
+        // 单条循环，或还有背景音乐没放完：图片回到第一张继续
         setState(() => img = 0);
       } else {
         next();
@@ -1238,10 +1246,8 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void toggleLoop() {
-    setState(() {
-      loopOne = !loopOne;
-      if (loopOne) autoplay = false;
-    });
+    // 单条循环与连播互不影响状态：循环开时优先循环，关掉后连播设置保持原样
+    setState(() => loopOne = !loopOne);
     player.setPlaylistMode(loopOne ? PlaylistMode.single : PlaylistMode.none);
   }
 
