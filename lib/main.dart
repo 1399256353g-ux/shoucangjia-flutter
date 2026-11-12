@@ -1179,7 +1179,8 @@ class _PlayerPageState extends State<PlayerPage> {
   // 连点/连按方向键时直接跳页，避免动画未结束把后续按键吃掉
   void _step(int delta) {
     final base = _pendingPage ?? cur;
-    final target = (base + delta).clamp(0, widget.works.length - 1);
+    final target =
+        (base + delta).clamp(0, widget.works.length - 1).toInt();
     if (target == base) return;
     _pendingPage = target;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -1520,24 +1521,25 @@ class _PlayerPageState extends State<PlayerPage> {
                       picView(pics[idx]),
                       if (pics.length > 1)
                         Positioned(
-                            bottom: 120,
-                            left: 0,
-                            right: 0,
-                            child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: List.generate(
-                                    pics.length,
-                                    (k) => Container(
-                                          width: 5,
-                                          height: 5,
-                                          margin: const EdgeInsets.symmetric(
-                                              horizontal: 3),
-                                          decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: k == idx
-                                                  ? Colors.white
-                                                  : Colors.white30),
-                                        )))),
+                            top: 2,
+                            right: 4,
+                            child: SafeArea(
+                              child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: List.generate(
+                                      pics.length,
+                                      (k) => Container(
+                                            width: 4,
+                                            height: 4,
+                                            margin: const EdgeInsets.symmetric(
+                                                horizontal: 1.5),
+                                            decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: k == idx
+                                                    ? Colors.white
+                                                    : Colors.white24),
+                                          ))),
+                            )),
                     ]),
                   );
                 },
