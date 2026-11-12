@@ -98,8 +98,13 @@ class _SettingsPageState extends State<SettingsPage> {
     await sp.setString('user', cfg.user);
     await sp.setString('pass', cfg.pass);
     if (mounted) {
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomePage()));
+      final nav = Navigator.of(context);
+      if (nav.canPop()) {
+        nav.pop();
+      } else {
+        nav.pushReplacement(
+            MaterialPageRoute(builder: (_) => const HomePage()));
+      }
     }
   }
 
@@ -114,16 +119,330 @@ class _SettingsPageState extends State<SettingsPage> {
                 labelText: 'NAS 地址', hintText: 'http://192.168.2.4:8090')),
         const SizedBox(height: 12),
         TextField(
-            controller: user, decoration: const InputDecoration(labelText: '用户名')),
+            controller: user,
+            decoration: const InputDecoration(labelText: '用户名')),
         const SizedBox(height: 12),
         TextField(
             controller: pass,
             obscureText: true,
             decoration: const InputDecoration(labelText: '密码')),
         const SizedBox(height: 24),
-        FilledButton(
-            onPressed: save, child: const Text('保存并连接')),
+        FilledButton(onPressed: save, child: const Text('保存并连接')),
       ]),
+    );
+  }
+}
+
+class SettingsHubPage extends StatelessWidget {
+  const SettingsHubPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('设置')),
+      body: ListView(children: [
+        ListTile(
+          leading: const Icon(Icons.dns),
+          title: const Text('连接 NAS'),
+          subtitle: Text(cfg.base.isEmpty ? '未设置' : cfg.base),
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.folder_special),
+          title: const Text('收藏夹管理'),
+          subtitle: const Text('同步选择 · 默认收藏夹 · 拖动排序 · 重命名 · 删除'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CollectionAdminPage())),
+        ),
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.info_outline),
+          title: const Text('关于 Dizi'),
+          subtitle: const Text('本地媒体库客户端 0.9.0'),
+          onTap: () => showAboutDialog(
+            context: context,
+            applicationName: 'Dizi',
+            applicationVersion: '0.9.0',
+            children: const [Text('本地媒体库客户端')],
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class CollectionAdminPage extends StatefulWidget {
+  const CollectionAdminPage({super.key});
+  @override
+  State<CollectionAdminPage> createState() => _CollectionAdminPageState();
+}
+
+class _CollectionAdminPageState extends State<CollectionAdminPage> {
+  List<Map<String, dynamic>> cols = [];
+  int? defaultIdx;
+  bool loading = true;
+  bool saving = false;
+  String? err;
+  int _seq = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      err = null;
+    });
+    try {
+      final r = await http.get(cfg.u('/api/settings'), headers: cfg.headers);
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      _apply(jsonDecode(r.body) as Map<String, dynamic>, setLoading: true);
+    } catch (e) {
+      if (mounted) setState(() => err = '$e');
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  void _apply(Map<String, dynamic> j, {bool setLoading = false}) {
+    final list = ((j['collections'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((e) => e['deleted'] != true)
+        .toList();
+    if (!mounted) return;
+    setState(() {
+      cols = list;
+      defaultIdx = (j['default'] as num?)?.toInt();
+      err = null;
+      if (setLoading) loading = false;
+    });
+  }
+
+  Future<Map<String, dynamic>> _send(
+      String path, Map<String, dynamic> body) async {
+    final r = await http.post(cfg.u(path),
+        headers: {...cfg.headers, 'Content-Type': 'application/json'},
+        body: jsonEncode(body));
+    if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  void _toast(String s) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+  }
+
+  Future<void> _save() async {
+    final seq = ++_seq;
+    setState(() => saving = true);
+    try {
+      final j = await _send('/api/settings', {
+        'default': defaultIdx,
+        'collections': [
+          for (final c in cols)
+            {
+              'idx': c['idx'],
+              'name': c['name'],
+              'sync': c['sync'] != false,
+            }
+        ],
+      });
+      if (!mounted || seq != _seq) return;
+      _apply(j);
+    } catch (e) {
+      if (mounted && seq == _seq) _toast('保存失败：$e');
+    } finally {
+      if (mounted && seq == _seq) setState(() => saving = false);
+    }
+  }
+
+  void _reorder(int oldIndex, int newIndex) {
+    setState(() {
+      if (newIndex > oldIndex) newIndex--;
+      final item = cols.removeAt(oldIndex);
+      cols.insert(newIndex, item);
+    });
+    _save();
+  }
+
+  Future<void> _rename(Map<String, dynamic> c) async {
+    final ctrl = TextEditingController(text: '${c['name']}');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重命名收藏夹'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 60,
+          decoration: const InputDecoration(labelText: '显示名称'),
+          onSubmitted: (v) => Navigator.of(ctx).pop(v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (name == null || name.isEmpty) return;
+    try {
+      final j = await _send(
+          '/api/collections/rename', {'idx': c['idx'], 'name': name});
+      _apply(j);
+    } catch (e) {
+      _toast('重命名失败：$e');
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> c) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除收藏夹'),
+        content: Text('将从 App 中移除「${c['name']}」，清除该收藏夹的索引数据并关闭同步。\n\n'
+            'NAS 上的原始视频、图片和文案不会被删除。\n此操作不可撤销。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final j = await _send('/api/collections/delete', {'idx': c['idx']});
+      _apply(j);
+      _toast('已移除「${c['name']}」并关闭同步');
+    } catch (e) {
+      _toast('删除失败：$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('收藏夹管理'), actions: [
+        if (saving)
+          const Padding(
+            padding: EdgeInsets.only(right: 16),
+            child: Center(
+                child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))),
+          ),
+      ]),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : err != null
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text('加载失败：$err'),
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: load, child: const Text('重试')),
+                ]))
+              : cols.isEmpty
+                  ? const Center(child: Text('没有收藏夹'))
+                  : Column(children: [
+                      const Padding(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        child: Row(children: [
+                          Icon(Icons.info_outline,
+                              size: 14, color: Colors.grey),
+                          SizedBox(width: 6),
+                          Expanded(
+                              child: Text('拖动左侧把手排序；开关控制是否同步；★ 为默认收藏夹',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey))),
+                        ]),
+                      ),
+                      Expanded(
+                        child: ReorderableListView.builder(
+                          buildDefaultDragHandles: false,
+                          itemCount: cols.length,
+                          onReorder: _reorder,
+                          itemBuilder: (_, i) {
+                            final c = cols[i];
+                            final isDefault =
+                                defaultIdx == (c['idx'] as num).toInt();
+                            final sync = c['sync'] != false;
+                            return ListTile(
+                              key: ValueKey('col-${c['idx']}'),
+                              leading: ReorderableDragStartListener(
+                                index: i,
+                                child: const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: Icon(Icons.drag_indicator),
+                                ),
+                              ),
+                              title: Row(children: [
+                                if (isDefault) ...const [
+                                  Icon(Icons.star,
+                                      size: 16, color: Colors.amber),
+                                  SizedBox(width: 4),
+                                ],
+                                Expanded(
+                                    child: Text('${c['name']}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis)),
+                              ]),
+                              subtitle:
+                                  Text('${c['count'] ?? 0} 个作品 · 序号 ${c['idx']}'
+                                      '${sync ? '' : ' · 不同步'}'),
+                              trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Switch(
+                                      value: sync,
+                                      onChanged: (v) {
+                                        setState(() => c['sync'] = v);
+                                        _save();
+                                      },
+                                    ),
+                                    PopupMenuButton<String>(
+                                      icon: const Icon(Icons.more_vert),
+                                      onSelected: (v) async {
+                                        if (v == 'default') {
+                                          setState(() => defaultIdx =
+                                              (c['idx'] as num).toInt());
+                                          await _save();
+                                        } else if (v == 'rename') {
+                                          await _rename(c);
+                                        } else if (v == 'delete') {
+                                          await _delete(c);
+                                        }
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(
+                                            value: 'default',
+                                            child: Text('设为默认收藏夹')),
+                                        PopupMenuItem(
+                                            value: 'rename',
+                                            child: Text('重命名')),
+                                        PopupMenuItem(
+                                            value: 'delete',
+                                            child: Text('删除（关闭同步）')),
+                                      ],
+                                    ),
+                                  ]),
+                            );
+                          },
+                        ),
+                      ),
+                    ]),
     );
   }
 }
@@ -138,6 +457,7 @@ class _HomePageState extends State<HomePage> {
   List cols = [];
   final Map<String, String> covers = {};
   String? err;
+  int? defaultIdx;
 
   @override
   void initState() {
@@ -147,9 +467,44 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> load() async {
     try {
-      final r = await http.get(cfg.u('/api/index.json'), headers: cfg.headers);
+      final rs = await Future.wait([
+        http.get(cfg.u('/api/index.json'), headers: cfg.headers),
+        http.get(cfg.u('/api/settings'), headers: cfg.headers),
+      ]);
+      final r = rs[0];
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final list = (jsonDecode(r.body)['collections'] as List);
+      var list = (jsonDecode(r.body)['collections'] as List);
+      if (rs[1].statusCode == 200) {
+        final p = jsonDecode(rs[1].body) as Map<String, dynamic>;
+        defaultIdx = (p['default'] as num?)?.toInt();
+        final prefs = (p['collections'] as List?) ?? const [];
+        final merged = <Map<String, dynamic>>[];
+        for (final raw in prefs) {
+          final pc = Map<String, dynamic>.from(raw as Map);
+          if (pc['deleted'] == true) continue;
+          final i = (pc['idx'] as num).toInt();
+          Map<String, dynamic>? base;
+          for (final c in list) {
+            if ((c['idx'] as num).toInt() == i) {
+              base = Map<String, dynamic>.from(c as Map);
+              break;
+            }
+          }
+          if (base == null) continue;
+          merged.add({
+            ...base,
+            'name': pc['name'] ?? base['name'],
+            'sync': pc['sync'] != false,
+          });
+        }
+        for (final c in list) {
+          final i = (c['idx'] as num).toInt();
+          if (!merged.any((m) => (m['idx'] as num).toInt() == i)) {
+            merged.add({...Map<String, dynamic>.from(c as Map), 'sync': true});
+          }
+        }
+        list = merged;
+      }
       setState(() => cols = list);
       for (final c in list) {
         http
@@ -169,19 +524,36 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  void openDefault() {
+    final i = cols.indexWhere(
+        (c) => defaultIdx != null && (c['idx'] as num).toInt() == defaultIdx);
+    if (i < 0) return;
+    final c = cols[i];
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('抖音收藏夹'), actions: [
+        if (defaultIdx != null)
+          IconButton(
+              icon: const Icon(Icons.star, color: Colors.amber),
+              tooltip: '打开默认收藏夹',
+              onPressed: openDefault),
         IconButton(
             icon: const Icon(Icons.search),
             tooltip: '搜索',
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SearchPage()))),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const SearchPage()))),
         IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsPage()))),
+            onPressed: () async {
+              await Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsHubPage()));
+              load();
+            }),
       ]),
       body: err != null
           ? Center(child: Text('加载失败：$err'))
@@ -193,6 +565,8 @@ class _HomePageState extends State<HomePage> {
                   itemBuilder: (_, i) {
                     final c = cols[i];
                     final cover = covers['${c['idx']}'];
+                    final isDefault = defaultIdx != null &&
+                        (c['idx'] as num).toInt() == defaultIdx;
                     return ListTile(
                       leading: ClipRRect(
                         borderRadius: BorderRadius.circular(6),
@@ -208,13 +582,20 @@ class _HomePageState extends State<HomePage> {
                                   memCacheWidth: 144),
                         ),
                       ),
-                      title: Text('(${c['idx']}) ${c['name']}'),
+                      title: Text(
+                          '(${c['idx']}) ${c['name']}${isDefault ? '  ★' : ''}',
+                          style: TextStyle(
+                              color: isDefault ? Colors.amber : null)),
+                      subtitle: c['sync'] == false
+                          ? const Text('同步已关闭',
+                              style:
+                                  TextStyle(fontSize: 11, color: Colors.grey))
+                          : null,
                       trailing: Text('${c['count']}',
                           style: const TextStyle(color: Colors.grey)),
-                      onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => CollectionPage(
-                                  name: c['name'], idx: c['idx']))),
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) =>
+                              CollectionPage(name: c['name'], idx: c['idx']))),
                     );
                   },
                 ),
@@ -253,7 +634,9 @@ class _CollectionPageState extends State<CollectionPage> {
   @override
   void initState() {
     super.initState();
-    http.get(cfg.u('/api/c/${widget.idx}.json'), headers: cfg.headers).then((r) {
+    http
+        .get(cfg.u('/api/c/${widget.idx}.json'), headers: cfg.headers)
+        .then((r) {
       setState(() => works = (jsonDecode(r.body)['works'] as List));
     });
   }
@@ -405,7 +788,8 @@ class _PlayerPageState extends State<PlayerPage> {
     final w = widget.works[i];
     try {
       if (w['t'] == 'v') {
-        await player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
+        await player
+            .open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
       } else if ((w['au'] ?? '').toString().isNotEmpty) {
         await player.open(Media(cfg.base + w['au'], httpHeaders: cfg.headers));
       }
@@ -427,7 +811,10 @@ class _PlayerPageState extends State<PlayerPage> {
       });
     }
     retryTimer = Timer(const Duration(milliseconds: 1800), () {
-      if (mounted && my == _openToken && w['t'] == 'v' && dur.inMilliseconds == 0) {
+      if (mounted &&
+          my == _openToken &&
+          w['t'] == 'v' &&
+          dur.inMilliseconds == 0) {
         player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
         player.play();
       }
@@ -639,6 +1026,7 @@ class _PlayerPageState extends State<PlayerPage> {
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$m:$s';
   }
+
   @override
   Widget build(BuildContext context) {
     final w = widget.works[cur];
@@ -746,8 +1134,7 @@ class _PlayerPageState extends State<PlayerPage> {
                 child: SafeArea(
                   child: IconButton(
                       onPressed: () => Navigator.of(context).maybePop(),
-                      icon:
-                          const Icon(Icons.arrow_back, color: Colors.white70),
+                      icon: const Icon(Icons.arrow_back, color: Colors.white70),
                       style: IconButton.styleFrom(
                           backgroundColor: Colors.black45)),
                 ),
@@ -755,8 +1142,8 @@ class _PlayerPageState extends State<PlayerPage> {
               if (paused)
                 const IgnorePointer(
                   child: Center(
-                    child: Icon(Icons.play_arrow,
-                        size: 76, color: Colors.white30),
+                    child:
+                        Icon(Icons.play_arrow, size: 76, color: Colors.white30),
                   ),
                 ),
               Positioned(
@@ -783,7 +1170,8 @@ class _PlayerPageState extends State<PlayerPage> {
                                 height: 38,
                                 fit: BoxFit.cover))
                       else
-                        const CircleAvatar(radius: 19, child: Icon(Icons.person)),
+                        const CircleAvatar(
+                            radius: 19, child: Icon(Icons.person)),
                       const SizedBox(width: 8),
                       Expanded(
                           child: Column(
@@ -864,8 +1252,7 @@ class _PlayerPageState extends State<PlayerPage> {
                           child: LayoutBuilder(builder: (ctx, cons) {
                             void seekAt(Offset p) {
                               if (!isV || dur.inMilliseconds == 0) return;
-                              final f =
-                                  (p.dx / cons.maxWidth).clamp(0.0, 1.0);
+                              final f = (p.dx / cons.maxWidth).clamp(0.0, 1.0);
                               player.seek(dur * f);
                             }
 
@@ -931,7 +1318,8 @@ class _PlayerPageState extends State<PlayerPage> {
                       Row(children: [
                         IconButton(
                             onPressed: toggleMute,
-                            icon: Icon(muted ? Icons.volume_off : Icons.volume_up,
+                            icon: Icon(
+                                muted ? Icons.volume_off : Icons.volume_up,
                                 color: Colors.white70)),
                         IconButton(
                             onPressed: () => setState(() => showVol = !showVol),
@@ -953,9 +1341,8 @@ class _PlayerPageState extends State<PlayerPage> {
                             onPressed: toggleLoop,
                             tooltip: '单条循环',
                             icon: Icon(Icons.repeat_one,
-                                color: loopOne
-                                    ? Colors.white70
-                                    : Colors.white24)),
+                                color:
+                                    loopOne ? Colors.white70 : Colors.white24)),
                         const Spacer(),
                         IconButton(
                             onPressed: toggleFs,
@@ -974,7 +1361,6 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 }
-
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -1090,7 +1476,8 @@ class _AuthorPageState extends State<AuthorPage> {
 
   Future<void> load() async {
     try {
-      final r = await http.get(cfg.u('/api/authors.json'), headers: cfg.headers);
+      final r =
+          await http.get(cfg.u('/api/authors.json'), headers: cfg.headers);
       final idx = jsonDecode(r.body) as Map;
       final info = idx[widget.name];
       if (info != null) {
@@ -1128,8 +1515,8 @@ class _AuthorPageState extends State<AuthorPage> {
                                           widget.name.isEmpty
                                               ? '?'
                                               : widget.name[0],
-                                          style: const TextStyle(
-                                              fontSize: 26))))
+                                          style:
+                                              const TextStyle(fontSize: 26))))
                               : CachedNetworkImage(
                                   imageUrl: cfg.base + av,
                                   httpHeaders: cfg.headers,
