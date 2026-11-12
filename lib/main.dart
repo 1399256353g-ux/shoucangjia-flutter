@@ -866,6 +866,16 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
+  // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停
+  void onStageTap() {
+    if (!ui) {
+      showUi();
+      return;
+    }
+    togglePause();
+    showUi();
+  }
+
   void togglePause() {
     final isV = widget.works[cur]['t'] == 'v';
     if (!isV) {
@@ -1063,10 +1073,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   }
                   if (it['t'] == 'v') {
                     return GestureDetector(
-                      onTap: () {
-                        togglePause();
-                        showUi();
-                      },
+                      onTap: onStageTap,
                       onLongPressStart: (_) => player.setRate(2.0),
                       onLongPressEnd: (_) => player.setRate(speed),
                       child: Stack(fit: StackFit.expand, children: [
@@ -1084,10 +1091,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     );
                   }
                   return GestureDetector(
-                    onTap: () {
-                      togglePause();
-                      showUi();
-                    },
+                    onTap: onStageTap,
                     onHorizontalDragEnd: (d) {
                       stopAuto();
                       final v = d.primaryVelocity ?? 0;
@@ -1150,10 +1154,12 @@ class _PlayerPageState extends State<PlayerPage> {
                 left: 14,
                 right: 80,
                 bottom: 96,
-                child: AnimatedOpacity(
-                  opacity: ui ? 1 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: GestureDetector(
+                child: IgnorePointer(
+                  ignoring: !ui,
+                  child: AnimatedOpacity(
+                    opacity: ui ? 1 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: GestureDetector(
                     onTap: () async {
                       player.pause();
                       await Navigator.of(context).push(MaterialPageRoute(
@@ -1177,9 +1183,21 @@ class _PlayerPageState extends State<PlayerPage> {
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                            Text('@${w['a']}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
+                            Row(children: [
+                              Flexible(
+                                child: Text('@${w['a']}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                              if (('${w['d'] ?? ''}').isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Text('${w['d']}',
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.white54)),
+                              ],
+                            ]),
                             Text('${w['ti'] ?? ''}',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -1189,8 +1207,9 @@ class _PlayerPageState extends State<PlayerPage> {
                     ]),
                   ),
                 ),
+                ),
               ),
-              if (showVol)
+              if (showVol && ui)
                 Positioned(
                   right: 16,
                   bottom: 128,
@@ -1225,10 +1244,12 @@ class _PlayerPageState extends State<PlayerPage> {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: AnimatedOpacity(
-                  opacity: ui ? 1 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Container(
+                child: IgnorePointer(
+                  ignoring: !ui,
+                  child: AnimatedOpacity(
+                    opacity: ui ? 1 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
                     decoration: const BoxDecoration(
                         gradient: LinearGradient(
                             begin: Alignment.topCenter,
@@ -1352,6 +1373,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       ]),
                     ]),
                   ),
+                ),
                 ),
               ),
             ]),
