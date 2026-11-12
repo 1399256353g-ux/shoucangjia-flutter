@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
@@ -8,13 +9,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  if (Platform.isWindows) {
+    await windowManager.ensureInitialized();
+  }
   runApp(const App());
+}
+
+// 轻触震动：iOS/Android 生效，桌面端静默忽略
+void hapticTap() {
+  try {
+    HapticFeedback.lightImpact();
+  } catch (_) {}
 }
 
 class Cfg {
@@ -2540,6 +2552,10 @@ class _PlayerPageState extends State<PlayerPage> {
   bool ui = true;
   bool fs = false;
   bool dragging = false;
+  bool barHover = false;
+  int pointers = 0;
+  double _hoverDx = -1;
+  double _hoverDy = -1;
   bool autoplay = true;
   bool loopOne = false;
   double? dragFrac;
@@ -2707,6 +2723,7 @@ class _PlayerPageState extends State<PlayerPage> {
       }
     });
     if (r != null && r['ok'] == true) {
+      hapticTap();
       _toast('已送 1 颗小水滴 · 今日剩余 $dropDayLeft · 本周剩余 $dropWeekLeft');
     } else {
       _toast('${r?['error'] ?? '发送失败，请检查网络'}');
@@ -2786,6 +2803,7 @@ class _PlayerPageState extends State<PlayerPage> {
       showUi();
       return;
     }
+    hapticTap();
     togglePause();
     showUi();
   }
@@ -2863,13 +2881,24 @@ class _PlayerPageState extends State<PlayerPage> {
     player.setRate(speed);
   }
 
-  void toggleFs() {
+  Future<void> toggleFs() async {
     setState(() => fs = !fs);
     if (fs) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      // Windows 使用窗口管理器进入真全屏（无边框、全屏不遮挡任务栏）
+      if (Platform.isWindows) {
+        try {
+          await windowManager.setFullScreen(true);
+        } catch (_) {}
+      }
       showUi();
     } else {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      if (Platform.isWindows) {
+        try {
+          await windowManager.setFullScreen(false);
+        } catch (_) {}
+      }
       setState(() => ui = true);
     }
   }
@@ -2880,7 +2909,13 @@ class _PlayerPageState extends State<PlayerPage> {
     hideTimer?.cancel();
     if (fs) {
       hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
-        if (mounted) setState(() => ui = false);
+        if (!mounted) return;
+        // 拖动进度条或鼠标停留在进度条上时不隐藏
+        if (dragging || barHover) {
+          showUi();
+        } else {
+          setState(() => ui = false);
+        }
       });
     }
   }
@@ -2985,6 +3020,17 @@ class _PlayerPageState extends State<PlayerPage> {
     autoTimer?.cancel();
     hideTimer?.cancel();
     retryTimer?.cancel();
+    // 退出播放页时确保恢复系统 UI 与 Windows 窗口，避免全屏残留
+    if (fs) {
+      try {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      } catch (_) {}
+      if (Platform.isWindows) {
+        try {
+          windowManager.setFullScreen(false);
+        } catch (_) {}
+      }
+    }
     subPos?.cancel();
     subDur?.cancel();
     player.dispose();
@@ -3069,8 +3115,34 @@ class _PlayerPageState extends State<PlayerPage> {
         backgroundColor: Colors.black,
         body: Listener(
           onPointerSignal: onWheel,
+          // 双指轻触/捏合：清屏（再次双指恢复功能区）
+          onPointerDown: (_) {
+            pointers++;
+            if (pointers == 2) {
+              hapticTap();
+              if (ui) {
+                hideTimer?.cancel();
+                setState(() => ui = false);
+              } else {
+                showUi();
+              }
+            }
+          },
+          onPointerUp: (_) {
+            if (pointers > 0) pointers--;
+          },
+          onPointerCancel: (_) {
+            if (pointers > 0) pointers--;
+          },
           child: MouseRegion(
-            onHover: (_) => showUi(),
+            onHover: (e) {
+              // 只在指针实际移动时唤醒功能区，静止后能正常自动隐藏
+              final d = (e.localPosition.dx - _hoverDx).abs() +
+                  (e.localPosition.dy - _hoverDy).abs();
+              _hoverDx = e.localPosition.dx;
+              _hoverDy = e.localPosition.dy;
+              if (d > 1.5) showUi();
+            },
             child: Stack(children: [
               PageView.builder(
                 controller: pc,
@@ -3324,6 +3396,47 @@ class _PlayerPageState extends State<PlayerPage> {
                                 player.seek(dur * f);
                               }
 
+                              // 图文：按图片数量分段显示进度，当前张高亮
+                              if (!isV && pics.length > 1) {
+                                return SizedBox(
+                                  height: 30,
+                                  child: Row(
+                                    children: List.generate(pics.length, (k) {
+                                      final active = k <= idx;
+                                      return Expanded(
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () {
+                                            stopAuto();
+                                            setState(() => img = k);
+                                          },
+                                          child: Container(
+                                            height: 30,
+                                            alignment: Alignment.center,
+                                            child: AnimatedContainer(
+                                              duration: const Duration(
+                                                  milliseconds: 120),
+                                              height: k == idx ? 6 : 3,
+                                              margin: const EdgeInsets
+                                                  .symmetric(horizontal: 1.5),
+                                              decoration: BoxDecoration(
+                                                color: active
+                                                    ? (k == idx
+                                                        ? Colors.white
+                                                        : Colors.white70)
+                                                    : Colors.white24,
+                                                borderRadius:
+                                                    BorderRadius.circular(3),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                  ),
+                                );
+                              }
+
                               return GestureDetector(
                                 behavior: HitTestBehavior.opaque,
                                 onTapUp: (d) => seekAt(d.localPosition),
@@ -3355,24 +3468,33 @@ class _PlayerPageState extends State<PlayerPage> {
                                     dragFrac = null;
                                   });
                                 },
-                                child: SizedBox(
-                                  height: 30,
-                                  child: Stack(
-                                    alignment: Alignment.centerLeft,
-                                    children: [
-                                      Container(
-                                          height: dragging ? 7 : 3,
-                                          color: Colors.white24),
-                                      FractionallySizedBox(
-                                        alignment: Alignment.centerLeft,
-                                        widthFactor: dragFrac ?? progress,
-                                        child: Container(
-                                            height: dragging ? 7 : 3,
-                                            color: dragging
-                                                ? Colors.white
-                                                : Colors.white70),
-                                      ),
-                                    ],
+                                child: MouseRegion(
+                                  onEnter: (_) =>
+                                      setState(() => barHover = true),
+                                  onExit: (_) =>
+                                      setState(() => barHover = false),
+                                  child: SizedBox(
+                                    height: 30,
+                                    child: Stack(
+                                      alignment: Alignment.centerLeft,
+                                      children: [
+                                        Container(
+                                            height:
+                                                (dragging || barHover) ? 7 : 3,
+                                            color: Colors.white24),
+                                        FractionallySizedBox(
+                                          alignment: Alignment.centerLeft,
+                                          widthFactor: dragFrac ?? progress,
+                                          child: Container(
+                                              height: (dragging || barHover)
+                                                  ? 7
+                                                  : 3,
+                                              color: dragging
+                                                  ? Colors.white
+                                                  : Colors.white70),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               );
