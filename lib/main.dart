@@ -145,6 +145,11 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       appBar: AppBar(title: const Text('收藏夹'), actions: [
         IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: '搜索',
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SearchPage()))),
+        IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const SettingsPage()))),
@@ -253,6 +258,8 @@ class _PlayerPageState extends State<PlayerPage> {
   int cur = 0;
   bool paused = false;
   int img = 0;
+  int _openToken = 0;
+  bool loading = true;
   int _lastWheel = 0;
 
   @override
@@ -265,22 +272,39 @@ class _PlayerPageState extends State<PlayerPage> {
         setState(() => paused = !v);
       }
     });
-    open(cur);
-    WidgetsBinding.instance.addPostFrameCallback((_) => focus.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      focus.requestFocus();
+      open(widget.start);
+    });
   }
 
   Future<void> open(int i) async {
+    final my = ++_openToken;
+    setState(() {
+      cur = i;
+      img = 0;
+      loading = true;
+      paused = false;
+    });
+    try {
+      await player.stop();
+    } catch (_) {}
+    if (my != _openToken) return;
     final w = widget.works[i];
-    img = 0;
-    if (w['t'] == 'v') {
-      await player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
-    } else if ((w['au'] ?? '').toString().isNotEmpty) {
-      await player.open(Media(cfg.base + w['au'], httpHeaders: cfg.headers));
-    } else {
-      await player.pause();
+    try {
+      if (w['t'] == 'v') {
+        await player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
+      } else if ((w['au'] ?? '').toString().isNotEmpty) {
+        await player.open(Media(cfg.base + w['au'], httpHeaders: cfg.headers));
+      }
+    } catch (_) {}
+    if (my != _openToken) return;
+    if (!paused) {
+      try {
+        await player.play();
+      } catch (_) {}
     }
-    if (!paused) player.play();
-    setState(() {});
+    if (mounted && my == _openToken) setState(() => loading = false);
   }
 
   void next() {
@@ -306,10 +330,6 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void onPage(int i) {
-    setState(() {
-      cur = i;
-      paused = false;
-    });
     open(i);
   }
 
@@ -400,7 +420,12 @@ class _PlayerPageState extends State<PlayerPage> {
                           fit: BoxFit.contain);
                 }
                 if (it['t'] == 'v') {
-                  return Video(controller: vc, controls: NoVideoControls);
+                  return Stack(fit: StackFit.expand, children: [
+                    if (!loading)
+                      Video(controller: vc, controls: NoVideoControls),
+                    if (loading)
+                      const Center(child: CircularProgressIndicator()),
+                  ]);
                 }
                 final imgs = it['m'] as List;
                 final idx = img.clamp(0, imgs.length - 1);
@@ -507,13 +532,208 @@ class _PlayerPageState extends State<PlayerPage> {
               right: 12,
               top: 8,
               child: SafeArea(
-                child: Text('${cur + 1} / ${widget.works.length}',
-                    style: const TextStyle(fontSize: 12, color: Colors.white54)),
+                child: Row(children: [
+                  Text('${cur + 1} / ${widget.works.length}',
+                      style:
+                          const TextStyle(fontSize: 12, color: Colors.white54)),
+                  const SizedBox(width: 6),
+                  IconButton(
+                      onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => AuthorPage(
+                                  name: '${widget.works[cur]['a']}'))),
+                      icon: const Icon(Icons.person),
+                      style: IconButton.styleFrom(
+                          backgroundColor: Colors.black45)),
+                ]),
               ),
             ),
           ]),
         ),
       ),
+    );
+  }
+}
+
+class SearchPage extends StatefulWidget {
+  const SearchPage({super.key});
+  @override
+  State<SearchPage> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends State<SearchPage> {
+  final TextEditingController q = TextEditingController();
+  List all = [];
+  bool loading = true;
+  String kw = '';
+
+  @override
+  void initState() {
+    super.initState();
+    loadAll();
+  }
+
+  Future<void> loadAll() async {
+    try {
+      final r = await http.get(cfg.u('/api/index.json'), headers: cfg.headers);
+      final cols = (jsonDecode(r.body)['collections'] as List);
+      for (final c in cols) {
+        final rr = await http.get(cfg.u('/api/c/${c['idx']}.json'),
+            headers: cfg.headers);
+        if (rr.statusCode != 200) continue;
+        final ws = (jsonDecode(rr.body)['works'] as List);
+        for (var i = 0; i < ws.length; i++) {
+          all.add({'w': ws[i], 'works': ws, 'i': i, 'col': c['name']});
+        }
+      }
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final res = kw.isEmpty
+        ? const []
+        : all.where((e) {
+            final w = e['w'];
+            return '${w['ti']}'.contains(kw) || '${w['a']}'.contains(kw);
+          }).toList();
+    return Scaffold(
+      appBar: AppBar(title: const Text('搜索')),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: q,
+            autofocus: true,
+            decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search), hintText: '标题或作者'),
+            onChanged: (v) => setState(() => kw = v.trim()),
+          ),
+        ),
+        if (loading) const LinearProgressIndicator(),
+        Expanded(
+          child: kw.isEmpty
+              ? const Center(
+                  child: Text('输入关键词，跨所有收藏夹搜索',
+                      style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  itemCount: res.length,
+                  itemBuilder: (_, i) {
+                    final e = res[i];
+                    final w = e['w'];
+                    return ListTile(
+                      leading: SizedBox(
+                          width: 40,
+                          height: 54,
+                          child: (w['th'] ?? '').toString().isEmpty
+                              ? Container(color: Colors.black26)
+                              : CachedNetworkImage(
+                                  imageUrl: cfg.base + w['th'],
+                                  httpHeaders: cfg.headers,
+                                  fit: BoxFit.cover)),
+                      title: Text('${w['ti']}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text('@${w['a']} · ${e['col']}',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) =>
+                              PlayerPage(works: e['works'], start: e['i']))),
+                    );
+                  },
+                ),
+        ),
+      ]),
+    );
+  }
+}
+
+class AuthorPage extends StatefulWidget {
+  final String name;
+  const AuthorPage({super.key, required this.name});
+  @override
+  State<AuthorPage> createState() => _AuthorPageState();
+}
+
+class _AuthorPageState extends State<AuthorPage> {
+  String bio = '';
+  String av = '';
+  List works = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    try {
+      final r = await http.get(cfg.u('/api/authors.json'), headers: cfg.headers);
+      final idx = jsonDecode(r.body) as Map;
+      final info = idx[widget.name];
+      if (info != null) {
+        final d = await http.get(cfg.u('/api/a/${info['i']}.json'),
+            headers: cfg.headers);
+        final m = jsonDecode(d.body);
+        bio = (m['bio'] ?? '').toString();
+        av = (m['av'] ?? '').toString();
+        works = (m['works'] as List);
+      }
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('@${widget.name}')),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipOval(
+                          child: av.isEmpty
+                              ? Container(
+                                  width: 64,
+                                  height: 64,
+                                  color: Colors.blueGrey,
+                                  child: Center(
+                                      child: Text(
+                                          widget.name.isEmpty
+                                              ? '?'
+                                              : widget.name[0],
+                                          style: const TextStyle(
+                                              fontSize: 26))))
+                              : CachedNetworkImage(
+                                  imageUrl: cfg.base + av,
+                                  httpHeaders: cfg.headers,
+                                  width: 64,
+                                  height: 64,
+                                  fit: BoxFit.cover)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            const Text('作者简介',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey)),
+                            const SizedBox(height: 6),
+                            Text(bio.isEmpty ? '（暂无简介）' : bio,
+                                maxLines: 6,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13)),
+                          ])),
+                    ]),
+              ),
+              const Divider(height: 1),
+              Expanded(child: WorkGrid(works: works)),
+            ]),
     );
   }
 }
