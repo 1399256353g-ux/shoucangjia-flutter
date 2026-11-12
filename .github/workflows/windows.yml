@@ -25,7 +25,14 @@ jobs:
           python -m pip install --quiet pillow
           python tool/make_ico.py
       - run: flutter build windows --release
+      - name: Package with version
+        shell: pwsh
+        run: |
+          $line = Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)' | Select-Object -First 1
+          $ver = $line.Matches.Groups[1].Value.Split('+')[0]
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "Dizi-$ver-windows.zip" -Force
+          Get-Item "Dizi-$ver-windows.zip" | Select-Object Name,Length
       - uses: actions/upload-artifact@v4
         with:
           name: windows-app
-          path: build/windows/x64/runner/Release/
+          path: Dizi-*-windows.zip

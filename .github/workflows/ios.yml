@@ -26,11 +26,12 @@ jobs:
       - run: flutter build ios --release --no-codesign
       - name: Package IPA
         run: |
+          VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry ShouCangJiaFlutter-unsigned.ipa Payload
-          ls -lh ShouCangJiaFlutter-unsigned.ipa
+          zip -qry "Dizi-${VER}-unsigned.ipa" Payload
+          ls -lh Dizi-${VER}-unsigned.ipa
       - uses: actions/upload-artifact@v4
         with:
           name: ios-ipa
-          path: ShouCangJiaFlutter-unsigned.ipa
+          path: Dizi-*-unsigned.ipa
