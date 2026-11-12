@@ -256,11 +256,19 @@ class _PlayerPageState extends State<PlayerPage> {
   late final VideoController vc = VideoController(player);
   final FocusNode focus = FocusNode();
   int cur = 0;
-  bool paused = false;
   int img = 0;
   int _openToken = 0;
-  bool loading = true;
   int _lastWheel = 0;
+  bool paused = false;
+  bool loading = true;
+  bool muted = false;
+  double speed = 1.0;
+  Duration pos = Duration.zero;
+  Duration dur = Duration.zero;
+  Timer? autoTimer;
+  bool manualPic = false;
+  StreamSubscription? subPos;
+  StreamSubscription? subDur;
 
   @override
   void initState() {
@@ -268,9 +276,13 @@ class _PlayerPageState extends State<PlayerPage> {
     cur = widget.start;
     player.setPlaylistMode(PlaylistMode.loop);
     player.stream.playing.listen((v) {
-      if (mounted && v != !paused) {
-        setState(() => paused = !v);
-      }
+      if (mounted && v != !paused) setState(() => paused = !v);
+    });
+    subPos = player.stream.position.listen((p) {
+      if (mounted) setState(() => pos = p);
+    });
+    subDur = player.stream.duration.listen((d) {
+      if (mounted) setState(() => dur = d);
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       focus.requestFocus();
@@ -280,6 +292,8 @@ class _PlayerPageState extends State<PlayerPage> {
 
   Future<void> open(int i) async {
     final my = ++_openToken;
+    autoTimer?.cancel();
+    manualPic = false;
     setState(() {
       cur = i;
       img = 0;
@@ -299,12 +313,37 @@ class _PlayerPageState extends State<PlayerPage> {
       }
     } catch (_) {}
     if (my != _openToken) return;
+    try {
+      await player.setVolume(muted ? 0 : 100);
+      await player.setRate(speed);
+    } catch (_) {}
     if (!paused) {
       try {
         await player.play();
       } catch (_) {}
     }
     if (mounted && my == _openToken) setState(() => loading = false);
+    if (w['t'] != 'v') startAuto();
+  }
+
+  void startAuto() {
+    autoTimer?.cancel();
+    if (manualPic) return;
+    autoTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      final w = widget.works[cur];
+      if (w['t'] == 'v') return;
+      final n = (w['m'] as List).length;
+      if (img < n - 1) {
+        setState(() => img++);
+      } else {
+        next();
+      }
+    });
+  }
+
+  void stopAuto() {
+    manualPic = true;
+    autoTimer?.cancel();
   }
 
   void next() {
@@ -329,8 +368,16 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
-  void onPage(int i) {
-    open(i);
+  void toggleMute() {
+    setState(() => muted = !muted);
+    player.setVolume(muted ? 0 : 100);
+  }
+
+  void cycleSpeed() {
+    setState(() {
+      speed = speed >= 2.0 ? 1.0 : (speed >= 1.5 ? 2.0 : 1.5);
+    });
+    player.setRate(speed);
   }
 
   void onWheel(PointerSignalEvent e) {
@@ -361,19 +408,23 @@ class _PlayerPageState extends State<PlayerPage> {
       togglePause();
       return KeyEventResult.handled;
     }
+    if (k == LogicalKeyboardKey.keyM) {
+      toggleMute();
+      return KeyEventResult.handled;
+    }
     if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.keyL) {
       final w = widget.works[cur];
       if (w['t'] != 'v') {
-        setState(() =>
-            img = (img + 1).clamp(0, (w['m'] as List).length - 1));
+        stopAuto();
+        setState(() => img = (img + 1).clamp(0, (w['m'] as List).length - 1));
       }
       return KeyEventResult.handled;
     }
     if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.keyH) {
       final w = widget.works[cur];
       if (w['t'] != 'v') {
-        setState(() =>
-            img = (img - 1).clamp(0, (w['m'] as List).length - 1));
+        stopAuto();
+        setState(() => img = (img - 1).clamp(0, (w['m'] as List).length - 1));
       }
       return KeyEventResult.handled;
     }
@@ -386,16 +437,30 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
+    autoTimer?.cancel();
+    subPos?.cancel();
+    subDur?.cancel();
     player.dispose();
     pc.dispose();
     focus.dispose();
     super.dispose();
   }
 
+  String fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
   @override
   Widget build(BuildContext context) {
     final w = widget.works[cur];
     final isV = w['t'] == 'v';
+    final pics = isV ? <dynamic>[] : (w['m'] as List);
+    final idx = pics.isEmpty ? 0 : img.clamp(0, pics.length - 1);
+    final progress = (isV && dur.inMilliseconds > 0)
+        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        : (pics.isEmpty ? 0.0 : (idx + 1) / pics.length);
     return Focus(
       focusNode: focus,
       onKeyEvent: onKey,
@@ -408,7 +473,7 @@ class _PlayerPageState extends State<PlayerPage> {
               controller: pc,
               scrollDirection: Axis.vertical,
               itemCount: widget.works.length,
-              onPageChanged: onPage,
+              onPageChanged: open,
               itemBuilder: (_, i) {
                 final it = widget.works[i];
                 if (i != cur) {
@@ -420,40 +485,52 @@ class _PlayerPageState extends State<PlayerPage> {
                           fit: BoxFit.contain);
                 }
                 if (it['t'] == 'v') {
-                  return Stack(fit: StackFit.expand, children: [
-                    if (!loading)
-                      Video(controller: vc, controls: NoVideoControls),
-                    if (loading)
-                      const Center(child: CircularProgressIndicator()),
-                  ]);
+                  return GestureDetector(
+                    onTap: togglePause,
+                    onLongPressStart: (_) => player.setRate(2.0),
+                    onLongPressEnd: (_) => player.setRate(speed),
+                    child: Stack(fit: StackFit.expand, children: [
+                      if ((it['th'] ?? '').toString().isNotEmpty)
+                        CachedNetworkImage(
+                            imageUrl: cfg.base + it['th'],
+                            httpHeaders: cfg.headers,
+                            fit: BoxFit.contain),
+                      if (!loading)
+                        Video(controller: vc, controls: NoVideoControls),
+                      if (paused)
+                        const Center(
+                            child: Icon(Icons.play_arrow,
+                                size: 84, color: Colors.white70)),
+                    ]),
+                  );
                 }
-                final imgs = it['m'] as List;
-                final idx = img.clamp(0, imgs.length - 1);
                 return GestureDetector(
                   onTapUp: (d) {
+                    stopAuto();
                     final width = MediaQuery.of(context).size.width;
                     setState(() {
                       if (d.localPosition.dx < width / 2) {
-                        img = (idx - 1).clamp(0, imgs.length - 1);
+                        img = (idx - 1).clamp(0, pics.length - 1);
                       } else {
-                        img = (idx + 1).clamp(0, imgs.length - 1);
+                        img = (idx + 1).clamp(0, pics.length - 1);
                       }
                     });
                   },
+                  onLongPressStart: (_) {},
                   child: Stack(fit: StackFit.expand, children: [
                     CachedNetworkImage(
-                        imageUrl: cfg.base + imgs[idx],
+                        imageUrl: cfg.base + pics[idx],
                         httpHeaders: cfg.headers,
                         fit: BoxFit.contain),
-                    if (imgs.length > 1)
+                    if (pics.length > 1)
                       Positioned(
-                          bottom: 14,
+                          bottom: 46,
                           left: 0,
                           right: 0,
                           child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: List.generate(
-                                  imgs.length,
+                                  pics.length,
                                   (k) => Container(
                                         width: 5,
                                         height: 5,
@@ -470,44 +547,93 @@ class _PlayerPageState extends State<PlayerPage> {
               },
             ),
             Positioned(
+              left: 14,
+              right: 80,
+              bottom: 62,
+              child: GestureDetector(
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => AuthorPage(name: '${w['a']}'))),
+                child: Row(children: [
+                  if ((w['av'] ?? '').toString().isNotEmpty)
+                    ClipOval(
+                        child: CachedNetworkImage(
+                            imageUrl: cfg.base + w['av'],
+                            httpHeaders: cfg.headers,
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover))
+                  else
+                    const CircleAvatar(radius: 20, child: Icon(Icons.person)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text('@${w['a']}',
+                            style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text('ID ${w['ai'] ?? '-'}',
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.white70)),
+                      ])),
+                ]),
+              ),
+            ),
+            Positioned(
               left: 16,
-              right: 90,
+              right: 16,
               bottom: 34,
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(children: [
-                      if ((w['av'] ?? '').toString().isNotEmpty)
-                        ClipOval(
-                            child: CachedNetworkImage(
-                                imageUrl: cfg.base + w['av'],
-                                httpHeaders: cfg.headers,
-                                width: 40,
-                                height: 40,
-                                fit: BoxFit.cover)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                            Text('@${w['a']}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                            Text('ID ${w['ai'] ?? '-'}',
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.white70)),
-                          ])),
-                    ]),
-                    const SizedBox(height: 8),
                     Text(w['ti'] ?? '',
-                        maxLines: 3, overflow: TextOverflow.ellipsis),
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
                     Text(
-                        '${w['d']}${isV ? '' : ' · 图文 ${(w['m'] as List).length} 张'}',
+                        '${w['d']}${isV ? '' : ' · 图文 ${pics.length} 张'}',
                         style: const TextStyle(
                             fontSize: 11, color: Colors.white60)),
                   ]),
+            ),
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: Row(children: [
+                Text(
+                    isV
+                        ? '${fmt(pos)} / ${fmt(dur)}'
+                        : '${idx + 1}/${pics.length}',
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.white54)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: GestureDetector(
+                    onHorizontalDragUpdate: (d) {
+                      if (!isV || dur.inMilliseconds == 0) return;
+                      final box = context.findRenderObject() as RenderBox?;
+                      if (box == null) return;
+                      final dx = d.localPosition.dx;
+                      final width = box.size.width - 24;
+                      final target = dur * (dx / width).clamp(0.0, 1.0);
+                      player.seek(target);
+                    },
+                    child: Container(
+                      height: 3,
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
+                      child: FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: progress,
+                        child: Container(
+                            decoration: BoxDecoration(
+                                color: Colors.white70,
+                                borderRadius: BorderRadius.circular(2))),
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
             ),
             Positioned(
               left: 8,
@@ -517,12 +643,6 @@ class _PlayerPageState extends State<PlayerPage> {
                   IconButton(
                       onPressed: () => Navigator.of(context).maybePop(),
                       icon: const Icon(Icons.arrow_back),
-                      style: IconButton.styleFrom(
-                          backgroundColor: Colors.black45)),
-                  const SizedBox(width: 6),
-                  IconButton(
-                      onPressed: togglePause,
-                      icon: Icon(paused ? Icons.play_arrow : Icons.pause),
                       style: IconButton.styleFrom(
                           backgroundColor: Colors.black45)),
                 ]),
@@ -536,13 +656,15 @@ class _PlayerPageState extends State<PlayerPage> {
                   Text('${cur + 1} / ${widget.works.length}',
                       style:
                           const TextStyle(fontSize: 12, color: Colors.white54)),
-                  const SizedBox(width: 6),
                   IconButton(
-                      onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => AuthorPage(
-                                  name: '${widget.works[cur]['a']}'))),
-                      icon: const Icon(Icons.person),
+                      onPressed: toggleMute,
+                      icon: Icon(muted ? Icons.volume_off : Icons.volume_up),
+                      style: IconButton.styleFrom(
+                          backgroundColor: Colors.black45)),
+                  IconButton(
+                      onPressed: cycleSpeed,
+                      child: Text('${speed}x',
+                          style: const TextStyle(fontSize: 11)),
                       style: IconButton.styleFrom(
                           backgroundColor: Colors.black45)),
                 ]),
