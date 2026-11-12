@@ -1,4 +1,6 @@
 name: windows
+permissions:
+  contents: write
 on:
   push:
     branches: [ main ]
@@ -36,3 +38,10 @@ jobs:
         with:
           name: windows-app
           path: Dizi-*-windows.zip
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
+          gh release create "v$VER" --title "Dizi $VER" --notes "auto build $VER" || true
+          gh release upload "v$VER" "Dizi-${VER}-windows.zip" --clobber
