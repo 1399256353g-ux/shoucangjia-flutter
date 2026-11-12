@@ -1291,11 +1291,13 @@ class _PlayerPageState extends State<PlayerPage> {
       stopAuto();
       final n = (w['m'] as List).length;
       setState(() => img = (img + dir).clamp(0, n - 1));
-    } else if (dur.inMilliseconds > 0) {
-      final target = pos + Duration(seconds: 10 * dir);
-      player.seek(target < Duration.zero
-          ? Duration.zero
-          : (target > dur ? dur : target));
+    } else {
+      // 视频：← / → 快退快进 10 秒（时长未知时也尝试 seek）
+      var target = pos + Duration(seconds: 10 * dir);
+      if (target < Duration.zero) target = Duration.zero;
+      if (dur.inMilliseconds > 0 && target > dur) target = dur;
+      player.seek(target);
+      setState(() => pos = target);
     }
   }
 
@@ -1482,12 +1484,20 @@ class _PlayerPageState extends State<PlayerPage> {
               Positioned(
                 left: 8,
                 top: 8,
-                child: SafeArea(
-                  child: IconButton(
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.arrow_back, color: Colors.white70),
-                      style: IconButton.styleFrom(
-                          backgroundColor: Colors.black45)),
+                child: IgnorePointer(
+                  ignoring: !ui,
+                  child: AnimatedOpacity(
+                    opacity: ui ? 1 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: SafeArea(
+                      child: IconButton(
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon:
+                              const Icon(Icons.arrow_back, color: Colors.white70),
+                          style: IconButton.styleFrom(
+                              backgroundColor: Colors.black45)),
+                    ),
+                  ),
                 ),
               ),
               if (paused)
