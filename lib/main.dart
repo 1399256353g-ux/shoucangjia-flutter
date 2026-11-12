@@ -330,6 +330,8 @@ class _PlayerPageState extends State<PlayerPage> {
   bool ui = true;
   bool fs = false;
   bool dragging = false;
+  bool autoplay = true;
+  bool loopOne = false;
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
