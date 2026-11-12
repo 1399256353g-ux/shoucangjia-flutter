@@ -73,6 +73,38 @@ Future<Map<String, dynamic>?> fetchDropStatus(String id) async {
   return null;
 }
 
+// 立即同步：collection（单个收藏夹）/ authors（作者信息）/ all（全部）
+Future<Map<String, dynamic>?> startServerSync(
+    {required String target, int? idx, bool full = false}) async {
+  if (cfg.base.isEmpty) return null;
+  try {
+    final r = await http
+        .post(cfg.u('/api/sync'),
+            headers: {...cfg.headers, 'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'target': target,
+              if (idx != null) 'idx': idx,
+              'full': full,
+            }))
+        .timeout(const Duration(seconds: 15));
+    final j = jsonDecode(r.body);
+    if (j is Map) return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
+  } catch (_) {}
+  return null;
+}
+
+Future<Map<String, dynamic>?> serverSyncStatus() async {
+  if (cfg.base.isEmpty) return null;
+  try {
+    final r = await http
+        .get(cfg.u('/api/sync'), headers: cfg.headers)
+        .timeout(const Duration(seconds: 8));
+    final j = jsonDecode(r.body);
+    if (j is Map) return Map<String, dynamic>.from(j);
+  } catch (_) {}
+  return null;
+}
+
 Future<Map<String, dynamic>?> sendDrop(String id, String author) async {
   if (cfg.base.isEmpty || id.isEmpty || author.isEmpty) return null;
   try {
@@ -1638,8 +1670,12 @@ class _CollectionPageState extends State<CollectionPage> {
   List get deletedView =>
       deleted.where((d) => _match(d as Map)).toList();
 
+  Timer? syncTimer;
+  bool syncing = false;
+
   @override
   void dispose() {
+    syncTimer?.cancel();
     _q.dispose();
     super.dispose();
   }
@@ -1657,14 +1693,80 @@ class _CollectionPageState extends State<CollectionPage> {
   @override
   void initState() {
     super.initState();
-    http
-        .get(cfg.u('/api/c/${widget.idx}.json'), headers: cfg.headers)
-        .then((r) {
+    load();
+  }
+
+  Future<void> load() async {
+    try {
+      final r =
+          await http.get(cfg.u('/api/c/${widget.idx}.json'), headers: cfg.headers);
+      if (r.statusCode != 200) return;
       final m = jsonDecode(r.body);
+      if (!mounted) return;
       setState(() {
         works = (m['works'] as List);
         deleted = (m['deleted'] as List?) ?? [];
       });
+    } catch (_) {}
+  }
+
+  Future<void> _syncNow() async {
+    if (syncing) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('立即同步'),
+        content: Text('将从抖音同步「${widget.name}」的最新作品，并刷新封面与索引。\n\n'
+            '同步在 NAS 后台运行，可能需要几分钟；期间可继续浏览。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('开始同步')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final j = await startServerSync(target: 'collection', idx: widget.idx);
+    if (j == null || j['ok'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+      }
+      return;
+    }
+    setState(() => syncing = true);
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已开始同步，完成后自动刷新')));
+    }
+    syncTimer?.cancel();
+    var tries = 0;
+    syncTimer = Timer.periodic(const Duration(seconds: 4), (t) async {
+      tries++;
+      final s = await serverSyncStatus();
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (s == null) {
+        if (tries > 5) {
+          t.cancel();
+          setState(() => syncing = false);
+        }
+        return;
+      }
+      if (s['running'] == true) return;
+      t.cancel();
+      setState(() => syncing = false);
+      final code = s['exit'];
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(code == 0 ? '同步完成' : '同步结束（退出码 $code），请查看日志')));
+      }
+      await load();
     });
   }
 
@@ -1686,6 +1788,15 @@ class _CollectionPageState extends State<CollectionPage> {
               )
             : Text(widget.name),
         actions: [
+          IconButton(
+              icon: syncing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.cloud_sync_outlined),
+              tooltip: syncing ? '同步中…' : '立即同步',
+              onPressed: syncing ? null : _syncNow),
           IconButton(
               icon: Icon(searching ? Icons.close : Icons.search),
               tooltip: searching ? '关闭搜索' : '在本收藏夹搜索',
@@ -2047,11 +2158,92 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   String sort = 'plays';
   bool loading = true;
   String? err;
+  bool fullSync = true;
+  bool syncing = false;
+  Timer? syncTimer;
 
   @override
   void initState() {
     super.initState();
+    SharedPreferences.getInstance().then((sp) {
+      if (mounted) {
+        setState(() => fullSync = sp.getBool('sync_full_authors') ?? true);
+      }
+    });
     load();
+  }
+
+  @override
+  void dispose() {
+    syncTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _setFull(bool v) async {
+    setState(() => fullSync = v);
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool('sync_full_authors', v);
+  }
+
+  Future<void> _syncAuthors() async {
+    if (syncing) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('立即同步作者'),
+        content: Text(fullSync
+            ? '将重新抓取全部作者的头像、简介与作品信息，耗时较长。\n\n同步在 NAS 后台运行。'
+            : '只补抓缺少头像/简介的作者，速度较快。\n\n同步在 NAS 后台运行。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('开始同步')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final j = await startServerSync(target: 'authors', full: fullSync);
+    if (j == null || j['ok'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+      }
+      return;
+    }
+    setState(() => syncing = true);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已开始同步作者，完成后自动刷新')));
+    }
+    syncTimer?.cancel();
+    var tries = 0;
+    syncTimer = Timer.periodic(const Duration(seconds: 4), (t) async {
+      tries++;
+      final s = await serverSyncStatus();
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (s == null) {
+        if (tries > 5) {
+          t.cancel();
+          setState(() => syncing = false);
+        }
+        return;
+      }
+      if (s['running'] == true) return;
+      t.cancel();
+      setState(() => syncing = false);
+      final code = s['exit'];
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(code == 0 ? '作者同步完成' : '作者同步结束（退出码 $code）')));
+      }
+      await load();
+    });
   }
 
   Future<void> load() async {
@@ -2160,6 +2352,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('作者'), actions: [
         IconButton(
+            tooltip: syncing ? '同步中…' : '立即同步作者',
+            onPressed: syncing ? null : _syncAuthors,
+            icon: syncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.cloud_sync_outlined)),
+        IconButton(
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
       ]),
       body: loading
@@ -2195,16 +2396,26 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                    padding: const EdgeInsets.fromLTRB(14, 0, 8, 6),
                     child: Row(children: [
                       const Icon(Icons.info_outline,
                           size: 13, color: Colors.grey),
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(
-                              '${authors.length} 位作者 · 播放/访问/水滴为本机统计，随使用累积',
+                              '${authors.length} 位作者 · 播放/访问/水滴为本机统计',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.grey))),
+                      Text('全量同步',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: fullSync ? Colors.blue : Colors.grey)),
+                      Transform.scale(
+                        scale: 0.8,
+                        child: Switch(
+                            value: fullSync,
+                            onChanged: syncing ? null : _setFull),
+                      ),
                     ]),
                   ),
                   Expanded(
