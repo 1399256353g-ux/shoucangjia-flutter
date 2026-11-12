@@ -1245,6 +1245,23 @@ class _PlayerPageState extends State<PlayerPage> {
     showUi();
   }
 
+  // 打开当前作品作者主页：先暂停，返回后按原状态恢复
+  Future<void> openAuthor() async {
+    final name = '${widget.works[cur]['a'] ?? ''}';
+    if (name.isEmpty) return;
+    final resume = !paused;
+    try {
+      player.pause();
+    } catch (_) {}
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    if (resume && mounted && !fs) {
+      try {
+        player.play();
+      } catch (_) {}
+    }
+  }
+
   void togglePause() {
     final isV = widget.works[cur]['t'] == 'v';
     if (!isV) {
@@ -1528,6 +1545,11 @@ class _PlayerPageState extends State<PlayerPage> {
                   if (it['t'] == 'v') {
                     return GestureDetector(
                       onTap: onStageTap,
+                      onHorizontalDragEnd: (d) {
+                        // 右划快速进入作者主页
+                        final v = d.primaryVelocity ?? 0;
+                        if (v > 280) openAuthor();
+                      },
                       onLongPressStart: (_) => player.setRate(2.0),
                       onLongPressEnd: (_) => player.setRate(speed),
                       child: Stack(fit: StackFit.expand, children: [
@@ -1620,12 +1642,7 @@ class _PlayerPageState extends State<PlayerPage> {
                     opacity: ui ? 1 : 0,
                     duration: const Duration(milliseconds: 200),
                     child: GestureDetector(
-                    onTap: () async {
-                      player.pause();
-                      await Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => AuthorPage(name: '${w['a']}')));
-                      if (!paused && mounted) player.play();
-                    },
+                    onTap: openAuthor,
                     child: Row(children: [
                       if ((w['av'] ?? '').toString().isNotEmpty)
                         ClipOval(
