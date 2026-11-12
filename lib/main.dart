@@ -336,6 +336,7 @@ class _PlayerPageState extends State<PlayerPage> {
   bool dragging = false;
   bool autoplay = true;
   bool loopOne = false;
+  double? dragFrac;
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
@@ -454,6 +455,16 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void togglePause() {
+    final isV = widget.works[cur]['t'] == 'v';
+    if (!isV) {
+      setState(() => paused = !paused);
+      if (paused) {
+        player.pause();
+      } else {
+        player.play();
+      }
+      return;
+    }
     if (paused) {
       player.play();
     } else {
@@ -794,12 +805,22 @@ class _PlayerPageState extends State<PlayerPage> {
                             return GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onTapDown: (d) => seekAt(d.localPosition),
-                              onHorizontalDragStart: (_) =>
-                                  setState(() => dragging = true),
-                              onHorizontalDragUpdate: (d) =>
-                                  seekAt(d.localPosition),
-                              onHorizontalDragEnd: (_) =>
-                                  setState(() => dragging = false),
+                              onHorizontalDragStart: (_) => setState(() {
+                                    dragging = true;
+                                    dragFrac = progress;
+                                  }),
+                              onHorizontalDragUpdate: (d) {
+                                final f = (d.localPosition.dx / cons.maxWidth)
+                                    .clamp(0.0, 1.0);
+                                setState(() => dragFrac = f);
+                                if (isV && dur.inMilliseconds > 0) {
+                                  player.seek(dur * f);
+                                }
+                              },
+                              onHorizontalDragEnd: (_) => setState(() {
+                                    dragging = false;
+                                    dragFrac = null;
+                                  }),
                               child: SizedBox(
                                 height: 30,
                                 child: Stack(
@@ -810,7 +831,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                         color: Colors.white24),
                                     FractionallySizedBox(
                                       alignment: Alignment.centerLeft,
-                                      widthFactor: progress,
+                                      widthFactor: dragFrac ?? progress,
                                       child: Container(
                                           height: dragging ? 7 : 3,
                                           color: dragging
