@@ -290,6 +290,506 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 }
 
+class PlayerPage extends StatefulWidget {
+  final List works;
+  final int start;
+  const PlayerPage({super.key, required this.works, required this.start});
+  @override
+  State<PlayerPage> createState() => _PlayerPageState();
+}
+
+class _PlayerPageState extends State<PlayerPage> {
+  late final PageController pc = PageController(initialPage: widget.start);
+  late final Player player = Player();
+  late final VideoController vc = VideoController(player);
+  final FocusNode focus = FocusNode();
+  int cur = 0;
+  int img = 0;
+  int _openToken = 0;
+  int _lastWheel = 0;
+  bool paused = false;
+  bool loading = true;
+  bool muted = false;
+  bool ui = true;
+  bool fs = false;
+  double speed = 1.0;
+  Duration pos = Duration.zero;
+  Duration dur = Duration.zero;
+  Timer? autoTimer;
+  Timer? hideTimer;
+  Timer? retryTimer;
+  bool manualPic = false;
+  StreamSubscription? subPos;
+  StreamSubscription? subDur;
+
+  @override
+  void initState() {
+    super.initState();
+    cur = widget.start;
+    player.setPlaylistMode(PlaylistMode.loop);
+    player.stream.playing.listen((v) {
+      if (mounted && v != !paused) setState(() => paused = !v);
+    });
+    subPos = player.stream.position.listen((p) {
+      if (mounted) setState(() => pos = p);
+    });
+    subDur = player.stream.duration.listen((d) {
+      if (mounted) setState(() => dur = d);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      focus.requestFocus();
+      open(widget.start);
+    });
+  }
+
+  Future<void> open(int i) async {
+    final my = ++_openToken;
+    autoTimer?.cancel();
+    retryTimer?.cancel();
+    manualPic = false;
+    setState(() {
+      cur = i;
+      img = 0;
+      loading = true;
+      paused = false;
+    });
+    try {
+      await player.stop();
+    } catch (_) {}
+    if (my != _openToken) return;
+    final w = widget.works[i];
+    try {
+      if (w['t'] == 'v') {
+        await player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
+      } else if ((w['au'] ?? '').toString().isNotEmpty) {
+        await player.open(Media(cfg.base + w['au'], httpHeaders: cfg.headers));
+      }
+    } catch (_) {}
+    if (my != _openToken) return;
+    try {
+      await player.setVolume(muted ? 0 : 100);
+      await player.setRate(speed);
+    } catch (_) {}
+    if (!paused) {
+      try {
+        await player.play();
+      } catch (_) {}
+    }
+    if (mounted && my == _openToken) setState(() => loading = false);
+    retryTimer = Timer(const Duration(milliseconds: 1800), () {
+      if (mounted && my == _openToken && w['t'] == 'v' && dur.inMilliseconds == 0) {
+        player.open(Media(cfg.base + w['m'][0], httpHeaders: cfg.headers));
+        player.play();
+      }
+    });
+    if (w['t'] != 'v') startAuto();
+  }
+
+  void startAuto() {
+    autoTimer?.cancel();
+    if (manualPic) return;
+    autoTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      final w = widget.works[cur];
+      if (w['t'] == 'v') return;
+      final n = (w['m'] as List).length;
+      if (img < n - 1) {
+        setState(() => img++);
+      } else {
+        next();
+      }
+    });
+  }
+
+  void stopAuto() {
+    manualPic = true;
+    autoTimer?.cancel();
+  }
+
+  void next() {
+    if (cur < widget.works.length - 1) {
+      pc.nextPage(
+          duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+    }
+  }
+
+  void prev() {
+    if (cur > 0) {
+      pc.previousPage(
+          duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+    }
+  }
+
+  void togglePause() {
+    if (paused) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }
+
+  void toggleMute() {
+    setState(() => muted = !muted);
+    player.setVolume(muted ? 0 : 100);
+  }
+
+  void cycleSpeed() {
+    setState(() {
+      speed = speed >= 2.0 ? 1.0 : (speed >= 1.5 ? 2.0 : 1.5);
+    });
+    player.setRate(speed);
+  }
+
+  void toggleFs() {
+    setState(() => fs = !fs);
+    if (fs) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      showUi();
+    } else {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      setState(() => ui = true);
+    }
+  }
+
+  void showUi() {
+    if (!mounted) return;
+    setState(() => ui = true);
+    hideTimer?.cancel();
+    if (fs) {
+      hideTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => ui = false);
+      });
+    }
+  }
+
+  void onWheel(PointerSignalEvent e) {
+    if (e is! PointerScrollEvent) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastWheel < 260) return;
+    if (e.scrollDelta.dy > 8) {
+      _lastWheel = now;
+      next();
+    } else if (e.scrollDelta.dy < -8) {
+      _lastWheel = now;
+      prev();
+    }
+  }
+
+  KeyEventResult onKey(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.keyJ) {
+      next();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyK) {
+      prev();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.space) {
+      togglePause();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.keyM) {
+      toggleMute();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.keyF) {
+      toggleFs();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.keyL) {
+      final w = widget.works[cur];
+      if (w['t'] != 'v') {
+        stopAuto();
+        setState(() => img = (img + 1).clamp(0, (w['m'] as List).length - 1));
+      }
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.keyH) {
+      final w = widget.works[cur];
+      if (w['t'] != 'v') {
+        stopAuto();
+        setState(() => img = (img - 1).clamp(0, (w['m'] as List).length - 1));
+      }
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.escape) {
+      if (fs) {
+        toggleFs();
+      } else {
+        Navigator.of(context).maybePop();
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  void dispose() {
+    autoTimer?.cancel();
+    hideTimer?.cancel();
+    retryTimer?.cancel();
+    subPos?.cancel();
+    subDur?.cancel();
+    player.dispose();
+    pc.dispose();
+    focus.dispose();
+    super.dispose();
+  }
+
+  String fmt(Duration d) {
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+  @override
+  Widget build(BuildContext context) {
+    final w = widget.works[cur];
+    final isV = w['t'] == 'v';
+    final pics = isV ? <dynamic>[] : (w['m'] as List);
+    final idx = pics.isEmpty ? 0 : img.clamp(0, pics.length - 1);
+    final progress = (isV && dur.inMilliseconds > 0)
+        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        : (pics.isEmpty ? 0.0 : (idx + 1) / pics.length);
+    return Focus(
+      focusNode: focus,
+      onKeyEvent: onKey,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Listener(
+          onPointerSignal: onWheel,
+          child: MouseRegion(
+            onHover: (_) => showUi(),
+            child: Stack(children: [
+              PageView.builder(
+                controller: pc,
+                scrollDirection: Axis.vertical,
+                itemCount: widget.works.length,
+                onPageChanged: open,
+                itemBuilder: (_, i) {
+                  final it = widget.works[i];
+                  if (i != cur) {
+                    return (it['th'] ?? '').toString().isEmpty
+                        ? Container(color: Colors.black)
+                        : CachedNetworkImage(
+                            imageUrl: cfg.base + it['th'],
+                            httpHeaders: cfg.headers,
+                            fit: BoxFit.contain);
+                  }
+                  if (it['t'] == 'v') {
+                    return GestureDetector(
+                      onTap: () {
+                        togglePause();
+                        showUi();
+                      },
+                      onLongPressStart: (_) => player.setRate(2.0),
+                      onLongPressEnd: (_) => player.setRate(speed),
+                      child: Stack(fit: StackFit.expand, children: [
+                        if ((it['th'] ?? '').toString().isNotEmpty)
+                          CachedNetworkImage(
+                              imageUrl: cfg.base + it['th'],
+                              httpHeaders: cfg.headers,
+                              fit: BoxFit.contain),
+                        if (!loading)
+                          Video(controller: vc, controls: NoVideoControls),
+                        if (loading)
+                          const Center(
+                              child: CircularProgressIndicator(
+                                  color: Colors.white38)),
+                      ]),
+                    );
+                  }
+                  return GestureDetector(
+                    onTap: () {
+                      togglePause();
+                      showUi();
+                    },
+                    onHorizontalDragEnd: (d) {
+                      stopAuto();
+                      final v = d.primaryVelocity ?? 0;
+                      setState(() {
+                        if (v < -100) {
+                          img = (idx + 1).clamp(0, pics.length - 1);
+                        } else if (v > 100) {
+                          img = (idx - 1).clamp(0, pics.length - 1);
+                        }
+                      });
+                    },
+                    child: Stack(fit: StackFit.expand, children: [
+                      CachedNetworkImage(
+                          imageUrl: cfg.base + pics[idx],
+                          httpHeaders: cfg.headers,
+                          fit: BoxFit.contain),
+                      if (pics.length > 1)
+                        Positioned(
+                            bottom: 120,
+                            left: 0,
+                            right: 0,
+                            child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: List.generate(
+                                    pics.length,
+                                    (k) => Container(
+                                          width: 5,
+                                          height: 5,
+                                          margin: const EdgeInsets.symmetric(
+                                              horizontal: 3),
+                                          decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: k == idx
+                                                  ? Colors.white
+                                                  : Colors.white30),
+                                        )))),
+                    ]),
+                  );
+                },
+              ),
+              if (paused)
+                const IgnorePointer(
+                  child: Center(
+                    child: Icon(Icons.play_arrow,
+                        size: 76, color: Colors.white30),
+                  ),
+                ),
+              Positioned(
+                left: 14,
+                right: 80,
+                bottom: 96,
+                child: AnimatedOpacity(
+                  opacity: ui ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => AuthorPage(name: '${w['a']}'))),
+                    child: Row(children: [
+                      if ((w['av'] ?? '').toString().isNotEmpty)
+                        ClipOval(
+                            child: CachedNetworkImage(
+                                imageUrl: cfg.base + w['av'],
+                                httpHeaders: cfg.headers,
+                                width: 38,
+                                height: 38,
+                                fit: BoxFit.cover))
+                      else
+                        const CircleAvatar(radius: 19, child: Icon(Icons.person)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text('@${w['a']}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                            Text('${w['ti'] ?? ''}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 12, color: Colors.white70)),
+                          ])),
+                    ]),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: AnimatedOpacity(
+                  opacity: ui ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Colors.black87])),
+                    padding: EdgeInsets.only(
+                        left: 12,
+                        right: 12,
+                        top: 10,
+                        bottom: 6 + MediaQuery.of(context).padding.bottom),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Row(children: [
+                        Text(
+                            isV
+                                ? '${fmt(pos)} / ${fmt(dur)}'
+                                : '${idx + 1}/${pics.length}',
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.white60)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: GestureDetector(
+                            onTapDown: (d) {},
+                            onHorizontalDragUpdate: (d) {
+                              if (!isV || dur.inMilliseconds == 0) return;
+                              final box =
+                                  context.findRenderObject() as RenderBox?;
+                              if (box == null) return;
+                              final width = box.size.width - 24;
+                              final target =
+                                  dur * (d.localPosition.dx / width).clamp(0.0, 1.0);
+                              player.seek(target);
+                            },
+                            child: SizedBox(
+                              height: 22,
+                              child: Center(
+                                child: Container(
+                                  height: 3,
+                                  decoration: BoxDecoration(
+                                      color: Colors.white24,
+                                      borderRadius: BorderRadius.circular(2)),
+                                  child: FractionallySizedBox(
+                                    alignment: Alignment.centerLeft,
+                                    widthFactor: progress,
+                                    child: Container(
+                                        decoration: BoxDecoration(
+                                            color: Colors.white70,
+                                            borderRadius:
+                                                BorderRadius.circular(2))),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('${cur + 1} / ${widget.works.length}',
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.white54)),
+                      ]),
+                      Row(children: [
+                        IconButton(
+                            onPressed: () => Navigator.of(context).maybePop(),
+                            icon: const Icon(Icons.arrow_back, color: Colors.white70)),
+                        IconButton(
+                            onPressed: toggleMute,
+                            icon: Icon(muted ? Icons.volume_off : Icons.volume_up,
+                                color: Colors.white70)),
+                        IconButton(
+                            onPressed: cycleSpeed,
+                            icon: Text('${speed}x',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.white70))),
+                        const Spacer(),
+                        IconButton(
+                            onPressed: toggleFs,
+                            icon: Icon(
+                                fs ? Icons.fullscreen_exit : Icons.fullscreen,
+                                color: Colors.white70)),
+                      ]),
+                    ]),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
   @override
