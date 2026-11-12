@@ -18,7 +18,7 @@ jobs:
         shell: pwsh
         run: |
           $f='windows/runner/main.cpp'
-          (Get-Content $f -Raw) -replace 'L"shoucangjia"','L"Didi"' | Set-Content $f -Encoding UTF8
+          (Get-Content $f -Raw) -replace 'L"shoucangjia"','L"Dizi"' | Set-Content $f -Encoding UTF8
       - run: flutter pub get
       - run: flutter build windows --release
       - uses: actions/upload-artifact@v4

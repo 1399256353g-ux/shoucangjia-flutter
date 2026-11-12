@@ -57,7 +57,7 @@ class _AppState extends State<App> {
           home: Scaffold(body: Center(child: CircularProgressIndicator())));
     }
     return MaterialApp(
-      title: 'Didi',
+      title: 'Dizi',
       navigatorKey: navKey,
       theme: ThemeData.dark(useMaterial3: true),
       shortcuts: const {

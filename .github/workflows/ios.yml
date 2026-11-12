@@ -20,7 +20,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PL" || true
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PL" || true
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 访问局域网图库" "$PL" || true
-          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Didi" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Didi" "$PL"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Dizi" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Dizi" "$PL"
       - run: flutter pub get
       - run: flutter build ios --release --no-codesign
       - name: Package IPA
