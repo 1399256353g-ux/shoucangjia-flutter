@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
@@ -331,6 +330,9 @@ class _PlayerPageState extends State<PlayerPage> {
   bool paused = false;
   bool loading = true;
   bool muted = false;
+  double volume = 100;
+  double lastVol = 100;
+  bool showVol = false;
   bool ui = true;
   bool fs = false;
   bool dragging = false;
@@ -398,7 +400,7 @@ class _PlayerPageState extends State<PlayerPage> {
     } catch (_) {}
     if (my != _openToken) return;
     try {
-      await player.setVolume(muted ? 0 : 100);
+      await player.setVolume(volume);
       await player.setRate(speed);
     } catch (_) {}
     if (!paused) {
@@ -425,6 +427,7 @@ class _PlayerPageState extends State<PlayerPage> {
     autoTimer?.cancel();
     if (manualPic) return;
     autoTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (paused) return;
       final w = widget.works[cur];
       if (w['t'] == 'v') return;
       final n = (w['m'] as List).length;
@@ -461,8 +464,10 @@ class _PlayerPageState extends State<PlayerPage> {
       setState(() => paused = !paused);
       if (paused) {
         player.pause();
+        autoTimer?.cancel();
       } else {
         player.play();
+        if (!manualPic) startAuto();
       }
       return;
     }
@@ -474,8 +479,16 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void toggleMute() {
-    setState(() => muted = !muted);
-    player.setVolume(muted ? 0 : 100);
+    setState(() {
+      muted = !muted;
+      if (muted) {
+        lastVol = volume;
+        volume = 0;
+      } else {
+        volume = lastVol > 0 ? lastVol : 100;
+      }
+    });
+    player.setVolume(volume);
   }
 
   void toggleLoop() {
@@ -767,6 +780,37 @@ class _PlayerPageState extends State<PlayerPage> {
                   ),
                 ),
               ),
+              if (showVol)
+                Positioned(
+                  right: 16,
+                  bottom: 128,
+                  child: Container(
+                    width: 220,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(14)),
+                    child: Row(children: [
+                      const Icon(Icons.volume_up,
+                          size: 18, color: Colors.white70),
+                      Expanded(
+                        child: Slider(
+                          value: volume.clamp(0, 100),
+                          min: 0,
+                          max: 100,
+                          onChanged: (v) {
+                            setState(() {
+                              volume = v;
+                              muted = v == 0;
+                            });
+                            player.setVolume(v);
+                          },
+                        ),
+                      ),
+                    ]),
+                  ),
+                ),
               Positioned(
                 left: 0,
                 right: 0,
@@ -805,7 +849,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
                             return GestureDetector(
                               behavior: HitTestBehavior.opaque,
-                              onTapDown: (d) => seekAt(d.localPosition),
+                              onTapUp: (d) => seekAt(d.localPosition),
                               onHorizontalDragStart: (_) {
                                 resumeAfterDrag = !paused;
                                 if (!paused) player.pause();
@@ -866,6 +910,10 @@ class _PlayerPageState extends State<PlayerPage> {
                         IconButton(
                             onPressed: toggleMute,
                             icon: Icon(muted ? Icons.volume_off : Icons.volume_up,
+                                color: Colors.white70)),
+                        IconButton(
+                            onPressed: () => setState(() => showVol = !showVol),
+                            icon: const Icon(Icons.graphic_eq,
                                 color: Colors.white70)),
                         IconButton(
                             onPressed: cycleSpeed,
