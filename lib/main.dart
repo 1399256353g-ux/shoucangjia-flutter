@@ -356,7 +356,19 @@ class _PlayerPageState extends State<PlayerPage> {
     cur = widget.start;
     player.setPlaylistMode(PlaylistMode.none);
     player.stream.completed.listen((done) {
-      if (done && autoplay && !loopOne && mounted) next();
+      if (!done || !mounted) return;
+      final w = widget.works[cur];
+      if (w['t'] != 'v') {
+        // image work: loop its background audio instead of jumping away
+        if (!paused) {
+          try {
+            player.seek(Duration.zero);
+            player.play();
+          } catch (_) {}
+        }
+        return;
+      }
+      if (autoplay && !loopOne && !paused) next();
     });
     player.stream.playing.listen((v) {
       if (mounted && widget.works[cur]['t'] == 'v' && v != !paused) {
@@ -425,9 +437,11 @@ class _PlayerPageState extends State<PlayerPage> {
 
   void startAuto() {
     autoTimer?.cancel();
-    if (manualPic) return;
-    autoTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (paused) return;
+    autoTimer = null;
+    if (manualPic || paused) return;
+    final t = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (!identical(timer, autoTimer)) return;
+      if (!mounted || paused) return;
       final w = widget.works[cur];
       if (w['t'] == 'v') return;
       final n = (w['m'] as List).length;
@@ -437,11 +451,18 @@ class _PlayerPageState extends State<PlayerPage> {
         next();
       }
     });
+    autoTimer = t;
   }
 
   void stopAuto() {
     manualPic = true;
     autoTimer?.cancel();
+    autoTimer = null;
+  }
+
+  void pauseAuto() {
+    autoTimer?.cancel();
+    autoTimer = null;
   }
 
   void next() {
@@ -461,10 +482,11 @@ class _PlayerPageState extends State<PlayerPage> {
   void togglePause() {
     final isV = widget.works[cur]['t'] == 'v';
     if (!isV) {
-      setState(() => paused = !paused);
-      if (paused) {
+      final willPause = !paused;
+      setState(() => paused = willPause);
+      if (willPause) {
+        pauseAuto();
         player.pause();
-        autoTimer?.cancel();
       } else {
         player.play();
         if (!manualPic) startAuto();
