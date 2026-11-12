@@ -937,9 +937,19 @@ class _CollectionPageState extends State<CollectionPage> {
   List deleted = [];
   String filter = 'all';
   String sort = 'new';
+  bool searching = false;
+  String kw = '';
+  final TextEditingController _q = TextEditingController();
+
+  bool _match(Map w) {
+    if (kw.isEmpty) return true;
+    final k = kw.toLowerCase();
+    return '${w['ti'] ?? ''}'.toLowerCase().contains(k) ||
+        '${w['a'] ?? ''}'.toLowerCase().contains(k);
+  }
 
   List get view {
-    var v = List.from(works);
+    var v = List.from(works.where((w) => _match(w as Map)));
     if (filter == 'v') v = v.where((w) => w['t'] == 'v').toList();
     if (filter == 'p') v = v.where((w) => w['t'] == 'p').toList();
     if (sort == 'old') {
@@ -950,6 +960,25 @@ class _CollectionPageState extends State<CollectionPage> {
       v.sort((a, b) => '${b['d']}'.compareTo('${a['d']}'));
     }
     return v;
+  }
+
+  List get deletedView =>
+      deleted.where((d) => _match(d as Map)).toList();
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      searching = !searching;
+      if (!searching) {
+        kw = '';
+        _q.clear();
+      }
+    });
   }
 
   @override
@@ -969,18 +998,36 @@ class _CollectionPageState extends State<CollectionPage> {
   @override
   Widget build(BuildContext context) {
     final list = view;
+    final dels = deletedView;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.name), actions: [
-        PopupMenuButton<String>(
-          icon: const Icon(Icons.sort),
-          onSelected: (v) => setState(() => sort = v),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'new', child: Text('最新在前')),
-            PopupMenuItem(value: 'old', child: Text('最早在前')),
-            PopupMenuItem(value: 'title', child: Text('按标题')),
-          ],
-        ),
-      ]),
+      appBar: AppBar(
+        title: searching
+            ? TextField(
+                controller: _q,
+                autofocus: true,
+                style: const TextStyle(fontSize: 16),
+                decoration: const InputDecoration(
+                    hintText: '在本收藏夹内搜索标题或作者',
+                    border: InputBorder.none),
+                onChanged: (v) => setState(() => kw = v.trim()),
+              )
+            : Text(widget.name),
+        actions: [
+          IconButton(
+              icon: Icon(searching ? Icons.close : Icons.search),
+              tooltip: searching ? '关闭搜索' : '在本收藏夹搜索',
+              onPressed: _toggleSearch),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.sort),
+            onSelected: (v) => setState(() => sort = v),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'new', child: Text('最新在前')),
+              PopupMenuItem(value: 'old', child: Text('最早在前')),
+              PopupMenuItem(value: 'title', child: Text('按标题')),
+            ],
+          ),
+        ],
+      ),
       body: works.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [
@@ -1008,22 +1055,27 @@ class _CollectionPageState extends State<CollectionPage> {
                       selected: filter == 'del',
                       onSelected: (_) => setState(() => filter = 'del')),
                   const Spacer(),
-                  Text('${filter == 'del' ? deleted.length : list.length}',
-                      style: const TextStyle(color: Colors.grey)),
+                  if (searching && kw.isNotEmpty)
+                    Text('命中 ${filter == 'del' ? dels.length : list.length}',
+                        style: const TextStyle(color: Colors.grey))
+                  else
+                    Text('${filter == 'del' ? deleted.length : list.length}',
+                        style: const TextStyle(color: Colors.grey)),
                 ]),
               ),
               Expanded(
                 child: filter == 'del'
-                    ? (deleted.isEmpty
-                        ? const Center(
-                            child: Text('暂无已删除记录',
-                                style: TextStyle(color: Colors.grey)))
+                    ? (dels.isEmpty
+                        ? Center(
+                            child: Text(
+                                kw.isNotEmpty ? '无匹配的已删除作品' : '暂无已删除记录',
+                                style: const TextStyle(color: Colors.grey)))
                         : ListView.separated(
-                            itemCount: deleted.length,
+                            itemCount: dels.length,
                             separatorBuilder: (_, __) =>
                                 const Divider(height: 1),
                             itemBuilder: (_, i) {
-                              final d = deleted[i];
+                              final d = dels[i];
                               return ListTile(
                                 leading: const Icon(Icons.delete_outline,
                                     color: Colors.grey),
@@ -1041,7 +1093,11 @@ class _CollectionPageState extends State<CollectionPage> {
                               );
                             },
                           ))
-                    : WorkGrid(works: list),
+                    : (list.isEmpty && kw.isNotEmpty
+                        ? Center(
+                            child: Text('无匹配作品：$kw',
+                                style: const TextStyle(color: Colors.grey)))
+                        : WorkGrid(works: list)),
               ),
             ]),
     );
