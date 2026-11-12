@@ -27,6 +27,9 @@ jobs:
               s=s.replace('<application', '<uses-permission android:name="android.permission.INTERNET"/>\n    <application', 1)
           if 'usesCleartextTraffic' not in s:
               s=s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          s=s.replace('android:label="shoucangjia"','android:label="Didi"')
+          if 'android:label="Didi"' not in s:
+              s=s.replace('<application', '<application android:label="Didi"', 1)
           open(p,'w').write(s)
           print(s[:400])
           PY
