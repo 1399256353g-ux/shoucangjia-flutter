@@ -1391,6 +1391,19 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   // 长简介/文案：弹出完整内容，避免被单行截断
+  // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
+  Widget picView(String path) {
+    final low = path.toLowerCase();
+    if (low.endsWith('.gif') || low.contains('.gif?')) {
+      return Image.network(cfg.base + path,
+          headers: cfg.headers, fit: BoxFit.contain, gaplessPlayback: true);
+    }
+    return CachedNetworkImage(
+        imageUrl: cfg.base + path,
+        httpHeaders: cfg.headers,
+        fit: BoxFit.contain);
+  }
+
   void showCaption(String text) {
     showModalBottomSheet(
       context: context,
@@ -1504,10 +1517,7 @@ class _PlayerPageState extends State<PlayerPage> {
                       });
                     },
                     child: Stack(fit: StackFit.expand, children: [
-                      CachedNetworkImage(
-                          imageUrl: cfg.base + pics[idx],
-                          httpHeaders: cfg.headers,
-                          fit: BoxFit.contain),
+                      picView(pics[idx]),
                       if (pics.length > 1)
                         Positioned(
                             bottom: 120,
@@ -1645,8 +1655,17 @@ class _PlayerPageState extends State<PlayerPage> {
                         color: Colors.black87,
                         borderRadius: BorderRadius.circular(14)),
                     child: Row(children: [
-                      const Icon(Icons.volume_up,
-                          size: 18, color: Colors.white70),
+                      IconButton(
+                        onPressed: toggleMute,
+                        tooltip: '静音',
+                        visualDensity: VisualDensity.compact,
+                        icon: Icon(
+                            muted || volume == 0
+                                ? Icons.volume_off
+                                : Icons.volume_up,
+                            size: 18,
+                            color: Colors.white70),
+                      ),
                       Expanded(
                         child: Slider(
                           value: volume.clamp(0, 100),
@@ -1762,13 +1781,15 @@ class _PlayerPageState extends State<PlayerPage> {
                       ]),
                       Row(children: [
                         IconButton(
-                            onPressed: toggleMute,
+                            onPressed: () =>
+                                setState(() => showVol = !showVol),
+                            tooltip: '音量',
                             icon: Icon(
-                                muted ? Icons.volume_off : Icons.volume_up,
-                                color: Colors.white70)),
-                        IconButton(
-                            onPressed: () => setState(() => showVol = !showVol),
-                            icon: const Icon(Icons.graphic_eq,
+                                muted || volume == 0
+                                    ? Icons.volume_off
+                                    : (volume < 50
+                                        ? Icons.volume_down
+                                        : Icons.volume_up),
                                 color: Colors.white70)),
                         IconButton(
                             onPressed: cycleSpeed,
