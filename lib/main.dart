@@ -9,6 +9,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'app_settings.dart';
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
@@ -41,12 +43,16 @@ class _AppState extends State<App> {
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((sp) {
-      cfg.base = sp.getString('base') ?? '';
-      cfg.user = sp.getString('user') ?? 'zzx';
-      cfg.pass = sp.getString('pass') ?? '';
-      setState(() => ready = true);
-    });
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    final sp = await SharedPreferences.getInstance();
+    cfg.base = sp.getString('base') ?? '';
+    cfg.user = sp.getString('user') ?? 'zzx';
+    cfg.pass = sp.getString('pass') ?? '';
+    await AppSettings.load();
+    if (mounted) setState(() => ready = true);
   }
 
   @override
@@ -84,12 +90,61 @@ class _SettingsPageState extends State<SettingsPage> {
       text: cfg.base.isEmpty ? 'http://192.168.2.4:8090' : cfg.base);
   late final TextEditingController user = TextEditingController(text: cfg.user);
   late final TextEditingController pass = TextEditingController(text: cfg.pass);
+  bool testing = false;
+  bool? testOk;
+  String testMsg = '';
 
-  Future<void> save() async {
-    var b = base.text.trim().replaceAll(RegExp(r'/+$'), '');
+  static String normalize(String raw) {
+    var b = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    if (b.isEmpty) return b;
     if (!b.startsWith('http://') && !b.startsWith('https://')) {
       b = 'http://' + b;
     }
+    return b;
+  }
+
+  Map<String, String> get _fieldHeaders => {
+        'Authorization': 'Basic '
+            '${base64Encode(utf8.encode('${user.text.trim()}:${pass.text}'))}',
+      };
+
+  Future<void> test() async {
+    final b = normalize(base.text);
+    if (b.isEmpty) return;
+    setState(() {
+      testing = true;
+      testOk = null;
+      testMsg = '';
+    });
+    final sw = Stopwatch()..start();
+    try {
+      final r = await http
+          .get(Uri.parse('$b/api/index.json'), headers: _fieldHeaders)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final cols = (jsonDecode(r.body)['collections'] as List?)?.length ?? 0;
+      sw.stop();
+      if (mounted) {
+        setState(() {
+          testOk = true;
+          testMsg = '连接成功 · $cols 个收藏夹 · ${sw.elapsedMilliseconds}ms';
+        });
+      }
+    } catch (e) {
+      sw.stop();
+      if (mounted) {
+        setState(() {
+          testOk = false;
+          testMsg = '连接失败：$e';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => testing = false);
+    }
+  }
+
+  Future<void> save() async {
+    final b = normalize(base.text);
     cfg.base = b;
     cfg.user = user.text.trim();
     cfg.pass = pass.text;
@@ -111,7 +166,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('连接 NAS')),
+      appBar: AppBar(title: const Text('网络连接')),
       body: ListView(padding: const EdgeInsets.all(20), children: [
         TextField(
             controller: base,
@@ -126,8 +181,40 @@ class _SettingsPageState extends State<SettingsPage> {
             controller: pass,
             obscureText: true,
             decoration: const InputDecoration(labelText: '密码')),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
+        Row(children: [
+          OutlinedButton.icon(
+            onPressed: testing ? null : test,
+            icon: testing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.network_check),
+            label: Text(testing ? '测试中…' : '测试连接'),
+          ),
+        ]),
+        if (testMsg.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Row(children: [
+              Icon(testOk == true ? Icons.check_circle : Icons.error_outline,
+                  size: 16,
+                  color: testOk == true ? Colors.green : Colors.redAccent),
+              const SizedBox(width: 6),
+              Expanded(
+                  child: Text(testMsg,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color:
+                              testOk == true ? Colors.green : Colors.redAccent))),
+            ]),
+          ),
+        const SizedBox(height: 16),
         FilledButton(onPressed: save, child: const Text('保存并连接')),
+        const SizedBox(height: 8),
+        const Text('地址留空将回到首次连接页；支持 http/https，自动补全 http://。',
+            style: TextStyle(fontSize: 11, color: Colors.grey)),
       ]),
     );
   }
@@ -143,7 +230,7 @@ class SettingsHubPage extends StatelessWidget {
       body: ListView(children: [
         ListTile(
           leading: const Icon(Icons.dns),
-          title: const Text('连接 NAS'),
+          title: const Text('网络连接'),
           subtitle: Text(cfg.base.isEmpty ? '未设置' : cfg.base),
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
@@ -154,6 +241,20 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('同步选择 · 默认收藏夹 · 拖动排序 · 重命名 · 删除'),
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CollectionAdminPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.tune),
+          title: const Text('播放参数'),
+          subtitle: const Text('默认倍速 · 图文间隔 · 全屏隐藏时间'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PlaybackSettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.keyboard),
+          title: const Text('按键绑定'),
+          subtitle: const Text('Windows / 桌面端快捷键 · 播放、翻页、全屏'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const KeyBindingsPage())),
         ),
         const Divider(),
         ListTile(
@@ -168,6 +269,210 @@ class SettingsHubPage extends StatelessWidget {
           ),
         ),
       ]),
+    );
+  }
+}
+
+class PlaybackSettingsPage extends StatefulWidget {
+  const PlaybackSettingsPage({super.key});
+  @override
+  State<PlaybackSettingsPage> createState() => _PlaybackSettingsPageState();
+}
+
+class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
+  static const _speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+
+  Future<void> _persist() => AppSettings.save();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('播放参数'), actions: [
+        TextButton(
+          onPressed: () {
+            setState(() => AppSettings.resetDefaults());
+            _persist();
+          },
+          child: const Text('恢复默认'),
+        ),
+      ]),
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        const Text('默认播放倍速',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        const Text('进入播放器时自动应用，播放中仍可用倍速按钮临时切换。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, children: [
+          for (final s in _speeds)
+            ChoiceChip(
+              label: Text('${s}x'),
+              selected: (AppSettings.defaultSpeed - s).abs() < 0.001,
+              onSelected: (_) {
+                setState(() => AppSettings.defaultSpeed = s);
+                _persist();
+              },
+            ),
+        ]),
+        const Divider(height: 32),
+        Row(children: [
+          const Expanded(
+              child: Text('图文自动切换间隔',
+                  style: TextStyle(fontWeight: FontWeight.bold))),
+          Text('${AppSettings.imageIntervalSec}s',
+              style: const TextStyle(color: Colors.amber)),
+        ]),
+        Slider(
+          value: AppSettings.imageIntervalSec.toDouble().clamp(1, 20),
+          min: 1,
+          max: 20,
+          divisions: 19,
+          label: '${AppSettings.imageIntervalSec}s',
+          onChanged: (v) =>
+              setState(() => AppSettings.imageIntervalSec = v.round()),
+          onChangeEnd: (_) => _persist(),
+        ),
+        const Text('图文作品停留多久后自动展示下一张（到末尾自动切下一条）。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const Divider(height: 32),
+        Row(children: [
+          const Expanded(
+              child: Text('全屏隐藏控制栏时间',
+                  style: TextStyle(fontWeight: FontWeight.bold))),
+          Text('${AppSettings.hideUiSec}s',
+              style: const TextStyle(color: Colors.amber)),
+        ]),
+        Slider(
+          value: AppSettings.hideUiSec.toDouble().clamp(1, 30),
+          min: 1,
+          max: 30,
+          divisions: 29,
+          label: '${AppSettings.hideUiSec}s',
+          onChanged: (v) => setState(() => AppSettings.hideUiSec = v.round()),
+          onChangeEnd: (_) => _persist(),
+        ),
+        const Text('全屏播放时无操作多久后自动隐藏进度条与控制栏；点击屏幕可再次呼出。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+      ]),
+    );
+  }
+}
+
+class KeyBindingsPage extends StatefulWidget {
+  const KeyBindingsPage({super.key});
+  @override
+  State<KeyBindingsPage> createState() => _KeyBindingsPageState();
+}
+
+class _KeyBindingsPageState extends State<KeyBindingsPage> {
+  Future<void> _rebind(PlayerAction action) async {
+    final id = await showDialog<int>(
+      context: context,
+      builder: (_) => _KeyCaptureDialog(action: action),
+    );
+    if (id == null || !mounted) return;
+    setState(() => AppSettings.bind(action, id));
+    await AppSettings.save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('按键绑定'), actions: [
+        TextButton(
+          onPressed: () {
+            setState(() => AppSettings.resetDefaults());
+            AppSettings.save();
+          },
+          child: const Text('恢复默认'),
+        ),
+      ]),
+      body: ListView(children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
+          child: Text(
+              '点击任意一行，然后按下新的按键即可绑定（Windows 桌面端生效，移动端可忽略）。'
+              '方向键与 Esc 始终保留。',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+        const Divider(height: 1),
+        for (final a in PlayerAction.values)
+          ListTile(
+            leading: const Icon(Icons.keyboard_alt_outlined),
+            title: Text(actionLabels[a]!),
+            trailing: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(6)),
+              child: Text(AppSettings.keyLabel(a),
+                  style: const TextStyle(
+                      fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+            ),
+            onTap: () => _rebind(a),
+          ),
+      ]),
+    );
+  }
+}
+
+class _KeyCaptureDialog extends StatefulWidget {
+  final PlayerAction action;
+  const _KeyCaptureDialog({required this.action});
+  @override
+  State<_KeyCaptureDialog> createState() => _KeyCaptureDialogState();
+}
+
+class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
+  static final _modifiers = <int>{
+    LogicalKeyboardKey.shift.keyId,
+    LogicalKeyboardKey.control.keyId,
+    LogicalKeyboardKey.alt.keyId,
+    LogicalKeyboardKey.meta.keyId,
+    LogicalKeyboardKey.capsLock.keyId,
+    LogicalKeyboardKey.fn.keyId,
+  };
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.handled;
+    final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.escape) {
+      Navigator.of(context).pop();
+      return KeyEventResult.handled;
+    }
+    if (_modifiers.contains(k.keyId)) return KeyEventResult.handled;
+    Navigator.of(context).pop(k.keyId);
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('绑定「${actionLabels[widget.action]}」'),
+      content: Focus(
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: Container(
+          height: 88,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+              border: Border.all(color: Colors.white24),
+              borderRadius: BorderRadius.circular(10)),
+          child: const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.keyboard, size: 26, color: Colors.white54),
+                SizedBox(height: 8),
+                Text('请按下要绑定的按键…',
+                    style: TextStyle(fontSize: 13, color: Colors.white70)),
+              ]),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('取消（Esc）')),
+      ],
     );
   }
 }
@@ -710,6 +1015,8 @@ class _PlayerPageState extends State<PlayerPage> {
   int img = 0;
   int _openToken = 0;
   int _lastWheel = 0;
+  int _navAt = 0;
+  int? _pendingPage;
   bool paused = false;
   bool loading = true;
   bool muted = false;
@@ -737,6 +1044,7 @@ class _PlayerPageState extends State<PlayerPage> {
   void initState() {
     super.initState();
     cur = widget.start;
+    speed = AppSettings.defaultSpeed;
     player.setPlaylistMode(PlaylistMode.none);
     player.stream.completed.listen((done) {
       if (!done || !mounted) return;
@@ -751,7 +1059,7 @@ class _PlayerPageState extends State<PlayerPage> {
         }
         return;
       }
-      if (autoplay && !loopOne && !paused) next();
+      if (autoplay && !loopOne) next();
     });
     player.stream.playing.listen((v) {
       if (mounted && widget.works[cur]['t'] == 'v' && v != !paused) {
@@ -775,6 +1083,7 @@ class _PlayerPageState extends State<PlayerPage> {
     autoTimer?.cancel();
     retryTimer?.cancel();
     manualPic = false;
+    _pendingPage = null;
     setState(() {
       cur = i;
       img = 0;
@@ -826,7 +1135,8 @@ class _PlayerPageState extends State<PlayerPage> {
     autoTimer?.cancel();
     autoTimer = null;
     if (manualPic || paused) return;
-    final t = Timer.periodic(const Duration(seconds: 3), (timer) {
+    final t = Timer.periodic(
+        Duration(seconds: AppSettings.imageIntervalSec), (timer) {
       if (!identical(timer, autoTimer)) return;
       if (!mounted || paused) return;
       final w = widget.works[cur];
@@ -852,18 +1162,24 @@ class _PlayerPageState extends State<PlayerPage> {
     autoTimer = null;
   }
 
-  void next() {
-    if (cur < widget.works.length - 1) {
-      pc.nextPage(
-          duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
-    }
-  }
+  void next() => _step(1);
 
-  void prev() {
-    if (cur > 0) {
-      pc.previousPage(
+  void prev() => _step(-1);
+
+  // 连点/连按方向键时直接跳页，避免动画未结束把后续按键吃掉
+  void _step(int delta) {
+    final base = _pendingPage ?? cur;
+    final target = (base + delta).clamp(0, widget.works.length - 1);
+    if (target == base) return;
+    _pendingPage = target;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _navAt < 450) {
+      pc.jumpToPage(target);
+    } else {
+      pc.animateToPage(target,
           duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
     }
+    _navAt = now;
   }
 
   // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停
@@ -927,9 +1243,10 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   void cycleSpeed() {
-    setState(() {
-      speed = speed >= 2.0 ? 1.0 : (speed >= 1.5 ? 2.0 : 1.5);
-    });
+    const steps = [0.75, 1.0, 1.25, 1.5, 2.0];
+    var i = steps.indexWhere((s) => (s - speed).abs() < 0.001);
+    final nextSpeed = steps[(i + 1) % steps.length];
+    setState(() => speed = nextSpeed);
     player.setRate(speed);
   }
 
@@ -949,7 +1266,7 @@ class _PlayerPageState extends State<PlayerPage> {
     setState(() => ui = true);
     hideTimer?.cancel();
     if (fs) {
-      hideTimer = Timer(const Duration(seconds: 3), () {
+      hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
         if (mounted) setState(() => ui = false);
       });
     }
@@ -968,43 +1285,73 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
+  void _stepImage(int dir) {
+    final w = widget.works[cur];
+    if (w['t'] != 'v') {
+      stopAuto();
+      final n = (w['m'] as List).length;
+      setState(() => img = (img + dir).clamp(0, n - 1));
+    } else if (dur.inMilliseconds > 0) {
+      final target = pos + Duration(seconds: 10 * dir);
+      player.seek(target < Duration.zero
+          ? Duration.zero
+          : (target > dur ? dur : target));
+    }
+  }
+
+  void doAction(PlayerAction a) {
+    switch (a) {
+      case PlayerAction.next:
+        next();
+        break;
+      case PlayerAction.prev:
+        prev();
+        break;
+      case PlayerAction.playPause:
+        togglePause();
+        break;
+      case PlayerAction.mute:
+        toggleMute();
+        break;
+      case PlayerAction.fullscreen:
+        toggleFs();
+        break;
+      case PlayerAction.forward:
+        _stepImage(1);
+        break;
+      case PlayerAction.back:
+        _stepImage(-1);
+        break;
+    }
+  }
+
   KeyEventResult onKey(FocusNode node, KeyEvent e) {
     if (e is! KeyDownEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
-    if (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.keyJ) {
+    final bound = AppSettings.actionFor(k);
+    if (bound != null) {
+      doAction(bound);
+      return KeyEventResult.handled;
+    }
+    // 固定键位：方向键翻页/切图，空格暂停，Esc 退出（不随自定义绑定变化）
+    if (k == LogicalKeyboardKey.arrowDown) {
       next();
       return KeyEventResult.handled;
     }
-    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyK) {
+    if (k == LogicalKeyboardKey.arrowUp) {
       prev();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowRight) {
+      _stepImage(1);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowLeft) {
+      _stepImage(-1);
       return KeyEventResult.handled;
     }
     if (k == LogicalKeyboardKey.space) {
       togglePause();
-      return KeyEventResult.handled;
-    }
-    if (k == LogicalKeyboardKey.keyM) {
-      toggleMute();
-      return KeyEventResult.handled;
-    }
-    if (k == LogicalKeyboardKey.keyF) {
-      toggleFs();
-      return KeyEventResult.handled;
-    }
-    if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.keyL) {
-      final w = widget.works[cur];
-      if (w['t'] != 'v') {
-        stopAuto();
-        setState(() => img = (img + 1).clamp(0, (w['m'] as List).length - 1));
-      }
-      return KeyEventResult.handled;
-    }
-    if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.keyH) {
-      final w = widget.works[cur];
-      if (w['t'] != 'v') {
-        stopAuto();
-        setState(() => img = (img - 1).clamp(0, (w['m'] as List).length - 1));
-      }
       return KeyEventResult.handled;
     }
     if (k == LogicalKeyboardKey.escape) {
