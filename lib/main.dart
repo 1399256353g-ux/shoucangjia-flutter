@@ -737,3 +737,45 @@ class _AuthorPageState extends State<AuthorPage> {
     );
   }
 }
+
+class WorkGrid extends StatelessWidget {
+  final List works;
+  const WorkGrid({super.key, required this.works});
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 180,
+          childAspectRatio: 3 / 4,
+          mainAxisSpacing: 2,
+          crossAxisSpacing: 2),
+      itemCount: works.length,
+      itemBuilder: (_, i) {
+        final w = works[i];
+        return GestureDetector(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => PlayerPage(works: works, start: i))),
+          child: Stack(fit: StackFit.expand, children: [
+            (w['th'] ?? '').toString().isEmpty
+                ? Container(color: Colors.black26)
+                : CachedNetworkImage(
+                    imageUrl: cfg.base + w['th'],
+                    httpHeaders: cfg.headers,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) =>
+                        Container(color: Colors.black26)),
+            Positioned(
+                right: 4,
+                top: 4,
+                child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    color: Colors.black54,
+                    child: Text(w['t'] == 'v' ? '视频' : '图文',
+                        style: const TextStyle(fontSize: 10)))),
+          ]),
+        );
+      },
+    );
+  }
+}
