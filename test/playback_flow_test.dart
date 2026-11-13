@@ -67,4 +67,60 @@ void main() {
           videoEndAction(loopOne: false, autoplay: false), VideoEndAction.stop);
     });
   });
+
+  group('切条起播与兜底（F32）', () {
+    test('切条过程忽略播放器事件，但结束后按用户意图起播', () {
+      expect(shouldAutoPlay(paused: false, opening: true), isFalse);
+      expect(shouldAutoPlay(paused: false, opening: false), isTrue);
+    });
+
+    test('用户在切条中暂停后不再自动起播', () {
+      expect(shouldAutoPlay(paused: true, opening: false), isFalse);
+    });
+
+    test('媒体就绪但未播放且用户未暂停：需要补 play', () {
+      expect(
+          shouldForcePlay(
+              paused: false,
+              opening: false,
+              playerPlaying: false,
+              hasMedia: true),
+          isTrue);
+    });
+
+    test('播放器已在播放/用户暂停/无媒体时不干预', () {
+      expect(
+          shouldForcePlay(
+              paused: false,
+              opening: false,
+              playerPlaying: true,
+              hasMedia: true),
+          isFalse);
+      expect(
+          shouldForcePlay(
+              paused: true,
+              opening: false,
+              playerPlaying: false,
+              hasMedia: true),
+          isFalse);
+      expect(
+          shouldForcePlay(
+              paused: false,
+              opening: false,
+              playerPlaying: false,
+              hasMedia: false),
+          isFalse);
+    });
+
+    test('连播与单条循环独立：四种组合判定稳定', () {
+      expect(videoEndAction(loopOne: false, autoplay: true),
+          VideoEndAction.nextWork);
+      expect(videoEndAction(loopOne: true, autoplay: true),
+          VideoEndAction.replay);
+      expect(videoEndAction(loopOne: true, autoplay: false),
+          VideoEndAction.replay);
+      expect(videoEndAction(loopOne: false, autoplay: false),
+          VideoEndAction.stop);
+    });
+  });
 }

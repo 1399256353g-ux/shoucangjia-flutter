@@ -2796,6 +2796,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   // 用于忽略 player.stop()/切条时上一段媒体迟到的 completed 事件，
   // 避免刚打开图文就被上一次播放的完成事件带去下一条。
   int _mediaToken = -1;
+  // 切条（stop/open）进行中：此时播放器会发出 playing=false，
+  // 不能据此改写 paused，否则下一条会停在首帧（F32）。
+  bool _opening = false;
+  // 连播兜底：视频已就绪但播放器未在播放时补一次 play。
+  Timer? playGuard;
   double? dragFrac;
   bool resumeAfterDrag = false;
   bool dropBusy = false;
@@ -2855,7 +2860,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
     });
     player.stream.playing.listen((v) {
-      if (mounted && widget.works[cur]['t'] == 'v' && v != !paused) {
+      if (!mounted || _opening) return;
+      if (widget.works[cur]['t'] == 'v' && v != !paused) {
         setState(() => paused = !v);
       }
     });
@@ -2899,9 +2905,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final my = ++_openToken;
     autoTimer?.cancel();
     retryTimer?.cancel();
+    playGuard?.cancel();
     manualPic = false;
     _pendingPage = null;
     _mediaToken = -1;
+    _opening = true;
     setState(() {
       cur = i;
       img = 0;
@@ -2936,7 +2944,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       await player.setVolume(volume);
       await player.setRate(speed);
     } catch (_) {}
-    if (!paused) {
+    // 媒体已就绪，恢复采信播放器事件；此后一切以用户意图 paused 为准
+    _opening = false;
+    if (shouldAutoPlay(paused: paused, opening: _opening)) {
       try {
         await player.play();
       } catch (_) {}
@@ -2951,6 +2961,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (w['t'] != 'v') paused = false;
       });
     }
+    // F32 兜底：媒体就绪后 2.5 秒仍未起播且用户没暂停，补一次 play，
+    // 避免停在片尾/首帧导致连播链路中断。
+    playGuard = Timer(const Duration(milliseconds: 2500), () {
+      if (!mounted || my != _openToken) return;
+      if (widget.works[i]['t'] != 'v') return;
+      bool playing = false;
+      try {
+        playing = player.state.playing;
+      } catch (_) {}
+      if (shouldForcePlay(
+          paused: paused,
+          opening: _opening,
+          playerPlaying: playing,
+          hasMedia: dur.inMilliseconds > 0 || pos.inMilliseconds > 0)) {
+        try {
+          player.play();
+        } catch (_) {}
+      }
+    });
     retryTimer = Timer(const Duration(milliseconds: 1800), () {
       if (mounted &&
           my == _openToken &&
@@ -3150,17 +3179,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   void toggleLoop() {
-    // 单条循环与连播互不影响状态：循环开时优先循环，关掉后连播设置保持原样
+    // F32：单条循环与连播是完全独立的两组状态。
+    // 不再使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
+    // completed 事件），统一由 completed 回调在 Dart 层重播，
+    // 这样关闭循环后连播判定立刻恢复，不会偶发停在片尾。
     setState(() => loopOne = !loopOne);
-    player.setPlaylistMode(loopOne ? PlaylistMode.single : PlaylistMode.none);
   }
 
   void toggleAutoplay() {
-    setState(() {
-      autoplay = !autoplay;
-      if (autoplay) loopOne = false;
-    });
-    player.setPlaylistMode(loopOne ? PlaylistMode.single : PlaylistMode.none);
+    // F32：只切连播，不再连带改动单条循环
+    setState(() => autoplay = !autoplay);
   }
 
   void cycleSpeed() {
@@ -3363,6 +3391,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
     subPos?.cancel();
     subDur?.cancel();
+    playGuard?.cancel();
     player.dispose();
     pc.dispose();
     focus.dispose();

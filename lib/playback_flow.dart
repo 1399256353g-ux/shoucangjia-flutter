@@ -30,3 +30,21 @@ VideoEndAction videoEndAction({
   if (loopOne) return VideoEndAction.replay;
   return autoplay ? VideoEndAction.nextWork : VideoEndAction.stop;
 }
+
+/// F32：切条结束后是否应主动起播。
+///
+/// `open()` 期间的 `player.stop()/open()` 会让 `playing` 流发出 `false`，
+/// 若此时按播放器事件回写暂停状态，会把用户「要播放」的意图覆盖成暂停，
+/// 下一条视频就会停在首帧。切条期间以用户意图为准，不采信播放器事件。
+bool shouldAutoPlay({required bool paused, required bool opening}) =>
+    !paused && !opening;
+
+/// F32：连播兜底。视频已就绪但播放器仍未在播放、且用户没有暂停时，
+/// 应主动补一次 `play()`，避免偶发停在片尾/首帧。
+bool shouldForcePlay({
+  required bool paused,
+  required bool opening,
+  required bool playerPlaying,
+  required bool hasMedia,
+}) =>
+    hasMedia && !paused && !opening && !playerPlaying;
