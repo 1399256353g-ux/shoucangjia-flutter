@@ -29,6 +29,13 @@ void hapticTap() {
   } catch (_) {}
 }
 
+// 动图判断：GIF 必须交给 Image.network 才能播放动画，
+// CachedNetworkImage 只取首帧。
+bool isGifPath(String path) {
+  final low = path.toLowerCase();
+  return low.endsWith('.gif') || low.contains('.gif?');
+}
+
 class Cfg {
   String base = '';
   String user = 'zzx';
@@ -3313,8 +3320,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   // 长简介/文案：弹出完整内容，避免被单行截断
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path) {
-    final low = path.toLowerCase();
-    if (low.endsWith('.gif') || low.contains('.gif?')) {
+    if (isGifPath(path)) {
       return Image.network(cfg.base + cfg.media(path),
           headers: cfg.headers, fit: BoxFit.contain, gaplessPlayback: true);
     }
