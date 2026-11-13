@@ -15,6 +15,7 @@ import 'app_settings.dart';
 import 'author_grade.dart';
 import 'deleted_cover.dart';
 import 'library_badge.dart';
+import 'library_rank.dart';
 import 'playback_flow.dart';
 import 'text_fit.dart';
 
@@ -2707,7 +2708,8 @@ class _CollectionPageState extends State<CollectionPage> {
 
 // 排行榜：按周/月/年/总统计作者播放量或小水滴
 class RankPage extends StatefulWidget {
-  const RankPage({super.key});
+  final String? initialLib;
+  const RankPage({super.key, this.initialLib});
   @override
   State<RankPage> createState() => _RankPageState();
 }
@@ -2730,7 +2732,7 @@ class _RankPageState extends State<RankPage> {
   @override
   void initState() {
     super.initState();
-    sel = cfg.lib;
+    sel = widget.initialLib ?? cfg.lib;
     loadLibs();
     load();
   }
@@ -3023,6 +3025,227 @@ class _RankPageState extends State<RankPage> {
                                       fontWeight: FontWeight.bold,
                                       color: Colors.lightBlueAccent)),
                               onTap: name.isEmpty ? null : () => _open(name),
+                            );
+                          },
+                        ),
+        ),
+      ]),
+    );
+  }
+}
+
+// 各库总播放量/水滴数排行榜：离线库不参与
+class LibraryRankPage extends StatefulWidget {
+  const LibraryRankPage({super.key});
+  @override
+  State<LibraryRankPage> createState() => _LibraryRankPageState();
+}
+
+class _LibraryRankPageState extends State<LibraryRankPage> {
+  String metric = 'play';
+  List<LibraryRankRow> rows = [];
+  int skipped = 0;
+  bool loading = true;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    if (mounted) setState(() => err = null);
+    try {
+      final r = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = ((j['libraries'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      final loaded = <String, Map<String, dynamic>>{};
+      var offline = 0;
+      for (final lib in list) {
+        final id = '${lib['id'] ?? ''}';
+        if (id.isEmpty) continue;
+        if (!libraryOnline(lib)) {
+          offline++;
+          continue;
+        }
+        try {
+          final sr = await http
+              .get(cfg.u('/api/author_stats.json', lib: id),
+                  headers: cfg.headers)
+              .timeout(const Duration(seconds: 8));
+          if (sr.statusCode != 200) {
+            offline++;
+            continue;
+          }
+          loaded[id] = statsAuthors(jsonDecode(sr.body));
+        } catch (_) {
+          offline++;
+        }
+      }
+
+      final ranked = buildLibraryRank(
+        libs: list,
+        stats: loaded,
+        metric: metric,
+        currentLib: cfg.lib,
+      );
+      if (!mounted) return;
+      setState(() {
+        rows = ranked;
+        skipped = offline;
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          err = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  Color _rankColor(int i) {
+    if (i == 0) return const Color(0xFFFFC107);
+    if (i == 1) return const Color(0xFFB0BEC5);
+    if (i == 2) return const Color(0xFFBF8970);
+    return Colors.white38;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('各库排行'), actions: [
+        IconButton(
+            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+      ]),
+      body: Column(children: [
+        SizedBox(
+          height: 46,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            children: [
+              ChoiceChip(
+                label: const Text('总播放量'),
+                selected: metric == 'play',
+                onSelected: (_) {
+                  if (metric == 'play') return;
+                  setState(() => metric = 'play');
+                },
+              ),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                label: const Text('总水滴数'),
+                selected: metric == 'drop',
+                onSelected: (_) {
+                  if (metric == 'drop') return;
+                  setState(() => metric = 'drop');
+                },
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+          child: Row(children: [
+            const Icon(Icons.stacked_bar_chart, size: 13, color: Colors.grey),
+            const SizedBox(width: 6),
+            Expanded(
+                child: Text(
+                    '${rows.length} 个库参与'
+                    '${skipped > 0 ? ' · 已跳过 $skipped 个离线库' : ''}'
+                    ' · 统计来自本机',
+                    style: const TextStyle(fontSize: 11, color: Colors.grey))),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const Center(child: CircularProgressIndicator())
+              : err != null
+                  ? Center(
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text('加载失败：$err',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12))),
+                      const SizedBox(height: 12),
+                      FilledButton(onPressed: load, child: const Text('重试')),
+                    ]))
+                  : rows.isEmpty
+                      ? const Center(
+                          child: Text('暂无可参与排行的库',
+                              style:
+                                  TextStyle(color: Colors.grey, fontSize: 12)))
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                          itemCount: rows.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, i) {
+                            final r = rows[i];
+                            final score =
+                                metric == 'drop' ? r.drops : r.plays;
+                            final sub = metric == 'drop'
+                                ? '播放 ${r.plays} · ${r.drops} 水滴'
+                                : '${r.plays} 播放 · ${r.drops} 水滴';
+                            return ListTile(
+                              contentPadding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              leading: SizedBox(
+                                width: 34,
+                                child: Text('${r.rank}',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: _rankColor(i))),
+                              ),
+                              title: Row(children: [
+                                Flexible(
+                                  child: Text(r.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600)),
+                                ),
+                                if (r.current)
+                                  Container(
+                                    margin: const EdgeInsets.only(left: 6),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 5, vertical: 1),
+                                    decoration: BoxDecoration(
+                                        color: Colors.lightBlueAccent
+                                            .withValues(alpha: 0.18),
+                                        borderRadius:
+                                            BorderRadius.circular(4)),
+                                    child: const Text('当前',
+                                        style: TextStyle(
+                                            fontSize: 9,
+                                            color: Colors.lightBlueAccent)),
+                                  ),
+                              ]),
+                              subtitle: Text(sub,
+                                  style: const TextStyle(
+                                      fontSize: 10, color: Colors.white60)),
+                              trailing: Text(
+                                  metric == 'drop' ? '💧 $score' : '$score',
+                                  style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.lightBlueAccent)),
+                              onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) =>
+                                          RankPage(initialLib: r.id))),
                             );
                           },
                         ),
@@ -3330,6 +3553,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('作者'), actions: [
+        IconButton(
+            tooltip: '各库排行',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const LibraryRankPage())),
+            icon: const Icon(Icons.stacked_bar_chart)),
         IconButton(
             tooltip: syncing ? '同步中…' : '立即同步作者',
             onPressed: syncing ? null : _syncAuthors,
