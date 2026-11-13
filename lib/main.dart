@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
 import 'deleted_cover.dart';
+import 'library_badge.dart';
 import 'playback_flow.dart';
 import 'text_fit.dart';
 
@@ -345,6 +346,247 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
+class LibraryBadgeColorsPage extends StatefulWidget {
+  const LibraryBadgeColorsPage({super.key});
+  @override
+  State<LibraryBadgeColorsPage> createState() => _LibraryBadgeColorsPageState();
+}
+
+class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
+  List<Map<String, dynamic>> libs = [];
+  bool loading = true;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await LibraryBadge.load();
+    await _loadLibs();
+  }
+
+  Future<void> _loadLibs() async {
+    if (mounted) setState(() => err = null);
+    try {
+      final r = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = ((j['libraries'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        libs = list;
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          err = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  List<String> get _order => libs.map((e) => '${e['id']}').toList();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('库词条配色'), actions: [
+        IconButton(
+            tooltip: '刷新',
+            onPressed: _loadLibs,
+            icon: const Icon(Icons.refresh)),
+      ]),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : err != null
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text('加载失败：$err',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12))),
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: _loadLibs, child: const Text('重试')),
+                ]))
+              : ListView(children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
+                    child: Text('作者卡片左上角的库词条颜色。默认按库注册顺序自动配色，也可逐库指定。',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  ),
+                  for (final l in libs) _libTile(l),
+                ]),
+    );
+  }
+
+  Widget _libTile(Map<String, dynamic> l) {
+    final id = '${l['id']}';
+    final name = '${l['name'] ?? id}';
+    final color = LibraryBadge.colorFor(id, order: _order);
+    return ListTile(
+      leading: Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+            color: Color(color), borderRadius: BorderRadius.circular(7)),
+      ),
+      title: Row(children: [
+        Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 8),
+        LibBadgeChip(label: name, color: color),
+      ]),
+      subtitle: Text(id, style: const TextStyle(fontSize: 11)),
+      trailing: Text(
+        LibraryBadge.custom[id] == null ? '自动' : '自定义',
+        style: TextStyle(
+            fontSize: 12,
+            color: LibraryBadge.custom[id] == null
+                ? Colors.grey
+                : Colors.lightBlueAccent),
+      ),
+      onTap: () async {
+        final chosen = await _showColorDialog(name, id, color);
+        if (chosen == null) return;
+        await LibraryBadge.setColor(id, chosen == -1 ? null : chosen);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// 返回 -1 表示恢复自动配色，null 表示取消。
+  Future<int?> _showColorDialog(String name, String id, int autoColor) async {
+    int? current = LibraryBadge.custom[id];
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text('「$name」词条颜色'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            LibBadgeChip(label: name, color: current ?? autoColor),
+            const SizedBox(height: 14),
+            Wrap(spacing: 10, runSpacing: 10, children: [
+              for (var i = 0; i < LibraryBadge.palette.length; i++)
+                GestureDetector(
+                  onTap: () => setLocal(() {
+                    current = LibraryBadge.palette[i];
+                  }),
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Color(LibraryBadge.palette[i]),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: current == LibraryBadge.palette[i]
+                            ? Colors.white
+                            : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                    child: current == LibraryBadge.palette[i]
+                        ? const Icon(Icons.check, size: 18, color: Colors.white)
+                        : null,
+                  ),
+                ),
+            ]),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setLocal(() => current = null),
+                icon: const Icon(Icons.restart_alt, size: 18),
+                label: const Text('自动配色'),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(current ?? -1),
+                child: const Text('保存')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// 库词条：作者卡片左上角的小标签，颜色按库自动分配（设置里可改）
+class LibBadgeChip extends StatelessWidget {
+  final String label;
+  final int color;
+  const LibBadgeChip({super.key, required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: Color(color).withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(6),
+        border:
+            Border.all(color: Colors.black.withValues(alpha: 0.25), width: 0.5),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 9,
+          height: 1.25,
+          fontWeight: FontWeight.w600,
+          color: Color(LibraryBadge.textColorOn(color)),
+        ),
+      ),
+    );
+  }
+}
+
+class LibBadges extends StatelessWidget {
+  final List<String> libIds;
+  final List<String> order;
+  final Map<String, String> names;
+  const LibBadges({
+    super.key,
+    required this.libIds,
+    this.order = const [],
+    this.names = const {},
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = LibraryBadge.labels(libIds, names: names);
+    if (labels.isEmpty) return const SizedBox.shrink();
+    final shown = libIds.where((e) => e.isNotEmpty).toList();
+    return Wrap(
+      spacing: 3,
+      runSpacing: 3,
+      children: [
+        for (var i = 0; i < labels.length; i++)
+          LibBadgeChip(
+            label: labels[i],
+            color: labels[i].startsWith('+')
+                ? const Color(0xFF6B7280).toARGB32()
+                : LibraryBadge.colorFor(i < shown.length ? shown[i] : '',
+                    order: order),
+          ),
+      ],
+    );
+  }
+}
+
 class SettingsHubPage extends StatelessWidget {
   const SettingsHubPage({super.key});
 
@@ -373,6 +615,13 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('同步选择 · 默认收藏夹 · 拖动排序 · 重命名 · 删除'),
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CollectionAdminPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.sell_outlined),
+          title: const Text('库词条配色'),
+          subtitle: const Text('作者卡片上的库标签 · 每库自动配色，可自定义'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const LibraryBadgeColorsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.tune),
@@ -1927,8 +2176,8 @@ class _CollectionPageState extends State<CollectionPage> {
 
   void _openAuthor(String name) {
     if (name.isEmpty) return;
-    Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
   }
 
   void _previewCover(String path, String title) {
@@ -1948,8 +2197,8 @@ class _CollectionPageState extends State<CollectionPage> {
               fit: BoxFit.contain,
               placeholder: (_, __) =>
                   const CircularProgressIndicator(color: Colors.white38),
-              errorWidget: (_, __, ___) => Text(title,
-                  style: const TextStyle(color: Colors.white70)),
+              errorWidget: (_, __, ___) =>
+                  Text(title, style: const TextStyle(color: Colors.white70)),
             ),
           ),
         ),
@@ -2021,16 +2270,15 @@ class _CollectionPageState extends State<CollectionPage> {
           const SizedBox(width: 8),
           SizedBox(
             height: 84,
-            child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  OutlinedButton(
-                      onPressed: name.isEmpty ? null : () => _openAuthor(name),
-                      style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 10)),
-                      child: const Text('跳转', style: TextStyle(fontSize: 12))),
-                ]),
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              OutlinedButton(
+                  onPressed: name.isEmpty ? null : () => _openAuthor(name),
+                  style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 10)),
+                  child: const Text('跳转', style: TextStyle(fontSize: 12))),
+            ]),
           ),
         ]),
       ),
@@ -2082,8 +2330,7 @@ class _CollectionPageState extends State<CollectionPage> {
       if (a.statusCode == 200) {
         final m = jsonDecode(a.body);
         if (m is Map && mounted) {
-          setState(() =>
-              authorsIndex = Map<String, dynamic>.from(m));
+          setState(() => authorsIndex = Map<String, dynamic>.from(m));
         }
       }
     } catch (_) {}
@@ -2360,8 +2607,7 @@ class _RankPageState extends State<RankPage> {
         ? (row['libs'] as List).map((e) => '$e').toList()
         : [sel == 'all' ? cfg.lib : sel];
     await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) =>
-            AuthorPage(name: name, libs: ls.isEmpty ? null : ls)));
+        builder: (_) => AuthorPage(name: name, libs: ls.isEmpty ? null : ls)));
     if (mounted) load();
   }
 
@@ -2540,12 +2786,10 @@ class _RankPageState extends State<RankPage> {
                                             ? Container(
                                                 color: Colors.blueGrey,
                                                 alignment: Alignment.center,
-                                                child: Text(
-                                                    name.isEmpty
-                                                        ? '?'
-                                                        : name[0],
-                                                    style: const TextStyle(
-                                                        fontSize: 18)))
+                                                child:
+                                                    Text(name.isEmpty ? '?' : name[0],
+                                                        style: const TextStyle(
+                                                            fontSize: 18)))
                                             : CachedNetworkImage(
                                                 imageUrl: cfg.base +
                                                     cfg.media(av,
@@ -2555,19 +2799,15 @@ class _RankPageState extends State<RankPage> {
                                                 httpHeaders: cfg.headers,
                                                 fit: BoxFit.cover,
                                                 memCacheWidth: 126,
-                                                errorWidget: (_, __, ___) =>
-                                                    Container(
-                                                        color: Colors.blueGrey,
-                                                        alignment:
-                                                            Alignment.center,
-                                                        child: Text(
-                                                            name.isEmpty
-                                                                ? '?'
-                                                                : name[0],
-                                                            style:
-                                                                const TextStyle(
-                                                                    fontSize:
-                                                                        18)))),
+                                                errorWidget: (_, __, ___) => Container(
+                                                    color: Colors.blueGrey,
+                                                    alignment: Alignment.center,
+                                                    child: Text(
+                                                        name.isEmpty
+                                                            ? '?'
+                                                            : name[0],
+                                                        style: const TextStyle(
+                                                            fontSize: 18)))),
                                       ),
                                     ),
                                   ]),
@@ -2635,6 +2875,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       }
     });
     loadLibs();
+    LibraryBadge.load().then((_) {
+      if (mounted) setState(() {});
+    });
     load();
   }
 
@@ -2724,7 +2967,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       if (!mounted || list.isEmpty) return;
       var next = sel;
       var changed = false;
-      if (next.isEmpty || (next != 'all' && !list.any((e) => e['id'] == next))) {
+      if (next.isEmpty ||
+          (next != 'all' && !list.any((e) => e['id'] == next))) {
         next = '${j['default'] ?? list.first['id']}';
         changed = next != sel;
       }
@@ -2751,8 +2995,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     try {
       for (final lib in targets) {
         final rs = await Future.wait([
-          http.get(cfg.u('/api/authors.json', lib: lib),
-              headers: cfg.headers),
+          http.get(cfg.u('/api/authors.json', lib: lib), headers: cfg.headers),
           http.get(cfg.u('/api/author_stats.json', lib: lib),
               headers: cfg.headers),
         ]);
@@ -2790,7 +3033,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
             for (final f in ['p', 'v', 'dr']) {
               o[f] = _num(o[f]) + _num(v[f]);
             }
-            o['lv'] = _num(o['lv']) > _num(v['lv']) ? _num(o['lv']) : _num(v['lv']);
+            o['lv'] =
+                _num(o['lv']) > _num(v['lv']) ? _num(o['lv']) : _num(v['lv']);
             stMap['${e.key}'] = o;
           }
         }
@@ -3012,76 +3256,99 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                             itemBuilder: (_, i) {
                               final e = sorted[i];
                               final av = '${e.value['av'] ?? ''}';
+                              final ids = authorLibs[e.key] ??
+                                  <String>[
+                                    sel == 'all'
+                                        ? '${e.value['_lib'] ?? cfg.lib}'
+                                        : sel
+                                  ];
                               return InkWell(
                                 borderRadius: BorderRadius.circular(12),
                                 onTap: () => _open(e.key),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 10),
-                                  decoration: BoxDecoration(
-                                      color: Colors.white10,
-                                      borderRadius: BorderRadius.circular(12)),
-                                  child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        ClipOval(
-                                          child: SizedBox(
-                                            width: 58,
-                                            height: 58,
-                                            child: av.isEmpty
-                                                ? Container(
-                                                    color: Colors.blueGrey,
-                                                    alignment: Alignment.center,
-                                                    child: Text(
-                                                        e.key.isEmpty
-                                                            ? '?'
-                                                            : e.key[0],
-                                                        style: const TextStyle(
-                                                            fontSize: 24)))
-                                                : CachedNetworkImage(
-                                                    imageUrl: cfg.base +
-                                                        cfg.media(av,
-                                                            lib: '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}'),
-                                                    httpHeaders: cfg.headers,
-                                                    fit: BoxFit.cover,
-                                                    memCacheWidth: 174,
-                                                    errorWidget: (_, __, ___) => Container(
-                                                        color: Colors.blueGrey,
-                                                        alignment:
-                                                            Alignment.center,
-                                                        child: Text(
-                                                            e.key.isEmpty
-                                                                ? '?'
-                                                                : e.key[0],
-                                                            style:
-                                                                const TextStyle(
-                                                                    fontSize:
-                                                                        24)))),
+                                child: Stack(children: [
+                                  Container(
+                                    padding:
+                                        const EdgeInsets.fromLTRB(6, 22, 6, 8),
+                                    decoration: BoxDecoration(
+                                        color: Colors.white10,
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                    child: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          ClipOval(
+                                            child: SizedBox(
+                                              width: 58,
+                                              height: 58,
+                                              child: av.isEmpty
+                                                  ? Container(
+                                                      color: Colors.blueGrey,
+                                                      alignment:
+                                                          Alignment.center,
+                                                      child: Text(
+                                                          e.key.isEmpty
+                                                              ? '?'
+                                                              : e.key[0],
+                                                          style: const TextStyle(
+                                                              fontSize: 24)))
+                                                  : CachedNetworkImage(
+                                                      imageUrl: cfg.base +
+                                                          cfg.media(av,
+                                                              lib:
+                                                                  '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}'),
+                                                      httpHeaders: cfg.headers,
+                                                      fit: BoxFit.cover,
+                                                      memCacheWidth: 174,
+                                                      errorWidget: (_, __, ___) => Container(
+                                                          color:
+                                                              Colors.blueGrey,
+                                                          alignment:
+                                                              Alignment.center,
+                                                          child: Text(
+                                                              e.key.isEmpty ? '?' : e.key[0],
+                                                              style: const TextStyle(fontSize: 24)))),
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(e.key,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600)),
-                                        const SizedBox(height: 2),
-                                        Text(_sub(e),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                                fontSize: 10,
-                                                color: Colors.white60)),
-                                        Text('${_num(e.value['n'])} 作品',
-                                            maxLines: 1,
-                                            style: const TextStyle(
-                                                fontSize: 9,
-                                                color: Colors.white38)),
-                                      ]),
-                                ),
+                                          const SizedBox(height: 6),
+                                          Text(e.key,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: TextAlign.center,
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600)),
+                                          const SizedBox(height: 2),
+                                          Text(_sub(e),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                  fontSize: 10,
+                                                  color: Colors.white60)),
+                                          Text('${_num(e.value['n'])} 作品',
+                                              maxLines: 1,
+                                              style: const TextStyle(
+                                                  fontSize: 9,
+                                                  color: Colors.white38)),
+                                        ]),
+                                  ),
+                                  Positioned(
+                                    top: 5,
+                                    left: 5,
+                                    right: 4,
+                                    child: LibBadges(
+                                      libIds: ids,
+                                      order: libs
+                                          .map((e) => '${e['id']}')
+                                          .toList(),
+                                      names: {
+                                        for (final l in libs)
+                                          '${l['id']}':
+                                              '${l['name'] ?? l['id']}'
+                                      },
+                                    ),
+                                  ),
+                                ]),
                               );
                             }),
                   ),
@@ -3344,8 +3611,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           my == _openToken &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
-        player.open(Media(
-            cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
+        player.open(Media(cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
             httpHeaders: cfg.headers));
         player.play();
         _mediaToken = my;
@@ -3952,23 +4218,23 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       picView(pics[idx], lib: _curLib),
                       if (pics.length > 1)
                         Positioned(
-                            top: pad.top + 2,
-                            right: pad.right + 4,
-                            child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: List.generate(
-                                    pics.length,
-                                    (k) => Container(
-                                          width: 4,
-                                          height: 4,
-                                          margin: const EdgeInsets.symmetric(
-                                              horizontal: 1.5),
-                                          decoration: BoxDecoration(
-                                              shape: BoxShape.circle,
-                                              color: k == idx
-                                                  ? Colors.white
-                                                  : Colors.white24),
-                                        ))),
+                          top: pad.top + 2,
+                          right: pad.right + 4,
+                          child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: List.generate(
+                                  pics.length,
+                                  (k) => Container(
+                                        width: 4,
+                                        height: 4,
+                                        margin: const EdgeInsets.symmetric(
+                                            horizontal: 1.5),
+                                        decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: k == idx
+                                                ? Colors.white
+                                                : Colors.white24),
+                                      ))),
                         ),
                     ]),
                   );
@@ -3984,8 +4250,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     duration: const Duration(milliseconds: 200),
                     child: IconButton(
                         onPressed: () => Navigator.of(context).maybePop(),
-                        icon: const Icon(Icons.arrow_back,
-                            color: Colors.white70),
+                        icon:
+                            const Icon(Icons.arrow_back, color: Colors.white70),
                         style: IconButton.styleFrom(
                             backgroundColor: Colors.black45)),
                   ),
@@ -4047,20 +4313,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                 Expanded(
                                   child: LayoutBuilder(builder: (context, c) {
                                     const style = TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.white70);
+                                        fontSize: 12, color: Colors.white70);
                                     const expandWidth = 22.0;
                                     final title = '${w['ti'] ?? ''}';
                                     // F33：按可用宽度实际测量，只有真的截断才
                                     // 显示展开按钮（原按字符数猜测会误判）。
                                     final needsExpand = willOverflowText(
-                                        title, style,
-                                        c.maxWidth - expandWidth,
+                                        title, style, c.maxWidth - expandWidth,
                                         textScaler:
                                             MediaQuery.textScalerOf(context),
-                                        locale:
-                                            Localizations.maybeLocaleOf(
-                                                context));
+                                        locale: Localizations.maybeLocaleOf(
+                                            context));
                                     return Row(children: [
                                       Expanded(
                                         child: Text(title,
@@ -4612,22 +4875,22 @@ class _SearchPageState extends State<SearchPage> {
         final r = await http.get(cfg.u('/api/index.json', lib: lib),
             headers: cfg.headers);
         if (r.statusCode != 200) continue;
-      final cols = (jsonDecode(r.body)['collections'] as List);
-      for (final c in cols) {
-        final rr = await http.get(cfg.u('/api/c/${c['idx']}.json', lib: lib),
-            headers: cfg.headers);
-        if (rr.statusCode != 200) continue;
-        final ws = (jsonDecode(rr.body)['works'] as List);
-        for (var i = 0; i < ws.length; i++) {
-          out.add({
-            'w': ws[i],
-            'works': ws,
-            'i': i,
-            'col': c['name'],
-            '_lib': lib,
-          });
+        final cols = (jsonDecode(r.body)['collections'] as List);
+        for (final c in cols) {
+          final rr = await http.get(cfg.u('/api/c/${c['idx']}.json', lib: lib),
+              headers: cfg.headers);
+          if (rr.statusCode != 200) continue;
+          final ws = (jsonDecode(rr.body)['works'] as List);
+          for (var i = 0; i < ws.length; i++) {
+            out.add({
+              'w': ws[i],
+              'works': ws,
+              'i': i,
+              'col': c['name'],
+              '_lib': lib,
+            });
+          }
         }
-      }
       }
     } catch (_) {}
     if (!mounted || token != _loadToken) return;
@@ -4711,7 +4974,8 @@ class _SearchPageState extends State<SearchPage> {
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       subtitle: Text(
                           '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
                       onTap: () => Navigator.of(context).push(MaterialPageRoute(
                           builder: (_) => PlayerPage(
                               works: e['works'],
@@ -4742,9 +5006,8 @@ class _AuthorPageState extends State<AuthorPage> {
   String primaryLib = '';
   bool loading = true;
 
-  List<String> get _libs => (widget.libs == null || widget.libs!.isEmpty)
-      ? [cfg.lib]
-      : widget.libs!;
+  List<String> get _libs =>
+      (widget.libs == null || widget.libs!.isEmpty) ? [cfg.lib] : widget.libs!;
 
   @override
   void initState() {
@@ -4793,8 +5056,8 @@ class _AuthorPageState extends State<AuthorPage> {
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
-              imageUrl:
-                  cfg.base + cfg.media(av, lib: primaryLib.isEmpty ? null : primaryLib),
+              imageUrl: cfg.base +
+                  cfg.media(av, lib: primaryLib.isEmpty ? null : primaryLib),
               httpHeaders: cfg.headers,
               fit: BoxFit.contain,
               placeholder: (_, __) =>
@@ -4831,8 +5094,8 @@ class _AuthorPageState extends State<AuthorPage> {
                                             widget.name.isEmpty
                                                 ? '?'
                                                 : widget.name[0],
-                                            style: const TextStyle(
-                                                fontSize: 26))))
+                                            style:
+                                                const TextStyle(fontSize: 26))))
                                 : CachedNetworkImage(
                                     imageUrl: cfg.base +
                                         cfg.media(av,
@@ -4875,7 +5138,8 @@ class WorkGrid extends StatelessWidget {
   final String? lib;
   const WorkGrid({super.key, required this.works, this.lib});
 
-  String _libFor(dynamic w) => '${(w is Map ? w['_lib'] : null) ?? lib ?? cfg.lib}';
+  String _libFor(dynamic w) =>
+      '${(w is Map ? w['_lib'] : null) ?? lib ?? cfg.lib}';
 
   @override
   Widget build(BuildContext context) {
@@ -4890,8 +5154,8 @@ class WorkGrid extends StatelessWidget {
         final w = works[i];
         return GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => PlayerPage(
-                  works: works, start: i, lib: _libFor(w)))),
+              builder: (_) =>
+                  PlayerPage(works: works, start: i, lib: _libFor(w)))),
           child: Stack(fit: StackFit.expand, children: [
             (w['th'] ?? '').toString().isEmpty
                 ? Container(color: Colors.black26)
