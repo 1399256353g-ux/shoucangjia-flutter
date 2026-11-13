@@ -55,18 +55,21 @@ class Cfg {
   Map<String, String> get headers => {
         'Authorization': 'Basic ${base64Encode(utf8.encode('$user:$pass'))}',
       };
-  Uri u(String path) {
-    if (base.isEmpty || lib.isEmpty) return Uri.parse('$base$path');
+  // lib 省略时用当前库；显式传入可查询其他库
+  Uri u(String path, {String? lib}) {
+    final l = lib ?? this.lib;
+    if (base.isEmpty || l.isEmpty) return Uri.parse('$base$path');
     final sep = path.contains('?') ? '&' : '?';
-    return Uri.parse('$base$path${sep}lib=${Uri.encodeQueryComponent(lib)}');
+    return Uri.parse('$base$path${sep}lib=${Uri.encodeQueryComponent(l)}');
   }
 
   // 媒体路径统一带库前缀：/media/<lib>/<相对路径>
-  String media(String p) {
-    if (lib.isEmpty || !p.startsWith('/media/')) return p;
+  String media(String p, {String? lib}) {
+    final l = lib ?? this.lib;
+    if (l.isEmpty || !p.startsWith('/media/')) return p;
     final rest = p.substring(7);
-    if (rest.startsWith('$lib/')) return p;
-    return '/media/${Uri.encodeComponent(lib)}/$rest';
+    if (rest.startsWith('$l/')) return p;
+    return '/media/${Uri.encodeComponent(l)}/$rest';
   }
 }
 
@@ -74,11 +77,11 @@ final cfg = Cfg();
 final navKey = GlobalKey<NavigatorState>();
 
 // 作者统计上报（播放/访问），失败静默，不影响播放
-void postStat(String type, String author) {
+void postStat(String type, String author, {String? lib}) {
   if (cfg.base.isEmpty || author.isEmpty) return;
   try {
     http
-        .post(cfg.u('/api/stats'),
+        .post(cfg.u('/api/stats', lib: lib),
             headers: {...cfg.headers, 'Content-Type': 'application/json'},
             body: jsonEncode({'type': type, 'author': author}))
         .ignore();
@@ -86,11 +89,11 @@ void postStat(String type, String author) {
 }
 
 // 小水滴：每个作品每日 1 颗、每周 3 颗，服务端按作者累计
-Future<Map<String, dynamic>?> fetchDropStatus(String id) async {
+Future<Map<String, dynamic>?> fetchDropStatus(String id, {String? lib}) async {
   if (cfg.base.isEmpty || id.isEmpty) return null;
   try {
     final r = await http
-        .get(cfg.u('/api/drops?id=${Uri.encodeQueryComponent(id)}'),
+        .get(cfg.u('/api/drops?id=${Uri.encodeQueryComponent(id)}', lib: lib),
             headers: cfg.headers)
         .timeout(const Duration(seconds: 8));
     final j = jsonDecode(r.body);
@@ -134,11 +137,12 @@ Future<Map<String, dynamic>?> serverSyncStatus() async {
   return null;
 }
 
-Future<Map<String, dynamic>?> sendDrop(String id, String author) async {
+Future<Map<String, dynamic>?> sendDrop(String id, String author,
+    {String? lib}) async {
   if (cfg.base.isEmpty || id.isEmpty || author.isEmpty) return null;
   try {
     final r = await http
-        .post(cfg.u('/api/drops'),
+        .post(cfg.u('/api/drops', lib: lib),
             headers: {...cfg.headers, 'Content-Type': 'application/json'},
             body: jsonEncode({'id': id, 'author': author}))
         .timeout(const Duration(seconds: 8));
@@ -2275,6 +2279,8 @@ class _RankPageState extends State<RankPage> {
   };
   String period = 'week';
   String metric = 'play';
+  List<Map<String, dynamic>> libs = [];
+  String sel = '';
   List rows = [];
   bool loading = true;
   String? err;
@@ -2282,13 +2288,46 @@ class _RankPageState extends State<RankPage> {
   @override
   void initState() {
     super.initState();
+    sel = cfg.lib;
+    loadLibs();
     load();
+  }
+
+  Future<void> loadLibs() async {
+    try {
+      final r = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = ((j['libraries'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted || list.isEmpty) return;
+      var next = sel;
+      var changed = false;
+      if (next.isEmpty ||
+          (next != 'all' && !list.any((e) => e['id'] == next))) {
+        next = '${j['default'] ?? list.first['id']}';
+        changed = next != sel;
+      }
+      setState(() {
+        libs = list;
+        if (changed) {
+          sel = next;
+          loading = true;
+        }
+      });
+      if (changed) load();
+    } catch (_) {}
   }
 
   Future<void> load() async {
     if (mounted) setState(() => err = null);
     try {
-      final r = await http.get(cfg.u('/api/rank?period=$period&metric=$metric'),
+      final r = await http.get(
+          cfg.u('/api/rank?period=$period&metric=$metric',
+              lib: sel.isEmpty ? null : sel),
           headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(r.body);
@@ -2310,8 +2349,19 @@ class _RankPageState extends State<RankPage> {
   int _n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
 
   Future<void> _open(String name) async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    dynamic row;
+    for (final e in rows) {
+      if (e is Map && '${e['name'] ?? ''}' == name) {
+        row = e;
+        break;
+      }
+    }
+    final ls = row is Map && row['libs'] is List
+        ? (row['libs'] as List).map((e) => '$e').toList()
+        : [sel == 'all' ? cfg.lib : sel];
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) =>
+            AuthorPage(name: name, libs: ls.isEmpty ? null : ls)));
     if (mounted) load();
   }
 
@@ -2330,6 +2380,46 @@ class _RankPageState extends State<RankPage> {
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
       ]),
       body: Column(children: [
+        SizedBox(
+          height: 42,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: const Text('全部库'),
+                  selected: sel == 'all',
+                  onSelected: (_) {
+                    if (sel == 'all') return;
+                    setState(() {
+                      sel = 'all';
+                      loading = true;
+                    });
+                    load();
+                  },
+                ),
+              ),
+              for (final l in libs)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text('${l['name'] ?? l['id']}'),
+                    selected: sel == '${l['id']}',
+                    onSelected: (_) {
+                      if (sel == '${l['id']}') return;
+                      setState(() {
+                        sel = '${l['id']}';
+                        loading = true;
+                      });
+                      load();
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
         SizedBox(
           height: 46,
           child: ListView(
@@ -2457,8 +2547,11 @@ class _RankPageState extends State<RankPage> {
                                                     style: const TextStyle(
                                                         fontSize: 18)))
                                             : CachedNetworkImage(
-                                                imageUrl:
-                                                    cfg.base + cfg.media(av),
+                                                imageUrl: cfg.base +
+                                                    cfg.media(av,
+                                                        lib: sel == 'all'
+                                                            ? '${e['lib'] ?? cfg.lib}'
+                                                            : sel),
                                                 httpHeaders: cfg.headers,
                                                 fit: BoxFit.cover,
                                                 memCacheWidth: 126,
@@ -2522,6 +2615,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   List<MapEntry<String, Map<String, dynamic>>> authors = [];
   Map<String, dynamic> stats = {};
+  List<Map<String, dynamic>> libs = [];
+  String sel = '';
+  final Map<String, List<String>> authorLibs = {};
   String sort = 'plays';
   bool loading = true;
   String? err;
@@ -2532,11 +2628,13 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   @override
   void initState() {
     super.initState();
+    sel = cfg.lib;
     SharedPreferences.getInstance().then((sp) {
       if (mounted) {
         setState(() => fullSync = sp.getBool('sync_full_authors') ?? true);
       }
     });
+    loadLibs();
     load();
   }
 
@@ -2613,31 +2711,94 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     });
   }
 
+  Future<void> loadLibs() async {
+    try {
+      final r = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = ((j['libraries'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted || list.isEmpty) return;
+      var next = sel;
+      var changed = false;
+      if (next.isEmpty || (next != 'all' && !list.any((e) => e['id'] == next))) {
+        next = '${j['default'] ?? list.first['id']}';
+        changed = next != sel;
+      }
+      setState(() {
+        libs = list;
+        if (changed) {
+          sel = next;
+          loading = true;
+        }
+      });
+      if (changed) load();
+    } catch (_) {}
+  }
+
   Future<void> load() async {
     if (mounted) setState(() => err = null);
+    final targets = sel == 'all'
+        ? libs.map((e) => '${e['id']}').toList()
+        : [(sel.isEmpty ? cfg.lib : sel)];
+    if (targets.isEmpty) targets.add(cfg.lib);
+    final auMap = <String, Map<String, dynamic>>{};
+    final stMap = <String, Map<String, dynamic>>{};
+    authorLibs.clear();
     try {
-      final rs = await Future.wait([
-        http.get(cfg.u('/api/authors.json'), headers: cfg.headers),
-        http.get(cfg.u('/api/author_stats.json'), headers: cfg.headers),
-      ]);
-      if (rs[0].statusCode != 200) throw Exception('HTTP ${rs[0].statusCode}');
-      final m = jsonDecode(rs[0].body) as Map<String, dynamic>;
-      dynamic sj;
-      if (rs[1].statusCode == 200) {
-        try {
-          sj = jsonDecode(rs[1].body);
-        } catch (_) {}
+      for (final lib in targets) {
+        final rs = await Future.wait([
+          http.get(cfg.u('/api/authors.json', lib: lib),
+              headers: cfg.headers),
+          http.get(cfg.u('/api/author_stats.json', lib: lib),
+              headers: cfg.headers),
+        ]);
+        if (rs[0].statusCode != 200) continue;
+        final m = jsonDecode(rs[0].body) as Map<String, dynamic>;
+        dynamic sj;
+        if (rs[1].statusCode == 200) {
+          try {
+            sj = jsonDecode(rs[1].body);
+          } catch (_) {}
+        }
+        for (final e in m.entries) {
+          if (e.value is! Map) continue;
+          final v = Map<String, dynamic>.from(e.value as Map);
+          final old = auMap[e.key];
+          if (old == null) {
+            auMap[e.key] = {...v, '_lib': lib};
+          } else {
+            old['n'] = _num(old['n']) + _num(v['n']);
+            if ('${old['av'] ?? ''}'.isEmpty && '${v['av'] ?? ''}'.isNotEmpty) {
+              old['av'] = v['av'];
+            }
+            if ('${old['bio'] ?? ''}'.isEmpty &&
+                '${v['bio'] ?? ''}'.isNotEmpty) {
+              old['bio'] = v['bio'];
+            }
+          }
+          (authorLibs[e.key] ??= []).add(lib);
+        }
+        if (sj is Map && sj['authors'] is Map) {
+          for (final e in (sj['authors'] as Map).entries) {
+            if (e.value is! Map) continue;
+            final v = Map<String, dynamic>.from(e.value as Map);
+            final o = stMap['${e.key}'] ?? <String, dynamic>{};
+            for (final f in ['p', 'v', 'dr']) {
+              o[f] = _num(o[f]) + _num(v[f]);
+            }
+            o['lv'] = _num(o['lv']) > _num(v['lv']) ? _num(o['lv']) : _num(v['lv']);
+            stMap['${e.key}'] = o;
+          }
+        }
       }
       if (!mounted) return;
       setState(() {
-        authors = m.entries
-            .where((e) => e.value is Map)
-            .map((e) =>
-                MapEntry(e.key, Map<String, dynamic>.from(e.value as Map)))
-            .toList();
-        stats = (sj is Map && sj['authors'] is Map)
-            ? Map<String, dynamic>.from(sj['authors'] as Map)
-            : {};
+        authors = auMap.entries.map((e) => MapEntry(e.key, e.value)).toList();
+        stats = stMap;
         loading = false;
       });
     } catch (e) {
@@ -2692,6 +2853,14 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     return '${d.year}-${p(d.month)}-${p(d.day)}';
   }
 
+  String _selLabel() {
+    if (sel == 'all') return '全部库';
+    for (final l in libs) {
+      if ('${l['id']}' == sel) return '${l['name'] ?? l['id']}';
+    }
+    return cfg.libName.isEmpty ? '当前库' : cfg.libName;
+  }
+
   String _sub(MapEntry<String, Map<String, dynamic>> e) {
     final s = _s(e.key);
     switch (sort) {
@@ -2709,8 +2878,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   }
 
   Future<void> _open(String name) async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    final ls = authorLibs[name] ?? [sel == 'all' ? cfg.lib : sel];
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => AuthorPage(name: name, libs: List<String>.from(ls))));
     if (mounted) load();
   }
 
@@ -2745,6 +2915,46 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 ]))
               : Column(children: [
                   SizedBox(
+                    height: 42,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: const Text('全部库'),
+                            selected: sel == 'all',
+                            onSelected: (_) {
+                              if (sel == 'all') return;
+                              setState(() {
+                                sel = 'all';
+                                loading = true;
+                              });
+                              load();
+                            },
+                          ),
+                        ),
+                        for (final l in libs)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text('${l['name'] ?? l['id']}'),
+                              selected: sel == '${l['id']}',
+                              onSelected: (_) {
+                                if (sel == '${l['id']}') return;
+                                setState(() {
+                                  sel = '${l['id']}';
+                                  loading = true;
+                                });
+                                load();
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
                     height: 46,
                     child: ListView(
                       scrollDirection: Axis.horizontal,
@@ -2769,7 +2979,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                           size: 13, color: Colors.grey),
                       const SizedBox(width: 6),
                       Expanded(
-                          child: Text('${authors.length} 位作者 · 播放/访问/水滴为本机统计',
+                          child: Text(
+                              '${authors.length} 位作者 · ${_selLabel()} · 播放/访问/水滴为本机统计',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.grey))),
                       Text('全量同步',
@@ -2830,7 +3041,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                                             fontSize: 24)))
                                                 : CachedNetworkImage(
                                                     imageUrl: cfg.base +
-                                                        cfg.media(av),
+                                                        cfg.media(av,
+                                                            lib: '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}'),
                                                     httpHeaders: cfg.headers,
                                                     fit: BoxFit.cover,
                                                     memCacheWidth: 174,
@@ -2881,7 +3093,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 class PlayerPage extends StatefulWidget {
   final List works;
   final int start;
-  const PlayerPage({super.key, required this.works, required this.start});
+  // 作品可能来自非当前库（按库筛选 / 全部库），lib 为列表默认所属库
+  final String? lib;
+  const PlayerPage(
+      {super.key, required this.works, required this.start, this.lib});
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
@@ -2923,6 +3138,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool dragging = false;
   bool barHover = false;
   int pointers = 0;
+  // 每条作品可带 _lib（跨库列表），否则用本页 lib，最后回退当前库
+  String _libFor(dynamic w) =>
+      '${(w is Map ? w['_lib'] : null) ?? widget.lib ?? cfg.lib}';
+  String get _curLib => _libFor(widget.works[cur]);
   double _hoverDx = -1;
   double _hoverDy = -1;
   bool autoplay = true;
@@ -3061,14 +3280,17 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     } catch (_) {}
     if (my != _openToken) return;
     final w = widget.works[i];
-    _refreshDrop('${w['id'] ?? ''}', my);
-    postStat('play', '${w['a'] ?? ''}');
+    final wl = _libFor(w);
+    _refreshDrop('${w['id'] ?? ''}', my, wl);
+    postStat('play', '${w['a'] ?? ''}', lib: wl);
     try {
       if (w['t'] == 'v') {
-        await player.open(Media(cfg.base + cfg.media(w['m'][0].toString()),
+        await player.open(Media(
+            cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
             httpHeaders: cfg.headers));
       } else if ((w['au'] ?? '').toString().isNotEmpty) {
-        await player.open(Media(cfg.base + cfg.media(w['au'].toString()),
+        await player.open(Media(
+            cfg.base + cfg.media(w['au'].toString(), lib: wl),
             httpHeaders: cfg.headers));
       }
       if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
@@ -3122,7 +3344,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
           my == _openToken &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
-        player.open(Media(cfg.base + cfg.media(w['m'][0].toString()),
+        player.open(Media(
+            cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
             httpHeaders: cfg.headers));
         player.play();
         _mediaToken = my;
@@ -3131,9 +3354,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (w['t'] != 'v') startAuto();
   }
 
-  Future<void> _refreshDrop(String id, int token) async {
+  Future<void> _refreshDrop(String id, int token, String lib) async {
     if (id.isEmpty) return;
-    final r = await fetchDropStatus(id);
+    final r = await fetchDropStatus(id, lib: lib);
     if (!mounted || token != _openToken || r == null) return;
     setState(() {
       dropDayLeft = _intOf(r['dayLeft'], 1);
@@ -3159,7 +3382,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return;
     }
     setState(() => dropBusy = true);
-    final r = await sendDrop(id, author);
+    final r = await sendDrop(id, author, lib: _curLib);
     if (!mounted) return;
     setState(() {
       dropBusy = false;
@@ -3269,8 +3492,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     try {
       player.pause();
     } catch (_) {}
-    await Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => AuthorPage(name: name, libs: [_curLib])));
     if (resume && mounted && !fs) {
       try {
         player.play();
@@ -3552,13 +3775,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   // 长简介/文案：弹出完整内容，避免被单行截断
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
-  Widget picView(String path) {
+  Widget picView(String path, {String? lib}) {
     if (isGifPath(path)) {
-      return Image.network(cfg.base + cfg.media(path),
+      return Image.network(cfg.base + cfg.media(path, lib: lib),
           headers: cfg.headers, fit: BoxFit.contain, gaplessPlayback: true);
     }
     return CachedNetworkImage(
-        imageUrl: cfg.base + cfg.media(path),
+        imageUrl: cfg.base + cfg.media(path, lib: lib),
         httpHeaders: cfg.headers,
         fit: BoxFit.contain);
   }
@@ -3680,7 +3903,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                     return (it['th'] ?? '').toString().isEmpty
                         ? Container(color: Colors.black)
                         : CachedNetworkImage(
-                            imageUrl: cfg.base + cfg.media(it['th'].toString()),
+                            imageUrl: cfg.base +
+                                cfg.media(it['th'].toString(),
+                                    lib: _libFor(it)),
                             httpHeaders: cfg.headers,
                             fit: BoxFit.contain);
                   }
@@ -3697,8 +3922,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       child: Stack(fit: StackFit.expand, children: [
                         if ((it['th'] ?? '').toString().isNotEmpty)
                           CachedNetworkImage(
-                              imageUrl:
-                                  cfg.base + cfg.media(it['th'].toString()),
+                              imageUrl: cfg.base +
+                                  cfg.media(it['th'].toString(),
+                                      lib: _libFor(it)),
                               httpHeaders: cfg.headers,
                               fit: BoxFit.contain),
                         videoView(),
@@ -3723,7 +3949,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       });
                     },
                     child: Stack(fit: StackFit.expand, children: [
-                      picView(pics[idx]),
+                      picView(pics[idx], lib: _curLib),
                       if (pics.length > 1)
                         Positioned(
                             top: pad.top + 2,
@@ -3787,8 +4013,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         if ((w['av'] ?? '').toString().isNotEmpty)
                           ClipOval(
                               child: CachedNetworkImage(
-                                  imageUrl:
-                                      cfg.base + cfg.media(w['av'].toString()),
+                                  imageUrl: cfg.base +
+                                      cfg.media(w['av'].toString(),
+                                          lib: _curLib),
                                   httpHeaders: cfg.headers,
                                   width: 38,
                                   height: 38,
@@ -4315,31 +4542,99 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController q = TextEditingController();
+  List<Map<String, dynamic>> libs = [];
+  String sel = '';
   List all = [];
   bool loading = true;
   String kw = '';
+  int _loadToken = 0;
 
   @override
   void initState() {
     super.initState();
+    sel = cfg.lib;
+    _init();
+  }
+
+  Future<void> _init() async {
+    await loadLibs();
+    await loadAll();
+  }
+
+  Future<void> loadLibs() async {
+    try {
+      final r = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = ((j['libraries'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted || list.isEmpty) return;
+      var next = sel;
+      if (next.isEmpty ||
+          (next != 'all' && !list.any((e) => e['id'] == next))) {
+        next = '${j['default'] ?? list.first['id']}';
+      }
+      setState(() {
+        libs = list;
+        sel = next;
+      });
+    } catch (_) {}
+  }
+
+  String _libName(String id) {
+    for (final l in libs) {
+      if ('${l['id']}' == id) return '${l['name'] ?? l['id']}';
+    }
+    return id;
+  }
+
+  void _select(String id) {
+    if (sel == id) return;
+    setState(() {
+      sel = id;
+      loading = true;
+      all = [];
+    });
     loadAll();
   }
 
   Future<void> loadAll() async {
+    final token = ++_loadToken;
+    final targets = sel == 'all'
+        ? libs.map((e) => '${e['id']}').toList()
+        : [(sel.isEmpty ? cfg.lib : sel)];
+    final out = <Map<String, dynamic>>[];
     try {
-      final r = await http.get(cfg.u('/api/index.json'), headers: cfg.headers);
+      for (final lib in targets) {
+        final r = await http.get(cfg.u('/api/index.json', lib: lib),
+            headers: cfg.headers);
+        if (r.statusCode != 200) continue;
       final cols = (jsonDecode(r.body)['collections'] as List);
       for (final c in cols) {
-        final rr = await http.get(cfg.u('/api/c/${c['idx']}.json'),
+        final rr = await http.get(cfg.u('/api/c/${c['idx']}.json', lib: lib),
             headers: cfg.headers);
         if (rr.statusCode != 200) continue;
         final ws = (jsonDecode(rr.body)['works'] as List);
         for (var i = 0; i < ws.length; i++) {
-          all.add({'w': ws[i], 'works': ws, 'i': i, 'col': c['name']});
+          out.add({
+            'w': ws[i],
+            'works': ws,
+            'i': i,
+            'col': c['name'],
+            '_lib': lib,
+          });
         }
       }
+      }
     } catch (_) {}
-    if (mounted) setState(() => loading = false);
+    if (!mounted || token != _loadToken) return;
+    setState(() {
+      all = out;
+      loading = false;
+    });
   }
 
   @override
@@ -4353,6 +4648,32 @@ class _SearchPageState extends State<SearchPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('搜索')),
       body: Column(children: [
+        SizedBox(
+          height: 42,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: const Text('全部库'),
+                  selected: sel == 'all',
+                  onSelected: (_) => _select('all'),
+                ),
+              ),
+              for (final l in libs)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text('${l['name'] ?? l['id']}'),
+                    selected: sel == '${l['id']}',
+                    onSelected: (_) => _select('${l['id']}'),
+                  ),
+                ),
+            ],
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.all(12),
           child: TextField(
@@ -4367,7 +4688,7 @@ class _SearchPageState extends State<SearchPage> {
         Expanded(
           child: kw.isEmpty
               ? const Center(
-                  child: Text('输入关键词，跨所有收藏夹搜索',
+                  child: Text('输入关键词，在所选库内搜索',
                       style: TextStyle(color: Colors.grey)))
               : ListView.builder(
                   itemCount: res.length,
@@ -4381,17 +4702,21 @@ class _SearchPageState extends State<SearchPage> {
                           child: (w['th'] ?? '').toString().isEmpty
                               ? Container(color: Colors.black26)
                               : CachedNetworkImage(
-                                  imageUrl:
-                                      cfg.base + cfg.media(w['th'].toString()),
+                                  imageUrl: cfg.base +
+                                      cfg.media(w['th'].toString(),
+                                          lib: '${e['_lib']}'),
                                   httpHeaders: cfg.headers,
                                   fit: BoxFit.cover)),
                       title: Text('${w['ti']}',
                           maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('@${w['a']} · ${e['col']}',
+                      subtitle: Text(
+                          '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
                           maxLines: 1, overflow: TextOverflow.ellipsis),
                       onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) =>
-                              PlayerPage(works: e['works'], start: e['i']))),
+                          builder: (_) => PlayerPage(
+                              works: e['works'],
+                              start: e['i'],
+                              lib: '${e['_lib']}'))),
                     );
                   },
                 ),
@@ -4403,7 +4728,9 @@ class _SearchPageState extends State<SearchPage> {
 
 class AuthorPage extends StatefulWidget {
   final String name;
-  const AuthorPage({super.key, required this.name});
+  // 按库筛选后可能合并多个库；默认当前库
+  final List<String>? libs;
+  const AuthorPage({super.key, required this.name, this.libs});
   @override
   State<AuthorPage> createState() => _AuthorPageState();
 }
@@ -4412,7 +4739,12 @@ class _AuthorPageState extends State<AuthorPage> {
   String bio = '';
   String av = '';
   List works = [];
+  String primaryLib = '';
   bool loading = true;
+
+  List<String> get _libs => (widget.libs == null || widget.libs!.isEmpty)
+      ? [cfg.lib]
+      : widget.libs!;
 
   @override
   void initState() {
@@ -4421,21 +4753,30 @@ class _AuthorPageState extends State<AuthorPage> {
   }
 
   Future<void> load() async {
-    try {
-      final r =
-          await http.get(cfg.u('/api/authors.json'), headers: cfg.headers);
-      final idx = jsonDecode(r.body) as Map;
-      final info = idx[widget.name];
-      if (info != null) {
-        final d = await http.get(cfg.u('/api/a/${info['i']}.json'),
+    final seen = <String>{};
+    for (final lib in _libs) {
+      try {
+        final r = await http.get(cfg.u('/api/authors.json', lib: lib),
             headers: cfg.headers);
+        if (r.statusCode != 200) continue;
+        final idx = jsonDecode(r.body) as Map;
+        final info = idx[widget.name];
+        if (info == null) continue;
+        final d = await http.get(cfg.u('/api/a/${info['i']}.json', lib: lib),
+            headers: cfg.headers);
+        if (d.statusCode != 200) continue;
         final m = jsonDecode(d.body);
-        bio = (m['bio'] ?? '').toString();
-        av = (m['av'] ?? '').toString();
-        works = (m['works'] as List);
-        postStat('visit', widget.name);
-      }
-    } catch (_) {}
+        if (bio.isEmpty) bio = (m['bio'] ?? '').toString();
+        if (av.isEmpty) av = (m['av'] ?? '').toString();
+        if (primaryLib.isEmpty) primaryLib = lib;
+        for (final w in ((m['works'] as List?) ?? const [])) {
+          final id = '${(w as Map)['id'] ?? ''}';
+          if (id.isNotEmpty && !seen.add(id)) continue;
+          works.add({...Map<String, dynamic>.from(w), '_lib': lib});
+        }
+        postStat('visit', widget.name, lib: lib);
+      } catch (_) {}
+    }
     if (mounted) setState(() => loading = false);
   }
 
@@ -4452,7 +4793,8 @@ class _AuthorPageState extends State<AuthorPage> {
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
-              imageUrl: cfg.base + cfg.media(av),
+              imageUrl:
+                  cfg.base + cfg.media(av, lib: primaryLib.isEmpty ? null : primaryLib),
               httpHeaders: cfg.headers,
               fit: BoxFit.contain,
               placeholder: (_, __) =>
@@ -4492,7 +4834,11 @@ class _AuthorPageState extends State<AuthorPage> {
                                             style: const TextStyle(
                                                 fontSize: 26))))
                                 : CachedNetworkImage(
-                                    imageUrl: cfg.base + cfg.media(av),
+                                    imageUrl: cfg.base +
+                                        cfg.media(av,
+                                            lib: primaryLib.isEmpty
+                                                ? null
+                                                : primaryLib),
                                     httpHeaders: cfg.headers,
                                     width: 64,
                                     height: 64,
@@ -4515,7 +4861,10 @@ class _AuthorPageState extends State<AuthorPage> {
                     ]),
               ),
               const Divider(height: 1),
-              Expanded(child: WorkGrid(works: works)),
+              Expanded(
+                  child: WorkGrid(
+                      works: works,
+                      lib: primaryLib.isEmpty ? null : primaryLib)),
             ]),
     );
   }
@@ -4523,7 +4872,11 @@ class _AuthorPageState extends State<AuthorPage> {
 
 class WorkGrid extends StatelessWidget {
   final List works;
-  const WorkGrid({super.key, required this.works});
+  final String? lib;
+  const WorkGrid({super.key, required this.works, this.lib});
+
+  String _libFor(dynamic w) => '${(w is Map ? w['_lib'] : null) ?? lib ?? cfg.lib}';
+
   @override
   Widget build(BuildContext context) {
     return GridView.builder(
@@ -4537,12 +4890,14 @@ class WorkGrid extends StatelessWidget {
         final w = works[i];
         return GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => PlayerPage(works: works, start: i))),
+              builder: (_) => PlayerPage(
+                  works: works, start: i, lib: _libFor(w)))),
           child: Stack(fit: StackFit.expand, children: [
             (w['th'] ?? '').toString().isEmpty
                 ? Container(color: Colors.black26)
                 : CachedNetworkImage(
-                    imageUrl: cfg.base + cfg.media(w['th'].toString()),
+                    imageUrl: cfg.base +
+                        cfg.media(w['th'].toString(), lib: _libFor(w)),
                     httpHeaders: cfg.headers,
                     fit: BoxFit.cover,
                     errorWidget: (_, __, ___) =>
