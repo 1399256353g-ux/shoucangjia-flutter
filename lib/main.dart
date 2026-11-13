@@ -1570,6 +1570,8 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() => cols = list);
       for (final c in list) {
+        // 已抓到合集封面的直接使用，其余回退到首条作品封面
+        if ((c['cover'] ?? '').toString().isNotEmpty) continue;
         http
             .get(cfg.u('/api/c/${c['idx']}.json'), headers: cfg.headers)
             .then((rr) {
@@ -1647,46 +1649,168 @@ class _HomePageState extends State<HomePage> {
           ? Center(child: Text('加载失败：$err'))
           : cols.isEmpty
               ? const Center(child: CircularProgressIndicator())
-              : ListView.separated(
-                  itemCount: cols.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final c = cols[i];
-                    final cover = covers['${c['idx']}'];
-                    final isDefault = defaultIdx != null &&
-                        (c['idx'] as num).toInt() == defaultIdx;
-                    return ListTile(
-                      leading: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: SizedBox(
-                          width: 48,
-                          height: 64,
-                          child: cover == null
-                              ? Container(color: Colors.black26)
-                              : CachedNetworkImage(
-                                  imageUrl: cfg.base + cfg.media(cover),
-                                  httpHeaders: cfg.headers,
-                                  fit: BoxFit.cover,
-                                  memCacheWidth: 144),
-                        ),
-                      ),
-                      title: Text(
-                          '(${c['idx']}) ${c['name']}${isDefault ? '  ★' : ''}',
-                          style: TextStyle(
-                              color: isDefault ? Colors.amber : null)),
-                      subtitle: c['sync'] == false
-                          ? const Text('同步已关闭',
-                              style:
-                                  TextStyle(fontSize: 11, color: Colors.grey))
-                          : null,
-                      trailing: Text('${c['count']}',
-                          style: const TextStyle(color: Colors.grey)),
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) =>
-                              CollectionPage(name: c['name'], idx: c['idx']))),
-                    );
-                  },
+              : LayoutBuilder(builder: (context, cons) {
+                  final w = cons.maxWidth;
+                  final n = w >= 1200 ? 5 : w >= 900 ? 4 : w >= 620 ? 3 : 2;
+                  return GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: n,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 0.72,
+                    ),
+                    itemCount: cols.length,
+                    itemBuilder: (_, i) {
+                      final c = cols[i];
+                      final idx = (c['idx'] as num).toInt();
+                      final remote = (c['cover'] ?? '').toString();
+                      final fallback = covers['$idx'];
+                      final imageUrl = remote.isNotEmpty
+                          ? cfg.u(remote).toString()
+                          : (fallback == null
+                              ? null
+                              : cfg.base + cfg.media(fallback));
+                      final isDefault = defaultIdx != null && idx == defaultIdx;
+                      return _CollectionTile(
+                        idx: idx,
+                        name: '${c['name']}',
+                        count: c['count'] is num
+                            ? (c['count'] as num).toInt()
+                            : null,
+                        imageUrl: imageUrl,
+                        isDefault: isDefault,
+                        syncOff: c['sync'] == false,
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => CollectionPage(
+                                    name: '${c['name']}', idx: idx))),
+                      );
+                    },
+                  );
+                }),
+    );
+  }
+}
+
+/// 收藏夹图片卡片：大封面 + 底部渐变信息，默认收藏夹用金色星标
+class _CollectionTile extends StatelessWidget {
+  final int idx;
+  final String name;
+  final int? count;
+  final String? imageUrl;
+  final bool isDefault;
+  final bool syncOff;
+  final VoidCallback onTap;
+  const _CollectionTile({
+    required this.idx,
+    required this.name,
+    required this.count,
+    required this.imageUrl,
+    required this.isDefault,
+    required this.syncOff,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF1A1A1A),
+      clipBehavior: Clip.antiAlias,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (imageUrl == null)
+              const Center(
+                  child: Icon(Icons.collections_bookmark_outlined,
+                      color: Colors.white24, size: 36))
+            else
+              CachedNetworkImage(
+                imageUrl: imageUrl!,
+                httpHeaders: cfg.headers,
+                fit: BoxFit.cover,
+                memCacheWidth: 720,
+                fadeInDuration: const Duration(milliseconds: 180),
+                placeholder: (_, __) => Container(color: Colors.black26),
+                errorWidget: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        color: Colors.white24)),
+              ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black87],
+                  stops: [0.45, 1.0],
                 ),
+              ),
+            ),
+            Positioned(
+              left: 8,
+              top: 8,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(6)),
+                child: Text('$idx',
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.white70)),
+              ),
+            ),
+            if (isDefault)
+              const Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Icon(Icons.star, color: Colors.amber, size: 18)),
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 8,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isDefault ? Colors.amber : Colors.white)),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(count == null ? '' : '$count 作品',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.white70)),
+                      if (syncOff) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(4)),
+                          child: const Text('同步已关闭',
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.orangeAccent)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
