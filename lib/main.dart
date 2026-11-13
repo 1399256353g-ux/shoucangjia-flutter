@@ -3496,6 +3496,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final progress = (isV && dur.inMilliseconds > 0)
         ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
         : (pics.isEmpty ? 0.0 : (idx + 1) / pics.length);
+    // H2：iOS 刘海/灵动岛与横屏左右安全区。视频/图片仍全屏出血，
+    // 但返回键、图文圆点、作者/标题信息、音量面板与底部控制栏都要避开安全区。
+    final pad = MediaQuery.of(context).padding;
     return Focus(
       focusNode: focus,
       autofocus: true,
@@ -3598,45 +3601,42 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       picView(pics[idx]),
                       if (pics.length > 1)
                         Positioned(
-                            top: 2,
-                            right: 4,
-                            child: SafeArea(
-                              child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: List.generate(
-                                      pics.length,
-                                      (k) => Container(
-                                            width: 4,
-                                            height: 4,
-                                            margin: const EdgeInsets.symmetric(
-                                                horizontal: 1.5),
-                                            decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: k == idx
-                                                    ? Colors.white
-                                                    : Colors.white24),
-                                          ))),
-                            )),
+                            top: pad.top + 2,
+                            right: pad.right + 4,
+                            child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: List.generate(
+                                    pics.length,
+                                    (k) => Container(
+                                          width: 4,
+                                          height: 4,
+                                          margin: const EdgeInsets.symmetric(
+                                              horizontal: 1.5),
+                                          decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: k == idx
+                                                  ? Colors.white
+                                                  : Colors.white24),
+                                        ))),
+                        ),
                     ]),
                   );
                 },
               ),
               Positioned(
-                left: 8,
-                top: 8,
+                left: pad.left + 8,
+                top: pad.top + 8,
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
                     opacity: ui ? 1 : 0,
                     duration: const Duration(milliseconds: 200),
-                    child: SafeArea(
-                      child: IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(Icons.arrow_back,
-                              color: Colors.white70),
-                          style: IconButton.styleFrom(
-                              backgroundColor: Colors.black45)),
-                    ),
+                    child: IconButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.arrow_back,
+                            color: Colors.white70),
+                        style: IconButton.styleFrom(
+                            backgroundColor: Colors.black45)),
                   ),
                 ),
               ),
@@ -3648,9 +3648,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   ),
                 ),
               Positioned(
-                left: 14,
-                right: 80,
-                bottom: 96,
+                left: pad.left + 14,
+                right: pad.right + 80,
+                bottom: pad.bottom + 96,
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
@@ -3719,8 +3719,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               ),
               if (showVol && ui)
                 Positioned(
-                  right: 16,
-                  bottom: 128,
+                  right: pad.right + 16,
+                  bottom: pad.bottom + 128,
                   child: Container(
                     width: 220,
                     padding:
@@ -3773,10 +3773,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                               end: Alignment.bottomCenter,
                               colors: [Colors.transparent, Colors.black87])),
                       padding: EdgeInsets.only(
-                          left: 12,
-                          right: 12,
+                          left: pad.left + 12,
+                          right: pad.right + 12,
                           top: 10,
-                          bottom: 6 + MediaQuery.of(context).padding.bottom),
+                          bottom: 6 + pad.bottom),
                       child: Column(mainAxisSize: MainAxisSize.min, children: [
                         Row(children: [
                           Text(
