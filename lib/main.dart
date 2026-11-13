@@ -4016,7 +4016,8 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
+class _PlayerPageState extends State<PlayerPage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late final PageController pc = PageController(initialPage: widget.start);
   // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
   late final Player player = Player(
@@ -4087,6 +4088,20 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   int dropDayLeft = 1;
   int dropWeekLeft = 3;
   int dropTotal = 0;
+  // H15：本次打开作品后是否已送过水滴（决定图标是否变蓝）与点击弹跳动效
+  bool dropGlow = false;
+  late final AnimationController _dropAnim = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 380));
+  late final Animation<double> _dropScale = TweenSequence<double>([
+    TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.32)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 40),
+    TweenSequenceItem(
+        tween: Tween(begin: 1.32, end: 1.0)
+            .chain(CurveTween(curve: Curves.elasticOut)),
+        weight: 60),
+  ]).animate(_dropAnim);
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
@@ -4199,6 +4214,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       dropDayLeft = 1;
       dropWeekLeft = 3;
       dropTotal = 0;
+      dropGlow = false;
     });
     try {
       await player.stop();
@@ -4305,7 +4321,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       _toast('本周小水滴已送完（3/3）');
       return;
     }
-    setState(() => dropBusy = true);
+    final before = dropTotal;
+    // 先本地 +1 并播放动效，失败再回滚
+    setState(() {
+      dropBusy = true;
+      dropGlow = true;
+      dropTotal = before + 1;
+    });
+    _dropAnim.forward(from: 0);
+    hapticTap();
     final r = await sendDrop(id, author, lib: _curLib);
     if (!mounted) return;
     setState(() {
@@ -4314,10 +4338,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         dropDayLeft = _intOf(r['dayLeft'], dropDayLeft);
         dropWeekLeft = _intOf(r['weekLeft'], dropWeekLeft);
         dropTotal = _intOf(r['total'], dropTotal);
+      } else {
+        dropTotal = before;
+        dropGlow = false;
       }
     });
     if (r != null && r['ok'] == true) {
-      hapticTap();
       _toast('已送 1 颗小水滴 · 今日剩余 $dropDayLeft · 本周剩余 $dropWeekLeft');
     } else {
       _toast('${r?['error'] ?? '发送失败，请检查网络'}');
@@ -4709,6 +4735,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _dropAnim.dispose();
     autoTimer?.cancel();
     hideTimer?.cancel();
     retryTimer?.cancel();
@@ -5377,26 +5404,60 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                   color: loopOne
                                       ? Colors.white70
                                       : Colors.white24)),
-                          IconButton(
-                              onPressed: (dropBusy ||
+                          // H15：水滴图标下方常驻当前水滴数；默认灰、点击后变蓝并 +1 弹跳
+                          Tooltip(
+                            message:
+                                '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: (dropBusy ||
                                       dropDayLeft <= 0 ||
                                       dropWeekLeft <= 0)
                                   ? null
                                   : _sendDrop,
-                              tooltip:
-                                  '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
-                              icon: dropBusy
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white54))
-                                  : Icon(Icons.water_drop,
-                                      size: 21,
-                                      color: dropDayLeft > 0 && dropWeekLeft > 0
-                                          ? Colors.lightBlueAccent
-                                          : Colors.white24)),
+                              child: SizedBox(
+                                width: 46,
+                                height: 48,
+                                child: ScaleTransition(
+                                  scale: _dropScale,
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      if (dropBusy)
+                                        const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white54))
+                                      else
+                                        Icon(Icons.water_drop,
+                                            size: 20,
+                                            color: dropGlow &&
+                                                    dropDayLeft >= 0
+                                                ? Colors.lightBlueAccent
+                                                : (dropDayLeft > 0 &&
+                                                        dropWeekLeft > 0
+                                                    ? Colors.white38
+                                                    : Colors.white24)),
+                                      const SizedBox(height: 1),
+                                      Text('$dropTotal',
+                                          style: TextStyle(
+                                              fontSize: 9,
+                                              height: 1.0,
+                                              fontWeight: FontWeight.w600,
+                                              color: dropGlow
+                                                  ? Colors.lightBlueAccent
+                                                  : (dropDayLeft > 0 &&
+                                                          dropWeekLeft > 0
+                                                      ? Colors.white54
+                                                      : Colors.white24))),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                           const Spacer(),
                           IconButton(
                               onPressed: toggleFs,
