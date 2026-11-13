@@ -1606,6 +1606,35 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
   }
 
+  // 星标：点击卡片右上角设为/取消默认收藏夹，真正写回服务端
+  Future<void> _setDefault(int idx) async {
+    final next = defaultIdx == idx ? null : idx;
+    try {
+      final r = await http.post(cfg.u('/api/settings'),
+          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'default': next,
+            'collections': [
+              for (final c in cols)
+                {
+                  'idx': c['idx'],
+                  'name': c['name'],
+                  'sync': c['sync'] != false,
+                }
+            ],
+          }));
+      final m = jsonDecode(r.body);
+      if (!mounted) return;
+      setState(() => defaultIdx = (m['default'] as num?)?.toInt());
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(next == null ? '已取消默认收藏夹' : '已设为默认收藏夹')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('设置失败：$e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1689,6 +1718,7 @@ class _HomePageState extends State<HomePage> {
                         imageUrl: imageUrl,
                         isDefault: isDefault,
                         syncOff: c['sync'] == false,
+                        onStarTap: () => _setDefault(idx),
                         onTap: () => Navigator.of(context).push(
                             MaterialPageRoute(
                                 builder: (_) => CollectionPage(
@@ -1710,6 +1740,7 @@ class _CollectionTile extends StatelessWidget {
   final bool isDefault;
   final bool syncOff;
   final VoidCallback onTap;
+  final VoidCallback? onStarTap;
   const _CollectionTile({
     required this.idx,
     required this.name,
@@ -1718,6 +1749,7 @@ class _CollectionTile extends StatelessWidget {
     required this.isDefault,
     required this.syncOff,
     required this.onTap,
+    this.onStarTap,
   });
 
   @override
@@ -1771,11 +1803,24 @@ class _CollectionTile extends StatelessWidget {
                         const TextStyle(fontSize: 10, color: Colors.white70)),
               ),
             ),
-            if (isDefault)
-              const Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Icon(Icons.star, color: Colors.amber, size: 18)),
+            Positioned(
+              right: 4,
+              top: 4,
+              child: Tooltip(
+                message: isDefault ? '取消默认收藏夹' : '设为默认收藏夹',
+                child: InkWell(
+                  onTap: onStarTap,
+                  borderRadius: BorderRadius.circular(24),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(
+                        isDefault ? Icons.star : Icons.star_border,
+                        color: isDefault ? Colors.amber : Colors.white38,
+                        size: 20),
+                  ),
+                ),
+              ),
+            ),
             Positioned(
               left: 10,
               right: 10,
