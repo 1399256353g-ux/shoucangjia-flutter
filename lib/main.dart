@@ -1315,6 +1315,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
   bool running = false;
   String? err;
   Map<String, dynamic> data = {};
+  bool deepScan = false;
 
   String get libId => '${widget.lib['id']}';
   Uri _u(String path) =>
@@ -1326,15 +1327,17 @@ class _MaintenancePageState extends State<MaintenancePage> {
     load();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool deep = false}) async {
     setState(() {
       loading = true;
       err = null;
+      if (deep) deepScan = true;
     });
     try {
       final r = await http
-          .get(_u('/api/maintenance'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 15));
+          .get(Uri.parse('${_u('/api/maintenance')}${deep ? '&deep=1' : ''}'),
+              headers: cfg.headers)
+          .timeout(Duration(seconds: deep ? 90 : 15));
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
@@ -1371,13 +1374,23 @@ class _MaintenancePageState extends State<MaintenancePage> {
   String _list(Object? v) =>
       ((v as List?) ?? const []).map((e) => '$e').join(', ');
 
+  String _deadLine(dynamic e) {
+    if (e is! Map) return '$e';
+    final kind = e['kind'] == 'm' ? '媒体' : (e['kind'] == 'th' ? '封面' : '音频');
+    return '收藏夹${e['idx']} · ${e['id']} · $kind · ${e['reason']}';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final ok = data['indexOk'] == true && data['baseOk'] == true;
+    final deep = data['deep'] is Map ? data['deep'] as Map : null;
+    final deepOk = deep == null || deep['ok'] == true;
+    final ok = data['indexOk'] == true && data['baseOk'] == true && deepOk;
     return Scaffold(
       appBar: AppBar(title: Text('维护 · ${widget.lib['name']}'), actions: [
         IconButton(
-            icon: const Icon(Icons.refresh), onPressed: load, tooltip: '重新扫描'),
+            icon: const Icon(Icons.refresh),
+            onPressed: () => load(),
+            tooltip: '重新扫描'),
       ]),
       body: err != null
           ? Center(child: Text('加载失败：$err'))
@@ -1404,7 +1417,42 @@ class _MaintenancePageState extends State<MaintenancePage> {
                   _row('损坏', _list(data['bad'])),
                   _row('媒体目录存在', '${data['baseOk'] == true ? '是' : '否'}'),
                   _row('爬虫目录', '${data['crawlerDir'] ?? '未创建'}'),
+                  if (deep != null) ...[
+                    const Divider(height: 24),
+                    Row(children: [
+                      Icon(deepOk ? Icons.check_circle : Icons.error,
+                          color: deepOk ? Colors.green : Colors.red),
+                      const SizedBox(width: 8),
+                      Text('媒体一致性巡检',
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ]),
+                    _row('媒体文件', '${deep['checked'] ?? 0} 个'),
+                    _row('缺失 / 空文件',
+                        '${deep['missing'] ?? 0} / ${deep['zero'] ?? 0}'),
+                    _row('封面',
+                        '${deep['thumbs'] ?? 0} 个，缺失 ${deep['thumbMissing'] ?? 0}'),
+                    _row('音频缺失', '${deep['audioMissing'] ?? 0}'),
+                    _row('耗时', '${deep['ms'] ?? 0} ms'),
+                    if ((deep['dead'] as List?)?.isNotEmpty == true)
+                      _row(
+                          '失效明细',
+                          (deep['dead'] as List)
+                              .take(10)
+                              .map(_deadLine)
+                              .join('\n')),
+                  ],
                   const Divider(height: 24),
+                  OutlinedButton.icon(
+                    onPressed: loading
+                        ? null
+                        : () async {
+                            setState(() => deepScan = true);
+                            await load(deep: true);
+                          },
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: Text(deepScan ? '重新深度巡检' : '深度巡检全部媒体文件'),
+                  ),
+                  const SizedBox(height: 8),
                   FilledButton.icon(
                     onPressed: running ? null : runCrawler,
                     icon: const Icon(Icons.play_arrow),
