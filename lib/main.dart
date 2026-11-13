@@ -109,15 +109,20 @@ Future<Map<String, dynamic>?> fetchDropStatus(String id, {String? lib}) async {
 
 // 立即同步：collection（单个收藏夹）/ authors（作者信息）/ all（全部）
 Future<Map<String, dynamic>?> startServerSync(
-    {required String target, int? idx, bool full = false}) async {
+    {required String target,
+    int? idx,
+    String? author,
+    String? lib,
+    bool full = false}) async {
   if (cfg.base.isEmpty) return null;
   try {
     final r = await http
-        .post(cfg.u('/api/sync'),
+        .post(cfg.u('/api/sync', lib: lib),
             headers: {...cfg.headers, 'Content-Type': 'application/json'},
             body: jsonEncode({
               'target': target,
               if (idx != null) 'idx': idx,
+              if (author != null) 'author': author,
               'full': full,
             }))
         .timeout(const Duration(seconds: 15));
@@ -3279,7 +3284,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   String sort = 'plays';
   bool loading = true;
   String? err;
-  bool fullSync = true;
   bool syncing = false;
   Timer? syncTimer;
 
@@ -3287,11 +3291,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   void initState() {
     super.initState();
     sel = cfg.lib;
-    SharedPreferences.getInstance().then((sp) {
-      if (mounted) {
-        setState(() => fullSync = sp.getBool('sync_full_authors') ?? true);
-      }
-    });
     loadLibs();
     LibraryBadge.load().then((_) {
       if (mounted) setState(() {});
@@ -3308,21 +3307,14 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     super.dispose();
   }
 
-  Future<void> _setFull(bool v) async {
-    setState(() => fullSync = v);
-    final sp = await SharedPreferences.getInstance();
-    await sp.setBool('sync_full_authors', v);
-  }
-
   Future<void> _syncAuthors() async {
     if (syncing) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('立即同步作者'),
-        content: Text(fullSync
-            ? '将重新抓取全部作者的头像、简介与作品信息，耗时较长。\n\n同步在 NAS 后台运行。'
-            : '只补抓缺少头像/简介的作者，速度较快。\n\n同步在 NAS 后台运行。'),
+        content: const Text('只补抓缺少头像/简介的作者，速度较快。\n'
+            '需要整位作者全量刷新，请进入该作者主页同步。\n\n同步在 NAS 后台运行。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -3334,7 +3326,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       ),
     );
     if (ok != true || !mounted) return;
-    final j = await startServerSync(target: 'authors', full: fullSync);
+    final j = await startServerSync(target: 'authors');
     if (j == null || j['ok'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3653,16 +3645,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                               '${authors.length} 位作者 · ${_selLabel()} · 播放/访问/水滴为本机统计',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.grey))),
-                      Text('全量同步',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: fullSync ? Colors.blue : Colors.grey)),
-                      Transform.scale(
-                        scale: 0.8,
-                        child: Switch(
-                            value: fullSync,
-                            onChanged: syncing ? null : _setFull),
-                      ),
                     ]),
                   ),
                   Expanded(
@@ -5436,6 +5418,9 @@ class _AuthorPageState extends State<AuthorPage> {
   List works = [];
   String primaryLib = '';
   bool loading = true;
+  bool fullSync = true;
+  bool syncing = false;
+  Timer? syncTimer;
 
   List<String> get _libs =>
       (widget.libs == null || widget.libs!.isEmpty) ? [cfg.lib] : widget.libs!;
@@ -5443,11 +5428,102 @@ class _AuthorPageState extends State<AuthorPage> {
   @override
   void initState() {
     super.initState();
+    SharedPreferences.getInstance().then((sp) {
+      if (mounted) {
+        setState(() => fullSync = sp.getBool('sync_full_author') ?? true);
+      }
+    });
     load();
+  }
+
+  @override
+  void dispose() {
+    syncTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _setFull(bool v) async {
+    setState(() => fullSync = v);
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool('sync_full_author', v);
+  }
+
+  // 单作者同步：仅 douyin 库配置了抓取脚本
+  bool get _canSync =>
+      primaryLib == 'douyin' ||
+      (primaryLib.isEmpty && (cfg.lib.isEmpty || cfg.lib == 'douyin'));
+
+  Future<void> _syncAuthor() async {
+    if (syncing || !_canSync) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('同步作者 @${widget.name}'),
+        content: Text(fullSync
+            ? '将重新抓取该作者在收藏夹内的全部作品信息（头像、简介、封面），耗时较长。\n\n同步在 NAS 后台运行。'
+            : '只补抓该作者缺少头像/简介的作品信息，速度较快。\n\n同步在 NAS 后台运行。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('开始同步')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final j = await startServerSync(
+        target: 'author',
+        author: widget.name,
+        lib: primaryLib,
+        full: fullSync);
+    if (j == null || j['ok'] != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+      }
+      return;
+    }
+    setState(() => syncing = true);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已开始同步该作者，完成后自动刷新')));
+    }
+    syncTimer?.cancel();
+    var tries = 0;
+    syncTimer = Timer.periodic(const Duration(seconds: 4), (t) async {
+      tries++;
+      final s = await serverSyncStatus();
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (s == null) {
+        if (tries > 5) {
+          t.cancel();
+          setState(() => syncing = false);
+        }
+        return;
+      }
+      if (s['running'] == true) return;
+      t.cancel();
+      setState(() => syncing = false);
+      final code = s['exit'];
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(code == 0 ? '作者同步完成' : '作者同步结束（退出码 $code）')));
+      }
+      await load();
+    });
   }
 
   Future<void> load() async {
     final seen = <String>{};
+    works = [];
+    bio = '';
+    av = '';
+    primaryLib = '';
     for (final lib in _libs) {
       try {
         final r = await http.get(cfg.u('/api/authors.json', lib: lib),
@@ -5503,7 +5579,18 @@ class _AuthorPageState extends State<AuthorPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('@${widget.name}')),
+      appBar: AppBar(title: Text('@${widget.name}'), actions: [
+        if (_canSync)
+          IconButton(
+              tooltip: syncing ? '同步中…' : '同步该作者',
+              onPressed: syncing ? null : _syncAuthor,
+              icon: syncing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.sync)),
+      ]),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [
@@ -5554,6 +5641,30 @@ class _AuthorPageState extends State<AuthorPage> {
                           ])),
                     ]),
               ),
+              if (_canSync)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+                  child: Row(children: [
+                    const Icon(Icons.cloud_sync_outlined,
+                        size: 14, color: Colors.grey),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                        child: Text(
+                            '全量同步该作者作品信息（关闭则只补抓缺失）',
+                            style:
+                                TextStyle(fontSize: 11, color: Colors.grey))),
+                    Text('全量',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: fullSync ? Colors.blue : Colors.grey)),
+                    Transform.scale(
+                      scale: 0.8,
+                      child: Switch(
+                          value: fullSync,
+                          onChanged: syncing ? null : _setFull),
+                    ),
+                  ]),
+                ),
               const Divider(height: 1),
               Expanded(
                   child: WorkGrid(
