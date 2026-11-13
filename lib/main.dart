@@ -1938,7 +1938,7 @@ class _CollectionPageState extends State<CollectionPage> {
                       onSelected: (_) => setState(() => filter = 'p')),
                   const SizedBox(width: 8),
                   ChoiceChip(
-                      label: const Text('已删除'),
+                      label: const Text('删除监测'),
                       selected: filter == 'del',
                       onSelected: (_) => setState(() => filter = 'del')),
                   const Spacer(),
@@ -1954,7 +1954,7 @@ class _CollectionPageState extends State<CollectionPage> {
                 child: filter == 'del'
                     ? (dels.isEmpty
                         ? Center(
-                            child: Text(kw.isNotEmpty ? '无匹配的已删除作品' : '暂无已删除记录',
+                            child: Text(kw.isNotEmpty ? '无匹配的删除记录' : '暂无删除记录',
                                 style: const TextStyle(color: Colors.grey)))
                         : ListView.separated(
                             itemCount: dels.length,
