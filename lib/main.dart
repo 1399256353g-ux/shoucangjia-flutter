@@ -2219,20 +2219,62 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _openLibrary() async {
+    final changed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => const LibraryPage()));
+    if (changed == true) await load();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-          title: Text(cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName),
+          // H10：当前库名与媒体库入口合并为一个按钮，并与右侧功能按钮分隔
+          titleSpacing: 4,
+          title: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Material(
+              color: theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(20),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                key: const ValueKey('lib-selector'),
+                onTap: _openLibrary,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Row(children: [
+                    Icon(Icons.library_books_outlined,
+                        size: 18, color: theme.colorScheme.primary),
+                    const SizedBox(width: 6),
+                    Flexible(
+                        child: Text(
+                            cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w600))),
+                    const Icon(Icons.arrow_drop_down, size: 20),
+                  ]),
+                ),
+              ),
+            ),
+          ),
           actions: [
             IconButton(
-                icon: const Icon(Icons.library_books_outlined),
-                tooltip: '媒体库',
-                onPressed: () async {
-                  final changed = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(builder: (_) => const LibraryPage()));
-                  if (changed == true) await load();
-                }),
+                icon: const Icon(Icons.refresh),
+                tooltip: '刷新收藏夹',
+                onPressed: load),
+            // 与「库选择」分隔：右侧为功能按钮/设置
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Container(
+                width: 1,
+                color: theme.dividerColor.withValues(alpha: 0.6),
+              ),
+            ),
             if (defaultIdx != null)
               IconButton(
                   icon: const Icon(Icons.star, color: Colors.amber),
