@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
+import 'author_grade.dart';
 import 'deleted_cover.dart';
 import 'library_badge.dart';
 import 'playback_flow.dart';
@@ -558,17 +559,20 @@ class LibBadges extends StatelessWidget {
   final List<String> libIds;
   final List<String> order;
   final Map<String, String> names;
+  // 等级词条（D–S），空串表示不显示
+  final String grade;
   const LibBadges({
     super.key,
     required this.libIds,
     this.order = const [],
     this.names = const {},
+    this.grade = '',
   });
 
   @override
   Widget build(BuildContext context) {
     final labels = LibraryBadge.labels(libIds, names: names);
-    if (labels.isEmpty) return const SizedBox.shrink();
+    if (labels.isEmpty && grade.isEmpty) return const SizedBox.shrink();
     final shown = libIds.where((e) => e.isNotEmpty).toList();
     return Wrap(
       spacing: 3,
@@ -582,9 +586,193 @@ class LibBadges extends StatelessWidget {
                 : LibraryBadge.colorFor(i < shown.length ? shown[i] : '',
                     order: order),
           ),
+        if (grade.isNotEmpty)
+          LibBadgeChip(
+            label: grade,
+            color: AuthorGrade.colorForGrade(grade),
+          ),
       ],
     );
   }
+}
+
+class AuthorGradeSettingsPage extends StatefulWidget {
+  const AuthorGradeSettingsPage({super.key});
+  @override
+  State<AuthorGradeSettingsPage> createState() =>
+      _AuthorGradeSettingsPageState();
+}
+
+class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
+  final _play = TextEditingController();
+  final _drop = TextEditingController();
+  final _work = TextEditingController();
+  final _thresholds = List<TextEditingController>.generate(
+      AuthorGrade.grades.length - 1, (_) => TextEditingController());
+  String? _error;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AuthorGrade.load().then((_) {
+      if (!mounted) return;
+      setState(() {
+        _fillFromConfig();
+        _ready = true;
+      });
+    });
+  }
+
+  void _fillFromConfig() {
+    _play.text = '${AuthorGrade.playWeight}';
+    _drop.text = '${AuthorGrade.dropWeight}';
+    _work.text = '${AuthorGrade.workWeight}';
+    for (var i = 0; i < _thresholds.length; i++) {
+      _thresholds[i].text = '${AuthorGrade.thresholds[i]}';
+    }
+  }
+
+  @override
+  void dispose() {
+    _play.dispose();
+    _drop.dispose();
+    _work.dispose();
+    for (final c in _thresholds) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  int? _read(TextEditingController c) {
+    final v = int.tryParse(c.text.trim());
+    if (v == null || v < 0) return null;
+    return v;
+  }
+
+  Future<void> _save() async {
+    final play = _read(_play);
+    final drop = _read(_drop);
+    final work = _read(_work);
+    final ts = _thresholds.map(_read).toList();
+    if (play == null || drop == null || work == null) {
+      setState(() => _error = '权重必须是不小于 0 的整数');
+      return;
+    }
+    if (ts.any((e) => e == null)) {
+      setState(() => _error = '门槛必须是不小于 0 的整数');
+      return;
+    }
+    final list = ts.cast<int>();
+    for (var i = 1; i < list.length; i++) {
+      if (list[i] <= list[i - 1]) {
+        setState(() => _error = '等级门槛需逐级递增（C < B < A < S）');
+        return;
+      }
+    }
+    setState(() => _error = null);
+    AuthorGrade.playWeight = play;
+    AuthorGrade.dropWeight = drop;
+    AuthorGrade.workWeight = work;
+    AuthorGrade.thresholds = list;
+    await AuthorGrade.save();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('等级配置已保存')));
+  }
+
+  Future<void> _reset() async {
+    AuthorGrade.reset();
+    await AuthorGrade.save();
+    if (!mounted) return;
+    setState(() {
+      _fillFromConfig();
+      _error = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('作者等级'), actions: [
+        TextButton(onPressed: _ready ? _reset : null, child: const Text('恢复默认')),
+      ]),
+      body: !_ready
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(padding: const EdgeInsets.all(16), children: [
+              const Text('等级词条',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              const Text(
+                  '作者卡片库词条后显示 D–S 等级。分数 = 播放×权重 + 水滴×权重 + 作品×权重；'
+                  '达到门槛即升一级，等级越高门槛递增。',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                for (var i = 0; i < AuthorGrade.grades.length; i++)
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    LibBadgeChip(
+                        label: AuthorGrade.grades[i],
+                        color: AuthorGrade.colors[i]),
+                    const SizedBox(width: 4),
+                    Text(
+                        i == 0
+                            ? '0 起'
+                            : '≥${AuthorGrade.thresholds[i - 1]}',
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.grey)),
+                  ]),
+              ]),
+              const Divider(height: 28),
+              Row(children: [
+                Expanded(child: _numField('播放权重', _play)),
+                const SizedBox(width: 10),
+                Expanded(child: _numField('水滴权重', _drop)),
+                const SizedBox(width: 10),
+                Expanded(child: _numField('作品权重', _work)),
+              ]),
+              const SizedBox(height: 16),
+              const Text('等级门槛（分数）',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(children: [
+                for (var i = 1; i < AuthorGrade.grades.length; i++) ...[
+                  if (i > 1) const SizedBox(width: 8),
+                  Expanded(
+                    child: _numField(
+                        '${AuthorGrade.grades[i - 1]}→${AuthorGrade.grades[i]}',
+                        _thresholds[i - 1]),
+                  ),
+                ],
+              ]),
+              const SizedBox(height: 12),
+              Text(
+                  '示例：播放 100、水滴 5、作品 10 → '
+                  '${AuthorGrade.score(plays: 100, drops: 5, works: 10)} 分 → '
+                  '${AuthorGrade.gradeFor(plays: 100, drops: 5, works: 10)} 级',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(_error!,
+                    style: const TextStyle(
+                        color: Colors.redAccent, fontSize: 12)),
+              ],
+              const SizedBox(height: 20),
+              FilledButton(onPressed: _save, child: const Text('保存')),
+            ]),
+    );
+  }
+
+  Widget _numField(String label, TextEditingController c) => TextField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: InputDecoration(
+          labelText: label,
+          isDense: true,
+          border: const OutlineInputBorder(),
+        ),
+      );
 }
 
 class SettingsHubPage extends StatelessWidget {
@@ -622,6 +810,13 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('作者卡片上的库标签 · 每库自动配色，可自定义'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const LibraryBadgeColorsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.workspace_premium_outlined),
+          title: const Text('作者等级'),
+          subtitle: const Text('D–S 等级词条 · 播放/水滴加权、门槛可调'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const AuthorGradeSettingsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.tune),
@@ -2878,6 +3073,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     LibraryBadge.load().then((_) {
       if (mounted) setState(() {});
     });
+    AuthorGrade.load().then((_) {
+      if (mounted) setState(() {});
+    });
     load();
   }
 
@@ -3341,6 +3539,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                       order: libs
                                           .map((e) => '${e['id']}')
                                           .toList(),
+                                      grade: AuthorGrade.gradeFor(
+                                        plays: _num(_s(e.key)['p']),
+                                        drops: _num(_s(e.key)['dr']),
+                                        works: _num(e.value['n']),
+                                      ),
                                       names: {
                                         for (final l in libs)
                                           '${l['id']}':
