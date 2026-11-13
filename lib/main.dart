@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
+import 'app_theme.dart';
 import 'author_grade.dart';
 import 'collection_sync.dart';
 import 'deleted_cover.dart';
@@ -301,6 +302,7 @@ class _AppState extends State<App> {
     cfg.pass = sp.getString('pass') ?? '';
     cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
+    await AppTheme.load();
     if (mounted) setState(() => ready = true);
   }
 
@@ -310,26 +312,26 @@ class _AppState extends State<App> {
       return const MaterialApp(
           home: Scaffold(body: Center(child: CircularProgressIndicator())));
     }
-    return MaterialApp(
-      title: 'Dizi',
-      navigatorKey: navKey,
-      // 显式 emoji 字体回退链：Windows/Android/iOS 各自命中本机彩色 emoji 字体，
-      // 避免收藏夹名（如「🦶」）或作者名里的 emoji 显示成方框。
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        useMaterial3: true,
-        fontFamilyFallback: kEmojiFontFallback,
+    // 主题选取即时生效：AppTheme.current 变化会重建 MaterialApp（设置页预览用）。
+    return ValueListenableBuilder<String>(
+      valueListenable: AppTheme.current,
+      builder: (context, _, __) => MaterialApp(
+        title: 'Dizi',
+        navigatorKey: navKey,
+        // 主题里带显式 emoji 字体回退链：Windows/Android/iOS 各自命中本机彩色
+        // emoji 字体，避免收藏夹名（如「🦶」）或作者名里的 emoji 显示成方框。
+        theme: AppTheme.themeData,
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+        },
+        actions: {
+          DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
+            navKey.currentState?.maybePop();
+            return null;
+          }),
+        },
+        home: cfg.base.isEmpty ? const SettingsPage() : const HomePage(),
       ),
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-      },
-      actions: {
-        DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
-          navKey.currentState?.maybePop();
-          return null;
-        }),
-      },
-      home: cfg.base.isEmpty ? const SettingsPage() : const HomePage(),
     );
   }
 }
@@ -945,6 +947,13 @@ class SettingsHubPage extends StatelessWidget {
               builder: (_) => const AuthorGradeSettingsPage())),
         ),
         ListTile(
+          leading: const Icon(Icons.palette_outlined),
+          title: const Text('主题外观'),
+          subtitle: const Text('多套配色 · 点击即时预览，不用重启'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ThemeSettingsPage())),
+        ),
+        ListTile(
           leading: const Icon(Icons.tune),
           title: const Text('播放参数'),
           subtitle: const Text('默认倍速 · 图文间隔 · 全屏隐藏时间'),
@@ -973,6 +982,163 @@ class SettingsHubPage extends StatelessWidget {
       ]),
     );
   }
+}
+
+class ThemeSettingsPage extends StatelessWidget {
+  const ThemeSettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: AppTheme.current,
+      builder: (context, currentId, __) {
+        final active = normalizeThemeId(currentId);
+        return Scaffold(
+          appBar: AppBar(title: const Text('主题外观')),
+          body: ListView(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 4, 12),
+                child: Text(
+                  '点任意一套主题立即切换并预览，选择会自动保存；'
+                  '播放页始终保持全屏黑底，主题影响浏览与设置界面。',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: kAppThemes.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 1.22,
+                ),
+                itemBuilder: (context, i) {
+                  final spec = kAppThemes[i];
+                  return _ThemePreviewCard(
+                    spec: spec,
+                    selected: spec.id == active,
+                    onTap: () => AppTheme.select(spec.id),
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+              Text('用当前主题预览',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 8),
+              Card(
+                margin: EdgeInsets.zero,
+                child: Column(children: [
+                  const ListTile(
+                    leading: Icon(Icons.play_circle_outline),
+                    title: Text('示例条目'),
+                    subtitle: Text('标题与副标题会跟随主题变色'),
+                    trailing: Icon(Icons.chevron_right),
+                  ),
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                    child: Row(children: [
+                      FilledButton(onPressed: () {}, child: const Text('主按钮')),
+                      const SizedBox(width: 10),
+                      OutlinedButton(
+                          onPressed: () {}, child: const Text('次按钮')),
+                      const Spacer(),
+                      Switch(value: true, onChanged: (_) {}),
+                    ]),
+                  ),
+                ]),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 主题卡片：用该主题自己的配色画一个迷你界面，选中项加描边与勾。
+class _ThemePreviewCard extends StatelessWidget {
+  final AppThemeSpec spec;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ThemePreviewCard({
+    required this.spec,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = buildThemeData(spec).colorScheme;
+    final borderColor = selected
+        ? scheme.primary
+        : scheme.outlineVariant.withValues(alpha: 0.5);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          decoration: BoxDecoration(
+            color: spec.background,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: selected ? 2 : 1),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                _dot(scheme.primary),
+                const SizedBox(width: 6),
+                _dot(scheme.secondary),
+                const SizedBox(width: 6),
+                _dot(scheme.tertiary),
+                const Spacer(),
+                if (selected)
+                  Icon(Icons.check_circle, size: 18, color: scheme.primary),
+              ]),
+              const Spacer(),
+              Container(
+                height: 4,
+                width: 64,
+                decoration: BoxDecoration(
+                    color: scheme.primary,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(height: 8),
+              Text(spec.name,
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface)),
+              const SizedBox(height: 2),
+              Text(spec.subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11, color: scheme.onSurfaceVariant)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dot(Color c) => Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(color: c, shape: BoxShape.circle));
 }
 
 class PlaybackSettingsPage extends StatefulWidget {
@@ -1104,7 +1270,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                  color: Colors.white10,
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(6)),
               child: Text(AppSettings.keyLabel(a),
                   style: const TextStyle(
@@ -1157,15 +1323,20 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
           height: 88,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-              border: Border.all(color: Colors.white24),
+              border: Border.all(
+                  color: Theme.of(context).colorScheme.outline),
               borderRadius: BorderRadius.circular(10)),
-          child: const Column(
+          child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.keyboard, size: 26, color: Colors.white54),
-                SizedBox(height: 8),
+                Icon(Icons.keyboard,
+                    size: 26,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                const SizedBox(height: 8),
                 Text('请按下要绑定的按键…',
-                    style: TextStyle(fontSize: 13, color: Colors.white70)),
+                    style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
               ]),
         ),
       ),
@@ -2658,21 +2829,28 @@ class _CollectionPageState extends State<CollectionPage> {
                 height: 84,
                 child: cov.isEmpty
                     ? Container(
-                        color: Colors.white10,
-                        child: const Center(
-                            child: Icon(Icons.image_not_supported_outlined,
-                                size: 20, color: Colors.white38)))
+                        color:
+                            Theme.of(context).colorScheme.surfaceContainerHighest,
+                        child: Icon(Icons.image_not_supported_outlined,
+                            size: 20,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant))
                     : CachedNetworkImage(
                         imageUrl: cfg.base + cfg.media(cov),
                         httpHeaders: cfg.headers,
                         fit: BoxFit.cover,
-                        placeholder: (_, __) =>
-                            Container(color: Colors.white10),
+                        placeholder: (_, __) => Container(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest),
                         errorWidget: (_, __, ___) => Container(
-                            color: Colors.white10,
-                            child: const Center(
-                                child: Icon(Icons.broken_image_outlined,
-                                    size: 20, color: Colors.white38)))),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest,
+                            child: Icon(Icons.broken_image_outlined,
+                                size: 20,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant))),
               ),
             ),
           ),
@@ -2921,11 +3099,16 @@ class _CollectionPageState extends State<CollectionPage> {
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 6),
-                              color: Colors.white10,
-                              child: const Text(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              child: Text(
                                   '本地文件已清理，预览退回作者头像；点「跳转」回库查看该作者其他作品',
                                   style: TextStyle(
-                                      fontSize: 11, color: Colors.grey)),
+                                      fontSize: 11,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant)),
                             ),
                             Expanded(
                               child: ListView.separated(
@@ -3050,11 +3233,11 @@ class _RankPageState extends State<RankPage> {
     if (mounted) load();
   }
 
-  Color _rankColor(int i) {
+  Color _rankColor(BuildContext context, int i) {
     if (i == 0) return const Color(0xFFFFC107);
     if (i == 1) return const Color(0xFFB0BEC5);
     if (i == 2) return const Color(0xFFBF8970);
-    return Colors.white38;
+    return Theme.of(context).colorScheme.onSurfaceVariant;
   }
 
   @override
@@ -3216,7 +3399,7 @@ class _RankPageState extends State<RankPage> {
                                             style: TextStyle(
                                                 fontSize: 16,
                                                 fontWeight: FontWeight.bold,
-                                                color: _rankColor(i)))),
+                                                color: _rankColor(context, i)))),
                                     ClipOval(
                                       child: SizedBox(
                                         width: 42,
@@ -3258,8 +3441,11 @@ class _RankPageState extends State<RankPage> {
                                       fontWeight: FontWeight.w600)),
                               subtitle: Text(
                                   '播放 ${_n(e['plays'])} · 水滴 ${_n(e['drops'])} · ${_n(e['works'])} 作品',
-                                  style: const TextStyle(
-                                      fontSize: 10, color: Colors.white60)),
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant)),
                               trailing: Text(
                                   metric == 'drop' ? '💧 $score' : '$score',
                                   style: const TextStyle(
@@ -3354,11 +3540,11 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
     }
   }
 
-  Color _rankColor(int i) {
+  Color _rankColor(BuildContext context, int i) {
     if (i == 0) return const Color(0xFFFFC107);
     if (i == 1) return const Color(0xFFB0BEC5);
     if (i == 2) return const Color(0xFFBF8970);
-    return Colors.white38;
+    return Theme.of(context).colorScheme.onSurfaceVariant;
   }
 
   @override
@@ -3447,7 +3633,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                                     style: TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold,
-                                        color: _rankColor(i))),
+                                        color: _rankColor(context, i))),
                               ),
                               title: Row(children: [
                                 Flexible(
@@ -3474,8 +3660,11 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                                   ),
                               ]),
                               subtitle: Text(sub,
-                                  style: const TextStyle(
-                                      fontSize: 10, color: Colors.white60)),
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant)),
                               trailing: Text(
                                   metric == 'drop' ? '💧 $score' : '$score',
                                   style: const TextStyle(
@@ -3913,7 +4102,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                     padding:
                                         const EdgeInsets.fromLTRB(6, 22, 6, 8),
                                     decoration: BoxDecoration(
-                                        color: Colors.white10,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .surfaceContainerHighest,
                                         borderRadius:
                                             BorderRadius.circular(12)),
                                     child: Column(
@@ -3965,14 +4156,20 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                           Text(_sub(e),
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                   fontSize: 10,
-                                                  color: Colors.white60)),
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant)),
                                           Text('${_num(e.value['n'])} 作品',
                                               maxLines: 1,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                   fontSize: 9,
-                                                  color: Colors.white38)),
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant
+                                                      .withValues(
+                                                          alpha: 0.7))),
                                         ]),
                                   ),
                                   Positioned(
