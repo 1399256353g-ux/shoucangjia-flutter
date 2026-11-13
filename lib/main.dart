@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
+import 'deleted_cover.dart';
 import 'playback_flow.dart';
 import 'text_fit.dart';
 
@@ -1890,6 +1891,7 @@ class CollectionPage extends StatefulWidget {
 class _CollectionPageState extends State<CollectionPage> {
   List works = [];
   List deleted = [];
+  Map<String, dynamic> authorsIndex = {};
   String filter = 'all';
   String sort = 'new';
   bool searching = false;
@@ -1918,6 +1920,118 @@ class _CollectionPageState extends State<CollectionPage> {
   }
 
   List get deletedView => deleted.where((d) => _match(d as Map)).toList();
+
+  void _openAuthor(String name) {
+    if (name.isEmpty) return;
+    Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
+  }
+
+  void _previewCover(String path, String title) {
+    if (path.isEmpty) return;
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => GestureDetector(
+        onTap: () => Navigator.of(context).maybePop(),
+        child: InteractiveViewer(
+          minScale: 1,
+          maxScale: 5,
+          child: Center(
+            child: CachedNetworkImage(
+              imageUrl: cfg.base + cfg.media(path),
+              httpHeaders: cfg.headers,
+              fit: BoxFit.contain,
+              placeholder: (_, __) =>
+                  const CircularProgressIndicator(color: Colors.white38),
+              errorWidget: (_, __, ___) => Text(title,
+                  style: const TextStyle(color: Colors.white70)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // 已删除作品行：封面预览 + 跳转作者主页（回库查看该作者其他作品）
+  Widget _deletedTile(Map d) {
+    final cov = deletedCoverPath(d, authorsIndex);
+    final name = '${d['a'] ?? ''}';
+    final at = '${(d['at'] ?? '').toString().split('T').first}';
+    return InkWell(
+      onTap: name.isEmpty ? null : () => _openAuthor(name),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          GestureDetector(
+            onTap: cov.isEmpty
+                ? null
+                : () => _previewCover(cov, '${d['ti'] ?? ''}'),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 64,
+                height: 84,
+                child: cov.isEmpty
+                    ? Container(
+                        color: Colors.white10,
+                        child: const Center(
+                            child: Icon(Icons.image_not_supported_outlined,
+                                size: 20, color: Colors.white38)))
+                    : CachedNetworkImage(
+                        imageUrl: cfg.base + cfg.media(cov),
+                        httpHeaders: cfg.headers,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) =>
+                            Container(color: Colors.white10),
+                        errorWidget: (_, __, ___) => Container(
+                            color: Colors.white10,
+                            child: const Center(
+                                child: Icon(Icons.broken_image_outlined,
+                                    size: 20, color: Colors.white38)))),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text('${d['ti'] ?? ''}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 4),
+                Text('@$name · ${d['d'] ?? ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 2),
+                Text('抖音已删除${at.isEmpty ? '' : ' · $at'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 11, color: Colors.orangeAccent)),
+              ])),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 84,
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  OutlinedButton(
+                      onPressed: name.isEmpty ? null : () => _openAuthor(name),
+                      style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 10)),
+                      child: const Text('跳转', style: TextStyle(fontSize: 12))),
+                ]),
+          ),
+        ]),
+      ),
+    );
+  }
 
   Timer? syncTimer;
   bool syncing = false;
@@ -1956,6 +2070,18 @@ class _CollectionPageState extends State<CollectionPage> {
         works = (m['works'] as List);
         deleted = (m['deleted'] as List?) ?? [];
       });
+    } catch (_) {}
+    // 作者索引用于「已删除」列表回退显示头像；失败不影响主列表
+    try {
+      final a =
+          await http.get(cfg.u('/api/authors.json'), headers: cfg.headers);
+      if (a.statusCode == 200) {
+        final m = jsonDecode(a.body);
+        if (m is Map && mounted) {
+          setState(() =>
+              authorsIndex = Map<String, dynamic>.from(m));
+        }
+      }
     } catch (_) {}
   }
 
@@ -2101,29 +2227,27 @@ class _CollectionPageState extends State<CollectionPage> {
                         ? Center(
                             child: Text(kw.isNotEmpty ? '无匹配的已删除作品' : '暂无已删除记录',
                                 style: const TextStyle(color: Colors.grey)))
-                        : ListView.separated(
-                            itemCount: dels.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1),
-                            itemBuilder: (_, i) {
-                              final d = dels[i];
-                              return ListTile(
-                                leading: const Icon(Icons.delete_outline,
-                                    color: Colors.grey),
-                                title: Text('${d['ti'] ?? ''}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis),
-                                subtitle: Text(
-                                    '@${d['a'] ?? ''} · ${d['d'] ?? ''} · 已在抖音删除',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis),
-                                trailing: Text(
-                                    '${(d['at'] ?? '').toString().split('T').first}',
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.grey)),
-                              );
-                            },
-                          ))
+                        : Column(children: [
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              color: Colors.white10,
+                              child: const Text(
+                                  '本地文件已清理，预览退回作者头像；点「跳转」回库查看该作者其他作品',
+                                  style: TextStyle(
+                                      fontSize: 11, color: Colors.grey)),
+                            ),
+                            Expanded(
+                              child: ListView.separated(
+                                itemCount: dels.length,
+                                separatorBuilder: (_, __) =>
+                                    const Divider(height: 1),
+                                itemBuilder: (_, i) =>
+                                    _deletedTile(dels[i] as Map),
+                              ),
+                            ),
+                          ]))
                     : (list.isEmpty && kw.isNotEmpty
                         ? Center(
                             child: Text('无匹配作品：$kw',
