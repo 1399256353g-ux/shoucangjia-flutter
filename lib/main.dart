@@ -3463,7 +3463,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               Positioned(
                 left: 14,
                 right: 80,
-                bottom: 96,
+                bottom: 96 + MediaQuery.of(context).padding.bottom,
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
