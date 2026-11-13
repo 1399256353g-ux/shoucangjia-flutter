@@ -3037,6 +3037,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             await windowManager.setFullScreen(false);
           } catch (_) {}
         }
+        // 退出全屏：立刻取消自动隐藏，避免过几秒控制栏又消失
+        hideTimer?.cancel();
+        hideTimer = null;
         setState(() => ui = true);
       }
     } finally {
@@ -3052,7 +3055,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     hideTimer?.cancel();
     if (fs) {
       hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
-        if (!mounted) return;
+        if (!mounted || !fs) return;
         // 拖动进度条或鼠标停留在进度条上时不隐藏
         if (dragging || barHover) {
           showUi();
