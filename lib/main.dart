@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
+import 'playback_flow.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -2746,6 +2747,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   double _hoverDy = -1;
   bool autoplay = true;
   bool loopOne = false;
+  // 当前页面实际已载入的媒体所属 open token；图文无音频时为 -1。
+  // 用于忽略 player.stop()/切条时上一段媒体迟到的 completed 事件，
+  // 避免刚打开图文就被上一次播放的完成事件带去下一条。
+  int _mediaToken = -1;
   double? dragFrac;
   bool resumeAfterDrag = false;
   bool dropBusy = false;
@@ -2771,31 +2776,37 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     player.setPlaylistMode(PlaylistMode.none);
     player.stream.completed.listen((done) {
       if (!done || !mounted) return;
+      if (_mediaToken != _openToken) return;
       final w = widget.works[cur];
       if (w['t'] != 'v') {
         // 图文：整首歌放完才切下一条；单条循环时重新播放；都不开就停下图片轮播
         if (paused) return;
-        if (autoplay && !loopOne) {
-          next();
-        } else if (loopOne) {
+        if (loopOne) {
           try {
             player.seek(Duration.zero);
             player.play();
             setState(() => img = 0);
           } catch (_) {}
+        } else if (autoplay) {
+          next();
         } else {
           pauseAuto();
         }
         return;
       }
       // 视频播完：单条循环就重播本条，否则按连播设置切下一条
-      if (loopOne) {
-        try {
-          player.seek(Duration.zero);
-          player.play();
-        } catch (_) {}
-      } else if (autoplay) {
-        next();
+      switch (videoEndAction(loopOne: loopOne, autoplay: autoplay)) {
+        case VideoEndAction.replay:
+          try {
+            player.seek(Duration.zero);
+            player.play();
+          } catch (_) {}
+          break;
+        case VideoEndAction.nextWork:
+          next();
+          break;
+        case VideoEndAction.stop:
+          break;
       }
     });
     player.stream.playing.listen((v) {
@@ -2845,6 +2856,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     retryTimer?.cancel();
     manualPic = false;
     _pendingPage = null;
+    _mediaToken = -1;
     setState(() {
       cur = i;
       img = 0;
@@ -2868,6 +2880,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       } else if ((w['au'] ?? '').toString().isNotEmpty) {
         await player.open(Media(cfg.base + cfg.media(w['au'].toString()),
             httpHeaders: cfg.headers));
+      }
+      if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
+          my == _openToken) {
+        _mediaToken = my;
       }
     } catch (_) {}
     if (my != _openToken) return;
@@ -2898,6 +2914,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         player.open(Media(cfg.base + cfg.media(w['m'][0].toString()),
             httpHeaders: cfg.headers));
         player.play();
+        _mediaToken = my;
       }
     });
     if (w['t'] != 'v') startAuto();
@@ -2973,13 +2990,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (w['t'] == 'v') return;
       final n = (w['m'] as List).length;
       final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
-      if (img < n - 1) {
-        setState(() => img++);
-      } else if (loopOne || hasAudio) {
-        // 单条循环，或还有背景音乐没放完：图片回到第一张继续
-        setState(() => img = 0);
-      } else {
-        next();
+      switch (slideshowAction(
+          index: img, count: n, loopOne: loopOne, hasAudio: hasAudio)) {
+        case SlideshowAction.nextImage:
+          setState(() => img++);
+          break;
+        case SlideshowAction.restartImages:
+          // 单条循环，或还有背景音乐没放完：图片回到第一张继续
+          setState(() => img = 0);
+          break;
+        case SlideshowAction.nextWork:
+          next();
+          break;
       }
     });
     autoTimer = t;
