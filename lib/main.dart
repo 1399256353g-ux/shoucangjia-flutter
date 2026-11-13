@@ -2944,15 +2944,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   Future<void> openAuthor() async {
     final name = '${widget.works[cur]['a'] ?? ''}';
     if (name.isEmpty) return;
-    final resume = !paused;
     try {
       player.pause();
     } catch (_) {}
     await Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => AuthorPage(name: name)));
-    if (resume && mounted && !fs) {
+    // 从作者页返回：直接续播，不再保持暂停
+    if (mounted) {
       try {
         player.play();
+        if (widget.works[cur]['t'] != 'v' && !manualPic) startAuto();
       } catch (_) {}
     }
   }
