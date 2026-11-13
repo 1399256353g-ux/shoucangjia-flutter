@@ -12,7 +12,6 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
-import 'playback_flow.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,13 +27,6 @@ void hapticTap() {
   try {
     HapticFeedback.lightImpact();
   } catch (_) {}
-}
-
-// 动图判断：GIF 必须交给 Image.network 才能播放动画，
-// CachedNetworkImage 只取首帧。
-bool isGifPath(String path) {
-  final low = path.toLowerCase();
-  return low.endsWith('.gif') || low.contains('.gif?');
 }
 
 class Cfg {
@@ -1578,8 +1570,6 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() => cols = list);
       for (final c in list) {
-        // 已抓到合集封面的直接使用，其余回退到首条作品封面
-        if ((c['cover'] ?? '').toString().isNotEmpty) continue;
         http
             .get(cfg.u('/api/c/${c['idx']}.json'), headers: cfg.headers)
             .then((rr) {
@@ -1597,16 +1587,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void openDefault() {
-    final i = cols.indexWhere(
-        (c) => defaultIdx != null && (c['idx'] as num).toInt() == defaultIdx);
-    if (i < 0) return;
-    final c = cols[i];
-    Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
-  }
-
-  // 星标：点击卡片右上角设为/取消默认收藏夹，真正写回服务端
+  // 星标：点击行尾星号设为/取消默认收藏夹，写回服务端
   Future<void> _setDefault(int idx) async {
     final next = defaultIdx == idx ? null : idx;
     try {
@@ -1633,6 +1614,15 @@ class _HomePageState extends State<HomePage> {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('设置失败：$e')));
     }
+  }
+
+  void openDefault() {
+    final i = cols.indexWhere(
+        (c) => defaultIdx != null && (c['idx'] as num).toInt() == defaultIdx);
+    if (i < 0) return;
+    final c = cols[i];
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
   }
 
   @override
@@ -1686,184 +1676,60 @@ class _HomePageState extends State<HomePage> {
           ? Center(child: Text('加载失败：$err'))
           : cols.isEmpty
               ? const Center(child: CircularProgressIndicator())
-              : LayoutBuilder(builder: (context, cons) {
-                  final w = cons.maxWidth;
-                  final n = w >= 1200 ? 5 : w >= 900 ? 4 : w >= 620 ? 3 : 2;
-                  return GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: n,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 0.72,
-                    ),
-                    itemCount: cols.length,
-                    itemBuilder: (_, i) {
-                      final c = cols[i];
-                      final idx = (c['idx'] as num).toInt();
-                      final remote = (c['cover'] ?? '').toString();
-                      final fallback = covers['$idx'];
-                      final imageUrl = remote.isNotEmpty
-                          ? cfg.u(remote).toString()
-                          : (fallback == null
-                              ? null
-                              : cfg.base + cfg.media(fallback));
-                      final isDefault = defaultIdx != null && idx == defaultIdx;
-                      return _CollectionTile(
-                        idx: idx,
-                        name: '${c['name']}',
-                        count: c['count'] is num
-                            ? (c['count'] as num).toInt()
-                            : null,
-                        imageUrl: imageUrl,
-                        isDefault: isDefault,
-                        syncOff: c['sync'] == false,
-                        onStarTap: () => _setDefault(idx),
-                        onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => CollectionPage(
-                                    name: '${c['name']}', idx: idx))),
-                      );
-                    },
-                  );
-                }),
-    );
-  }
-}
-
-/// 收藏夹图片卡片：大封面 + 底部渐变信息，默认收藏夹用金色星标
-class _CollectionTile extends StatelessWidget {
-  final int idx;
-  final String name;
-  final int? count;
-  final String? imageUrl;
-  final bool isDefault;
-  final bool syncOff;
-  final VoidCallback onTap;
-  final VoidCallback? onStarTap;
-  const _CollectionTile({
-    required this.idx,
-    required this.name,
-    required this.count,
-    required this.imageUrl,
-    required this.isDefault,
-    required this.syncOff,
-    required this.onTap,
-    this.onStarTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: const Color(0xFF1A1A1A),
-      clipBehavior: Clip.antiAlias,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (imageUrl == null)
-              const Center(
-                  child: Icon(Icons.collections_bookmark_outlined,
-                      color: Colors.white24, size: 36))
-            else
-              CachedNetworkImage(
-                imageUrl: imageUrl!,
-                httpHeaders: cfg.headers,
-                fit: BoxFit.cover,
-                memCacheWidth: 720,
-                fadeInDuration: const Duration(milliseconds: 180),
-                placeholder: (_, __) => Container(color: Colors.black26),
-                errorWidget: (_, __, ___) => const Center(
-                    child: Icon(Icons.broken_image_outlined,
-                        color: Colors.white24)),
-              ),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black87],
-                  stops: [0.45, 1.0],
-                ),
-              ),
-            ),
-            Positioned(
-              left: 8,
-              top: 8,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(6)),
-                child: Text('$idx',
-                    style:
-                        const TextStyle(fontSize: 10, color: Colors.white70)),
-              ),
-            ),
-            Positioned(
-              right: 4,
-              top: 4,
-              child: Tooltip(
-                message: isDefault ? '取消默认收藏夹' : '设为默认收藏夹',
-                child: InkWell(
-                  onTap: onStarTap,
-                  borderRadius: BorderRadius.circular(24),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Icon(
-                        isDefault ? Icons.star : Icons.star_border,
-                        color: isDefault ? Colors.amber : Colors.white38,
-                        size: 20),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: 10,
-              right: 10,
-              bottom: 8,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: isDefault ? Colors.amber : Colors.white)),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Text(count == null ? '' : '$count 作品',
-                          style: const TextStyle(
-                              fontSize: 11, color: Colors.white70)),
-                      if (syncOff) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(4)),
-                          child: const Text('同步已关闭',
-                              style: TextStyle(
-                                  fontSize: 9,
-                                  color: Colors.orangeAccent)),
+              : ListView.separated(
+                  itemCount: cols.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) {
+                    final c = cols[i];
+                    final cover = covers['${c['idx']}'];
+                    final isDefault = defaultIdx != null &&
+                        (c['idx'] as num).toInt() == defaultIdx;
+                    return ListTile(
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 48,
+                          height: 64,
+                          child: cover == null
+                              ? Container(color: Colors.black26)
+                              : CachedNetworkImage(
+                                  imageUrl: cfg.base + cfg.media(cover),
+                                  httpHeaders: cfg.headers,
+                                  fit: BoxFit.cover,
+                                  memCacheWidth: 144),
                         ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+                      ),
+                      title: Text(
+                          '(${c['idx']}) ${c['name']}${isDefault ? '  ★' : ''}',
+                          style: TextStyle(
+                              color: isDefault ? Colors.amber : null)),
+                      subtitle: c['sync'] == false
+                          ? const Text('同步已关闭',
+                              style:
+                                  TextStyle(fontSize: 11, color: Colors.grey))
+                          : null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('${c['count']}',
+                              style: const TextStyle(color: Colors.grey)),
+                          IconButton(
+                            tooltip: isDefault ? '取消默认收藏夹' : '设为默认收藏夹',
+                            icon: Icon(
+                                isDefault ? Icons.star : Icons.star_border,
+                                color:
+                                    isDefault ? Colors.amber : Colors.white38),
+                            onPressed: () => _setDefault(
+                                (c['idx'] as num).toInt()),
+                          ),
+                        ],
+                      ),
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) =>
+                              CollectionPage(name: c['name'], idx: c['idx']))),
+                    );
+                  },
+                ),
     );
   }
 }
@@ -2792,10 +2658,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   double _hoverDy = -1;
   bool autoplay = true;
   bool loopOne = false;
-  // 当前页面实际已载入的媒体所属 open token；图文无音频时为 -1。
-  // 用于忽略 player.stop()/切条时上一段媒体迟到的 completed 事件，
-  // 避免刚打开图文就被上一次播放的完成事件带去下一条。
-  int _mediaToken = -1;
   double? dragFrac;
   bool resumeAfterDrag = false;
   bool dropBusy = false;
@@ -2821,37 +2683,31 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     player.setPlaylistMode(PlaylistMode.none);
     player.stream.completed.listen((done) {
       if (!done || !mounted) return;
-      if (_mediaToken != _openToken) return;
       final w = widget.works[cur];
       if (w['t'] != 'v') {
         // 图文：整首歌放完才切下一条；单条循环时重新播放；都不开就停下图片轮播
         if (paused) return;
-        if (loopOne) {
+        if (autoplay && !loopOne) {
+          next();
+        } else if (loopOne) {
           try {
             player.seek(Duration.zero);
             player.play();
             setState(() => img = 0);
           } catch (_) {}
-        } else if (autoplay) {
-          next();
         } else {
           pauseAuto();
         }
         return;
       }
       // 视频播完：单条循环就重播本条，否则按连播设置切下一条
-      switch (videoEndAction(loopOne: loopOne, autoplay: autoplay)) {
-        case VideoEndAction.replay:
-          try {
-            player.seek(Duration.zero);
-            player.play();
-          } catch (_) {}
-          break;
-        case VideoEndAction.nextWork:
-          next();
-          break;
-        case VideoEndAction.stop:
-          break;
+      if (loopOne) {
+        try {
+          player.seek(Duration.zero);
+          player.play();
+        } catch (_) {}
+      } else if (autoplay) {
+        next();
       }
     });
     player.stream.playing.listen((v) {
@@ -2901,7 +2757,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     retryTimer?.cancel();
     manualPic = false;
     _pendingPage = null;
-    _mediaToken = -1;
     setState(() {
       cur = i;
       img = 0;
@@ -2925,10 +2780,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       } else if ((w['au'] ?? '').toString().isNotEmpty) {
         await player.open(Media(cfg.base + cfg.media(w['au'].toString()),
             httpHeaders: cfg.headers));
-      }
-      if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
-          my == _openToken) {
-        _mediaToken = my;
       }
     } catch (_) {}
     if (my != _openToken) return;
@@ -2959,7 +2810,6 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         player.open(Media(cfg.base + cfg.media(w['m'][0].toString()),
             httpHeaders: cfg.headers));
         player.play();
-        _mediaToken = my;
       }
     });
     if (w['t'] != 'v') startAuto();
@@ -3035,18 +2885,13 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (w['t'] == 'v') return;
       final n = (w['m'] as List).length;
       final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
-      switch (slideshowAction(
-          index: img, count: n, loopOne: loopOne, hasAudio: hasAudio)) {
-        case SlideshowAction.nextImage:
-          setState(() => img++);
-          break;
-        case SlideshowAction.restartImages:
-          // 单条循环，或还有背景音乐没放完：图片回到第一张继续
-          setState(() => img = 0);
-          break;
-        case SlideshowAction.nextWork:
-          next();
-          break;
+      if (img < n - 1) {
+        setState(() => img++);
+      } else if (loopOne || hasAudio) {
+        // 单条循环，或还有背景音乐没放完：图片回到第一张继续
+        setState(() => img = 0);
+      } else {
+        next();
       }
     });
     autoTimer = t;
@@ -3387,7 +3232,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   // 长简介/文案：弹出完整内容，避免被单行截断
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path) {
-    if (isGifPath(path)) {
+    final low = path.toLowerCase();
+    if (low.endsWith('.gif') || low.contains('.gif?')) {
       return Image.network(cfg.base + cfg.media(path),
           headers: cfg.headers, fit: BoxFit.contain, gaplessPlayback: true);
     }
