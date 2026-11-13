@@ -48,3 +48,13 @@ bool shouldForcePlay({
   required bool hasMedia,
 }) =>
     hasMedia && !paused && !opening && !playerPlaying;
+
+/// H1：图文进度条拖动时，按横向比例换算目标图片下标。
+///
+/// [fraction] 为 0–1 的进度比例（越界会被夹紧），[count] 为图片张数。
+/// 按下/拖动时使用（floor），松手直接采用该下标，实现「拖动快速选图」。
+int picIndexAtFraction(double fraction, int count) {
+  if (count <= 1) return 0;
+  final f = fraction.clamp(0.0, 1.0);
+  return (f * count).floor().clamp(0, count - 1);
+}

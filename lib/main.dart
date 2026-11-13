@@ -30,6 +30,13 @@ void hapticTap() {
   } catch (_) {}
 }
 
+// 选择震动（拖动进度条跨段时用，比 lightImpact 更轻）
+void hapticSelect() {
+  try {
+    HapticFeedback.selectionClick();
+  } catch (_) {}
+}
+
 // 动图判断：GIF 必须交给 Image.network 才能播放动画，
 // CachedNetworkImage 只取首帧。
 bool isGifPath(String path) {
@@ -1626,8 +1633,8 @@ class _HomePageState extends State<HomePage> {
       final m = jsonDecode(r.body);
       if (!mounted) return;
       setState(() => defaultIdx = (m['default'] as num?)?.toInt());
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(next == null ? '已取消默认收藏夹' : '已设为默认收藏夹')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next == null ? '已取消默认收藏夹' : '已设为默认收藏夹')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -1688,7 +1695,13 @@ class _HomePageState extends State<HomePage> {
               ? const Center(child: CircularProgressIndicator())
               : LayoutBuilder(builder: (context, cons) {
                   final w = cons.maxWidth;
-                  final n = w >= 1200 ? 5 : w >= 900 ? 4 : w >= 620 ? 3 : 2;
+                  final n = w >= 1200
+                      ? 5
+                      : w >= 900
+                          ? 4
+                          : w >= 620
+                              ? 3
+                              : 2;
                   return GridView.builder(
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -1793,8 +1806,7 @@ class _CollectionTile extends StatelessWidget {
               left: 8,
               top: 8,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(6)),
@@ -1813,8 +1825,7 @@ class _CollectionTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(24),
                   child: Padding(
                     padding: const EdgeInsets.all(8),
-                    child: Icon(
-                        isDefault ? Icons.star : Icons.star_border,
+                    child: Icon(isDefault ? Icons.star : Icons.star_border,
                         color: isDefault ? Colors.amber : Colors.white38,
                         size: 20),
                   ),
@@ -1852,8 +1863,7 @@ class _CollectionTile extends StatelessWidget {
                               borderRadius: BorderRadius.circular(4)),
                           child: const Text('同步已关闭',
                               style: TextStyle(
-                                  fontSize: 9,
-                                  color: Colors.orangeAccent)),
+                                  fontSize: 9, color: Colors.orangeAccent)),
                         ),
                       ],
                     ],
@@ -2802,6 +2812,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   // 连播兜底：视频已就绪但播放器未在播放时补一次 play。
   Timer? playGuard;
   double? dragFrac;
+  // 图文进度条拖动时当前指向的图片序号（null = 未在拖动）
+  int? dragPic;
   bool resumeAfterDrag = false;
   bool dropBusy = false;
   int dropDayLeft = 1;
@@ -3770,7 +3782,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                           Text(
                               isV
                                   ? '${fmt(pos)} / ${fmt(dur)}'
-                                  : '${idx + 1}/${pics.length}',
+                                  : '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}',
                               style: const TextStyle(
                                   fontSize: 10, color: Colors.white60)),
                           const SizedBox(width: 8),
@@ -3785,31 +3797,81 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
                               // 图文：按图片数量分段显示进度，当前张高亮
                               if (!isV && pics.length > 1) {
-                                return SizedBox(
-                                  height: 30,
-                                  child: Row(
-                                    children: List.generate(pics.length, (k) {
-                                      final active = k <= idx;
-                                      return Expanded(
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: () {
-                                            stopAuto();
-                                            setState(() => img = k);
-                                          },
+                                // H1：按下即进入拖动，跨段震动反馈，松手才切换图片；
+                                // 拖动中的目标段放大到与视频进度条一致（7px）。
+                                int picAt(Offset p) => picIndexAtFraction(
+                                    p.dx / cons.maxWidth, pics.length);
+                                return GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTapUp: (d) {
+                                    stopAuto();
+                                    setState(
+                                        () => img = picAt(d.localPosition));
+                                    hapticTap();
+                                  },
+                                  onHorizontalDragStart: (d) {
+                                    stopAuto();
+                                    final k = picAt(d.localPosition);
+                                    setState(() {
+                                      dragging = true;
+                                      dragPic = k;
+                                      dragFrac = ((k + 0.5) / pics.length)
+                                          .clamp(0.0, 1.0);
+                                    });
+                                    hapticTap();
+                                  },
+                                  onHorizontalDragUpdate: (d) {
+                                    final f =
+                                        (d.localPosition.dx / cons.maxWidth)
+                                            .clamp(0.0, 1.0);
+                                    final k =
+                                        picIndexAtFraction(f, pics.length);
+                                    if (k != dragPic) hapticSelect();
+                                    setState(() {
+                                      dragPic = k;
+                                      dragFrac = f;
+                                    });
+                                  },
+                                  onHorizontalDragEnd: (_) {
+                                    final k = dragPic;
+                                    setState(() {
+                                      if (k != null) img = k;
+                                      dragging = false;
+                                      dragPic = null;
+                                      dragFrac = null;
+                                    });
+                                  },
+                                  onHorizontalDragCancel: () {
+                                    setState(() {
+                                      dragging = false;
+                                      dragPic = null;
+                                      dragFrac = null;
+                                    });
+                                  },
+                                  child: SizedBox(
+                                    height: 30,
+                                    child: Row(
+                                      children: List.generate(pics.length, (k) {
+                                        final selected =
+                                            k == (dragging ? dragPic : idx);
+                                        final active = k <=
+                                            (dragging ? (dragPic ?? idx) : idx);
+                                        return Expanded(
                                           child: Container(
                                             height: 30,
                                             alignment: Alignment.center,
                                             child: AnimatedContainer(
                                               duration: const Duration(
                                                   milliseconds: 120),
-                                              height: k == idx ? 6 : 3,
+                                              height: dragging
+                                                  ? (selected ? 7 : 3)
+                                                  : (selected ? 6 : 3),
                                               margin:
                                                   const EdgeInsets.symmetric(
                                                       horizontal: 1.5),
                                               decoration: BoxDecoration(
                                                 color: active
-                                                    ? (k == idx
+                                                    ? (selected
                                                         ? Colors.white
                                                         : Colors.white70)
                                                     : Colors.white24,
@@ -3818,9 +3880,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                               ),
                                             ),
                                           ),
-                                        ),
-                                      );
-                                    }),
+                                        );
+                                      }),
+                                    ),
                                   ),
                                 );
                               }
