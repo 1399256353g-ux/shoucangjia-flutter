@@ -4050,6 +4050,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool ui = true;
   bool fs = false;
   bool dragging = false;
+  // H13：简介在任务栏内展开（不再弹独立窗口）
+  bool captionOpen = false;
   bool barHover = false;
   int pointers = 0;
   // 每条作品可带 _lib（跨库列表），否则用本页 lib，最后回退当前库
@@ -4183,6 +4185,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     setState(() {
       cur = i;
       img = 0;
+      captionOpen = false;
       loading = true;
       paused = false;
       dropDayLeft = 1;
@@ -4686,7 +4689,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     });
   }
 
-  // 长简介/文案：弹出完整内容，避免被单行截断
+  // 长简介/文案：在任务栏内展开缩略全文（H13，参考抖音，不弹独立窗口）
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path, {String? lib}) {
     if (isGifPath(path)) {
@@ -4699,47 +4702,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         fit: BoxFit.contain);
   }
 
-  void showCaption(String text) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF151515),
-      isScrollControlled: true,
-      builder: (_) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.7),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Row(children: [
-                const Expanded(
-                  child: Text('作品简介',
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white70)),
-                ),
-                IconButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    icon: const Icon(Icons.close,
-                        size: 18, color: Colors.white54)),
-              ]),
-              const SizedBox(height: 4),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: SelectableText(text,
-                      style: const TextStyle(
-                          fontSize: 14, height: 1.5, color: Colors.white)),
-                ),
-              ),
-            ]),
-          ),
-        ),
-      ),
-    ).whenComplete(() {
-      // 关闭弹层后把焦点还给播放页，方向键可以继续翻页
-      if (mounted) focus.requestFocus();
-    });
+  // H13：展开/收起任务栏内简介
+  void toggleCaption() {
+    setState(() => captionOpen = !captionOpen);
   }
 
   String fmt(Duration d) {
@@ -4939,6 +4904,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                         const SizedBox(width: 8),
                         Expanded(
                             child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                               Row(children: [
@@ -4971,6 +4937,63 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                             MediaQuery.textScalerOf(context),
                                         locale: Localizations.maybeLocaleOf(
                                             context));
+                                    // H13：展开后任务栏向上拉长，显示缩略全文，
+                                    // 不弹独立窗口；再点一次收起。
+                                    if (captionOpen) {
+                                      return GestureDetector(
+                                        // 吸收点击，避免误触进入作者主页
+                                        onTap: () {},
+                                        child: Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.fromLTRB(
+                                              10, 8, 10, 6),
+                                          decoration: BoxDecoration(
+                                              color: Colors.black45,
+                                              borderRadius:
+                                                  BorderRadius.circular(12)),
+                                          constraints: BoxConstraints(
+                                              maxHeight: MediaQuery.sizeOf(
+                                                      context)
+                                                  .height *
+                                                  0.42),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Flexible(
+                                                child: SingleChildScrollView(
+                                                  child: SelectableText(title,
+                                                      style: style.copyWith(
+                                                          fontSize: 13,
+                                                          height: 1.5,
+                                                          color:
+                                                              Colors.white)),
+                                                ),
+                                              ),
+                                              Align(
+                                                alignment:
+                                                    Alignment.centerRight,
+                                                child: GestureDetector(
+                                                  onTap: toggleCaption,
+                                                  child: const Padding(
+                                                    padding:
+                                                        EdgeInsets.only(
+                                                            left: 6,
+                                                            top: 4,
+                                                            bottom: 2),
+                                                    child: Icon(
+                                                        Icons.unfold_less,
+                                                        size: 16,
+                                                        color: Colors.white54),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    }
                                     return Row(children: [
                                       Expanded(
                                         child: Text(title,
@@ -4980,7 +5003,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                       ),
                                       if (needsExpand)
                                         GestureDetector(
-                                          onTap: () => showCaption(title),
+                                          onTap: toggleCaption,
                                           child: const Padding(
                                             padding: EdgeInsets.only(
                                                 left: 6, top: 2, bottom: 2),
