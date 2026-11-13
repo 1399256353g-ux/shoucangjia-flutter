@@ -20,6 +20,7 @@ import 'library_badge.dart';
 import 'library_rank.dart';
 import 'playback_flow.dart';
 import 'text_fit.dart';
+import 'volume_control.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -4046,7 +4047,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   bool muted = false;
   double volume = 100;
   double lastVol = 100;
+  // H14：音量常驻任务栏，点击喇叭=静音切换；长按/拖动调音量，
+  // 不再弹独立音量模块。拖动中只显示一个轻量提示（松手后自动消失）。
   bool showVol = false;
+  bool _volAdjusting = false;
+  double _volStart = 100;
+  double _volStartDx = 0;
+  Timer? _volHintTimer;
+  bool get _volHintVisible => _volAdjusting || showVol;
   bool ui = true;
   bool fs = false;
   bool dragging = false;
@@ -4442,16 +4450,68 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   void toggleMute() {
+    _volHintTimer?.cancel();
     setState(() {
       muted = !muted;
       if (muted) {
-        lastVol = volume;
-        volume = 0;
-      } else {
-        volume = lastVol > 0 ? lastVol : 100;
+        lastVol = volume > 0 ? volume : lastVol;
       }
+      volume =
+          volumeAfterMuteToggle(nowMuted: muted, current: volume, last: lastVol);
+      showVol = true; // 轻量反馈，不弹模块
     });
     player.setVolume(volume);
+    _volHintTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() => showVol = false);
+    });
+  }
+
+  // H14：统一设置音量（0–100），静音状态跟随音量归零/恢复。
+  void _setVolume(double v) {
+    final nv = v.clamp(0.0, 100.0);
+    setState(() {
+      volume = nv;
+      muted = nv == 0;
+      if (nv > 0) lastVol = nv;
+    });
+    player.setVolume(nv);
+  }
+
+  // 长按/横向拖动喇叭调音量：以按下时的音量为基准累加位移。
+  void _volDragStart(DragStartDetails d) {
+    _volHintTimer?.cancel();
+    setState(() {
+      _volAdjusting = true;
+      _volStart = muted ? 0 : volume;
+      _volStartDx = d.globalPosition.dx;
+    });
+  }
+
+  void _volDragUpdate(DragUpdateDetails d) {
+    if (!_volAdjusting) return;
+    _setVolume(volumeFromDrag(_volStart, d.globalPosition.dx - _volStartDx));
+  }
+
+  // 长按拖动同样按横向位移调音量（长按后手指滑动的偏移从原点算）。
+  void _volLongPressStart(LongPressStartDetails d) {
+    _volDragStart(DragStartDetails(globalPosition: d.globalPosition));
+  }
+
+  void _volLongPressMove(LongPressMoveUpdateDetails d) {
+    if (!_volAdjusting) return;
+    _setVolume(volumeFromDrag(_volStart, d.globalPosition.dx - _volStartDx));
+  }
+
+  void _volDragEnd([DragEndDetails? _]) {
+    if (!_volAdjusting) return;
+    _volHintTimer?.cancel();
+    setState(() {
+      _volAdjusting = false;
+      showVol = true; // 松手后短暂保留读数
+    });
+    _volHintTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() => showVol = false);
+    });
   }
 
   void toggleLoop() {
@@ -4654,6 +4714,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     retryTimer?.cancel();
     _wheelUnlock?.cancel();
     _wheelIdle?.cancel();
+    _volHintTimer?.cancel();
     // 退出播放页时确保恢复系统 UI 与 Windows 窗口，避免全屏残留
     if (fs) {
       try {
@@ -5022,44 +5083,55 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   ),
                 ),
               ),
-              if (showVol && ui)
+              // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
+              if (_volHintVisible && ui)
                 Positioned(
                   right: pad.right + 16,
-                  bottom: pad.bottom + 128,
-                  child: Container(
-                    width: 220,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(14)),
-                    child: Row(children: [
-                      IconButton(
-                        onPressed: toggleMute,
-                        tooltip: '静音',
-                        visualDensity: VisualDensity.compact,
-                        icon: Icon(
+                  bottom: pad.bottom + 96,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(12)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(
                             muted || volume == 0
                                 ? Icons.volume_off
-                                : Icons.volume_up,
-                            size: 18,
+                                : (volume < 50
+                                    ? Icons.volume_down
+                                    : Icons.volume_up),
+                            size: 16,
                             color: Colors.white70),
-                      ),
-                      Expanded(
-                        child: Slider(
-                          value: volume.clamp(0, 100),
-                          min: 0,
-                          max: 100,
-                          onChanged: (v) {
-                            setState(() {
-                              volume = v;
-                              muted = v == 0;
-                            });
-                            player.setVolume(v);
-                          },
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 84,
+                          height: 4,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(2),
+                            child: LinearProgressIndicator(
+                              value: (muted ? 0.0 : volume.clamp(0.0, 100.0)) /
+                                  100.0,
+                              backgroundColor: Colors.white24,
+                              valueColor: const AlwaysStoppedAnimation(
+                                  Colors.white),
+                              minHeight: 4,
+                            ),
+                          ),
                         ),
-                      ),
-                    ]),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 30,
+                          child: Text(
+                            '${(muted ? 0 : volume).round()}%',
+                            textAlign: TextAlign.right,
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.white70),
+                          ),
+                        ),
+                      ]),
+                    ),
                   ),
                 ),
               Positioned(
@@ -5261,17 +5333,31 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                   fontSize: 10, color: Colors.white54)),
                         ]),
                         Row(children: [
-                          IconButton(
-                              onPressed: () =>
-                                  setState(() => showVol = !showVol),
-                              tooltip: '音量',
-                              icon: Icon(
-                                  muted || volume == 0
-                                      ? Icons.volume_off
-                                      : (volume < 50
-                                          ? Icons.volume_down
-                                          : Icons.volume_up),
-                                  color: Colors.white70)),
+                          // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: toggleMute,
+                            onLongPressStart: _volLongPressStart,
+                            onLongPressMoveUpdate: _volLongPressMove,
+                            onLongPressEnd: (_) => _volDragEnd(),
+                            onHorizontalDragStart: _volDragStart,
+                            onHorizontalDragUpdate: _volDragUpdate,
+                            onHorizontalDragEnd: _volDragEnd,
+                            child: Tooltip(
+                              message: '点击静音 / 长按拖动调音量',
+                              child: SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Icon(
+                                    muted || volume == 0
+                                        ? Icons.volume_off
+                                        : (volume < 50
+                                            ? Icons.volume_down
+                                            : Icons.volume_up),
+                                    color: Colors.white70),
+                              ),
+                            ),
+                          ),
                           IconButton(
                               onPressed: cycleSpeed,
                               icon: Text('${speed}x',
