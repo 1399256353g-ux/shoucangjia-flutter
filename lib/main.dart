@@ -4294,6 +4294,31 @@ class _AuthorPageState extends State<AuthorPage> {
     if (mounted) setState(() => loading = false);
   }
 
+  // 点击头像放大查看（可双指缩放，点任意处关闭）
+  void _showAvatar(BuildContext context) {
+    if (av.isEmpty) return;
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => GestureDetector(
+        onTap: () => Navigator.of(context).maybePop(),
+        child: InteractiveViewer(
+          minScale: 1,
+          maxScale: 5,
+          child: Center(
+            child: CachedNetworkImage(
+              imageUrl: cfg.base + cfg.media(av),
+              httpHeaders: cfg.headers,
+              fit: BoxFit.contain,
+              placeholder: (_, __) =>
+                  const CircularProgressIndicator(color: Colors.white38),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -4306,25 +4331,28 @@ class _AuthorPageState extends State<AuthorPage> {
                 child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipOval(
-                          child: av.isEmpty
-                              ? Container(
-                                  width: 64,
-                                  height: 64,
-                                  color: Colors.blueGrey,
-                                  child: Center(
-                                      child: Text(
-                                          widget.name.isEmpty
-                                              ? '?'
-                                              : widget.name[0],
-                                          style:
-                                              const TextStyle(fontSize: 26))))
-                              : CachedNetworkImage(
-                                  imageUrl: cfg.base + cfg.media(av),
-                                  httpHeaders: cfg.headers,
-                                  width: 64,
-                                  height: 64,
-                                  fit: BoxFit.cover)),
+                      GestureDetector(
+                        onTap: () => _showAvatar(context),
+                        child: ClipOval(
+                            child: av.isEmpty
+                                ? Container(
+                                    width: 64,
+                                    height: 64,
+                                    color: Colors.blueGrey,
+                                    child: Center(
+                                        child: Text(
+                                            widget.name.isEmpty
+                                                ? '?'
+                                                : widget.name[0],
+                                            style: const TextStyle(
+                                                fontSize: 26))))
+                                : CachedNetworkImage(
+                                    imageUrl: cfg.base + cfg.media(av),
+                                    httpHeaders: cfg.headers,
+                                    width: 64,
+                                    height: 64,
+                                    fit: BoxFit.cover)),
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                           child: Column(
