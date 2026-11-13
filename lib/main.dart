@@ -4085,7 +4085,7 @@ class _AuthorPageState extends State<AuthorPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('@${widget.name}')),
+      appBar: AppBar(title: Text(widget.name.startsWith('@') ? widget.name.substring(1) : widget.name)),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [
