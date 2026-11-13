@@ -1632,6 +1632,10 @@ class _HomePageState extends State<HomePage> {
           title: Text(cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName),
           actions: [
             IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: '刷新收藏夹',
+                onPressed: load),
+            IconButton(
                 icon: const Icon(Icons.library_books_outlined),
                 tooltip: '媒体库',
                 onPressed: () async {
