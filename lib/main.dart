@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
+import 'playback_flow.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +28,20 @@ void hapticTap() {
   try {
     HapticFeedback.lightImpact();
   } catch (_) {}
+}
+
+// 选择震动（拖动进度条跨段时用，比 lightImpact 更轻）
+void hapticSelect() {
+  try {
+    HapticFeedback.selectionClick();
+  } catch (_) {}
+}
+
+// 动图判断：GIF 必须交给 Image.network 才能播放动画，
+// CachedNetworkImage 只取首帧。
+bool isGifPath(String path) {
+  final low = path.toLowerCase();
+  return low.endsWith('.gif') || low.contains('.gif?');
 }
 
 class Cfg {
@@ -1570,6 +1585,8 @@ class _HomePageState extends State<HomePage> {
       }
       setState(() => cols = list);
       for (final c in list) {
+        // 已抓到合集封面的直接使用，其余回退到首条作品封面
+        if ((c['cover'] ?? '').toString().isNotEmpty) continue;
         http
             .get(cfg.u('/api/c/${c['idx']}.json'), headers: cfg.headers)
             .then((rr) {
@@ -1587,7 +1604,16 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // 星标：点击行尾星号设为/取消默认收藏夹，写回服务端
+  void openDefault() {
+    final i = cols.indexWhere(
+        (c) => defaultIdx != null && (c['idx'] as num).toInt() == defaultIdx);
+    if (i < 0) return;
+    final c = cols[i];
+    Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
+  }
+
+  // 星标：点击卡片右上角设为/取消默认收藏夹，真正写回服务端
   Future<void> _setDefault(int idx) async {
     final next = defaultIdx == idx ? null : idx;
     try {
@@ -1607,22 +1633,13 @@ class _HomePageState extends State<HomePage> {
       final m = jsonDecode(r.body);
       if (!mounted) return;
       setState(() => defaultIdx = (m['default'] as num?)?.toInt());
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(next == null ? '已取消默认收藏夹' : '已设为默认收藏夹')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next == null ? '已取消默认收藏夹' : '已设为默认收藏夹')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('设置失败：$e')));
     }
-  }
-
-  void openDefault() {
-    final i = cols.indexWhere(
-        (c) => defaultIdx != null && (c['idx'] as num).toInt() == defaultIdx);
-    if (i < 0) return;
-    final c = cols[i];
-    Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
   }
 
   @override
@@ -1676,60 +1693,187 @@ class _HomePageState extends State<HomePage> {
           ? Center(child: Text('加载失败：$err'))
           : cols.isEmpty
               ? const Center(child: CircularProgressIndicator())
-              : ListView.separated(
-                  itemCount: cols.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) {
-                    final c = cols[i];
-                    final cover = covers['${c['idx']}'];
-                    final isDefault = defaultIdx != null &&
-                        (c['idx'] as num).toInt() == defaultIdx;
-                    return ListTile(
-                      leading: ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: SizedBox(
-                          width: 48,
-                          height: 64,
-                          child: cover == null
-                              ? Container(color: Colors.black26)
-                              : CachedNetworkImage(
-                                  imageUrl: cfg.base + cfg.media(cover),
-                                  httpHeaders: cfg.headers,
-                                  fit: BoxFit.cover,
-                                  memCacheWidth: 144),
-                        ),
-                      ),
-                      title: Text(
-                          '(${c['idx']}) ${c['name']}${isDefault ? '  ★' : ''}',
-                          style: TextStyle(
-                              color: isDefault ? Colors.amber : null)),
-                      subtitle: c['sync'] == false
-                          ? const Text('同步已关闭',
-                              style:
-                                  TextStyle(fontSize: 11, color: Colors.grey))
-                          : null,
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text('${c['count']}',
-                              style: const TextStyle(color: Colors.grey)),
-                          IconButton(
-                            tooltip: isDefault ? '取消默认收藏夹' : '设为默认收藏夹',
-                            icon: Icon(
-                                isDefault ? Icons.star : Icons.star_border,
-                                color:
-                                    isDefault ? Colors.amber : Colors.white38),
-                            onPressed: () => _setDefault(
-                                (c['idx'] as num).toInt()),
-                          ),
-                        ],
-                      ),
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) =>
-                              CollectionPage(name: c['name'], idx: c['idx']))),
-                    );
-                  },
+              : LayoutBuilder(builder: (context, cons) {
+                  final w = cons.maxWidth;
+                  final n = w >= 1200
+                      ? 5
+                      : w >= 900
+                          ? 4
+                          : w >= 620
+                              ? 3
+                              : 2;
+                  return GridView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: n,
+                      mainAxisSpacing: 12,
+                      crossAxisSpacing: 12,
+                      childAspectRatio: 0.72,
+                    ),
+                    itemCount: cols.length,
+                    itemBuilder: (_, i) {
+                      final c = cols[i];
+                      final idx = (c['idx'] as num).toInt();
+                      final remote = (c['cover'] ?? '').toString();
+                      final fallback = covers['$idx'];
+                      final imageUrl = remote.isNotEmpty
+                          ? cfg.u(remote).toString()
+                          : (fallback == null
+                              ? null
+                              : cfg.base + cfg.media(fallback));
+                      final isDefault = defaultIdx != null && idx == defaultIdx;
+                      return _CollectionTile(
+                        idx: idx,
+                        name: '${c['name']}',
+                        count: c['count'] is num
+                            ? (c['count'] as num).toInt()
+                            : null,
+                        imageUrl: imageUrl,
+                        isDefault: isDefault,
+                        syncOff: c['sync'] == false,
+                        onStarTap: () => _setDefault(idx),
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => CollectionPage(
+                                    name: '${c['name']}', idx: idx))),
+                      );
+                    },
+                  );
+                }),
+    );
+  }
+}
+
+/// 收藏夹图片卡片：大封面 + 底部渐变信息，默认收藏夹用金色星标
+class _CollectionTile extends StatelessWidget {
+  final int idx;
+  final String name;
+  final int? count;
+  final String? imageUrl;
+  final bool isDefault;
+  final bool syncOff;
+  final VoidCallback onTap;
+  final VoidCallback? onStarTap;
+  const _CollectionTile({
+    required this.idx,
+    required this.name,
+    required this.count,
+    required this.imageUrl,
+    required this.isDefault,
+    required this.syncOff,
+    required this.onTap,
+    this.onStarTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF1A1A1A),
+      clipBehavior: Clip.antiAlias,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (imageUrl == null)
+              const Center(
+                  child: Icon(Icons.collections_bookmark_outlined,
+                      color: Colors.white24, size: 36))
+            else
+              CachedNetworkImage(
+                imageUrl: imageUrl!,
+                httpHeaders: cfg.headers,
+                fit: BoxFit.cover,
+                memCacheWidth: 720,
+                fadeInDuration: const Duration(milliseconds: 180),
+                placeholder: (_, __) => Container(color: Colors.black26),
+                errorWidget: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        color: Colors.white24)),
+              ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black87],
+                  stops: [0.45, 1.0],
                 ),
+              ),
+            ),
+            Positioned(
+              left: 8,
+              top: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(6)),
+                child: Text('$idx',
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.white70)),
+              ),
+            ),
+            Positioned(
+              right: 4,
+              top: 4,
+              child: Tooltip(
+                message: isDefault ? '取消默认收藏夹' : '设为默认收藏夹',
+                child: InkWell(
+                  onTap: onStarTap,
+                  borderRadius: BorderRadius.circular(24),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(isDefault ? Icons.star : Icons.star_border,
+                        color: isDefault ? Colors.amber : Colors.white38,
+                        size: 20),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 10,
+              right: 10,
+              bottom: 8,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isDefault ? Colors.amber : Colors.white)),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(count == null ? '' : '$count 作品',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.white70)),
+                      if (syncOff) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(4)),
+                          child: const Text('同步已关闭',
+                              style: TextStyle(
+                                  fontSize: 9, color: Colors.orangeAccent)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2658,7 +2802,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   double _hoverDy = -1;
   bool autoplay = true;
   bool loopOne = false;
+  // 当前页面实际已载入的媒体所属 open token；图文无音频时为 -1。
+  // 用于忽略 player.stop()/切条时上一段媒体迟到的 completed 事件，
+  // 避免刚打开图文就被上一次播放的完成事件带去下一条。
+  int _mediaToken = -1;
+  // 切条（stop/open）进行中：此时播放器会发出 playing=false，
+  // 不能据此改写 paused，否则下一条会停在首帧（F32）。
+  bool _opening = false;
+  // 连播兜底：视频已就绪但播放器未在播放时补一次 play。
+  Timer? playGuard;
   double? dragFrac;
+  // 图文进度条拖动时当前指向的图片序号（null = 未在拖动）
+  int? dragPic;
   bool resumeAfterDrag = false;
   bool dropBusy = false;
   int dropDayLeft = 1;
@@ -2683,35 +2838,42 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     player.setPlaylistMode(PlaylistMode.none);
     player.stream.completed.listen((done) {
       if (!done || !mounted) return;
+      if (_mediaToken != _openToken) return;
       final w = widget.works[cur];
       if (w['t'] != 'v') {
         // 图文：整首歌放完才切下一条；单条循环时重新播放；都不开就停下图片轮播
         if (paused) return;
-        if (autoplay && !loopOne) {
-          next();
-        } else if (loopOne) {
+        if (loopOne) {
           try {
             player.seek(Duration.zero);
             player.play();
             setState(() => img = 0);
           } catch (_) {}
+        } else if (autoplay) {
+          next();
         } else {
           pauseAuto();
         }
         return;
       }
       // 视频播完：单条循环就重播本条，否则按连播设置切下一条
-      if (loopOne) {
-        try {
-          player.seek(Duration.zero);
-          player.play();
-        } catch (_) {}
-      } else if (autoplay) {
-        next();
+      switch (videoEndAction(loopOne: loopOne, autoplay: autoplay)) {
+        case VideoEndAction.replay:
+          try {
+            player.seek(Duration.zero);
+            player.play();
+          } catch (_) {}
+          break;
+        case VideoEndAction.nextWork:
+          next();
+          break;
+        case VideoEndAction.stop:
+          break;
       }
     });
     player.stream.playing.listen((v) {
-      if (mounted && widget.works[cur]['t'] == 'v' && v != !paused) {
+      if (!mounted || _opening) return;
+      if (widget.works[cur]['t'] == 'v' && v != !paused) {
         setState(() => paused = !v);
       }
     });
@@ -2755,8 +2917,11 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final my = ++_openToken;
     autoTimer?.cancel();
     retryTimer?.cancel();
+    playGuard?.cancel();
     manualPic = false;
     _pendingPage = null;
+    _mediaToken = -1;
+    _opening = true;
     setState(() {
       cur = i;
       img = 0;
@@ -2781,13 +2946,19 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         await player.open(Media(cfg.base + cfg.media(w['au'].toString()),
             httpHeaders: cfg.headers));
       }
+      if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
+          my == _openToken) {
+        _mediaToken = my;
+      }
     } catch (_) {}
     if (my != _openToken) return;
     try {
       await player.setVolume(volume);
       await player.setRate(speed);
     } catch (_) {}
-    if (!paused) {
+    // 媒体已就绪，恢复采信播放器事件；此后一切以用户意图 paused 为准
+    _opening = false;
+    if (shouldAutoPlay(paused: paused, opening: _opening)) {
       try {
         await player.play();
       } catch (_) {}
@@ -2802,6 +2973,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         if (w['t'] != 'v') paused = false;
       });
     }
+    // F32 兜底：媒体就绪后 2.5 秒仍未起播且用户没暂停，补一次 play，
+    // 避免停在片尾/首帧导致连播链路中断。
+    playGuard = Timer(const Duration(milliseconds: 2500), () {
+      if (!mounted || my != _openToken) return;
+      if (widget.works[i]['t'] != 'v') return;
+      bool playing = false;
+      try {
+        playing = player.state.playing;
+      } catch (_) {}
+      if (shouldForcePlay(
+          paused: paused,
+          opening: _opening,
+          playerPlaying: playing,
+          hasMedia: dur.inMilliseconds > 0 || pos.inMilliseconds > 0)) {
+        try {
+          player.play();
+        } catch (_) {}
+      }
+    });
     retryTimer = Timer(const Duration(milliseconds: 1800), () {
       if (mounted &&
           my == _openToken &&
@@ -2810,6 +3000,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
         player.open(Media(cfg.base + cfg.media(w['m'][0].toString()),
             httpHeaders: cfg.headers));
         player.play();
+        _mediaToken = my;
       }
     });
     if (w['t'] != 'v') startAuto();
@@ -2885,13 +3076,18 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       if (w['t'] == 'v') return;
       final n = (w['m'] as List).length;
       final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
-      if (img < n - 1) {
-        setState(() => img++);
-      } else if (loopOne || hasAudio) {
-        // 单条循环，或还有背景音乐没放完：图片回到第一张继续
-        setState(() => img = 0);
-      } else {
-        next();
+      switch (slideshowAction(
+          index: img, count: n, loopOne: loopOne, hasAudio: hasAudio)) {
+        case SlideshowAction.nextImage:
+          setState(() => img++);
+          break;
+        case SlideshowAction.restartImages:
+          // 单条循环，或还有背景音乐没放完：图片回到第一张继续
+          setState(() => img = 0);
+          break;
+        case SlideshowAction.nextWork:
+          next();
+          break;
       }
     });
     autoTimer = t;
@@ -2995,17 +3191,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   void toggleLoop() {
-    // 单条循环与连播互不影响状态：循环开时优先循环，关掉后连播设置保持原样
+    // F32：单条循环与连播是完全独立的两组状态。
+    // 不再使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
+    // completed 事件），统一由 completed 回调在 Dart 层重播，
+    // 这样关闭循环后连播判定立刻恢复，不会偶发停在片尾。
     setState(() => loopOne = !loopOne);
-    player.setPlaylistMode(loopOne ? PlaylistMode.single : PlaylistMode.none);
   }
 
   void toggleAutoplay() {
-    setState(() {
-      autoplay = !autoplay;
-      if (autoplay) loopOne = false;
-    });
-    player.setPlaylistMode(loopOne ? PlaylistMode.single : PlaylistMode.none);
+    // F32：只切连播，不再连带改动单条循环
+    setState(() => autoplay = !autoplay);
   }
 
   void cycleSpeed() {
@@ -3208,6 +3403,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     }
     subPos?.cancel();
     subDur?.cancel();
+    playGuard?.cancel();
     player.dispose();
     pc.dispose();
     focus.dispose();
@@ -3232,8 +3428,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   // 长简介/文案：弹出完整内容，避免被单行截断
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path) {
-    final low = path.toLowerCase();
-    if (low.endsWith('.gif') || low.contains('.gif?')) {
+    if (isGifPath(path)) {
       return Image.network(cfg.base + cfg.media(path),
           headers: cfg.headers, fit: BoxFit.contain, gaplessPlayback: true);
     }
@@ -3301,6 +3496,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     final progress = (isV && dur.inMilliseconds > 0)
         ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
         : (pics.isEmpty ? 0.0 : (idx + 1) / pics.length);
+    // H2：iOS 刘海/灵动岛与横屏左右安全区。视频/图片仍全屏出血，
+    // 但返回键、图文圆点、作者/标题信息、音量面板与底部控制栏都要避开安全区。
+    final pad = MediaQuery.of(context).padding;
     return Focus(
       focusNode: focus,
       autofocus: true,
@@ -3403,45 +3601,42 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                       picView(pics[idx]),
                       if (pics.length > 1)
                         Positioned(
-                            top: 2,
-                            right: 4,
-                            child: SafeArea(
-                              child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: List.generate(
-                                      pics.length,
-                                      (k) => Container(
-                                            width: 4,
-                                            height: 4,
-                                            margin: const EdgeInsets.symmetric(
-                                                horizontal: 1.5),
-                                            decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: k == idx
-                                                    ? Colors.white
-                                                    : Colors.white24),
-                                          ))),
-                            )),
+                            top: pad.top + 2,
+                            right: pad.right + 4,
+                            child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: List.generate(
+                                    pics.length,
+                                    (k) => Container(
+                                          width: 4,
+                                          height: 4,
+                                          margin: const EdgeInsets.symmetric(
+                                              horizontal: 1.5),
+                                          decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              color: k == idx
+                                                  ? Colors.white
+                                                  : Colors.white24),
+                                        ))),
+                        ),
                     ]),
                   );
                 },
               ),
               Positioned(
-                left: 8,
-                top: 8,
+                left: pad.left + 8,
+                top: pad.top + 8,
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
                     opacity: ui ? 1 : 0,
                     duration: const Duration(milliseconds: 200),
-                    child: SafeArea(
-                      child: IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(Icons.arrow_back,
-                              color: Colors.white70),
-                          style: IconButton.styleFrom(
-                              backgroundColor: Colors.black45)),
-                    ),
+                    child: IconButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.arrow_back,
+                            color: Colors.white70),
+                        style: IconButton.styleFrom(
+                            backgroundColor: Colors.black45)),
                   ),
                 ),
               ),
@@ -3453,9 +3648,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                   ),
                 ),
               Positioned(
-                left: 14,
-                right: 80,
-                bottom: 96,
+                left: pad.left + 14,
+                right: pad.right + 80,
+                bottom: pad.bottom + 96,
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
@@ -3524,8 +3719,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
               ),
               if (showVol && ui)
                 Positioned(
-                  right: 16,
-                  bottom: 128,
+                  right: pad.right + 16,
+                  bottom: pad.bottom + 128,
                   child: Container(
                     width: 220,
                     padding:
@@ -3578,16 +3773,16 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                               end: Alignment.bottomCenter,
                               colors: [Colors.transparent, Colors.black87])),
                       padding: EdgeInsets.only(
-                          left: 12,
-                          right: 12,
+                          left: pad.left + 12,
+                          right: pad.right + 12,
                           top: 10,
-                          bottom: 6 + MediaQuery.of(context).padding.bottom),
+                          bottom: 6 + pad.bottom),
                       child: Column(mainAxisSize: MainAxisSize.min, children: [
                         Row(children: [
                           Text(
                               isV
                                   ? '${fmt(pos)} / ${fmt(dur)}'
-                                  : '${idx + 1}/${pics.length}',
+                                  : '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}',
                               style: const TextStyle(
                                   fontSize: 10, color: Colors.white60)),
                           const SizedBox(width: 8),
@@ -3602,31 +3797,81 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
                               // 图文：按图片数量分段显示进度，当前张高亮
                               if (!isV && pics.length > 1) {
-                                return SizedBox(
-                                  height: 30,
-                                  child: Row(
-                                    children: List.generate(pics.length, (k) {
-                                      final active = k <= idx;
-                                      return Expanded(
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: () {
-                                            stopAuto();
-                                            setState(() => img = k);
-                                          },
+                                // H1：按下即进入拖动，跨段震动反馈，松手才切换图片；
+                                // 拖动中的目标段放大到与视频进度条一致（7px）。
+                                int picAt(Offset p) => picIndexAtFraction(
+                                    p.dx / cons.maxWidth, pics.length);
+                                return GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTapUp: (d) {
+                                    stopAuto();
+                                    setState(
+                                        () => img = picAt(d.localPosition));
+                                    hapticTap();
+                                  },
+                                  onHorizontalDragStart: (d) {
+                                    stopAuto();
+                                    final k = picAt(d.localPosition);
+                                    setState(() {
+                                      dragging = true;
+                                      dragPic = k;
+                                      dragFrac = ((k + 0.5) / pics.length)
+                                          .clamp(0.0, 1.0);
+                                    });
+                                    hapticTap();
+                                  },
+                                  onHorizontalDragUpdate: (d) {
+                                    final f =
+                                        (d.localPosition.dx / cons.maxWidth)
+                                            .clamp(0.0, 1.0);
+                                    final k =
+                                        picIndexAtFraction(f, pics.length);
+                                    if (k != dragPic) hapticSelect();
+                                    setState(() {
+                                      dragPic = k;
+                                      dragFrac = f;
+                                    });
+                                  },
+                                  onHorizontalDragEnd: (_) {
+                                    final k = dragPic;
+                                    setState(() {
+                                      if (k != null) img = k;
+                                      dragging = false;
+                                      dragPic = null;
+                                      dragFrac = null;
+                                    });
+                                  },
+                                  onHorizontalDragCancel: () {
+                                    setState(() {
+                                      dragging = false;
+                                      dragPic = null;
+                                      dragFrac = null;
+                                    });
+                                  },
+                                  child: SizedBox(
+                                    height: 30,
+                                    child: Row(
+                                      children: List.generate(pics.length, (k) {
+                                        final selected =
+                                            k == (dragging ? dragPic : idx);
+                                        final active = k <=
+                                            (dragging ? (dragPic ?? idx) : idx);
+                                        return Expanded(
                                           child: Container(
                                             height: 30,
                                             alignment: Alignment.center,
                                             child: AnimatedContainer(
                                               duration: const Duration(
                                                   milliseconds: 120),
-                                              height: k == idx ? 6 : 3,
+                                              height: dragging
+                                                  ? (selected ? 7 : 3)
+                                                  : (selected ? 6 : 3),
                                               margin:
                                                   const EdgeInsets.symmetric(
                                                       horizontal: 1.5),
                                               decoration: BoxDecoration(
                                                 color: active
-                                                    ? (k == idx
+                                                    ? (selected
                                                         ? Colors.white
                                                         : Colors.white70)
                                                     : Colors.white24,
@@ -3635,9 +3880,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                               ),
                                             ),
                                           ),
-                                        ),
-                                      );
-                                    }),
+                                        );
+                                      }),
+                                    ),
                                   ),
                                 );
                               }
@@ -4049,6 +4294,31 @@ class _AuthorPageState extends State<AuthorPage> {
     if (mounted) setState(() => loading = false);
   }
 
+  // 点击头像放大查看（可双指缩放，点任意处关闭）
+  void _showAvatar(BuildContext context) {
+    if (av.isEmpty) return;
+    showDialog(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (_) => GestureDetector(
+        onTap: () => Navigator.of(context).maybePop(),
+        child: InteractiveViewer(
+          minScale: 1,
+          maxScale: 5,
+          child: Center(
+            child: CachedNetworkImage(
+              imageUrl: cfg.base + cfg.media(av),
+              httpHeaders: cfg.headers,
+              fit: BoxFit.contain,
+              placeholder: (_, __) =>
+                  const CircularProgressIndicator(color: Colors.white38),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -4061,25 +4331,28 @@ class _AuthorPageState extends State<AuthorPage> {
                 child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipOval(
-                          child: av.isEmpty
-                              ? Container(
-                                  width: 64,
-                                  height: 64,
-                                  color: Colors.blueGrey,
-                                  child: Center(
-                                      child: Text(
-                                          widget.name.isEmpty
-                                              ? '?'
-                                              : widget.name[0],
-                                          style:
-                                              const TextStyle(fontSize: 26))))
-                              : CachedNetworkImage(
-                                  imageUrl: cfg.base + cfg.media(av),
-                                  httpHeaders: cfg.headers,
-                                  width: 64,
-                                  height: 64,
-                                  fit: BoxFit.cover)),
+                      GestureDetector(
+                        onTap: () => _showAvatar(context),
+                        child: ClipOval(
+                            child: av.isEmpty
+                                ? Container(
+                                    width: 64,
+                                    height: 64,
+                                    color: Colors.blueGrey,
+                                    child: Center(
+                                        child: Text(
+                                            widget.name.isEmpty
+                                                ? '?'
+                                                : widget.name[0],
+                                            style: const TextStyle(
+                                                fontSize: 26))))
+                                : CachedNetworkImage(
+                                    imageUrl: cfg.base + cfg.media(av),
+                                    httpHeaders: cfg.headers,
+                                    width: 64,
+                                    height: 64,
+                                    fit: BoxFit.cover)),
+                      ),
                       const SizedBox(width: 12),
                       Expanded(
                           child: Column(
