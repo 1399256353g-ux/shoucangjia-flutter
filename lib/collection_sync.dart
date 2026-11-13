@@ -1,3 +1,5 @@
+import 'emoji_text.dart';
+
 /// H11：收藏夹同步选择的纯逻辑。
 ///
 /// 名称一律使用账号返回的名称（服务端已按账号名下发），不在客户端追加序号；
@@ -22,8 +24,9 @@ class CollectionSyncInfo {
   });
 
   factory CollectionSyncInfo.fromJson(Map<String, dynamic> j) {
-    final rawName =
-        '${j['name'] ?? ''}'.replaceAll(RegExp(r'[\x00-\x1f]'), '').trim();
+    // 去掉控制字符，并修复不完整的 UTF-16（否则 emoji 名会显示成方框）。
+    final rawName = fixEmojiText(
+        '${j['name'] ?? ''}'.replaceAll(RegExp(r'[\x00-\x1f]'), ''));
     return CollectionSyncInfo(
       idx: (j['idx'] as num?)?.toInt() ?? 0,
       name: rawName.isEmpty ? '收藏夹' : rawName,

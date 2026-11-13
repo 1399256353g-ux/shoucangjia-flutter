@@ -15,6 +15,7 @@ import 'app_settings.dart';
 import 'author_grade.dart';
 import 'collection_sync.dart';
 import 'deleted_cover.dart';
+import 'emoji_text.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
 import 'playback_flow.dart';
@@ -311,7 +312,13 @@ class _AppState extends State<App> {
     return MaterialApp(
       title: 'Dizi',
       navigatorKey: navKey,
-      theme: ThemeData.dark(useMaterial3: true),
+      // 显式 emoji 字体回退链：Windows/Android/iOS 各自命中本机彩色 emoji 字体，
+      // 避免收藏夹名（如「🦶」）或作者名里的 emoji 显示成方框。
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
+        fontFamilyFallback: kEmojiFontFallback,
+      ),
       shortcuts: const {
         SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
       },
@@ -1551,7 +1558,7 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Future<void> _switchTo(Map<String, dynamic> l) async {
     cfg.lib = '${l['id']}';
-    cfg.libName = '${l['name'] ?? l['id']}';
+    cfg.libName = fixDisplayName('${l['name'] ?? l['id']}');
     final sp = await SharedPreferences.getInstance();
     await sp.setString('lib', cfg.lib);
     if (!mounted) return;
@@ -2160,7 +2167,7 @@ class _HomePageState extends State<HomePage> {
         if (pick != null) {
           final changed = cfg.lib != pick['id'];
           cfg.lib = '${pick['id']}';
-          cfg.libName = '${pick['name'] ?? cfg.lib}';
+          cfg.libName = fixDisplayName('${pick['name'] ?? cfg.lib}');
           if (changed) {
             final sp = await SharedPreferences.getInstance();
             await sp.setString('lib', cfg.lib);
@@ -2193,7 +2200,7 @@ class _HomePageState extends State<HomePage> {
           if (base == null) continue;
           merged.add({
             ...base,
-            'name': pc['name'] ?? base['name'],
+            'name': fixDisplayName('${pc['name'] ?? base['name'] ?? ''}'),
             'sync': pc['sync'] != false,
           });
         }
@@ -2205,6 +2212,17 @@ class _HomePageState extends State<HomePage> {
         }
         list = merged;
       }
+      // 索引里的收藏夹名同样做一次 emoji 修复（含仅用索引的回退分支）。
+      list = [
+        for (final c in list)
+          if (c is Map)
+            {
+              ...Map<String, dynamic>.from(c),
+              'name': fixDisplayName('${c['name'] ?? c['idx'] ?? ''}'),
+            }
+          else
+            c
+      ];
       setState(() => cols = list);
       for (final c in list) {
         // 已抓到合集封面的直接使用，其余回退到首条作品封面
@@ -2507,7 +2525,7 @@ class _CollectionTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(name,
+                  Text(fixDisplayName(name),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -5515,7 +5533,7 @@ class _SearchPageState extends State<SearchPage> {
               'w': ws[i],
               'works': ws,
               'i': i,
-              'col': c['name'],
+              'col': fixDisplayName('${c['name'] ?? ''}'),
               '_lib': lib,
             });
           }
