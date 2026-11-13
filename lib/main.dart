@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
 import 'author_grade.dart';
+import 'collection_sync.dart';
 import 'deleted_cover.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
@@ -815,13 +816,13 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('作者等级'), actions: [
-        TextButton(onPressed: _ready ? _reset : null, child: const Text('恢复默认')),
+        TextButton(
+            onPressed: _ready ? _reset : null, child: const Text('恢复默认')),
       ]),
       body: !_ready
           ? const Center(child: CircularProgressIndicator())
           : ListView(padding: const EdgeInsets.all(16), children: [
-              const Text('等级词条',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('等级词条', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               const Text(
                   '作者卡片库词条后显示 D–S 等级。分数 = 播放×权重 + 水滴×权重 + 作品×权重；'
@@ -835,12 +836,9 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
                         label: AuthorGrade.grades[i],
                         color: AuthorGrade.colors[i]),
                     const SizedBox(width: 4),
-                    Text(
-                        i == 0
-                            ? '0 起'
-                            : '≥${AuthorGrade.thresholds[i - 1]}',
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.grey)),
+                    Text(i == 0 ? '0 起' : '≥${AuthorGrade.thresholds[i - 1]}',
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.grey)),
                   ]),
               ]),
               const Divider(height: 28),
@@ -874,8 +872,8 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
               if (_error != null) ...[
                 const SizedBox(height: 12),
                 Text(_error!,
-                    style: const TextStyle(
-                        color: Colors.redAccent, fontSize: 12)),
+                    style:
+                        const TextStyle(color: Colors.redAccent, fontSize: 12)),
               ],
               const SizedBox(height: 20),
               FilledButton(onPressed: _save, child: const Text('保存')),
@@ -919,8 +917,8 @@ class SettingsHubPage extends StatelessWidget {
         ),
         ListTile(
           leading: const Icon(Icons.folder_special),
-          title: const Text('收藏夹管理'),
-          subtitle: const Text('同步选择 · 默认收藏夹 · 拖动排序 · 重命名 · 删除'),
+          title: const Text('收藏夹同步选择'),
+          subtitle: const Text('账号全部收藏夹 · 勾选参与同步，未勾选不在主页显示'),
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CollectionAdminPage())),
         ),
@@ -1179,8 +1177,9 @@ class CollectionAdminPage extends StatefulWidget {
 }
 
 class _CollectionAdminPageState extends State<CollectionAdminPage> {
-  List<Map<String, dynamic>> cols = [];
+  List<CollectionSyncInfo> cols = [];
   int? defaultIdx;
+  int accountCount = 0;
   bool loading = true;
   bool saving = false;
   String? err;
@@ -1208,14 +1207,13 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
   }
 
   void _apply(Map<String, dynamic> j, {bool setLoading = false}) {
-    final list = ((j['collections'] as List?) ?? const [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .where((e) => e['deleted'] != true)
-        .toList();
     if (!mounted) return;
+    final list = parseCollectionSettings(j);
     setState(() {
       cols = list;
       defaultIdx = (j['default'] as num?)?.toInt();
+      accountCount = (j['accountCount'] as num?)?.toInt() ??
+          list.where((c) => c.account).length;
       err = null;
       if (setLoading) loading = false;
     });
@@ -1244,9 +1242,9 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
         'collections': [
           for (final c in cols)
             {
-              'idx': c['idx'],
-              'name': c['name'],
-              'sync': c['sync'] != false,
+              'idx': c.idx,
+              'name': c.name,
+              'sync': c.sync,
             }
         ],
       });
@@ -1268,8 +1266,48 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     _save();
   }
 
-  Future<void> _rename(Map<String, dynamic> c) async {
-    final ctrl = TextEditingController(text: '${c['name']}');
+  void _toggle(CollectionSyncInfo c, bool value) {
+    setState(() {
+      final i = cols.indexWhere((e) => e.idx == c.idx);
+      if (i < 0) return;
+      cols[i] = CollectionSyncInfo(
+        idx: c.idx,
+        name: c.name,
+        count: c.count,
+        sync: value,
+        inIndex: c.inIndex,
+        account: c.account,
+        customName: c.customName,
+      );
+      // 默认收藏夹必须保持勾选：关闭时自动改选第一个仍参与同步的收藏夹
+      if (!value && defaultIdx == c.idx) {
+        int? next;
+        for (final e in cols) {
+          if (e.sync) {
+            next = e.idx;
+            break;
+          }
+        }
+        defaultIdx = next;
+      }
+    });
+    _save();
+  }
+
+  Future<void> _toggleAll(bool value) async {
+    setState(() {
+      cols = setAllSync(cols, value);
+      if (!value) {
+        defaultIdx = null;
+      } else if (defaultIdx == null && cols.isNotEmpty) {
+        defaultIdx = cols.first.idx;
+      }
+    });
+    await _save();
+  }
+
+  Future<void> _rename(CollectionSyncInfo c) async {
+    final ctrl = TextEditingController(text: c.name);
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1294,20 +1332,22 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     ctrl.dispose();
     if (name == null || name.isEmpty) return;
     try {
-      final j = await _send(
-          '/api/collections/rename', {'idx': c['idx'], 'name': name});
+      final j = await _send('/api/collections/rename', {
+        'idx': c.idx,
+        'name': name,
+      });
       _apply(j);
     } catch (e) {
       _toast('重命名失败：$e');
     }
   }
 
-  Future<void> _delete(Map<String, dynamic> c) async {
+  Future<void> _delete(CollectionSyncInfo c) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('删除收藏夹'),
-        content: Text('将从 App 中移除「${c['name']}」，清除该收藏夹的索引数据并关闭同步。\n\n'
+        content: Text('将从 App 中移除「${c.name}」，清除该收藏夹的索引数据并关闭同步。\n\n'
             'NAS 上的原始视频、图片和文案不会被删除。\n此操作不可撤销。'),
         actions: [
           TextButton(
@@ -1322,9 +1362,9 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     );
     if (ok != true) return;
     try {
-      final j = await _send('/api/collections/delete', {'idx': c['idx']});
+      final j = await _send('/api/collections/delete', {'idx': c.idx});
       _apply(j);
-      _toast('已移除「${c['name']}」并关闭同步');
+      _toast('已移除「${c.name}」并关闭同步');
     } catch (e) {
       _toast('删除失败：$e');
     }
@@ -1332,8 +1372,18 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
 
   @override
   Widget build(BuildContext context) {
+    final enabled = cols.where((c) => c.sync).length;
     return Scaffold(
-      appBar: AppBar(title: const Text('收藏夹管理'), actions: [
+      appBar: AppBar(title: const Text('收藏夹同步选择'), actions: [
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.checklist),
+          tooltip: '批量勾选',
+          onSelected: (v) => _toggleAll(v == 'all'),
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'all', child: Text('全选（全部参与同步）')),
+            PopupMenuItem(value: 'none', child: Text('全不选（全部暂不同步）')),
+          ],
+        ),
         if (cfg.lib == 'douyin')
           IconButton(
               icon: const Icon(Icons.cloud_sync),
@@ -1363,17 +1413,19 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
               : cols.isEmpty
                   ? const Center(child: Text('没有收藏夹'))
                   : Column(children: [
-                      const Padding(
-                        padding:
-                            EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                         child: Row(children: [
-                          Icon(Icons.info_outline,
+                          const Icon(Icons.info_outline,
                               size: 14, color: Colors.grey),
-                          SizedBox(width: 6),
+                          const SizedBox(width: 6),
                           Expanded(
-                              child: Text('拖动左侧把手排序；开关控制是否同步；★ 为默认收藏夹',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.grey))),
+                            child: Text(
+                                '账号共 $accountCount 个收藏夹 · $enabled 个参与同步。'
+                                '关闭后不参与同步，也不出现在主页/库选择页；名称与账号一致。',
+                                style: const TextStyle(
+                                    fontSize: 12, color: Colors.grey)),
+                          ),
                         ]),
                       ),
                       Expanded(
@@ -1383,11 +1435,9 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
                           onReorder: _reorder,
                           itemBuilder: (_, i) {
                             final c = cols[i];
-                            final isDefault =
-                                defaultIdx == (c['idx'] as num).toInt();
-                            final sync = c['sync'] != false;
+                            final isDefault = defaultIdx == c.idx;
                             return ListTile(
-                              key: ValueKey('col-${c['idx']}'),
+                              key: ValueKey('col-${c.idx}'),
                               leading: ReorderableDragStartListener(
                                 index: i,
                                 child: const Padding(
@@ -1402,29 +1452,23 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
                                   SizedBox(width: 4),
                                 ],
                                 Expanded(
-                                    child: Text('${c['name']}',
+                                    child: Text(c.name,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis)),
                               ]),
-                              subtitle:
-                                  Text('${c['count'] ?? 0} 个作品 · 序号 ${c['idx']}'
-                                      '${sync ? '' : ' · 不同步'}'),
+                              subtitle: Text(c.subtitle),
                               trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Switch(
-                                      value: sync,
-                                      onChanged: (v) {
-                                        setState(() => c['sync'] = v);
-                                        _save();
-                                      },
+                                      value: c.sync,
+                                      onChanged: (v) => _toggle(c, v),
                                     ),
                                     PopupMenuButton<String>(
                                       icon: const Icon(Icons.more_vert),
                                       onSelected: (v) async {
                                         if (v == 'default') {
-                                          setState(() => defaultIdx =
-                                              (c['idx'] as num).toInt());
+                                          setState(() => defaultIdx = c.idx);
                                           await _save();
                                         } else if (v == 'rename') {
                                           await _rename(c);
@@ -1432,14 +1476,15 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
                                           await _delete(c);
                                         }
                                       },
-                                      itemBuilder: (_) => const [
-                                        PopupMenuItem(
-                                            value: 'default',
-                                            child: Text('设为默认收藏夹')),
-                                        PopupMenuItem(
+                                      itemBuilder: (_) => [
+                                        if (c.sync)
+                                          const PopupMenuItem(
+                                              value: 'default',
+                                              child: Text('设为默认收藏夹')),
+                                        const PopupMenuItem(
                                             value: 'rename',
                                             child: Text('重命名')),
-                                        PopupMenuItem(
+                                        const PopupMenuItem(
                                             value: 'delete',
                                             child: Text('删除（关闭同步）')),
                                       ],
@@ -2196,17 +2241,8 @@ class _HomePageState extends State<HomePage> {
     try {
       final r = await http.post(cfg.u('/api/settings'),
           headers: {...cfg.headers, 'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'default': next,
-            'collections': [
-              for (final c in cols)
-                {
-                  'idx': c['idx'],
-                  'name': c['name'],
-                  'sync': c['sync'] != false,
-                }
-            ],
-          }));
+          // 只提交默认项；服务端保留其余收藏夹的勾选状态与名称
+          body: jsonEncode({'default': next}));
       final m = jsonDecode(r.body);
       if (!mounted) return;
       setState(() => defaultIdx = (m['default'] as num?)?.toInt());
@@ -2220,8 +2256,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openLibrary() async {
-    final changed = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(builder: (_) => const LibraryPage()));
+    final changed = await Navigator.of(context)
+        .push<bool>(MaterialPageRoute(builder: (_) => const LibraryPage()));
     if (changed == true) await load();
   }
 
@@ -2250,8 +2286,7 @@ class _HomePageState extends State<HomePage> {
                         size: 18, color: theme.colorScheme.primary),
                     const SizedBox(width: 6),
                     Flexible(
-                        child: Text(
-                            cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName,
+                        child: Text(cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium
@@ -3379,8 +3414,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (_, i) {
                             final r = rows[i];
-                            final score =
-                                metric == 'drop' ? r.drops : r.plays;
+                            final score = metric == 'drop' ? r.drops : r.plays;
                             final sub = metric == 'drop'
                                 ? '播放 ${r.plays} · ${r.drops} 水滴'
                                 : '${r.plays} 播放 · ${r.drops} 水滴';
@@ -3413,8 +3447,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                                     decoration: BoxDecoration(
                                         color: Colors.lightBlueAccent
                                             .withValues(alpha: 0.18),
-                                        borderRadius:
-                                            BorderRadius.circular(4)),
+                                        borderRadius: BorderRadius.circular(4)),
                                     child: const Text('当前',
                                         style: TextStyle(
                                             fontSize: 9,
@@ -3730,8 +3763,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       appBar: AppBar(title: const Text('作者'), actions: [
         IconButton(
             tooltip: '各库排行',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => const LibraryRankPage())),
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LibraryRankPage())),
             icon: const Icon(Icons.stacked_bar_chart)),
         IconButton(
             tooltip: syncing ? '同步中…' : '立即同步作者',
@@ -5657,10 +5690,7 @@ class _AuthorPageState extends State<AuthorPage> {
     );
     if (ok != true || !mounted) return;
     final j = await startServerSync(
-        target: 'author',
-        author: widget.name,
-        lib: primaryLib,
-        full: fullSync);
+        target: 'author', author: widget.name, lib: primaryLib, full: fullSync);
     if (j == null || j['ok'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -5670,8 +5700,8 @@ class _AuthorPageState extends State<AuthorPage> {
     }
     setState(() => syncing = true);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已开始同步该作者，完成后自动刷新')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已开始同步该作者，完成后自动刷新')));
     }
     syncTimer?.cancel();
     var tries = 0;
@@ -5832,8 +5862,7 @@ class _AuthorPageState extends State<AuthorPage> {
                         size: 14, color: Colors.grey),
                     const SizedBox(width: 6),
                     const Expanded(
-                        child: Text(
-                            '全量同步该作者作品信息（关闭则只补抓缺失）',
+                        child: Text('全量同步该作者作品信息（关闭则只补抓缺失）',
                             style:
                                 TextStyle(fontSize: 11, color: Colors.grey))),
                     Text('全量',
