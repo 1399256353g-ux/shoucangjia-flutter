@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
 import 'playback_flow.dart';
+import 'text_fit.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -3693,23 +3694,43 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                               ]),
                               Row(children: [
                                 Expanded(
-                                  child: Text('${w['ti'] ?? ''}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 12, color: Colors.white70)),
+                                  child: LayoutBuilder(builder: (context, c) {
+                                    const style = TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white70);
+                                    const expandWidth = 22.0;
+                                    final title = '${w['ti'] ?? ''}';
+                                    // F33：按可用宽度实际测量，只有真的截断才
+                                    // 显示展开按钮（原按字符数猜测会误判）。
+                                    final needsExpand = willOverflowText(
+                                        title, style,
+                                        c.maxWidth - expandWidth,
+                                        textScaler:
+                                            MediaQuery.textScalerOf(context),
+                                        locale:
+                                            Localizations.maybeLocaleOf(
+                                                context));
+                                    return Row(children: [
+                                      Expanded(
+                                        child: Text(title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: style),
+                                      ),
+                                      if (needsExpand)
+                                        GestureDetector(
+                                          onTap: () => showCaption(title),
+                                          child: const Padding(
+                                            padding: EdgeInsets.only(
+                                                left: 6, top: 2, bottom: 2),
+                                            child: Icon(Icons.unfold_more,
+                                                size: 16,
+                                                color: Colors.white54),
+                                          ),
+                                        ),
+                                    ]);
+                                  }),
                                 ),
-                                if (('${w['ti'] ?? ''}').length > 24)
-                                  GestureDetector(
-                                    onTap: () =>
-                                        showCaption('${w['ti'] ?? ''}'),
-                                    child: const Padding(
-                                      padding: EdgeInsets.only(
-                                          left: 6, top: 2, bottom: 2),
-                                      child: Icon(Icons.unfold_more,
-                                          size: 16, color: Colors.white54),
-                                    ),
-                                  ),
                               ]),
                             ])),
                       ]),
