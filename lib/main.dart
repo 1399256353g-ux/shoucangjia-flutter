@@ -51,7 +51,6 @@ class Cfg {
     if (rest.startsWith('$lib/')) return p;
     return '/media/${Uri.encodeComponent(lib)}/$rest';
   }
-
 }
 
 final cfg = Cfg();
@@ -100,7 +99,8 @@ Future<Map<String, dynamic>?> startServerSync(
             }))
         .timeout(const Duration(seconds: 15));
     final j = jsonDecode(r.body);
-    if (j is Map) return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
+    if (j is Map)
+      return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
   } catch (_) {}
   return null;
 }
@@ -343,8 +343,8 @@ class SettingsHubPage extends StatelessWidget {
           leading: const Icon(Icons.library_books_outlined),
           title: const Text('媒体库与爬虫'),
           subtitle: const Text('选择 / 添加 / 删除库 · 库根爬虫 · 维护检查'),
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const LibraryPage())),
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const LibraryPage())),
         ),
         ListTile(
           leading: const Icon(Icons.folder_special),
@@ -947,7 +947,8 @@ class _LibraryPageState extends State<LibraryPage> {
         content: const Text('仅从注册表移除，不删除数据目录和媒体文件。当前库或唯一库不能删除。'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
           FilledButton(
               onPressed: () => Navigator.pop(c, true), child: const Text('删除')),
         ],
@@ -988,8 +989,8 @@ class _LibraryPageState extends State<LibraryPage> {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
                 controller: id,
-                decoration: const InputDecoration(
-                    labelText: '库 ID（小写字母/数字/-/_）')),
+                decoration:
+                    const InputDecoration(labelText: '库 ID（小写字母/数字/-/_）')),
             TextField(
                 controller: name,
                 decoration: const InputDecoration(labelText: '显示名称')),
@@ -999,8 +1000,7 @@ class _LibraryPageState extends State<LibraryPage> {
             TextField(
                 controller: base,
                 decoration: const InputDecoration(
-                    labelText: '媒体根目录（绝对路径）',
-                    hintText: '/vol1/1000/...')),
+                    labelText: '媒体根目录（绝对路径）', hintText: '/vol1/1000/...')),
             TextField(
                 controller: dir,
                 decoration: const InputDecoration(
@@ -1009,7 +1009,8 @@ class _LibraryPageState extends State<LibraryPage> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
           FilledButton(
               onPressed: () => Navigator.pop(c, true), child: const Text('添加')),
         ],
@@ -1080,7 +1081,8 @@ class _LibraryPageState extends State<LibraryPage> {
                       final isCur = id == cfg.lib;
                       final isDef = id == defaultId;
                       final cr = (l['crawler'] as Map?) ?? const {};
-                      final scripts = (l['crawlerScripts'] as List?) ?? const [];
+                      final scripts =
+                          (l['crawlerScripts'] as List?) ?? const [];
                       return ListTile(
                         leading: Icon(
                             isCur
@@ -1113,10 +1115,11 @@ class _LibraryPageState extends State<LibraryPage> {
                           onSelected: (v) {
                             if (v == 'default') _setDefault(l);
                             if (v == 'crawler') {
-                              Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) =>
-                                      CrawlerConfigPage(lib: l))).then(
-                                  (_) => load());
+                              Navigator.of(context)
+                                  .push(MaterialPageRoute(
+                                      builder: (_) =>
+                                          CrawlerConfigPage(lib: l)))
+                                  .then((_) => load());
                             }
                             if (v == 'maint') {
                               Navigator.of(context).push(MaterialPageRoute(
@@ -1245,8 +1248,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(16), children: [
                   Text('库根：${widget.lib['base']}',
-                      style:
-                          const TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
                   const SizedBox(height: 10),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1259,8 +1261,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                   TextFormField(
                     initialValue: schedule,
                     decoration: const InputDecoration(
-                        labelText: '每日执行时间（HH:MM）',
-                        hintText: '04:10'),
+                        labelText: '每日执行时间（HH:MM）', hintText: '04:10'),
                     onChanged: (v) => schedule = v,
                   ),
                   const SizedBox(height: 12),
@@ -1273,8 +1274,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                     min: 0,
                     max: 1440,
                     divisions: 48,
-                    onChanged: (v) =>
-                        setState(() => intervalMin = v.round()),
+                    onChanged: (v) => setState(() => intervalMin = v.round()),
                   ),
                   TextFormField(
                     initialValue: note,
@@ -1295,8 +1295,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.terminal, size: 18),
                       title: Text('${(s as Map)['name']}'),
-                      subtitle: Text(
-                          '${((s['size'] as num?)?.toInt() ?? 0)} B',
+                      subtitle: Text('${((s['size'] as num?)?.toInt() ?? 0)} B',
                           style: const TextStyle(fontSize: 11)),
                     ),
                 ]),
@@ -1358,8 +1357,8 @@ class _MaintenancePageState extends State<MaintenancePage> {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('爬虫已启动 pid=${j['pid']}，日志：${j['log']}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('爬虫已启动 pid=${j['pid']}，日志：${j['log']}')));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -1397,7 +1396,8 @@ class _MaintenancePageState extends State<MaintenancePage> {
                   _row('数据目录', '${data['dir']}'),
                   _row('媒体目录', '${data['base']}'),
                   _row('索引', '${data['indexOk'] == true ? '正常' : '缺失/损坏'}'),
-                  _row('作品/收藏夹', '${data['total'] ?? 0} / ${data['collections'] ?? 0}'),
+                  _row('作品/收藏夹',
+                      '${data['total'] ?? 0} / ${data['collections'] ?? 0}'),
                   _row('索引文件', '${data['cFiles'] ?? 0} 个'),
                   _row('缺失', _list(data['missing'])),
                   _row('孤儿', _list(data['orphans'])),
@@ -1420,7 +1420,9 @@ class _MaintenancePageState extends State<MaintenancePage> {
   Widget _row(String k, String v) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: 110, child: Text(k, style: const TextStyle(color: Colors.grey))),
+          SizedBox(
+              width: 110,
+              child: Text(k, style: const TextStyle(color: Colors.grey))),
           Expanded(child: SelectableText(v)),
         ]),
       );
@@ -1552,47 +1554,47 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
           title: Text(cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName),
           actions: [
-        IconButton(
-            icon: const Icon(Icons.library_books_outlined),
-            tooltip: '媒体库',
-            onPressed: () async {
-              final changed = await Navigator.of(context).push<bool>(
-                  MaterialPageRoute(builder: (_) => const LibraryPage()));
-              if (changed == true) await load();
-            }),
-        if (defaultIdx != null)
-          IconButton(
-              icon: const Icon(Icons.star, color: Colors.amber),
-              tooltip: '打开默认收藏夹',
-              onPressed: openDefault),
-        IconButton(
-            icon: const Icon(Icons.auto_awesome),
-            tooltip: '推荐',
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const RecommendPage()))),
-        IconButton(
-            icon: const Icon(Icons.people_alt_outlined),
-            tooltip: '作者',
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const AuthorGridPage()))),
-        IconButton(
-            icon: const Icon(Icons.leaderboard_outlined),
-            tooltip: '排行榜',
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const RankPage()))),
-        IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '搜索',
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const SearchPage()))),
-        IconButton(
-            icon: const Icon(Icons.settings),
-            onPressed: () async {
-              await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsHubPage()));
-              load();
-            }),
-      ]),
+            IconButton(
+                icon: const Icon(Icons.library_books_outlined),
+                tooltip: '媒体库',
+                onPressed: () async {
+                  final changed = await Navigator.of(context).push<bool>(
+                      MaterialPageRoute(builder: (_) => const LibraryPage()));
+                  if (changed == true) await load();
+                }),
+            if (defaultIdx != null)
+              IconButton(
+                  icon: const Icon(Icons.star, color: Colors.amber),
+                  tooltip: '打开默认收藏夹',
+                  onPressed: openDefault),
+            IconButton(
+                icon: const Icon(Icons.auto_awesome),
+                tooltip: '推荐',
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const RecommendPage()))),
+            IconButton(
+                icon: const Icon(Icons.people_alt_outlined),
+                tooltip: '作者',
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AuthorGridPage()))),
+            IconButton(
+                icon: const Icon(Icons.leaderboard_outlined),
+                tooltip: '排行榜',
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => const RankPage()))),
+            IconButton(
+                icon: const Icon(Icons.search),
+                tooltip: '搜索',
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SearchPage()))),
+            IconButton(
+                icon: const Icon(Icons.settings),
+                onPressed: () async {
+                  await Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => const SettingsHubPage()));
+                  load();
+                }),
+          ]),
       body: err != null
           ? Center(child: Text('加载失败：$err'))
           : cols.isEmpty
@@ -1679,8 +1681,7 @@ class _CollectionPageState extends State<CollectionPage> {
     return v;
   }
 
-  List get deletedView =>
-      deleted.where((d) => _match(d as Map)).toList();
+  List get deletedView => deleted.where((d) => _match(d as Map)).toList();
 
   Timer? syncTimer;
   bool syncing = false;
@@ -1710,8 +1711,8 @@ class _CollectionPageState extends State<CollectionPage> {
 
   Future<void> load() async {
     try {
-      final r =
-          await http.get(cfg.u('/api/c/${widget.idx}.json'), headers: cfg.headers);
+      final r = await http.get(cfg.u('/api/c/${widget.idx}.json'),
+          headers: cfg.headers);
       if (r.statusCode != 200) return;
       final m = jsonDecode(r.body);
       if (!mounted) return;
@@ -1744,8 +1745,8 @@ class _CollectionPageState extends State<CollectionPage> {
     final j = await startServerSync(target: 'collection', idx: widget.idx);
     if (j == null || j['ok'] != true) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
       }
       return;
     }
@@ -1794,8 +1795,7 @@ class _CollectionPageState extends State<CollectionPage> {
                 autofocus: true,
                 style: const TextStyle(fontSize: 16),
                 decoration: const InputDecoration(
-                    hintText: '在本收藏夹内搜索标题或作者',
-                    border: InputBorder.none),
+                    hintText: '在本收藏夹内搜索标题或作者', border: InputBorder.none),
                 onChanged: (v) => setState(() => kw = v.trim()),
               )
             : Text(widget.name),
@@ -1863,8 +1863,7 @@ class _CollectionPageState extends State<CollectionPage> {
                 child: filter == 'del'
                     ? (dels.isEmpty
                         ? Center(
-                            child: Text(
-                                kw.isNotEmpty ? '无匹配的已删除作品' : '暂无已删除记录',
+                            child: Text(kw.isNotEmpty ? '无匹配的已删除作品' : '暂无已删除记录',
                                 style: const TextStyle(color: Colors.grey)))
                         : ListView.separated(
                             itemCount: dels.length,
@@ -1929,8 +1928,7 @@ class _RankPageState extends State<RankPage> {
   Future<void> load() async {
     if (mounted) setState(() => err = null);
     try {
-      final r = await http.get(
-          cfg.u('/api/rank?period=$period&metric=$metric'),
+      final r = await http.get(cfg.u('/api/rank?period=$period&metric=$metric'),
           headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(r.body);
@@ -2034,8 +2032,7 @@ class _RankPageState extends State<RankPage> {
                     metric == 'drop'
                         ? '按${_periods[period]}统计作者收到的小水滴'
                         : '按${_periods[period]}统计作者播放量',
-                    style:
-                        const TextStyle(fontSize: 11, color: Colors.grey))),
+                    style: const TextStyle(fontSize: 11, color: Colors.grey))),
           ]),
         ),
         Expanded(
@@ -2043,19 +2040,15 @@ class _RankPageState extends State<RankPage> {
               ? const Center(child: CircularProgressIndicator())
               : err != null
                   ? Center(
-                      child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                          Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 24),
-                              child: Text('加载失败：$err',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(fontSize: 12))),
-                          const SizedBox(height: 12),
-                          FilledButton(
-                              onPressed: load, child: const Text('重试')),
-                        ]))
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text('加载失败：$err',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12))),
+                      const SizedBox(height: 12),
+                      FilledButton(onPressed: load, child: const Text('重试')),
+                    ]))
                   : rows.isEmpty
                       ? Center(
                           child: Text(
@@ -2067,8 +2060,7 @@ class _RankPageState extends State<RankPage> {
                       : ListView.separated(
                           padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                           itemCount: rows.length,
-                          separatorBuilder: (_, __) =>
-                              const Divider(height: 1),
+                          separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (_, i) {
                             final e = rows[i] is Map
                                 ? Map<String, dynamic>.from(rows[i] as Map)
@@ -2077,8 +2069,8 @@ class _RankPageState extends State<RankPage> {
                             final av = '${e['avatar'] ?? ''}';
                             final score = _n(e['score']);
                             return ListTile(
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 4),
+                              contentPadding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
                               leading: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -2099,11 +2091,14 @@ class _RankPageState extends State<RankPage> {
                                                 color: Colors.blueGrey,
                                                 alignment: Alignment.center,
                                                 child: Text(
-                                                    name.isEmpty ? '?' : name[0],
+                                                    name.isEmpty
+                                                        ? '?'
+                                                        : name[0],
                                                     style: const TextStyle(
                                                         fontSize: 18)))
                                             : CachedNetworkImage(
-                                                imageUrl: cfg.base + cfg.media(av),
+                                                imageUrl:
+                                                    cfg.base + cfg.media(av),
                                                 httpHeaders: cfg.headers,
                                                 fit: BoxFit.cover,
                                                 memCacheWidth: 126,
@@ -2220,15 +2215,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final j = await startServerSync(target: 'authors', full: fullSync);
     if (j == null || j['ok'] != true) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
       }
       return;
     }
     setState(() => syncing = true);
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('已开始同步作者，完成后自动刷新')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已开始同步作者，完成后自动刷新')));
     }
     syncTimer?.cancel();
     var tries = 0;
@@ -2414,8 +2409,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                           size: 13, color: Colors.grey),
                       const SizedBox(width: 6),
                       Expanded(
-                          child: Text(
-                              '${authors.length} 位作者 · 播放/访问/水滴为本机统计',
+                          child: Text('${authors.length} 位作者 · 播放/访问/水滴为本机统计',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.grey))),
                       Text('全量同步',
@@ -2475,21 +2469,21 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                                         style: const TextStyle(
                                                             fontSize: 24)))
                                                 : CachedNetworkImage(
-                                                    imageUrl: cfg.base + cfg.media(av),
+                                                    imageUrl: cfg.base +
+                                                        cfg.media(av),
                                                     httpHeaders: cfg.headers,
                                                     fit: BoxFit.cover,
                                                     memCacheWidth: 174,
-                                                    errorWidget: (_, __, ___) =>
-                                                        Container(
-                                                            color:
-                                                                Colors.blueGrey,
-                                                            alignment: Alignment
-                                                                .center,
-                                                            child: Text(
-                                                                e.key.isEmpty
-                                                                    ? '?'
-                                                                    : e.key[0],
-                                                                style: const TextStyle(
+                                                    errorWidget: (_, __, ___) => Container(
+                                                        color: Colors.blueGrey,
+                                                        alignment:
+                                                            Alignment.center,
+                                                        child: Text(
+                                                            e.key.isEmpty
+                                                                ? '?'
+                                                                : e.key[0],
+                                                            style:
+                                                                const TextStyle(
                                                                     fontSize:
                                                                         24)))),
                                           ),
@@ -2532,7 +2526,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   late final PageController pc = PageController(initialPage: widget.start);
   late final Player player = Player();
   late final VideoController vc = VideoController(player);
@@ -2541,7 +2535,9 @@ class _PlayerPageState extends State<PlayerPage> {
   int img = 0;
   int _openToken = 0;
   int _lastWheel = 0;
+  double _wheelAcc = 0;
   int _navAt = 0;
+  int _lastKeyNav = 0;
   int? _pendingPage;
   bool paused = false;
   bool loading = true;
@@ -2577,6 +2573,7 @@ class _PlayerPageState extends State<PlayerPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
     player.setPlaylistMode(PlaylistMode.none);
@@ -2626,6 +2623,14 @@ class _PlayerPageState extends State<PlayerPage> {
     });
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
+    if (state == AppLifecycleState.resumed && mounted) {
+      focus.requestFocus();
+    }
+  }
+
   Future<void> open(int i) async {
     final my = ++_openToken;
     autoTimer?.cancel();
@@ -2650,10 +2655,11 @@ class _PlayerPageState extends State<PlayerPage> {
     postStat('play', '${w['a'] ?? ''}');
     try {
       if (w['t'] == 'v') {
-        await player
-            .open(Media(cfg.base + cfg.media(w['m'][0].toString()), httpHeaders: cfg.headers));
+        await player.open(Media(cfg.base + cfg.media(w['m'][0].toString()),
+            httpHeaders: cfg.headers));
       } else if ((w['au'] ?? '').toString().isNotEmpty) {
-        await player.open(Media(cfg.base + cfg.media(w['au'].toString()), httpHeaders: cfg.headers));
+        await player.open(Media(cfg.base + cfg.media(w['au'].toString()),
+            httpHeaders: cfg.headers));
       }
     } catch (_) {}
     if (my != _openToken) return;
@@ -2677,7 +2683,8 @@ class _PlayerPageState extends State<PlayerPage> {
           my == _openToken &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
-        player.open(Media(cfg.base + cfg.media(w['m'][0].toString()), httpHeaders: cfg.headers));
+        player.open(Media(cfg.base + cfg.media(w['m'][0].toString()),
+            httpHeaders: cfg.headers));
         player.play();
       }
     });
@@ -2782,13 +2789,13 @@ class _PlayerPageState extends State<PlayerPage> {
   void prev() => _step(-1);
 
   // 连点/连按方向键时直接跳页，避免动画未结束把后续按键吃掉
-  void _step(int delta) {
+  void _step(int delta, {bool instant = false}) {
     final base = _pendingPage ?? cur;
     final target = (base + delta).clamp(0, widget.works.length - 1).toInt();
     if (target == base) return;
     _pendingPage = target;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _navAt < 450) {
+    if (instant || now - _navAt < 450) {
       pc.jumpToPage(target);
     } else {
       pc.animateToPage(target,
@@ -2799,6 +2806,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
   // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停
   void onStageTap() {
+    focus.requestFocus();
     if (!ui) {
       showUi();
       return;
@@ -2923,13 +2931,20 @@ class _PlayerPageState extends State<PlayerPage> {
   void onWheel(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastWheel < 150) return;
-    if (e.scrollDelta.dy > 1) {
+    final dy = e.scrollDelta.dy;
+    if (dy == 0) return;
+    // 触控板/模拟器会把一次滑动拆成多个很小的 delta，累计到 1 再翻页
+    if (now - _lastWheel > 1200) _wheelAcc = 0;
+    _wheelAcc += dy;
+    if (now - _lastWheel < 90) return;
+    if (_wheelAcc >= 1) {
       _lastWheel = now;
-      next();
-    } else if (e.scrollDelta.dy < -1) {
+      _wheelAcc = 0;
+      _step(1, instant: true);
+    } else if (_wheelAcc <= -1) {
       _lastWheel = now;
-      prev();
+      _wheelAcc = 0;
+      _step(-1, instant: true);
     }
   }
 
@@ -2976,30 +2991,45 @@ class _PlayerPageState extends State<PlayerPage> {
   }
 
   KeyEventResult onKey(FocusNode node, KeyEvent e) {
-    if (e is! KeyDownEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
-    final bound = AppSettings.actionFor(k);
-    if (bound != null) {
-      doAction(bound);
-      return KeyEventResult.handled;
+    final down = e is KeyDownEvent;
+    final repeat = e is KeyRepeatEvent;
+    if (!down && !repeat) return KeyEventResult.ignored;
+    // 自定义键位只在按下时触发一次，长按重复不再连发
+    if (down) {
+      final bound = AppSettings.actionFor(k);
+      if (bound != null) {
+        doAction(bound);
+        return KeyEventResult.handled;
+      }
     }
     // 固定键位：方向键翻页/切图，空格暂停，Esc 退出（不随自定义绑定变化）
-    if (k == LogicalKeyboardKey.arrowDown) {
-      next();
+    final navKey = k == LogicalKeyboardKey.arrowDown ||
+        k == LogicalKeyboardKey.arrowUp ||
+        k == LogicalKeyboardKey.arrowRight ||
+        k == LogicalKeyboardKey.arrowLeft;
+    if (navKey) {
+      // 应用宝/模拟器长按方向键会发 KeyRepeatEvent（旧实现直接丢弃，必须反复点按）；
+      // 这里接受重复事件并节流，长按可以连续翻页但不会一次冲过头。
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final gap = (k == LogicalKeyboardKey.arrowLeft ||
+              k == LogicalKeyboardKey.arrowRight)
+          ? 320
+          : 180;
+      if (repeat && now - _lastKeyNav < gap) return KeyEventResult.handled;
+      _lastKeyNav = now;
+      if (k == LogicalKeyboardKey.arrowDown) {
+        _step(1, instant: true);
+      } else if (k == LogicalKeyboardKey.arrowUp) {
+        _step(-1, instant: true);
+      } else if (k == LogicalKeyboardKey.arrowRight) {
+        _stepImage(1);
+      } else {
+        _stepImage(-1);
+      }
       return KeyEventResult.handled;
     }
-    if (k == LogicalKeyboardKey.arrowUp) {
-      prev();
-      return KeyEventResult.handled;
-    }
-    if (k == LogicalKeyboardKey.arrowRight) {
-      _stepImage(1);
-      return KeyEventResult.handled;
-    }
-    if (k == LogicalKeyboardKey.arrowLeft) {
-      _stepImage(-1);
-      return KeyEventResult.handled;
-    }
+    if (!down) return KeyEventResult.ignored;
     if (k == LogicalKeyboardKey.space) {
       togglePause();
       return KeyEventResult.handled;
@@ -3017,6 +3047,7 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     autoTimer?.cancel();
     hideTimer?.cancel();
     retryTimer?.cancel();
@@ -3090,7 +3121,10 @@ class _PlayerPageState extends State<PlayerPage> {
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      // 关闭弹层后把焦点还给播放页，方向键可以继续翻页
+      if (mounted) focus.requestFocus();
+    });
   }
 
   String fmt(Duration d) {
@@ -3110,6 +3144,7 @@ class _PlayerPageState extends State<PlayerPage> {
         : (pics.isEmpty ? 0.0 : (idx + 1) / pics.length);
     return Focus(
       focusNode: focus,
+      autofocus: true,
       onKeyEvent: onKey,
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -3117,6 +3152,8 @@ class _PlayerPageState extends State<PlayerPage> {
           onPointerSignal: onWheel,
           // 双指轻触/捏合：清屏（再次双指恢复功能区）
           onPointerDown: (_) {
+            // 点击画面时确保键盘焦点仍在播放页，避免模拟器丢焦点后方向键失效
+            if (!focus.hasFocus) focus.requestFocus();
             pointers++;
             if (pointers == 2) {
               hapticTap();
@@ -3172,7 +3209,8 @@ class _PlayerPageState extends State<PlayerPage> {
                       child: Stack(fit: StackFit.expand, children: [
                         if ((it['th'] ?? '').toString().isNotEmpty)
                           CachedNetworkImage(
-                              imageUrl: cfg.base + cfg.media(it['th'].toString()),
+                              imageUrl:
+                                  cfg.base + cfg.media(it['th'].toString()),
                               httpHeaders: cfg.headers,
                               fit: BoxFit.contain),
                         Video(controller: vc, controls: NoVideoControls),
@@ -3264,7 +3302,8 @@ class _PlayerPageState extends State<PlayerPage> {
                         if ((w['av'] ?? '').toString().isNotEmpty)
                           ClipOval(
                               child: CachedNetworkImage(
-                                  imageUrl: cfg.base + cfg.media(w['av'].toString()),
+                                  imageUrl:
+                                      cfg.base + cfg.media(w['av'].toString()),
                                   httpHeaders: cfg.headers,
                                   width: 38,
                                   height: 38,
@@ -3417,8 +3456,9 @@ class _PlayerPageState extends State<PlayerPage> {
                                               duration: const Duration(
                                                   milliseconds: 120),
                                               height: k == idx ? 6 : 3,
-                                              margin: const EdgeInsets
-                                                  .symmetric(horizontal: 1.5),
+                                              margin:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 1.5),
                                               decoration: BoxDecoration(
                                                 color: active
                                                     ? (k == idx
@@ -3602,8 +3642,7 @@ class _RecommendPageState extends State<RecommendPage> {
       err = null;
     });
     try {
-      final r = await http.get(
-          cfg.u('/api/recommend?n=40&seed=$seed'),
+      final r = await http.get(cfg.u('/api/recommend?n=40&seed=$seed'),
           headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(r.body);
@@ -3644,8 +3683,7 @@ class _RecommendPageState extends State<RecommendPage> {
                 ]))
               : works.isEmpty
                   ? const Center(
-                      child: Text('暂无推荐',
-                          style: TextStyle(color: Colors.grey)))
+                      child: Text('暂无推荐', style: TextStyle(color: Colors.grey)))
                   : RefreshIndicator(
                       onRefresh: () => load(refresh: true),
                       child: GridView.builder(
@@ -3662,18 +3700,18 @@ class _RecommendPageState extends State<RecommendPage> {
                           return GestureDetector(
                             onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute(
-                                    builder: (_) => PlayerPage(
-                                        works: works, start: i))),
-                            child:
-                                Stack(fit: StackFit.expand, children: [
+                                    builder: (_) =>
+                                        PlayerPage(works: works, start: i))),
+                            child: Stack(fit: StackFit.expand, children: [
                               (w['th'] ?? '').toString().isEmpty
                                   ? Container(color: Colors.black26)
                                   : CachedNetworkImage(
-                                      imageUrl: cfg.base + cfg.media(w['th'].toString()),
+                                      imageUrl: cfg.base +
+                                          cfg.media(w['th'].toString()),
                                       httpHeaders: cfg.headers,
                                       fit: BoxFit.cover,
-                                      errorWidget: (_, __, ___) => Container(
-                                          color: Colors.black26)),
+                                      errorWidget: (_, __, ___) =>
+                                          Container(color: Colors.black26)),
                               Positioned(
                                   left: 4,
                                   top: 4,
@@ -3681,8 +3719,7 @@ class _RecommendPageState extends State<RecommendPage> {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 4, vertical: 2),
                                       color: Colors.black54,
-                                      child: Text(
-                                          w['t'] == 'v' ? '视频' : '图文',
+                                      child: Text(w['t'] == 'v' ? '视频' : '图文',
                                           style:
                                               const TextStyle(fontSize: 10)))),
                               Positioned(
@@ -3789,7 +3826,8 @@ class _SearchPageState extends State<SearchPage> {
                           child: (w['th'] ?? '').toString().isEmpty
                               ? Container(color: Colors.black26)
                               : CachedNetworkImage(
-                                  imageUrl: cfg.base + cfg.media(w['th'].toString()),
+                                  imageUrl:
+                                      cfg.base + cfg.media(w['th'].toString()),
                                   httpHeaders: cfg.headers,
                                   fit: BoxFit.cover)),
                       title: Text('${w['ti']}',
