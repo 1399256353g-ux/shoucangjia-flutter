@@ -145,6 +145,120 @@ Future<Map<String, dynamic>?> serverSyncStatus() async {
   return null;
 }
 
+// 所有收藏夹页面共用：确认后同步全部收藏夹（NAS 后台），完成后回调刷新
+Future<void> syncAllCollectionsFlow(BuildContext context,
+    {Future<void> Function()? onFinished}) async {
+  if (cfg.base.isEmpty) return;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('立即同步所有收藏夹'),
+      content: const Text('将同步全部收藏夹的最新作品，并刷新封面、索引与作者信息。\n\n'
+          '同步在 NAS 后台运行，可能需要较长时间；期间可继续浏览。'),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消')),
+        FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('开始同步')),
+      ],
+    ),
+  );
+  if (ok != true || !context.mounted) return;
+  final j = await startServerSync(target: 'all');
+  if (!context.mounted) return;
+  if (j == null || j['ok'] != true) {
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+    return;
+  }
+  final exit = await showDialog<int>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const _SyncAllProgressDialog(),
+  );
+  if (!context.mounted) return;
+  if (exit != null) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(exit == 0 ? '所有收藏夹同步完成' : '同步结束（退出码 $exit），请查看日志')));
+  }
+  if (onFinished != null) await onFinished();
+}
+
+// 同步全部收藏夹进度：后台任务在 NAS 上运行，这里只轮询状态
+class _SyncAllProgressDialog extends StatefulWidget {
+  const _SyncAllProgressDialog();
+  @override
+  State<_SyncAllProgressDialog> createState() => _SyncAllProgressDialogState();
+}
+
+class _SyncAllProgressDialogState extends State<_SyncAllProgressDialog> {
+  Timer? timer;
+  bool done = false;
+  int tries = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _poll();
+    timer = Timer.periodic(const Duration(seconds: 4), (_) => _poll());
+  }
+
+  Future<void> _poll() async {
+    if (done) return;
+    final s = await serverSyncStatus();
+    if (!mounted || done) return;
+    if (s == null) {
+      tries++;
+      if (tries > 5) _finish(-1);
+      return;
+    }
+    tries = 0;
+    if (s['running'] == true) return;
+    _finish((s['exit'] as num?)?.toInt() ?? -1);
+  }
+
+  void _finish(int exit) {
+    if (done || !mounted) return;
+    done = true;
+    timer?.cancel();
+    Navigator.of(context).pop(exit);
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('正在同步所有收藏夹'),
+      content: const Row(children: [
+        SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2)),
+        SizedBox(width: 14),
+        Expanded(
+            child: Text('同步任务已在 NAS 后台启动，完成后会自动刷新。',
+                style: TextStyle(fontSize: 13))),
+      ]),
+      actions: [
+        TextButton(
+            onPressed: () {
+              done = true;
+              timer?.cancel();
+              Navigator.of(context).pop();
+            },
+            child: const Text('转到后台')),
+      ],
+    );
+  }
+}
+
 Future<Map<String, dynamic>?> sendDrop(String id, String author,
     {String? lib}) async {
   if (cfg.base.isEmpty || id.isEmpty || author.isEmpty) return null;
@@ -1220,6 +1334,13 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('收藏夹管理'), actions: [
+        if (cfg.lib == 'douyin')
+          IconButton(
+              icon: const Icon(Icons.cloud_sync),
+              tooltip: '立即同步所有收藏夹',
+              onPressed: () async {
+                await syncAllCollectionsFlow(context, onFinished: load);
+              }),
         if (saving)
           const Padding(
             padding: EdgeInsets.only(right: 16),
@@ -2144,6 +2265,19 @@ class _HomePageState extends State<HomePage> {
                       builder: (_) => const SettingsHubPage()));
                   load();
                 }),
+            if (cfg.lib == 'douyin')
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_horiz),
+                tooltip: '更多',
+                onSelected: (v) async {
+                  if (v == 'sync-all') {
+                    await syncAllCollectionsFlow(context, onFinished: load);
+                  }
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'sync-all', child: Text('立即同步所有收藏夹')),
+                ],
+              ),
           ]),
       body: err != null
           ? Center(child: Text('加载失败：$err'))
@@ -2614,6 +2748,13 @@ class _CollectionPageState extends State<CollectionPage> {
               )
             : Text(widget.name),
         actions: [
+          if (cfg.lib == 'douyin')
+            IconButton(
+                icon: const Icon(Icons.cloud_sync),
+                tooltip: '立即同步所有收藏夹',
+                onPressed: syncing
+                    ? null
+                    : () => syncAllCollectionsFlow(context, onFinished: load)),
           IconButton(
               icon: syncing
                   ? const SizedBox(
