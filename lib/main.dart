@@ -2576,14 +2576,27 @@ class PlayerPage extends StatefulWidget {
 
 class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   late final PageController pc = PageController(initialPage: widget.start);
-  late final Player player = Player();
-  late final VideoController vc = VideoController(player);
+  // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
+  late final Player player = Player(
+    configuration: const PlayerConfiguration(
+      title: 'Dizi',
+      bufferSize: 32 * 1024 * 1024,
+    ),
+  );
+  late final VideoController vc = VideoController(
+    player,
+    configuration: const VideoControllerConfiguration(hwdec: 'auto-safe'),
+  );
   final FocusNode focus = FocusNode();
   int cur = 0;
   int img = 0;
   int _openToken = 0;
-  int _lastWheel = 0;
   double _wheelAcc = 0;
+  bool _wheelLock = false;
+  Timer? _wheelUnlock;
+  Timer? _wheelIdle;
+  bool _fsBusy = false;
+  int _lastPosSet = 0;
   int _navAt = 0;
   int _lastKeyNav = 0;
   int? _pendingPage;
@@ -2660,7 +2673,15 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       }
     });
     subPos = player.stream.position.listen((p) {
-      if (mounted) setState(() => pos = p);
+      if (!mounted) return;
+      // 位置流每 100ms 左右触发一次；全量 setState 会让视频层频繁重建、
+      // 在 Windows 上造成卡顿与音画不同步。这里节流到 200ms，
+      // 但跳转/拖动后的大幅变化立即刷新。
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final bigJump = (p.inMilliseconds - pos.inMilliseconds).abs() > 1200;
+      if (!bigJump && now - _lastPosSet < 200) return;
+      _lastPosSet = now;
+      setState(() => pos = p);
     });
     subDur = player.stream.duration.listen((d) {
       if (mounted) setState(() => dur = d);
@@ -2676,6 +2697,14 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
     if (state == AppLifecycleState.resumed && mounted) {
       focus.requestFocus();
+      // Windows 切回前台后音视频时钟偶发漂移：按已记录位置重新对齐并恢复速率
+      if (widget.works[cur]['t'] == 'v' && !paused) {
+        try {
+          player.seek(pos);
+          player.setRate(speed);
+          player.play();
+        } catch (_) {}
+      }
     }
   }
 
@@ -2718,6 +2747,10 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     if (!paused) {
       try {
         await player.play();
+      } catch (_) {}
+      // open 后再确认一次速率，避免个别 Windows 解码器在起播时重置为 1x
+      try {
+        await player.setRate(speed);
       } catch (_) {}
     }
     if (mounted && my == _openToken) {
@@ -2896,6 +2929,9 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
       return;
     }
     if (paused) {
+      try {
+        player.setRate(speed);
+      } catch (_) {}
       player.play();
     } else {
       player.pause();
@@ -2938,24 +2974,32 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
   }
 
   Future<void> toggleFs() async {
+    if (_fsBusy) return;
+    _fsBusy = true;
     setState(() => fs = !fs);
-    if (fs) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-      // Windows 使用窗口管理器进入真全屏（无边框、全屏不遮挡任务栏）
-      if (Platform.isWindows) {
-        try {
-          await windowManager.setFullScreen(true);
-        } catch (_) {}
+    try {
+      if (fs) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+        // Windows 使用窗口管理器进入真全屏（无边框、全屏不遮挡任务栏）
+        if (Platform.isWindows) {
+          try {
+            await windowManager.setFullScreen(true);
+          } catch (_) {}
+        }
+        showUi();
+      } else {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        if (Platform.isWindows) {
+          try {
+            await windowManager.setFullScreen(false);
+          } catch (_) {}
+        }
+        setState(() => ui = true);
       }
-      showUi();
-    } else {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      if (Platform.isWindows) {
-        try {
-          await windowManager.setFullScreen(false);
-        } catch (_) {}
-      }
-      setState(() => ui = true);
+    } finally {
+      // 窗口管理器切换需要一点时间，防抖避免快速连点导致的窗口状态错乱/崩溃
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+      _fsBusy = false;
     }
   }
 
@@ -2978,22 +3022,29 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
 
   void onWheel(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
     final dy = e.scrollDelta.dy;
     if (dy == 0) return;
-    // 触控板/模拟器会把一次滑动拆成多个很小的 delta，累计到 1 再翻页
-    if (now - _lastWheel > 1200) _wheelAcc = 0;
+    // 一次翻页后短暂锁定，滚轮惯性/触控板连续事件不会连续跳过多个作品
+    if (_wheelLock) return;
     _wheelAcc += dy;
-    if (now - _lastWheel < 90) return;
-    if (_wheelAcc >= 1) {
-      _lastWheel = now;
+    // 静止 350ms 后清空累计量，避免慢速滑动攒出额外翻页
+    _wheelIdle?.cancel();
+    _wheelIdle = Timer(const Duration(milliseconds: 350), () {
       _wheelAcc = 0;
-      _step(1, instant: true);
-    } else if (_wheelAcc <= -1) {
-      _lastWheel = now;
+    });
+    // Windows 鼠标一格约 100；触控板/模拟器会拆成 1~10 的小 delta，
+    // 累计到 30 即视为一次翻页，正好一格一次。
+    const threshold = 30.0;
+    if (_wheelAcc.abs() < threshold) return;
+    final dir = _wheelAcc > 0 ? 1 : -1;
+    _wheelAcc = 0;
+    _wheelLock = true;
+    _wheelUnlock?.cancel();
+    _wheelUnlock = Timer(const Duration(milliseconds: 260), () {
+      _wheelLock = false;
       _wheelAcc = 0;
-      _step(-1, instant: true);
-    }
+    });
+    _step(dir, instant: true);
   }
 
   void _stepImage(int dir) {
@@ -3099,6 +3150,8 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     autoTimer?.cancel();
     hideTimer?.cancel();
     retryTimer?.cancel();
+    _wheelUnlock?.cancel();
+    _wheelIdle?.cancel();
     // 退出播放页时确保恢复系统 UI 与 Windows 窗口，避免全屏残留
     if (fs) {
       try {
@@ -3116,6 +3169,21 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
     pc.dispose();
     focus.dispose();
     super.dispose();
+  }
+
+  // 视频层：窗口最小化/缩放时约束可能瞬间为 0，直接挂载纹理会让
+  // Windows 上的 libmpv 重建输出并崩溃；尺寸过小时用纯黑占位。
+  Widget videoView() {
+    return LayoutBuilder(builder: (_, c) {
+      if (c.maxWidth < 2 || c.maxHeight < 2) {
+        return const ColoredBox(color: Colors.black);
+      }
+      return ClipRect(
+        child: RepaintBoundary(
+          child: Video(controller: vc, controls: NoVideoControls),
+        ),
+      );
+    });
   }
 
   // 长简介/文案：弹出完整内容，避免被单行截断
@@ -3231,6 +3299,12 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
             child: Stack(children: [
               PageView.builder(
                 controller: pc,
+                // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
+                // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
+                physics:
+                    (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+                        ? const NeverScrollableScrollPhysics()
+                        : null,
                 scrollDirection: Axis.vertical,
                 itemCount: widget.works.length,
                 onPageChanged: open,
@@ -3261,7 +3335,7 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                   cfg.base + cfg.media(it['th'].toString()),
                               httpHeaders: cfg.headers,
                               fit: BoxFit.contain),
-                        Video(controller: vc, controls: NoVideoControls),
+                        videoView(),
                         if (loading)
                           const Center(
                               child: CircularProgressIndicator(
