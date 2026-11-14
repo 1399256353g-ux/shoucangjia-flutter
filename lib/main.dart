@@ -29,6 +29,7 @@ import 'playback_error.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
+import 'preload_plan.dart';
 import 'swipe_control.dart';
 import 'watch_progress.dart';
 
@@ -4470,20 +4471,47 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
+/// G18：两个播放器槽位。A 播放当前作品，B 在后台静音预缓冲下一条；
+/// 切条时交换槽位，预缓冲好的媒体无需重新打开即可起播。
+class _PlaybackSlot {
+  final String tag;
+  late final Player player;
+  late final VideoController vc;
+
+  _PlaybackSlot(this.tag) {
+    player = Player(
+      configuration: const PlayerConfiguration(
+        title: 'Dizi',
+        bufferSize: 32 * 1024 * 1024,
+      ),
+    );
+    // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
+    vc = VideoController(
+      player,
+      configuration: const VideoControllerConfiguration(hwdec: 'auto-safe'),
+    );
+  }
+}
+
 class _PlayerPageState extends State<PlayerPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late final PageController pc = PageController(initialPage: widget.start);
-  // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
-  late final Player player = Player(
-    configuration: const PlayerConfiguration(
-      title: 'Dizi',
-      bufferSize: 32 * 1024 * 1024,
-    ),
-  );
-  late final VideoController vc = VideoController(
-    player,
-    configuration: const VideoControllerConfiguration(hwdec: 'auto-safe'),
-  );
+  late final _PlaybackSlot _slotA = _PlaybackSlot('a');
+  late final _PlaybackSlot _slotB = _PlaybackSlot('b');
+  bool _slotAActive = true;
+  _PlaybackSlot get _active => _slotAActive ? _slotA : _slotB;
+  _PlaybackSlot get _idle => _slotAActive ? _slotB : _slotA;
+  // 对播放页其余代码保持原有 player / vc 接口，内部指向当前活动槽位
+  Player get player => _active.player;
+  VideoController get vc => _active.vc;
+  // G18：下一条预缓冲状态
+  Timer? _preloadTimer;
+  int? _preloadIndex;
+  String? _preloadKey;
+  bool _preloadReady = false;
+  bool _preloadFailed = false;
+  int _preloadGen = 0;
+  final List<StreamSubscription> _playerSubs = <StreamSubscription>[];
   final FocusNode focus = FocusNode();
   int cur = 0;
   int img = 0;
@@ -4627,8 +4655,24 @@ class _PlayerPageState extends State<PlayerPage>
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
     _loadLikes();
-    player.setPlaylistMode(PlaylistMode.none);
-    player.stream.completed.listen((done) {
+    _bindPlayer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      focus.requestFocus();
+      open(widget.start);
+    });
+  }
+
+  /// G18：监听当前活动槽位。切换预缓冲槽位时先解绑旧槽位，避免
+  /// 旧播放器迟到的 completed/position 事件干扰新作品。
+  void _bindPlayer() {
+    for (final s in _playerSubs) {
+      s.cancel();
+    }
+    _playerSubs.clear();
+    final p = player;
+    p.setPlaylistMode(PlaylistMode.none);
+    _playerSubs.add(p.stream.completed.listen((done) {
+      if (!identical(p, player)) return;
       if (!done || !mounted) return;
       if (_mediaToken != _openToken) return;
       final w = widget.works[cur];
@@ -4664,14 +4708,16 @@ class _PlayerPageState extends State<PlayerPage>
         case VideoEndAction.stop:
           break;
       }
-    });
-    player.stream.playing.listen((v) {
+    }));
+    _playerSubs.add(p.stream.playing.listen((v) {
+      if (!identical(p, player)) return;
       if (!mounted || _opening) return;
       if (widget.works[cur]['t'] == 'v' && v != !paused) {
         setState(() => paused = !v);
       }
-    });
-    subPos = player.stream.position.listen((p) {
+    }));
+    subPos = p.stream.position.listen((position) {
+      if (!identical(p, player)) return;
       if (!mounted) return;
       // G10：记录观看位置（内部 3s 节流，不受 UI 刷新节流影响）；
       // _opening 期间播放器会先上报 0 位置，不能用来覆盖已有进度
@@ -4681,35 +4727,41 @@ class _PlayerPageState extends State<PlayerPage>
           WatchProgressStore.record(
               lib: _libFor(cw),
               id: _watchIdFor(cw),
-              positionMs: p.inMilliseconds,
+              positionMs: position.inMilliseconds,
               durationMs: dur.inMilliseconds);
-          _recordContinue(cw, p.inMilliseconds, dur.inMilliseconds);
+          _recordContinue(cw, position.inMilliseconds, dur.inMilliseconds);
         }
       }
       // 位置流每 100ms 左右触发一次；全量 setState 会让视频层频繁重建、
       // 在 Windows 上造成卡顿与音画不同步。这里节流到 200ms，
       // 但跳转/拖动后的大幅变化立即刷新。
       final now = DateTime.now().millisecondsSinceEpoch;
-      final bigJump = (p.inMilliseconds - pos.inMilliseconds).abs() > 1200;
+      final bigJump =
+          (position.inMilliseconds - pos.inMilliseconds).abs() > 1200;
       if (!bigJump && now - _lastPosSet < 200) return;
       _lastPosSet = now;
-      setState(() => pos = p);
+      setState(() => pos = position);
     });
-    subDur = player.stream.duration.listen((d) {
+    subDur = p.stream.duration.listen((d) {
+      if (!identical(p, player)) return;
       if (d.inMilliseconds > 0) {
         _loadTimeout?.cancel();
         _loadTimeout = null;
       }
       if (mounted) setState(() => dur = d);
     });
+    if (subPos != null) _playerSubs.add(subPos!);
+    if (subDur != null) _playerSubs.add(subDur!);
     // G12：播放器报错（解码失败/流打不开）直接给出可重试提示，
     // 不再无限转圈；错误可能来自上一条媒体，切条后自动清除。
-    player.stream.error.listen((msg) {
+    _playerSubs.add(p.stream.error.listen((msg) {
+      if (!identical(p, player)) return;
       if (!mounted || _failure != null) return;
       _showFailure(classifyPlaybackError(msg));
-    });
+    }));
     // G12：弱网缓冲提示 —— 缓冲超过阈值才显示，避免正常起播闪一下
-    player.stream.buffering.listen((b) {
+    _playerSubs.add(p.stream.buffering.listen((b) {
+      if (!identical(p, player)) return;
       if (!mounted) return;
       if (!b) {
         _slowBufferTimer?.cancel();
@@ -4728,11 +4780,7 @@ class _PlayerPageState extends State<PlayerPage>
       _slowBufferTimer = Timer(slowBufferThreshold, () {
         if (mounted && _buffering) setState(() => _slowBuffer = true);
       });
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      focus.requestFocus();
-      open(widget.start);
-    });
+    }));
   }
 
   @override
@@ -4873,9 +4921,95 @@ class _PlayerPageState extends State<PlayerPage>
     open(cur);
   }
 
+  /// G18：作废当前预缓冲（例如用户跳到别的作品）。默认顺手停掉空闲槽位，
+  /// 避免它在后台继续占带宽。
+  void _cancelPreload({bool stopIdle = true}) {
+    _preloadTimer?.cancel();
+    _preloadTimer = null;
+    _preloadGen++;
+    _preloadReady = false;
+    _preloadFailed = false;
+    _preloadIndex = null;
+    _preloadKey = null;
+    if (stopIdle) {
+      try {
+        _idle.player.stop();
+      } catch (_) {}
+    }
+  }
+
+  /// G18：当前条起播后，延迟一点在空闲槽位静音打开下一条。
+  void _schedulePreload() {
+    _preloadTimer?.cancel();
+    _preloadTimer = null;
+    final next = cur + 1;
+    if (next >= widget.works.length) return;
+    final nw = widget.works[next];
+    final path = preloadMediaPath(nw);
+    if (!shouldPreloadNext(
+        autoplay: autoplay,
+        loopOne: loopOne,
+        index: next,
+        count: widget.works.length,
+        hasMedia: path != null)) {
+      return;
+    }
+    _preloadTimer = Timer(const Duration(milliseconds: 800), () {
+      _startPreload(next, path!);
+    });
+  }
+
+  Future<void> _startPreload(int idx, String path) async {
+    if (!mounted || idx != cur + 1 || !autoplay || loopOne) return;
+    final gen = ++_preloadGen;
+    final nw = widget.works[idx];
+    final nlib = _libFor(nw);
+    final key = preloadKeyFor(nw, nlib);
+    final slot = _idle;
+    _preloadIndex = idx;
+    _preloadKey = key;
+    _preloadReady = false;
+    _preloadFailed = false;
+    StreamSubscription? err;
+    err = slot.player.stream.error.listen((_) {
+      if (gen == _preloadGen) _preloadFailed = true;
+    });
+    try {
+      await slot.player.stop();
+      // 预缓冲槽位保持静音、暂停；切条时再恢复音量并 play
+      await slot.player.setVolume(0);
+      await slot.player.open(
+        Media(cfg.base + cfg.media(path, lib: nlib),
+            httpHeaders: cfg.headers),
+        play: false,
+      );
+      if (gen != _preloadGen) return;
+      _preloadReady = !_preloadFailed;
+    } catch (_) {
+      if (gen == _preloadGen) {
+        _preloadReady = false;
+        _preloadFailed = true;
+      }
+    } finally {
+      await err.cancel();
+    }
+  }
+
   Future<void> open(int i) async {
     // 切条前先把上一条的进度落盘
     _saveWatchProgress(force: true);
+    final w = widget.works[i];
+    final wl = _libFor(w);
+    final key = preloadKeyFor(w, wl);
+    // 命中预缓冲：直接使用空闲槽位，跳过 player.open 的等待
+    final canUsePreload = _preloadReady &&
+        !_preloadFailed &&
+        preloadMatches(
+            preloadedIndex: _preloadIndex,
+            preloadedKey: _preloadKey,
+            index: i,
+            key: key);
+    if (!canUsePreload) _cancelPreload();
     final my = ++_openToken;
     _pausedByBackground = false;
     autoTimer?.cancel();
@@ -4883,6 +5017,8 @@ class _PlayerPageState extends State<PlayerPage>
     playGuard?.cancel();
     _loadTimeout?.cancel();
     _slowBufferTimer?.cancel();
+    _preloadTimer?.cancel();
+    _preloadTimer = null;
     manualPic = false;
     _pendingPage = null;
     _mediaToken = -1;
@@ -4911,33 +5047,54 @@ class _PlayerPageState extends State<PlayerPage>
       }
       _showFailure(timeoutFailure);
     });
-    try {
-      await player.stop();
-    } catch (_) {}
+    if (canUsePreload) {
+      final old = _active;
+      final target = _idle;
+      _slotAActive = target == _slotA;
+      _bindPlayer();
+      try {
+        await old.player.stop();
+      } catch (_) {}
+      _mediaToken = my;
+      _preloadReady = false;
+      _preloadFailed = false;
+      _preloadIndex = null;
+      _preloadKey = null;
+      _preloadGen++;
+      setState(() {
+        pos = Duration.zero;
+        final d0 = player.state.duration;
+        dur = d0.inMilliseconds > 0 ? d0 : Duration.zero;
+      });
+    } else {
+      try {
+        await player.stop();
+      } catch (_) {}
+    }
     if (my != _openToken) return;
-    final w = widget.works[i];
-    final wl = _libFor(w);
     _refreshDrop('${w['id'] ?? ''}', my, wl);
     postStat('play', '${w['a'] ?? ''}', lib: wl);
-    try {
-      if (w['t'] == 'v') {
-        await player.open(Media(
-            cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
-            httpHeaders: cfg.headers));
-      } else if ((w['au'] ?? '').toString().isNotEmpty) {
-        await player.open(Media(
-            cfg.base + cfg.media(w['au'].toString(), lib: wl),
-            httpHeaders: cfg.headers));
-      }
-      if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
-          my == _openToken) {
-        _mediaToken = my;
-      }
-    } catch (e) {
-      if (my == _openToken) {
-        _opening = false;
-        _showFailure(classifyPlaybackError(e));
-        return;
+    if (!canUsePreload) {
+      try {
+        if (w['t'] == 'v') {
+          await player.open(Media(
+              cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
+              httpHeaders: cfg.headers));
+        } else if ((w['au'] ?? '').toString().isNotEmpty) {
+          await player.open(Media(
+              cfg.base + cfg.media(w['au'].toString(), lib: wl),
+              httpHeaders: cfg.headers));
+        }
+        if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
+            my == _openToken) {
+          _mediaToken = my;
+        }
+      } catch (e) {
+        if (my == _openToken) {
+          _opening = false;
+          _showFailure(classifyPlaybackError(e));
+          return;
+        }
       }
     }
     if (my != _openToken) return;
@@ -5012,6 +5169,8 @@ class _PlayerPageState extends State<PlayerPage>
     });
     // 后台打开的作品不启动图文轮播，等回前台再按用户状态恢复
     if (w['t'] != 'v' && !paused) startAuto();
+    // G18：起播稳定后再预缓冲下一条，避免和当前条抢带宽
+    _schedulePreload();
   }
 
   Future<void> _refreshDrop(String id, int token, String lib) async {
@@ -5470,11 +5629,21 @@ class _PlayerPageState extends State<PlayerPage>
     // completed 事件），统一由 completed 回调在 Dart 层重播，
     // 这样关闭循环后连播判定立刻恢复，不会偶发停在片尾。
     setState(() => loopOne = !loopOne);
+    if (loopOne) {
+      _cancelPreload();
+    } else {
+      _schedulePreload();
+    }
   }
 
   void toggleAutoplay() {
     // F32：只切连播，不再连带改动单条循环
     setState(() => autoplay = !autoplay);
+    if (autoplay) {
+      _schedulePreload();
+    } else {
+      _cancelPreload();
+    }
   }
 
   void cycleSpeed() {
@@ -5673,6 +5842,8 @@ class _PlayerPageState extends State<PlayerPage>
     _wheelIdle?.cancel();
     _volHintTimer?.cancel();
     _swipeHintTimer?.cancel();
+    _preloadTimer?.cancel();
+    _preloadGen++;
     // 退出播放页时确保恢复系统 UI 与 Windows 窗口，避免全屏残留
     if (fs) {
       try {
@@ -5687,7 +5858,12 @@ class _PlayerPageState extends State<PlayerPage>
     subPos?.cancel();
     subDur?.cancel();
     playGuard?.cancel();
-    player.dispose();
+    for (final s in _playerSubs) {
+      s.cancel();
+    }
+    _playerSubs.clear();
+    _slotA.player.dispose();
+    _slotB.player.dispose();
     pc.dispose();
     focus.dispose();
     super.dispose();
@@ -5702,7 +5878,11 @@ class _PlayerPageState extends State<PlayerPage>
       }
       return ClipRect(
         child: RepaintBoundary(
-          child: Video(controller: vc, controls: NoVideoControls),
+          // key 随槽位变化：预缓冲切换后必须重建 Video，才能挂到新控制器
+          child: Video(
+              key: ValueKey('video-${_active.tag}'),
+              controller: vc,
+              controls: NoVideoControls),
         ),
       );
     });
