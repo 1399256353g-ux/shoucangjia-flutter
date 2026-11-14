@@ -18,6 +18,10 @@ class BasicLib {
   final String bigId;
   final int authors;
   final int works;
+  /// J7：来源连接（多 IP 聚合时用于路由与去重展示）。
+  final String serverId;
+  final String serverBase;
+  final String serverLabel;
 
   const BasicLib({
     required this.id,
@@ -26,6 +30,9 @@ class BasicLib {
     required this.bigId,
     required this.authors,
     required this.works,
+    this.serverId = '',
+    this.serverBase = '',
+    this.serverLabel = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -35,6 +42,9 @@ class BasicLib {
         'big_id': bigId,
         'authors': authors,
         'works': works,
+        if (serverId.isNotEmpty) '_serverId': serverId,
+        if (serverBase.isNotEmpty) '_serverBase': serverBase,
+        if (serverLabel.isNotEmpty) '_serverLabel': serverLabel,
       };
 }
 
@@ -45,6 +55,9 @@ class BigLib {
   final int authors;
   final int works;
   final List<BasicLib> basics;
+  final String serverId;
+  final String serverBase;
+  final String serverLabel;
 
   const BigLib({
     required this.id,
@@ -53,6 +66,9 @@ class BigLib {
     required this.authors,
     required this.works,
     required this.basics,
+    this.serverId = '',
+    this.serverBase = '',
+    this.serverLabel = '',
   });
 
   String get subtitle =>
@@ -91,6 +107,9 @@ class LibraryTree {
         bigId: '${raw['big_id'] ?? ''}'.trim(),
         authors: _num(raw['authors']),
         works: _num(raw['works']),
+        serverId: '${raw['_serverId'] ?? ''}'.trim(),
+        serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
+        serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
       ));
     }
 
@@ -106,6 +125,9 @@ class LibraryTree {
         authors: _num(raw['authors']),
         works: _num(raw['works']),
         basics: basics.where((b) => b.bigId == id).toList(growable: false),
+        serverId: '${raw['_serverId'] ?? ''}'.trim(),
+        serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
+        serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
       ));
     }
     if (bigs.isEmpty) return null;

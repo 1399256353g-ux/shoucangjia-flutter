@@ -117,7 +117,11 @@ class LibrarySelectorView extends StatelessWidget {
           open ? Icons.folder_open : Icons.folder_outlined,
           color: Theme.of(context).colorScheme.primary),
       title: Text(big.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text(big.subtitle, style: const TextStyle(fontSize: 11)),
+      subtitle: Text(
+          big.serverLabel.isEmpty
+              ? big.subtitle
+              : '${big.subtitle} · ${big.serverLabel}',
+          style: const TextStyle(fontSize: 11)),
       trailing: AnimatedRotation(
         turns: open ? 0.25 : 0,
         duration: const Duration(milliseconds: 150),
@@ -151,7 +155,9 @@ class LibrarySelectorView extends StatelessWidget {
       contentPadding: const EdgeInsets.only(left: 40, right: 8),
       leading: const Icon(Icons.subdirectory_arrow_right, size: 18),
       title: Text(b.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text('${b.authors} 作者 · ${b.works} 作品',
+      subtitle: Text(
+          '${b.authors} 作者 · ${b.works} 作品'
+          '${b.serverLabel.isEmpty ? '' : ' · ${b.serverLabel}'}',
           style: const TextStyle(fontSize: 11)),
       trailing: IconButton(
         key: ValueKey('star-${b.id}'),

@@ -28,6 +28,7 @@ import 'library_rank.dart';
 import 'library_selector_view.dart';
 import 'library_tree.dart';
 import 'likes.dart';
+import 'multi_server.dart';
 import 'playback_flow.dart';
 import 'pic_zoom.dart';
 import 'playback_error.dart';
@@ -83,15 +84,51 @@ class Cfg {
   String pass = '';
   String lib = '';
   String libName = '';
-  Map<String, String> get headers => {
-        'Authorization': 'Basic ${base64Encode(utf8.encode('$user:$pass'))}',
-      };
+
+  /// J7：库 → 连接映射。同一库 id 在聚合时已去重，这里保存最终来源的 IP。
+  final Map<String, Map<String, String>> _bindings = {};
+
+  void setBindings(Map<String, Map<String, String>> bindings) {
+    _bindings
+      ..clear()
+      ..addAll(bindings);
+  }
+
+  void bindLibrary(String libId, String base,
+      {String? user, String? pass, String? server}) {
+    final b = normalizeBase(base);
+    if (libId.isEmpty || b.isEmpty) return;
+    _bindings[libId] = {
+      'base': b,
+      'user': user ?? this.user,
+      'pass': pass ?? this.pass,
+      'server': server ?? '',
+    };
+  }
+
+  String baseFor([String? libId]) {
+    final l = libId ?? lib;
+    return _bindings[l]?['base'] ?? base;
+  }
+
+  Map<String, String> headersFor([String? libId]) {
+    final b = _bindings[libId ?? lib];
+    final u = b?['user'] ?? user;
+    final p = b?['pass'] ?? pass;
+    return {
+      'Authorization': 'Basic ${base64Encode(utf8.encode('$u:$p'))}',
+    };
+  }
+
+  /// 当前库所在连接的认证；没有绑定则回落到当前连接。
+  Map<String, String> get headers => headersFor(lib);
   // lib 省略时用当前库；显式传入可查询其他库
   Uri u(String path, {String? lib}) {
     final l = lib ?? this.lib;
-    if (base.isEmpty || l.isEmpty) return Uri.parse('$base$path');
+    final b = baseFor(l);
+    if (b.isEmpty || l.isEmpty) return Uri.parse('$b$path');
     final sep = path.contains('?') ? '&' : '?';
-    return Uri.parse('$base$path${sep}lib=${Uri.encodeQueryComponent(l)}');
+    return Uri.parse('$b$path${sep}lib=${Uri.encodeQueryComponent(l)}');
   }
 
   // 媒体路径统一带库前缀：/media/<lib>/<相对路径>
@@ -102,6 +139,10 @@ class Cfg {
     if (rest.startsWith('$l/')) return p;
     return '/media/${Uri.encodeComponent(l)}/$rest';
   }
+
+  /// 媒体绝对地址：按作品所属库路由到对应 IP。
+  String mediaUrl(String p, {String? lib}) =>
+      '${baseFor(lib)}${media(p, lib: lib)}';
 }
 
 final cfg = Cfg();
@@ -321,9 +362,33 @@ class _AppState extends State<App> {
 
   Future<void> _boot() async {
     final sp = await SharedPreferences.getInstance();
-    cfg.base = sp.getString('base') ?? '';
+    final legacyBase = sp.getString('base') ?? '';
     cfg.user = sp.getString('user') ?? 'zzx';
     cfg.pass = sp.getString('pass') ?? '';
+    final servers = migrateLegacy(
+      servers: decodeServers(sp.getString('servers_v1')),
+      base: legacyBase,
+      user: cfg.user,
+      pass: cfg.pass,
+    );
+    if (servers.isNotEmpty) {
+      await sp.setString('servers_v1', encodeServers(servers));
+    }
+    final activeId = sp.getString('active_server_v1') ?? '';
+    ServerConn? active;
+    for (final s in servers) {
+      if (s.id == activeId) {
+        active = s;
+        break;
+      }
+    }
+    active ??= servers.isEmpty ? null : servers.first;
+    if (active != null) {
+      cfg.base = active.base;
+      cfg.user = active.user;
+      cfg.pass = active.pass;
+    }
+    cfg.setBindings(decodeBindings(sp.getString('lib_bindings_v1')));
     cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
     await AppTheme.load();
@@ -367,137 +432,332 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late final TextEditingController base = TextEditingController(
-      text: cfg.base.isEmpty ? 'http://192.168.2.4:8090' : cfg.base);
-  late final TextEditingController user = TextEditingController(text: cfg.user);
-  late final TextEditingController pass = TextEditingController(text: cfg.pass);
-  bool testing = false;
-  bool? testOk;
-  String testMsg = '';
+  List<ServerConn> servers = [];
+  String activeId = '';
+  final Map<String, String> testMsg = {};
+  final Map<String, bool> testOk = {};
+  final Set<String> testing = {};
 
-  static String normalize(String raw) {
-    var b = raw.trim().replaceAll(RegExp(r'/+$'), '');
-    if (b.isEmpty) return b;
-    if (!b.startsWith('http://') && !b.startsWith('https://')) {
-      b = 'http://' + b;
-    }
-    return b;
+  @override
+  void initState() {
+    super.initState();
+    _load();
   }
 
-  Map<String, String> get _fieldHeaders => {
-        'Authorization': 'Basic '
-            '${base64Encode(utf8.encode('${user.text.trim()}:${pass.text}'))}',
-      };
-
-  Future<void> test() async {
-    final b = normalize(base.text);
-    if (b.isEmpty) return;
+  Future<void> _load() async {
+    final sp = await SharedPreferences.getInstance();
+    final list = migrateLegacy(
+      servers: decodeServers(sp.getString('servers_v1')),
+      base: sp.getString('base') ?? '',
+      user: sp.getString('user') ?? 'zzx',
+      pass: sp.getString('pass') ?? '',
+    );
+    final active = sp.getString('active_server_v1') ?? '';
+    if (!mounted) return;
     setState(() {
-      testing = true;
-      testOk = null;
-      testMsg = '';
+      servers = list;
+      activeId = list.any((s) => s.id == active)
+          ? active
+          : (list.isEmpty ? '' : list.first.id);
     });
+  }
+
+  Future<void> _persist() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString('servers_v1', encodeServers(servers));
+    await sp.setString('active_server_v1', activeId);
+    ServerConn? active;
+    for (final s in servers) {
+      if (s.id == activeId) active = s;
+    }
+    active ??= servers.isEmpty ? null : servers.first;
+    if (active != null) {
+      cfg.base = active.base;
+      cfg.user = active.user;
+      cfg.pass = active.pass;
+      await sp.setString('base', active.base);
+      await sp.setString('user', active.user);
+      await sp.setString('pass', active.pass);
+    } else {
+      cfg.base = '';
+      await sp.setString('base', '');
+    }
+  }
+
+  Future<void> _test(ServerConn s) async {
+    setState(() => testing.add(s.id));
     final sw = Stopwatch()..start();
     try {
-      final r = await http
-          .get(Uri.parse('$b/api/index.json'), headers: _fieldHeaders)
-          .timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final cols = (jsonDecode(r.body)['collections'] as List?)?.length ?? 0;
+      final headers = {
+        'Authorization':
+            'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+      };
+      final rs = await Future.wait([
+        http
+            .get(Uri.parse('${s.base}/api/index.json'), headers: headers)
+            .timeout(const Duration(seconds: 8)),
+        http
+            .get(Uri.parse('${s.base}/api/libraries.json'), headers: headers)
+            .timeout(const Duration(seconds: 8)),
+      ]);
+      if (rs[0].statusCode != 200) throw Exception('HTTP ${rs[0].statusCode}');
+      final cols =
+          (jsonDecode(rs[0].body)['collections'] as List?)?.length ?? 0;
+      var basics = 0;
+      if (rs[1].statusCode == 200) {
+        final j = jsonDecode(rs[1].body);
+        if (j is Map) basics = (j['basicLibraries'] as List?)?.length ?? 0;
+      }
       sw.stop();
       if (mounted) {
         setState(() {
-          testOk = true;
-          testMsg = '连接成功 · $cols 个收藏夹 · ${sw.elapsedMilliseconds}ms';
+          testOk[s.id] = true;
+          testMsg[s.id] =
+              '连接成功 · $cols 收藏夹 · $basics 基础库 · ${sw.elapsedMilliseconds}ms';
         });
       }
     } catch (e) {
       sw.stop();
       if (mounted) {
         setState(() {
-          testOk = false;
-          testMsg = '连接失败：$e';
+          testOk[s.id] = false;
+          testMsg[s.id] = '连接失败：$e';
         });
       }
     } finally {
-      if (mounted) setState(() => testing = false);
+      if (mounted) setState(() => testing.remove(s.id));
     }
   }
 
-  Future<void> save() async {
-    final b = normalize(base.text);
-    cfg.base = b;
-    cfg.user = user.text.trim();
-    cfg.pass = pass.text;
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString('base', cfg.base);
-    await sp.setString('user', cfg.user);
-    await sp.setString('pass', cfg.pass);
-    if (mounted) {
-      final nav = Navigator.of(context);
-      if (nav.canPop()) {
-        nav.pop();
-      } else {
-        nav.pushReplacement(
-            MaterialPageRoute(builder: (_) => const HomePage()));
+  Future<void> _edit([ServerConn? old]) async {
+    final label = TextEditingController(text: old?.label ?? '');
+    final base =
+        TextEditingController(text: old?.base ?? 'http://192.168.2.4:8090');
+    final user = TextEditingController(text: old?.user ?? cfg.user);
+    final pass = TextEditingController(text: old?.pass ?? cfg.pass);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(old == null ? '添加网络连接' : '编辑网络连接'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+                controller: label,
+                decoration: const InputDecoration(
+                    labelText: '名称（可选）', hintText: '家里 / 公司 / 备用 NAS')),
+            const SizedBox(height: 8),
+            TextField(
+                controller: base,
+                decoration: const InputDecoration(
+                    labelText: '地址', hintText: 'http://192.168.2.4:8090')),
+            const SizedBox(height: 8),
+            TextField(
+                controller: user,
+                decoration: const InputDecoration(labelText: '用户名')),
+            const SizedBox(height: 8),
+            TextField(
+                controller: pass,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '密码')),
+          ]),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: Text(old == null ? '添加' : '保存')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final b = normalizeBase(base.text);
+    if (b.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('地址不能为空')));
       }
+      return;
+    }
+    final dup = servers.any((s) => s.base == b && s.id != old?.id);
+    if (dup) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('该地址已添加')));
+      }
+      return;
+    }
+    final s = old == null
+        ? ServerConn(
+            id: nextServerId(servers),
+            label: label.text.trim(),
+            base: b,
+            user: user.text.trim(),
+            pass: pass.text,
+          )
+        : old.copyWith(
+            label: label.text.trim(),
+            base: b,
+            user: user.text.trim(),
+            pass: pass.text,
+          );
+    setState(() {
+      if (old == null) {
+        servers = [...servers, s];
+        activeId = activeId.isEmpty ? s.id : activeId;
+      } else {
+        servers = [
+          for (final x in servers) x.id == old.id ? s : x,
+        ];
+      }
+      testMsg.remove(s.id);
+      testOk.remove(s.id);
+    });
+    await _persist();
+  }
+
+  Future<void> _delete(ServerConn s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('删除连接「${s.title}」？'),
+        content: const Text('只删除本机保存的地址与账号，不删除 NAS 上的媒体和库。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() {
+      servers = servers.where((x) => x.id != s.id).toList();
+      if (activeId == s.id) activeId = servers.isEmpty ? '' : servers.first.id;
+    });
+    await _persist();
+  }
+
+  Future<void> _toggle(ServerConn s, bool v) async {
+    setState(() {
+      servers = [
+        for (final x in servers) x.id == s.id ? x.copyWith(visible: v) : x,
+      ];
+    });
+    await _persist();
+  }
+
+  Future<void> _activate(ServerConn s) async {
+    setState(() => activeId = s.id);
+    await _persist();
+  }
+
+  Future<void> _saveAndEnter() async {
+    await _persist();
+    if (!mounted) return;
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop(true);
+    } else if (cfg.base.isNotEmpty) {
+      nav.pushReplacement(MaterialPageRoute(builder: (_) => const HomePage()));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('网络连接')),
-      body: ListView(padding: const EdgeInsets.all(20), children: [
-        TextField(
-            controller: base,
-            decoration: const InputDecoration(
-                labelText: 'NAS 地址', hintText: 'http://192.168.2.4:8090')),
+      appBar: AppBar(title: const Text('多网络连接'), actions: [
+        IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: '添加连接',
+            onPressed: () => _edit()),
+      ]),
+      body: ListView(padding: const EdgeInsets.all(16), children: [
+        const Text(
+            '可添加多个 NAS 地址（IP）。主页与媒体库会聚合所有可见连接的库；'
+            '同名/同 id 的库只显示一份。隐藏某条连接只会隐藏它的库，配置仍保留。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 12),
-        TextField(
-            controller: user,
-            decoration: const InputDecoration(labelText: '用户名')),
-        const SizedBox(height: 12),
-        TextField(
-            controller: pass,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: '密码')),
+        if (servers.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 40),
+            child: Center(
+                child: Text('还没有连接，点右上角 + 添加一个 NAS 地址',
+                    style: TextStyle(color: Colors.grey))),
+          ),
+        for (final s in servers) _card(s),
         const SizedBox(height: 20),
-        Row(children: [
-          OutlinedButton.icon(
-            onPressed: testing ? null : test,
-            icon: testing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.network_check),
-            label: Text(testing ? '测试中…' : '测试连接'),
-          ),
-        ]),
-        if (testMsg.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Row(children: [
-              Icon(testOk == true ? Icons.check_circle : Icons.error_outline,
-                  size: 16,
-                  color: testOk == true ? Colors.green : Colors.redAccent),
-              const SizedBox(width: 6),
-              Expanded(
-                  child: Text(testMsg,
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: testOk == true
-                              ? Colors.green
-                              : Colors.redAccent))),
-            ]),
-          ),
-        const SizedBox(height: 16),
-        FilledButton(onPressed: save, child: const Text('保存并连接')),
+        FilledButton(
+            onPressed: servers.isEmpty ? null : _saveAndEnter,
+            child: const Text('保存并进入')),
         const SizedBox(height: 8),
-        const Text('地址留空将回到首次连接页；支持 http/https，自动补全 http://。',
+        const Text('支持 http/https，自动补全 http://；地址与密码只保存在本机。',
             style: TextStyle(fontSize: 11, color: Colors.grey)),
       ]),
+    );
+  }
+
+  Widget _card(ServerConn s) {
+    final isActive = s.id == activeId;
+    final msg = testMsg[s.id];
+    final ok = testOk[s.id];
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(isActive ? Icons.check_circle : Icons.dns_outlined,
+                size: 20, color: isActive ? Colors.green : null),
+            const SizedBox(width: 8),
+            Expanded(
+                child: Text(s.title,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis)),
+            if (isActive)
+              const Padding(
+                padding: EdgeInsets.only(right: 6),
+                child: Text('当前',
+                    style: TextStyle(fontSize: 11, color: Colors.green)),
+              ),
+            Switch(
+                value: s.visible,
+                onChanged: (v) => _toggle(s, v),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
+          ]),
+          Text(s.base,
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+          Text('账号：${s.user} · ${s.visible ? '库参与聚合' : '库已隐藏'}',
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          if (msg != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(msg,
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: ok == true ? Colors.green : Colors.redAccent)),
+            ),
+          const SizedBox(height: 4),
+          Wrap(spacing: 4, children: [
+            TextButton(
+                onPressed: () => _activate(s),
+                child: Text(isActive ? '当前连接' : '设为当前')),
+            TextButton(
+                onPressed: testing.contains(s.id) ? null : () => _test(s),
+                child: Text(testing.contains(s.id) ? '测试中…' : '测试')),
+            TextButton(onPressed: () => _edit(s), child: const Text('编辑')),
+            TextButton(
+                onPressed: () => _delete(s),
+                child: const Text('删除',
+                    style: TextStyle(color: Colors.redAccent))),
+          ]),
+        ]),
+      ),
     );
   }
 }
@@ -937,8 +1197,10 @@ class SettingsHubPage extends StatelessWidget {
       body: ListView(children: [
         ListTile(
           leading: const Icon(Icons.dns),
-          title: const Text('网络连接'),
-          subtitle: Text(cfg.base.isEmpty ? '未设置' : cfg.base),
+          title: const Text('多网络连接'),
+          subtitle: Text(cfg.base.isEmpty
+              ? '未设置 · 可添加多个 NAS 地址并聚合库'
+              : '${cfg.base} · 可添加多个地址并聚合库'),
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
         ),
@@ -1709,9 +1971,11 @@ class _LibraryPageState extends State<LibraryPage> {
   static const String _starKey = 'lib_tree_stars_v1';
 
   List<Map<String, dynamic>> libs = [];
+  List<ServerConn> servers = [];
   String? defaultId;
   bool loading = true;
   String? err;
+  String? warn;
   bool changed = false;
 
   /// J2：大库/基础库两级选择。v1 服务端没有 bigLibraries 时为 null，走原列表。
@@ -1727,30 +1991,105 @@ class _LibraryPageState extends State<LibraryPage> {
     load();
   }
 
-  Uri _u(String path, [String? lib]) {
+  Uri _u(String path, [String? lib, String? atBase]) {
     final sep = path.contains('?') ? '&' : '?';
     return Uri.parse(
-        '${cfg.base}$path${sep}lib=${Uri.encodeQueryComponent(lib ?? cfg.lib)}');
+        '${atBase ?? cfg.baseFor(lib)}$path${sep}lib=${Uri.encodeQueryComponent(lib ?? cfg.lib)}');
   }
 
   Future<void> load() async {
     setState(() {
       loading = true;
       err = null;
+      warn = null;
     });
     try {
-      final r = await http
-          .get(_u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 10));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
-      final list = ((j['libraries'] as List?) ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
+      final sp = await SharedPreferences.getInstance();
+      final all = migrateLegacy(
+        servers: decodeServers(sp.getString('servers_v1')),
+        base: sp.getString('base') ?? cfg.base,
+        user: sp.getString('user') ?? cfg.user,
+        pass: sp.getString('pass') ?? cfg.pass,
+      );
+      final visible = all.where((s) => s.visible).toList(growable: false);
+      final use = visible.isEmpty
+          ? [
+              ServerConn(
+                  id: 'legacy',
+                  label: '默认连接',
+                  base: cfg.base,
+                  user: cfg.user,
+                  pass: cfg.pass)
+            ].where((s) => s.base.isNotEmpty).toList()
+          : visible;
+      final snaps = <ServerLibraries>[];
+      for (final s in use) {
+        final h = {
+          'Authorization':
+              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+        };
+        try {
+          final rs = await Future.wait([
+            http
+                .get(Uri.parse('${s.base}/api/libraries'), headers: h)
+                .timeout(const Duration(seconds: 10)),
+            http
+                .get(Uri.parse('${s.base}/api/libraries.json'), headers: h)
+                .timeout(const Duration(seconds: 10)),
+          ]);
+          var list = <Map<String, dynamic>>[];
+          var def = '';
+          if (rs[0].statusCode == 200) {
+            final j = jsonDecode(rs[0].body);
+            if (j is Map) {
+              list = ((j['libraries'] as List?) ?? const [])
+                  .map((e) => Map<String, dynamic>.from(e as Map))
+                  .toList();
+              def = '${j['default'] ?? ''}';
+            }
+          }
+          Map<String, dynamic>? treeJson;
+          if (rs[1].statusCode == 200) {
+            final j = jsonDecode(rs[1].body);
+            if (j is Map) treeJson = Map<String, dynamic>.from(j);
+          }
+          if (def.isNotEmpty && defaultId == null) defaultId = def;
+          snaps.add(ServerLibraries(
+              server: s, libraries: list, tree: treeJson));
+        } catch (e) {
+          snaps.add(ServerLibraries(server: s, error: '$e'));
+        }
+      }
+      final merged = mergeRegisteredLibraries(snaps);
+      final treeJson = mergeLibraryTrees(snaps);
+      // 记录库 → 连接，之后播放/统计/媒体都按所属 IP 路由。
+      final bindings = buildBindings(servers: use, libraries: merged);
+      final byBase = {for (final s in use) s.base: s};
+      if (treeJson != null) {
+        for (final raw in (treeJson['basicLibraries'] as List?) ?? const []) {
+          if (raw is! Map) continue;
+          final id = '${raw['id'] ?? ''}'.trim();
+          final s = byBase['${raw['_serverBase'] ?? ''}'];
+          if (id.isEmpty || s == null) continue;
+          bindings[id] = {
+            'base': s.base,
+            'user': s.user,
+            'pass': s.pass,
+            'server': s.id,
+          };
+        }
+      }
+      cfg.setBindings(bindings);
+      await sp.setString('lib_bindings_v1', encodeBindings(bindings));
+      final failures =
+          snaps.where((s) => s.error != null).map((s) => s.server.title);
       if (!mounted) return;
       setState(() {
-        libs = list;
-        defaultId = '${j['default'] ?? ''}';
+        servers = use;
+        libs = merged;
+        if (failures.isNotEmpty) {
+          warn = '部分连接失败：${failures.join('、')}（其余库已照常显示）';
+        }
       });
     } catch (e) {
       if (mounted) setState(() => err = '$e');
@@ -1762,16 +2101,33 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 读取 v2 索引与本地星标；任何失败都只影响大库区，不影响已注册库。
   Future<void> _loadTree() async {
     try {
-      final r = await http
-          .get(Uri.parse('${cfg.base}/api/libraries.json'),
-              headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) return;
-      final j = jsonDecode(r.body);
-      if (j is! Map) return;
       final sp = await SharedPreferences.getInstance();
       final saved = sp.getStringList(_starKey) ?? <String>[];
-      final t = LibraryTree.parse(Map<String, dynamic>.from(j), stars: saved);
+      final snaps = <ServerLibraries>[];
+      for (final s in servers) {
+        final h = {
+          'Authorization':
+              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+        };
+        try {
+          final r = await http
+              .get(Uri.parse('${s.base}/api/libraries.json'), headers: h)
+              .timeout(const Duration(seconds: 8));
+          if (r.statusCode != 200) continue;
+          final j = jsonDecode(r.body);
+          if (j is! Map) continue;
+          snaps.add(ServerLibraries(
+              server: s,
+              libraries: const [],
+              tree: Map<String, dynamic>.from(j)));
+        } catch (_) {}
+      }
+      final merged = mergeLibraryTrees(snaps);
+      if (merged == null) {
+        if (mounted) setState(() => tree = null);
+        return;
+      }
+      final t = LibraryTree.parse(merged, stars: saved);
       if (!mounted) return;
       setState(() {
         stars = saved;
@@ -1810,6 +2166,11 @@ class _LibraryPageState extends State<LibraryPage> {
             const SizedBox(height: 8),
             Text('${b.authors} 位作者 · ${b.works} 个作品',
                 style: const TextStyle(color: Colors.grey)),
+            if (b.serverLabel.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text('连接：${b.serverLabel}',
+                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            ],
             if (b.rel.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text(b.rel,
@@ -1834,16 +2195,26 @@ class _LibraryPageState extends State<LibraryPage> {
   Future<void> _switchTo(Map<String, dynamic> l) async {
     cfg.lib = '${l['id']}';
     cfg.libName = fixDisplayName('${l['name'] ?? l['id']}');
+    final sb = '${l['_serverBase'] ?? ''}';
+    if (sb.isNotEmpty) {
+      cfg.bindLibrary(cfg.lib, sb,
+          user: '${l['_serverUser'] ?? cfg.user}',
+          pass: '${l['_serverPass'] ?? cfg.pass}',
+          server: '${l['_serverId'] ?? ''}');
+    }
     final sp = await SharedPreferences.getInstance();
     await sp.setString('lib', cfg.lib);
+    await sp.setString('lib_bindings_v1', encodeBindings(cfg._bindings));
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
 
   Future<void> _setDefault(Map<String, dynamic> l) async {
     try {
-      final r = await http.post(_u('/api/libraries/default'),
-          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+      final id = '${l['id']}';
+      final sb = '${l['_serverBase'] ?? ''}';
+      final r = await http.post(_u('/api/libraries/default', id, sb),
+          headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
           body: jsonEncode({'id': l['id']}));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       if (!mounted) return;
@@ -1875,8 +2246,10 @@ class _LibraryPageState extends State<LibraryPage> {
     );
     if (ok != true) return;
     try {
-      final r = await http.post(_u('/api/libraries/delete'),
-          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+      final id = '${l['id']}';
+      final sb = '${l['_serverBase'] ?? ''}';
+      final r = await http.post(_u('/api/libraries/delete', id, sb),
+          headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
           body: jsonEncode({'id': l['id']}));
       final j = jsonDecode(r.body);
       if (r.statusCode != 200 || j['ok'] == false) {
@@ -1948,7 +2321,15 @@ class _LibraryPageState extends State<LibraryPage> {
       return;
     }
     try {
-      final r = await http.post(_u('/api/libraries'),
+      final atBase = await () async {
+        final sp = await SharedPreferences.getInstance();
+        final active = sp.getString('active_server_v1') ?? '';
+        for (final s in servers) {
+          if (s.id == active) return s.base;
+        }
+        return servers.isEmpty ? cfg.base : servers.first.base;
+      }();
+      final r = await http.post(_u('/api/libraries', null, atBase),
           headers: {...cfg.headers, 'Content-Type': 'application/json'},
           body: jsonEncode({
             'id': lid,
@@ -1985,6 +2366,14 @@ class _LibraryPageState extends State<LibraryPage> {
           IconButton(
               icon: const Icon(Icons.refresh), onPressed: load, tooltip: '刷新'),
           IconButton(
+              icon: const Icon(Icons.dns_outlined),
+              tooltip: '多网络连接',
+              onPressed: () async {
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const SettingsPage()));
+                await load();
+              }),
+          IconButton(
               icon: const Icon(Icons.add), onPressed: _add, tooltip: '添加库'),
         ]),
         body: err != null
@@ -1993,6 +2382,28 @@ class _LibraryPageState extends State<LibraryPage> {
                 ? const Center(child: CircularProgressIndicator())
                 : ListView(
                     children: [
+                      if (warn != null)
+                        Container(
+                          color: Colors.orange.withValues(alpha: 0.12),
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                          child: Row(children: [
+                            const Icon(Icons.warning_amber_rounded,
+                                size: 16, color: Colors.orange),
+                            const SizedBox(width: 6),
+                            Expanded(
+                                child: Text(warn!,
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.orange))),
+                          ]),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: Text(
+                            '聚合 ${servers.where((s) => s.visible).length} 条连接'
+                            ' · ${libs.length} 个已注册库（同 id 只显示一次）',
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.grey)),
+                      ),
                       if (tree != null)
                         LibrarySelectorView(
                           tree: tree!,
@@ -2047,6 +2458,11 @@ class _LibraryPageState extends State<LibraryPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          if ('${l['_serverLabel'] ?? ''}'.isNotEmpty)
+            Text('连接：${l['_serverLabel']}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
           Text(
               '爬虫：${cr['enabled'] == true ? '已启用' : '未启用'} · ${cr['schedule'] ?? '04:10'} · 脚本 ${scripts.length} 个 · ${(l['indexOk'] == true) ? '索引正常' : '索引缺失'}',
               style: TextStyle(
@@ -2107,7 +2523,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
   String get libId => '${widget.lib['id']}';
 
   Uri _u(String path) =>
-      Uri.parse('${cfg.base}$path?lib=${Uri.encodeQueryComponent(libId)}');
+      Uri.parse('${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
 
   @override
   void initState() {
@@ -2122,7 +2538,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
     });
     try {
       final r = await http
-          .get(_u('/api/crawler'), headers: cfg.headers)
+          .get(_u('/api/crawler'), headers: cfg.headersFor(libId))
           .timeout(const Duration(seconds: 10));
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
@@ -2147,7 +2563,10 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
     setState(() => saving = true);
     try {
       final r = await http.post(_u('/api/crawler'),
-          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          headers: {
+            ...cfg.headersFor(libId),
+            'Content-Type': 'application/json'
+          },
           body: jsonEncode({
             'enabled': enabled,
             'schedule': schedule.trim(),
@@ -2256,7 +2675,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
 
   String get libId => '${widget.lib['id']}';
   Uri _u(String path) =>
-      Uri.parse('${cfg.base}$path?lib=${Uri.encodeQueryComponent(libId)}');
+      Uri.parse('${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
 
   @override
   void initState() {
@@ -2273,7 +2692,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
     try {
       final r = await http
           .get(Uri.parse('${_u('/api/maintenance')}${deep ? '&deep=1' : ''}'),
-              headers: cfg.headers)
+              headers: cfg.headersFor(libId))
           .timeout(Duration(seconds: deep ? 90 : 15));
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
@@ -2290,7 +2709,10 @@ class _MaintenancePageState extends State<MaintenancePage> {
     setState(() => running = true);
     try {
       final r = await http.post(_u('/api/maintenance'),
-          headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          headers: {
+            ...cfg.headersFor(libId),
+            'Content-Type': 'application/json'
+          },
           body: jsonEncode({'action': 'run-crawler', 'lib': libId}));
       final j = jsonDecode(r.body);
       if (r.statusCode != 200 || j['ok'] == false) {
@@ -2741,7 +3163,7 @@ class _HomePageState extends State<HomePage> {
                             ? cfg.u(remote).toString()
                             : (fallback == null
                                 ? null
-                                : cfg.base + cfg.media(fallback));
+                                : cfg.mediaUrl(fallback));
                         final isDefault =
                             defaultIdx != null && idx == defaultIdx;
                         return _CollectionTile(
@@ -2825,7 +3247,7 @@ class _ContinueTile extends StatelessWidget {
     final theme = Theme.of(context);
     final cover = item.thumb.isEmpty
         ? null
-        : cfg.base + cfg.media(item.thumb, lib: item.lib);
+        : cfg.mediaUrl(item.thumb, lib: item.lib);
     return SizedBox(
       width: 172,
       child: Material(
@@ -3117,7 +3539,7 @@ class _CollectionPageState extends State<CollectionPage> {
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
-              imageUrl: cfg.base + cfg.media(path),
+              imageUrl: cfg.mediaUrl(path),
               httpHeaders: cfg.headers,
               fit: BoxFit.contain,
               placeholder: (_, __) =>
@@ -3160,7 +3582,7 @@ class _CollectionPageState extends State<CollectionPage> {
                             color:
                                 Theme.of(context).colorScheme.onSurfaceVariant))
                     : CachedNetworkImage(
-                        imageUrl: cfg.base + cfg.media(cov),
+                        imageUrl: cfg.mediaUrl(cov),
                         httpHeaders: cfg.headers,
                         fit: BoxFit.cover,
                         placeholder: (_, __) => Container(
@@ -3748,8 +4170,7 @@ class _RankPageState extends State<RankPage> {
                                                         style: const TextStyle(
                                                             fontSize: 18)))
                                             : CachedNetworkImage(
-                                                imageUrl: cfg.base +
-                                                    cfg.media(av,
+                                                imageUrl: cfg.mediaUrl(av,
                                                         lib: sel == 'all'
                                                             ? '${e['lib'] ?? cfg.lib}'
                                                             : sel),
@@ -4411,8 +4832,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                         child: Text(e.key.isEmpty ? '?' : e.key[0],
                             style: const TextStyle(fontSize: 24)))
                     : CachedNetworkImage(
-                        imageUrl: cfg.base + cfg.media(av, lib: lib),
-                        httpHeaders: cfg.headers,
+                        imageUrl: cfg.mediaUrl(av, lib: lib),
+                        httpHeaders: cfg.headersFor(lib),
                         fit: BoxFit.cover,
                         memCacheWidth: avatarPx,
                         fadeInDuration: Duration.zero,
@@ -5269,7 +5690,7 @@ class _PlayerPageState extends State<PlayerPage>
       // 预缓冲槽位保持静音、暂停；切条时再恢复音量并 play
       await slot.player.setVolume(0);
       await slot.player.open(
-        Media(cfg.base + cfg.media(path, lib: nlib), httpHeaders: cfg.headers),
+        Media(cfg.mediaUrl(path, lib: nlib), httpHeaders: cfg.headersFor(nlib)),
         play: false,
       );
       if (gen != _preloadGen) return;
@@ -5404,12 +5825,12 @@ class _PlayerPageState extends State<PlayerPage>
       try {
         if (w['t'] == 'v') {
           await player.open(Media(
-              cfg.base + cfg.media(workMediaPaths(w).first, lib: wl),
-              httpHeaders: cfg.headers));
+              cfg.mediaUrl(workMediaPaths(w).first, lib: wl),
+              httpHeaders: cfg.headersFor(wl)));
         } else if ((w['au'] ?? '').toString().isNotEmpty) {
           await player.open(Media(
-              cfg.base + cfg.media(w['au'].toString(), lib: wl),
-              httpHeaders: cfg.headers));
+              cfg.mediaUrl(w['au'].toString(), lib: wl),
+              httpHeaders: cfg.headersFor(wl)));
         }
         if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
             my == _openToken) {
@@ -5521,8 +5942,8 @@ class _PlayerPageState extends State<PlayerPage>
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
         player.open(Media(
-            cfg.base + cfg.media(workMediaPaths(w).first, lib: wl),
-            httpHeaders: cfg.headers));
+            cfg.mediaUrl(workMediaPaths(w).first, lib: wl),
+            httpHeaders: cfg.headersFor(wl)));
         player.play();
         _mediaToken = my;
       }
@@ -6341,7 +6762,7 @@ class _PlayerPageState extends State<PlayerPage>
   // 长简介/文案：在任务栏内展开缩略全文（H13，参考抖音，不弹独立窗口）
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path, {String? lib}) {
-    final url = cfg.base + cfg.media(path, lib: lib);
+    final url = cfg.mediaUrl(path, lib: lib);
     // G12：图片加载失败（弱网/文件损坏）给出重试，而不是空白
     Widget retryBox() => _MediaRetryBox(
           message: '图片加载失败',
@@ -6833,10 +7254,9 @@ class _PlayerPageState extends State<PlayerPage>
                     return (it['th'] ?? '').toString().isEmpty
                         ? Container(color: Colors.black)
                         : CachedNetworkImage(
-                            imageUrl: cfg.base +
-                                cfg.media(it['th'].toString(),
+                            imageUrl: cfg.mediaUrl(it['th'].toString(),
                                     lib: _libFor(it)),
-                            httpHeaders: cfg.headers,
+                            httpHeaders: cfg.headersFor(_libFor(it)),
                             fit: BoxFit.contain);
                   }
                   if (it['t'] == 'v') {
@@ -6852,10 +7272,9 @@ class _PlayerPageState extends State<PlayerPage>
                       child: Stack(fit: StackFit.expand, children: [
                         if ((it['th'] ?? '').toString().isNotEmpty)
                           CachedNetworkImage(
-                              imageUrl: cfg.base +
-                                  cfg.media(it['th'].toString(),
+                              imageUrl: cfg.mediaUrl(it['th'].toString(),
                                       lib: _libFor(it)),
-                              httpHeaders: cfg.headers,
+                              httpHeaders: cfg.headersFor(_libFor(it)),
                               fit: BoxFit.contain),
                         videoView(),
                         if (loading)
@@ -7045,10 +7464,9 @@ class _PlayerPageState extends State<PlayerPage>
                         if ((w['av'] ?? '').toString().isNotEmpty)
                           ClipOval(
                               child: CachedNetworkImage(
-                                  imageUrl: cfg.base +
-                                      cfg.media(w['av'].toString(),
+                                  imageUrl: cfg.mediaUrl(w['av'].toString(),
                                           lib: _curLib),
-                                  httpHeaders: cfg.headers,
+                                  httpHeaders: cfg.headersFor(_curLib),
                                   width: 38,
                                   height: 38,
                                   fit: BoxFit.cover))
@@ -7694,8 +8112,7 @@ class _RecommendPageState extends State<RecommendPage> {
                               (w['th'] ?? '').toString().isEmpty
                                   ? Container(color: Colors.black26)
                                   : CachedNetworkImage(
-                                      imageUrl: cfg.base +
-                                          cfg.media(w['th'].toString()),
+                                      imageUrl: cfg.mediaUrl(w['th'].toString()),
                                       httpHeaders: cfg.headers,
                                       fit: BoxFit.cover,
                                       errorWidget: (_, __, ___) =>
@@ -7908,10 +8325,10 @@ class _SearchPageState extends State<SearchPage> {
                           child: (w['th'] ?? '').toString().isEmpty
                               ? Container(color: Colors.black26)
                               : CachedNetworkImage(
-                                  imageUrl: cfg.base +
-                                      cfg.media(w['th'].toString(),
+                                  imageUrl: cfg.mediaUrl(w['th'].toString(),
                                           lib: '${e['_lib']}'),
-                                  httpHeaders: cfg.headers,
+                                  httpHeaders:
+                                      cfg.headersFor('${e['_lib']}'),
                                   fit: BoxFit.cover)),
                       title: Text('${w['ti']}',
                           maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -8120,9 +8537,9 @@ class _AuthorPageState extends State<AuthorPage> {
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
-              imageUrl: cfg.base +
-                  cfg.media(av, lib: primaryLib.isEmpty ? null : primaryLib),
-              httpHeaders: cfg.headers,
+              imageUrl: cfg.mediaUrl(av, lib: primaryLib.isEmpty ? null : primaryLib),
+              httpHeaders: cfg.headersFor(
+                  primaryLib.isEmpty ? null : primaryLib),
               fit: BoxFit.contain,
               placeholder: (_, __) =>
                   const CircularProgressIndicator(color: Colors.white38),
@@ -8172,12 +8589,12 @@ class _AuthorPageState extends State<AuthorPage> {
                                             style:
                                                 const TextStyle(fontSize: 26))))
                                 : CachedNetworkImage(
-                                    imageUrl: cfg.base +
-                                        cfg.media(av,
+                                    imageUrl: cfg.mediaUrl(av,
                                             lib: primaryLib.isEmpty
                                                 ? null
                                                 : primaryLib),
-                                    httpHeaders: cfg.headers,
+                                    httpHeaders: cfg.headersFor(
+                                        primaryLib.isEmpty ? null : primaryLib),
                                     width: 64,
                                     height: 64,
                                     fit: BoxFit.cover)),
@@ -8484,9 +8901,8 @@ class _WorkGridState extends State<WorkGrid> {
             (w['th'] ?? '').toString().isEmpty
                 ? Container(color: Colors.black26)
                 : CachedNetworkImage(
-                    imageUrl: cfg.base +
-                        cfg.media(w['th'].toString(), lib: _libFor(w)),
-                    httpHeaders: cfg.headers,
+                    imageUrl: cfg.mediaUrl(w['th'].toString(), lib: _libFor(w)),
+                    httpHeaders: cfg.headersFor(_libFor(w)),
                     fit: BoxFit.cover,
                     // 图片解码前用骨架占位，滚动时不再白块闪烁
                     placeholder: (_, __) =>

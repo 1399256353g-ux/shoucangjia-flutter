@@ -1,0 +1,260 @@
+// J7 多网络连接：一个 NAS 地址（IP:端口）就是一条「连接」。
+//
+// 规则：
+//  - 可添加多条连接，每条有独立地址与账号；
+//  - 连接可单独隐藏：隐藏后它的库不再出现在聚合列表里，但配置保留；
+//  - 多个连接指向同一个库（库 id 相同）时只显示一份，优先取靠前且可见的连接；
+//  - 删除连接只删除本机配置，不动 NAS 数据。
+//
+// 本文件只放纯逻辑（解析 / 合并 / 去重 / 映射），便于单测。
+
+import 'dart:convert';
+
+class ServerConn {
+  final String id;
+  final String label;
+  final String base;
+  final String user;
+  final String pass;
+  final bool visible;
+
+  const ServerConn({
+    required this.id,
+    required this.label,
+    required this.base,
+    required this.user,
+    required this.pass,
+    this.visible = true,
+  });
+
+  String get title => label.trim().isEmpty ? base : label.trim();
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'label': label,
+        'base': base,
+        'user': user,
+        'pass': pass,
+        'visible': visible,
+      };
+
+  ServerConn copyWith({
+    String? label,
+    String? base,
+    String? user,
+    String? pass,
+    bool? visible,
+  }) =>
+      ServerConn(
+        id: id,
+        label: label ?? this.label,
+        base: base ?? this.base,
+        user: user ?? this.user,
+        pass: pass ?? this.pass,
+        visible: visible ?? this.visible,
+      );
+
+  static ServerConn? fromJson(dynamic raw) {
+    if (raw is! Map) return null;
+    final base = normalizeBase('${raw['base'] ?? ''}');
+    if (base.isEmpty) return null;
+    var id = '${raw['id'] ?? ''}'.trim();
+    if (id.isEmpty) id = 'srv-${base.hashCode.abs()}';
+    return ServerConn(
+      id: id,
+      label: '${raw['label'] ?? ''}'.trim(),
+      base: base,
+      user: '${raw['user'] ?? 'zzx'}',
+      pass: '${raw['pass'] ?? ''}',
+      visible: raw['visible'] != false,
+    );
+  }
+}
+
+/// 规范化地址：去空格、补协议、去尾部斜杠。
+String normalizeBase(String raw) {
+  var b = raw.trim().replaceAll(RegExp(r'/+$'), '');
+  if (b.isEmpty) return b;
+  if (!b.startsWith('http://') && !b.startsWith('https://')) {
+    b = 'http://$b';
+  }
+  return b;
+}
+
+/// 解析连接列表；坏数据跳过，重复地址只保留第一条。
+List<ServerConn> decodeServers(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return const [];
+  try {
+    final j = jsonDecode(raw);
+    if (j is! List) return const [];
+    final out = <ServerConn>[];
+    final seenBase = <String>{};
+    final seenId = <String>{};
+    for (final e in j) {
+      final s = ServerConn.fromJson(e);
+      if (s == null) continue;
+      if (!seenBase.add(s.base)) continue;
+      if (!seenId.add(s.id)) continue;
+      out.add(s);
+    }
+    return out;
+  } catch (_) {
+    return const [];
+  }
+}
+
+String encodeServers(List<ServerConn> servers) =>
+    jsonEncode([for (final s in servers) s.toJson()]);
+
+/// 新版没有连接但旧版存了单条 `base` 时，自动迁移为第一条连接。
+List<ServerConn> migrateLegacy({
+  required List<ServerConn> servers,
+  required String base,
+  required String user,
+  required String pass,
+}) {
+  if (servers.isNotEmpty) return servers;
+  final b = normalizeBase(base);
+  if (b.isEmpty) return servers;
+  return [
+    ServerConn(id: 'legacy', label: '默认连接', base: b, user: user, pass: pass)
+  ];
+}
+
+/// 一条连接抓到的库列表 / 库树。
+class ServerLibraries {
+  final ServerConn server;
+  final List<Map<String, dynamic>> libraries;
+  final Map<String, dynamic>? tree;
+  final String? error;
+
+  const ServerLibraries({
+    required this.server,
+    this.libraries = const [],
+    this.tree,
+    this.error,
+  });
+}
+
+/// 给库/树节点补上来源连接字段，便于切换时路由到正确的 IP。
+Map<String, dynamic> _tag(Map raw, ServerConn s) => {
+      ...Map<String, dynamic>.from(raw),
+      '_serverId': s.id,
+      '_serverBase': s.base,
+      '_serverLabel': s.title,
+      '_serverUser': s.user,
+      '_serverPass': s.pass,
+    };
+
+/// 聚合已注册库：按库 id 去重，先出现的连接优先。
+List<Map<String, dynamic>> mergeRegisteredLibraries(
+    List<ServerLibraries> snapshots) {
+  final seen = <String>{};
+  final out = <Map<String, dynamic>>[];
+  for (final snap in snapshots) {
+    if (!snap.server.visible) continue;
+    for (final raw in snap.libraries) {
+      final m = Map<String, dynamic>.from(raw);
+      final id = '${m['id'] ?? ''}'.trim();
+      if (id.isEmpty || !seen.add(id)) continue;
+      out.add(_tag(m, snap.server));
+    }
+  }
+  return out;
+}
+
+/// 聚合 v2 库树：大库与基础库都按 id 去重。
+Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
+  final seenBig = <String>{};
+  final seenBasic = <String>{};
+  final bigs = <Map<String, dynamic>>[];
+  final basics = <Map<String, dynamic>>[];
+  var any = false;
+  for (final snap in snapshots) {
+    if (!snap.server.visible || snap.tree == null) continue;
+    final t = snap.tree!;
+    final rb = t['bigLibraries'];
+    final rs = t['basicLibraries'];
+    if (rb is! List || rs is! List) continue;
+    any = true;
+    for (final raw in rb) {
+      if (raw is! Map) continue;
+      final id = '${raw['id'] ?? ''}'.trim();
+      if (id.isEmpty || !seenBig.add(id)) continue;
+      bigs.add(_tag(raw, snap.server));
+    }
+    for (final raw in rs) {
+      if (raw is! Map) continue;
+      final id = '${raw['id'] ?? ''}'.trim();
+      if (id.isEmpty || !seenBasic.add(id)) continue;
+      basics.add(_tag(raw, snap.server));
+    }
+  }
+  if (!any) return null;
+  return {
+    ...{
+      'bigLibraries': bigs,
+      'basicLibraries': basics,
+    }
+  };
+}
+
+/// 库 → 连接映射，持久化后启动时就能按库路由。
+Map<String, Map<String, String>> buildBindings({
+  required List<ServerConn> servers,
+  required List<Map<String, dynamic>> libraries,
+}) {
+  final byId = {for (final s in servers) s.id: s};
+  final out = <String, Map<String, String>>{};
+  for (final l in libraries) {
+    final id = '${l['id'] ?? ''}'.trim();
+    final sid = '${l['_serverId'] ?? ''}'.trim();
+    if (id.isEmpty || sid.isEmpty) continue;
+    final s = byId[sid];
+    if (s == null) continue;
+    out[id] = {
+      'base': s.base,
+      'user': s.user,
+      'pass': s.pass,
+      'server': s.id,
+    };
+  }
+  return out;
+}
+
+/// 解析持久化的库映射；坏项跳过。
+Map<String, Map<String, String>> decodeBindings(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return const {};
+  try {
+    final j = jsonDecode(raw);
+    if (j is! Map) return const {};
+    final out = <String, Map<String, String>>{};
+    j.forEach((k, v) {
+      if (v is! Map) return;
+      final base = normalizeBase('${v['base'] ?? ''}');
+      if (base.isEmpty) return;
+      out['$k'] = {
+        'base': base,
+        'user': '${v['user'] ?? 'zzx'}',
+        'pass': '${v['pass'] ?? ''}',
+        'server': '${v['server'] ?? ''}',
+      };
+    });
+    return out;
+  } catch (_) {
+    return const {};
+  }
+}
+
+String encodeBindings(Map<String, Map<String, String>> bindings) =>
+    jsonEncode(bindings);
+
+/// 新增连接时生成稳定且不重复的 id。
+String nextServerId(List<ServerConn> servers) {
+  var n = servers.length + 1;
+  final used = {for (final s in servers) s.id};
+  while (used.contains('srv-$n')) {
+    n++;
+  }
+  return 'srv-$n';
+}
