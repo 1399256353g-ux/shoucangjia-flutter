@@ -23,6 +23,7 @@ import 'likes.dart';
 import 'playback_flow.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
+import 'watch_progress.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +31,8 @@ Future<void> main() async {
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
   }
+  // G10：先载入观看记录，列表首帧就能显示「已看完」角标
+  await WatchProgressStore.ensureLoaded();
   runApp(const App());
 }
 
@@ -4340,6 +4343,8 @@ class _PlayerPageState extends State<PlayerPage>
       if (!done || !mounted) return;
       if (_mediaToken != _openToken) return;
       final w = widget.works[cur];
+      // G10：播放完成即标记「已看完」
+      _markWatched(w);
       if (w['t'] != 'v') {
         // 图文：整首歌放完才切下一条；单条循环时重新播放；都不开就停下图片轮播
         if (paused) return;
@@ -4379,6 +4384,18 @@ class _PlayerPageState extends State<PlayerPage>
     });
     subPos = player.stream.position.listen((p) {
       if (!mounted) return;
+      // G10：记录观看位置（内部 3s 节流，不受 UI 刷新节流影响）；
+      // _opening 期间播放器会先上报 0 位置，不能用来覆盖已有进度
+      if (!_opening && _mediaToken == _openToken && _mediaToken > 0) {
+        final cw = widget.works[cur];
+        if (cw['t'] == 'v') {
+          WatchProgressStore.record(
+              lib: _libFor(cw),
+              id: _watchIdFor(cw),
+              positionMs: p.inMilliseconds,
+              durationMs: dur.inMilliseconds);
+        }
+      }
       // 位置流每 100ms 左右触发一次；全量 setState 会让视频层频繁重建、
       // 在 Windows 上造成卡顿与音画不同步。这里节流到 200ms，
       // 但跳转/拖动后的大幅变化立即刷新。
@@ -4400,6 +4417,10 @@ class _PlayerPageState extends State<PlayerPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
+    if (state != AppLifecycleState.resumed) {
+      // G10：切后台/最小化前落盘，避免异常退出丢进度
+      _saveWatchProgress(force: true);
+    }
     if (state == AppLifecycleState.resumed && mounted) {
       focus.requestFocus();
       // Windows 切回前台后音视频时钟偶发漂移：按已记录位置重新对齐并恢复速率
@@ -4413,7 +4434,31 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  String _watchIdFor(dynamic w) =>
+      '${(w is Map ? w['id'] : null) ?? ''}';
+
+  /// G10：把当前视频的播放位置写入本地记录（强制写，用于切条/退出/切后台）。
+  void _saveWatchProgress({bool force = false}) {
+    if (widget.works.isEmpty || cur < 0 || cur >= widget.works.length) return;
+    final w = widget.works[cur];
+    if (w['t'] != 'v' || dur.inMilliseconds <= 0) return;
+    WatchProgressStore.record(
+        lib: _libFor(w),
+        id: _watchIdFor(w),
+        positionMs: pos.inMilliseconds,
+        durationMs: dur.inMilliseconds,
+        force: force);
+  }
+
+  /// G10：播放完成时标记「已看完」。
+  void _markWatched(dynamic w) {
+    if (w is! Map) return;
+    WatchProgressStore.markDone(lib: _libFor(w), id: _watchIdFor(w));
+  }
+
   Future<void> open(int i) async {
+    // 切条前先把上一条的进度落盘
+    _saveWatchProgress(force: true);
     final my = ++_openToken;
     autoTimer?.cancel();
     retryTimer?.cancel();
@@ -4461,6 +4506,18 @@ class _PlayerPageState extends State<PlayerPage>
       await player.setVolume(volume);
       await player.setRate(speed);
     } catch (_) {}
+    // G10：同一作品再次打开时从上次位置续播（已看完则从头）
+    if (w['t'] == 'v') {
+      final at = resumeMs(WatchProgressStore.of(wl, _watchIdFor(w)));
+      if (at > 0) {
+        try {
+          await player.seek(Duration(milliseconds: at));
+          if (mounted && my == _openToken) {
+            setState(() => pos = Duration(milliseconds: at));
+          }
+        } catch (_) {}
+      }
+    }
     // 媒体已就绪，恢复采信播放器事件；此后一切以用户意图 paused 为准
     _opening = false;
     if (shouldAutoPlay(paused: paused, opening: _opening)) {
@@ -5028,6 +5085,9 @@ class _PlayerPageState extends State<PlayerPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // G10：退出播放页前落盘当前进度
+    _saveWatchProgress(force: true);
+    WatchProgressStore.flush();
     _dropAnim.dispose();
     _heartAnim.dispose();
     autoTimer?.cancel();
@@ -6413,6 +6473,13 @@ class WorkGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // G10：监听本地观看记录，完成后角标与进度条自动刷新
+    return ValueListenableBuilder<int>(
+        valueListenable: WatchProgressStore.revision,
+        builder: (context, _, __) => _buildGrid(context));
+  }
+
+  Widget _buildGrid(BuildContext context) {
     return GridView.builder(
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: 180,
@@ -6422,6 +6489,8 @@ class WorkGrid extends StatelessWidget {
       itemCount: works.length,
       itemBuilder: (_, i) {
         final w = works[i];
+        final wp = WatchProgressStore.of(
+            _libFor(w), '${(w is Map ? w['id'] : null) ?? ''}');
         return GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
@@ -6445,6 +6514,33 @@ class WorkGrid extends StatelessWidget {
                     color: Colors.black54,
                     child: Text(w['t'] == 'v' ? '视频' : '图文',
                         style: const TextStyle(fontSize: 10)))),
+            // G10：已看完角标 / 未看完的进度条
+            if (wp != null && wp.done)
+              Positioned(
+                  left: 4,
+                  top: 4,
+                  child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4)),
+                      child: const Text('已看完',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600))))
+            else if (wp != null && wp.fraction > 0.01)
+              Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: SizedBox(
+                      height: 2,
+                      child: LinearProgressIndicator(
+                          value: wp.fraction,
+                          backgroundColor: Colors.black26,
+                          minHeight: 2))),
           ]),
         );
       },
