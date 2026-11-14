@@ -16,6 +16,7 @@ import 'app_theme.dart';
 import 'author_grade.dart';
 import 'background_pause.dart';
 import 'collection_sync.dart';
+import 'continue_watching.dart';
 import 'cover_badges.dart';
 import 'deleted_cover.dart';
 import 'emoji_text.dart';
@@ -39,6 +40,8 @@ Future<void> main() async {
   }
   // G10：先载入观看记录，列表首帧就能显示「已看完」角标
   await WatchProgressStore.ensureLoaded();
+  // G17：载入「继续观看」，主页首帧直接显示
+  await ContinueWatchingStore.ensureLoaded();
   runApp(const App());
 }
 
@@ -2432,6 +2435,47 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
   }
 
+  /// G17：点「继续观看」回到原收藏夹列表的同一作品续播；
+  /// 收藏夹失效/作品已删除时退化为单条播放，仍按记录位置续播。
+  Future<void> _openContinue(ContinueItem it) async {
+    final lib = it.lib.isEmpty ? cfg.lib : it.lib;
+    List works = [];
+    if (it.idx > 0) {
+      try {
+        final r = await http
+            .get(cfg.u('/api/c/${it.idx}.json', lib: lib), headers: cfg.headers)
+            .timeout(const Duration(seconds: 10));
+        if (r.statusCode == 200) {
+          final j = jsonDecode(r.body);
+          if (j is Map) works = (j['works'] as List?) ?? [];
+        }
+      } catch (_) {}
+    }
+    var start =
+        works.indexWhere((w) => w is Map && '${w['id'] ?? ''}' == it.id);
+    if (start < 0) {
+      works = [
+        {
+          'id': it.id,
+          'ti': it.title,
+          'a': it.author,
+          'th': it.thumb,
+          't': it.type,
+        }
+      ];
+      start = 0;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PlayerPage(
+              works: works,
+              start: start,
+              lib: lib,
+              idx: it.idx > 0 ? it.idx : null,
+              colName: it.collection,
+            )));
+  }
+
   // 星标：点击卡片右上角设为/取消默认收藏夹，真正写回服务端
   Future<void> _setDefault(int idx) async {
     final next = defaultIdx == idx ? null : idx;
@@ -2557,53 +2601,213 @@ class _HomePageState extends State<HomePage> {
           ? Center(child: Text('加载失败：$err'))
           : cols.isEmpty
               ? const Center(child: CircularProgressIndicator())
-              : LayoutBuilder(builder: (context, cons) {
-                  final w = cons.maxWidth;
-                  final n = w >= 1200
-                      ? 5
-                      : w >= 900
-                          ? 4
-                          : w >= 620
-                              ? 3
-                              : 2;
-                  return GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: n,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 0.72,
-                    ),
-                    itemCount: cols.length,
-                    itemBuilder: (_, i) {
-                      final c = cols[i];
-                      final idx = (c['idx'] as num).toInt();
-                      final remote = (c['cover'] ?? '').toString();
-                      final fallback = covers['$idx'];
-                      final imageUrl = remote.isNotEmpty
-                          ? cfg.u(remote).toString()
-                          : (fallback == null
-                              ? null
-                              : cfg.base + cfg.media(fallback));
-                      final isDefault = defaultIdx != null && idx == defaultIdx;
-                      return _CollectionTile(
-                        idx: idx,
-                        name: '${c['name']}',
-                        count: c['count'] is num
-                            ? (c['count'] as num).toInt()
-                            : null,
-                        imageUrl: imageUrl,
-                        isDefault: isDefault,
-                        syncOff: c['sync'] == false,
-                        onStarTap: () => _setDefault(idx),
-                        onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => CollectionPage(
-                                    name: '${c['name']}', idx: idx))),
-                      );
-                    },
-                  );
-                }),
+              : Column(children: [
+                  _ContinueWatchingStrip(onOpen: _openContinue),
+                  Expanded(child: LayoutBuilder(builder: (context, cons) {
+                    final w = cons.maxWidth;
+                    final n = w >= 1200
+                        ? 5
+                        : w >= 900
+                            ? 4
+                            : w >= 620
+                                ? 3
+                                : 2;
+                    return GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: n,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.72,
+                      ),
+                      itemCount: cols.length,
+                      itemBuilder: (_, i) {
+                        final c = cols[i];
+                        final idx = (c['idx'] as num).toInt();
+                        final remote = (c['cover'] ?? '').toString();
+                        final fallback = covers['$idx'];
+                        final imageUrl = remote.isNotEmpty
+                            ? cfg.u(remote).toString()
+                            : (fallback == null
+                                ? null
+                                : cfg.base + cfg.media(fallback));
+                        final isDefault =
+                            defaultIdx != null && idx == defaultIdx;
+                        return _CollectionTile(
+                          idx: idx,
+                          name: '${c['name']}',
+                          count: c['count'] is num
+                              ? (c['count'] as num).toInt()
+                              : null,
+                          imageUrl: imageUrl,
+                          isDefault: isDefault,
+                          syncOff: c['sync'] == false,
+                          onStarTap: () => _setDefault(idx),
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => CollectionPage(
+                                      name: '${c['name']}', idx: idx))),
+                        );
+                      },
+                    );
+                  })),
+                ]),
+    );
+  }
+}
+
+/// G17：主页顶部「继续观看」横向列表；没有记录时完全不占位。
+class _ContinueWatchingStrip extends StatelessWidget {
+  final void Function(ContinueItem) onOpen;
+  const _ContinueWatchingStrip({required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+        valueListenable: ContinueWatchingStore.revision,
+        builder: (context, _, __) {
+          final items = ContinueWatchingStore.items;
+          if (items.isEmpty) return const SizedBox.shrink();
+          final theme = Theme.of(context);
+          return SizedBox(
+            height: 158,
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
+                child: Row(children: [
+                  Icon(Icons.play_circle_outline,
+                      size: 16, color: theme.colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Text('继续观看',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text('${items.length} 条',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
+                ]),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (_, i) =>
+                      _ContinueTile(item: items[i], onOpen: onOpen),
+                ),
+              ),
+            ]),
+          );
+        });
+  }
+}
+
+class _ContinueTile extends StatelessWidget {
+  final ContinueItem item;
+  final void Function(ContinueItem) onOpen;
+  const _ContinueTile({required this.item, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cover = item.thumb.isEmpty
+        ? null
+        : cfg.base + cfg.media(item.thumb, lib: item.lib);
+    return SizedBox(
+      width: 172,
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => onOpen(item),
+          onLongPress: () {
+            ContinueWatchingStore.remove(item.lib, item.id);
+            ScaffoldMessenger.of(context)
+                .showSnackBar(const SnackBar(content: Text('已从「继续观看」移除')));
+          },
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+              height: 86,
+              width: double.infinity,
+              child: Stack(fit: StackFit.expand, children: [
+                cover == null
+                    ? Container(color: Colors.black26)
+                    : CachedNetworkImage(
+                        imageUrl: cover,
+                        httpHeaders: cfg.headers,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) =>
+                            Container(color: Colors.black26)),
+                // 底部渐变 + 位置文案
+                const DecoratedBox(
+                    decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Colors.black54],
+                            stops: [0.45, 1]))),
+                Positioned(
+                    left: 6,
+                    bottom: 4,
+                    child: Text(
+                        formatContinueLabel(item.positionMs, item.durationMs),
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600))),
+                Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(4)),
+                        child: Text(item.isVideo ? '视频' : '图文',
+                            style: const TextStyle(
+                                fontSize: 9, color: Colors.white)))),
+                // 观看进度
+                Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: SizedBox(
+                        height: 2,
+                        child: LinearProgressIndicator(
+                            value: item.fraction,
+                            backgroundColor: Colors.white24,
+                            minHeight: 2))),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+              child: Text(item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+              child: Text(
+                  [
+                    if (item.collection.trim().isNotEmpty)
+                      item.collection.trim(),
+                    if (item.author.trim().isNotEmpty) item.author.trim(),
+                  ].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -3132,7 +3336,11 @@ class _CollectionPageState extends State<CollectionPage> {
                         ? Center(
                             child: Text('无匹配作品：$kw',
                                 style: const TextStyle(color: Colors.grey)))
-                        : WorkGrid(works: list)),
+                        : WorkGrid(
+                            works: list,
+                            collectionIdx: widget.idx,
+                            collectionName: widget.name,
+                          )),
               ),
             ]),
     );
@@ -4248,8 +4456,16 @@ class PlayerPage extends StatefulWidget {
   final int start;
   // 作品可能来自非当前库（按库筛选 / 全部库），lib 为列表默认所属库
   final String? lib;
+  // G17：「继续观看」需要回到原收藏夹列表续播
+  final int? idx;
+  final String? colName;
   const PlayerPage(
-      {super.key, required this.works, required this.start, this.lib});
+      {super.key,
+      required this.works,
+      required this.start,
+      this.lib,
+      this.idx,
+      this.colName});
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
@@ -4467,6 +4683,7 @@ class _PlayerPageState extends State<PlayerPage>
               id: _watchIdFor(cw),
               positionMs: p.inMilliseconds,
               durationMs: dur.inMilliseconds);
+          _recordContinue(cw, p.inMilliseconds, dur.inMilliseconds);
         }
       }
       // 位置流每 100ms 左右触发一次；全量 setState 会让视频层频繁重建、
@@ -4591,12 +4808,37 @@ class _PlayerPageState extends State<PlayerPage>
         positionMs: pos.inMilliseconds,
         durationMs: dur.inMilliseconds,
         force: force);
+    // G17：退出/切条/切后台时强制刷新「继续观看」的位置
+    _recordContinue(w, pos.inMilliseconds, dur.inMilliseconds, force: true);
+  }
+
+  /// G17：写入「继续观看」条目（含收藏夹信息，便于一键回到原列表续播）。
+  void _recordContinue(dynamic w, int positionMs, int durationMs,
+      {bool force = false}) {
+    if (w is! Map || w['t'] != 'v') return;
+    ContinueWatchingStore.record(
+        ContinueItem(
+          lib: _libFor(w),
+          id: _watchIdFor(w),
+          idx: widget.idx ?? 0,
+          collection: widget.colName ?? '',
+          title: '${w['ti'] ?? ''}',
+          author: '${w['a'] ?? ''}',
+          thumb: '${w['th'] ?? ''}',
+          type: 'v',
+          positionMs: positionMs,
+          durationMs: durationMs,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        force: force);
   }
 
   /// G10：播放完成时标记「已看完」。
   void _markWatched(dynamic w) {
     if (w is! Map) return;
     WatchProgressStore.markDone(lib: _libFor(w), id: _watchIdFor(w));
+    // G17：看完即从「继续观看」移除
+    ContinueWatchingStore.remove(_libFor(w), _watchIdFor(w));
   }
 
   // G12：展示失败提示并停止转圈；重试时整条媒体重新打开。
@@ -5587,6 +5829,8 @@ class _PlayerPageState extends State<PlayerPage>
     final w = widget.works[cur];
     final isV = w['t'] == 'v';
     WatchProgressStore.remove(_libFor(w), _watchIdFor(w));
+    // G17：从头播放视为新的观看，先移出「继续观看」，位置到 1s 后重新出现
+    ContinueWatchingStore.remove(_libFor(w), _watchIdFor(w));
     if (isV) {
       try {
         player.seek(Duration.zero);
@@ -5676,6 +5920,7 @@ class _PlayerPageState extends State<PlayerPage>
                 onTap: () {
                   Navigator.of(ctx).pop();
                   WatchProgressStore.remove(lib, id);
+                  ContinueWatchingStore.remove(lib, id);
                 },
               ),
             const SizedBox(height: 4),
@@ -7180,7 +7425,15 @@ class _AuthorPageState extends State<AuthorPage> {
 class WorkGrid extends StatelessWidget {
   final List works;
   final String? lib;
-  const WorkGrid({super.key, required this.works, this.lib});
+  // G17：带上所属收藏夹，播放页写「继续观看」时才能一键回到原列表
+  final int? collectionIdx;
+  final String? collectionName;
+  const WorkGrid(
+      {super.key,
+      required this.works,
+      this.lib,
+      this.collectionIdx,
+      this.collectionName});
 
   String _libFor(dynamic w) =>
       '${(w is Map ? w['_lib'] : null) ?? lib ?? cfg.lib}';
@@ -7209,8 +7462,12 @@ class WorkGrid extends StatelessWidget {
         final coverBadge = workCoverBadge(w);
         return GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) =>
-                  PlayerPage(works: works, start: i, lib: _libFor(w)))),
+              builder: (_) => PlayerPage(
+                  works: works,
+                  start: i,
+                  lib: _libFor(w),
+                  idx: collectionIdx,
+                  colName: collectionName))),
           child: Stack(fit: StackFit.expand, children: [
             (w['th'] ?? '').toString().isEmpty
                 ? Container(color: Colors.black26)
