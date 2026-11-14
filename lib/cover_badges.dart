@@ -2,6 +2,9 @@
 ///
 /// 时长优先读索引里的 `du`（秒，服务端 ffprobe 生成）；缺省时不显示，
 /// 避免用 0:00 误导。图文张数直接取媒体列表长度。
+library;
+
+import 'work_forms.dart';
 
 /// 把秒数格式化成 `m:ss`（超过 1 小时为 `h:mm:ss`）。
 /// 非法/非正数返回空串，调用方据此隐藏角标。
@@ -28,13 +31,17 @@ num? _asSeconds(dynamic raw) {
 String? workCoverBadge(dynamic work) {
   if (work is! Map) return null;
   final type = '${work['t'] ?? ''}';
+  if (workKind(work) == 'chapters') {
+    final n = workChapterCount(work);
+    return n > 1 ? '$n 集' : null;
+  }
   if (type == 'p') {
     final media = work['m'];
     final n = media is List ? media.length : 0;
     return n > 0 ? '$n 图' : null;
   }
   if (type == 'v') {
-    final d = formatBadgeDuration(_asSeconds(work['du']));
+    final d = formatBadgeDuration(_asSeconds(workTotalDuration(work)));
     return d.isEmpty ? null : d;
   }
   return null;

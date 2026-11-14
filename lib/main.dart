@@ -40,6 +40,7 @@ import 'swipe_control.dart';
 import 'swipe_physics.dart';
 import 'start_fade.dart';
 import 'watch_progress.dart';
+import 'work_forms.dart';
 import 'work_safety.dart';
 
 Future<void> main() async {
@@ -4732,6 +4733,8 @@ class _PlayerPageState extends State<PlayerPage>
   final FocusNode focus = FocusNode();
   int cur = 0;
   int img = 0;
+  // J5：视频合集当前章节（非合集恒为 0）
+  int _chapter = 0;
   int _openToken = 0;
   double _wheelAcc = 0;
   bool _wheelLock = false;
@@ -4802,8 +4805,12 @@ class _PlayerPageState extends State<PlayerPage>
   /// 让该条显示「作品不可用」占位，而不是让整页 build 抛异常。
   dynamic _workAt(int i) {
     if (i < 0 || i >= widget.works.length) return const <String, dynamic>{};
-    final w = _workAt(i);
-    return w is Map ? w : const <String, dynamic>{};
+    final w = widget.works[i];
+    if (w is! Map) return const <String, dynamic>{};
+    // J5：当前作品的视频合集按 _chapter 叠加章节媒体；
+    // 其他条目（预缓冲下一条）始终返回首章。
+    if (i == cur) return workWithChapter(w, _chapter);
+    return w;
   }
 
   String get _curLib => _libFor(_workAt(cur));
@@ -5081,7 +5088,9 @@ class _PlayerPageState extends State<PlayerPage>
     if (!isV && !manualPic) startAuto();
   }
 
-  String _watchIdFor(dynamic w) => '${(w is Map ? w['id'] : null) ?? ''}';
+  // J5：合集按章节记录观看位置，避免章节之间互相覆盖。
+  String _watchIdFor(dynamic w) =>
+      workWatchKeyFor(w, _chapter);
 
   /// G10：把当前视频的播放位置写入本地记录（强制写，用于切条/退出/切后台）。
   void _saveWatchProgress({bool force = false}) {
@@ -5275,10 +5284,12 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  Future<void> open(int i) async {
+  Future<void> open(int i, {bool saveProgress = true}) async {
     if (widget.works.isEmpty || i < 0 || i >= widget.works.length) return;
     // 切条前先把上一条的进度落盘
-    _saveWatchProgress(force: true);
+    if (saveProgress) _saveWatchProgress(force: true);
+    // J5：切到其他作品时回到第一集
+    if (i != cur) _chapter = 0;
     final w = _workAt(i);
     final wl = _libFor(w);
     // G20：单条作品数据异常时不再调用播放器（避免未捕获异常卡死整页），
@@ -6566,6 +6577,81 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  // J5：视频合集选集——切换章节后重新打开当前作品（保留暂停/连播状态）。
+  Future<void> _selectChapter(int k) async {
+    final n = workChapterCount(widget.works[cur]);
+    if (n <= 1) return;
+    final i = k.clamp(0, n - 1);
+    if (i == _chapter) return;
+    // 先按旧章节落盘，再切章节，避免把旧位置写到新章节记录里
+    _saveWatchProgress(force: true);
+    setState(() => _chapter = i);
+    await open(cur, saveProgress: false);
+    hapticTap();
+    showUi();
+  }
+
+  void _showChapters() {
+    final w = _workAt(cur);
+    final chs = workChapters(w);
+    if (chs.length < 2) return;
+    hapticTap();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      showDragHandle: true,
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return SafeArea(
+          top: false,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Row(children: [
+                Text('选集（${chs.length}）',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                const Spacer(),
+                Text('${_chapter + 1} / ${chs.length}',
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              ]),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: chs.length,
+                itemBuilder: (_, i) {
+                  final selected = i == _chapter;
+                  final dur = formatBadgeDuration(
+                      chs[i]['du'] is num ? chs[i]['du'] as num : null);
+                  return ListTile(
+                    dense: true,
+                    leading: Icon(
+                        selected
+                            ? Icons.play_circle_fill
+                            : Icons.play_circle_outline,
+                        color:
+                            selected ? cs.primary : cs.onSurfaceVariant),
+                    title: Text(chapterLabel(chs[i], i),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: selected ? cs.primary : null,
+                            fontWeight:
+                                selected ? FontWeight.w600 : null)),
+                    subtitle: dur.isEmpty ? null : Text(dur),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      _selectChapter(i);
+                    },
+                  );
+                },
+              ),
+            ),
+          ]),
+        );
+      },
+    );
+  }
   String fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -6999,6 +7085,18 @@ class _PlayerPageState extends State<PlayerPage>
                                   ),
                                 ],
                               ]),
+                              if (workChapterCount(widget.works[cur]) > 1)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 2),
+                                  child: Text(
+                                      '第 ${_chapter + 1}/${workChapterCount(widget.works[cur])} 集 · '
+                                      '${chapterLabel(workChapters(widget.works[cur])[_chapter], _chapter)}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 10.5,
+                                          color: Colors.lightBlueAccent)),
+                                ),
                               Row(children: [
                                 Expanded(
                                   child: LayoutBuilder(builder: (context, c) {
@@ -7379,6 +7477,34 @@ class _PlayerPageState extends State<PlayerPage>
                                                 ? Icons.volume_down
                                                 : Icons.volume_up),
                                         color: Colors.white70),
+                                  ),
+                                ),
+                              ),
+                            // J5：视频合集章节选择（按「选集」图标 + 当前集数）
+                            if (workChapterCount(w) > 1)
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: _showChapters,
+                                child: Tooltip(
+                                  message: '选集',
+                                  child: SizedBox(
+                                    width: 46,
+                                    height: 48,
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(Icons.video_library_outlined,
+                                            size: 19, color: Colors.white70),
+                                        const SizedBox(height: 1),
+                                        Text(
+                                            '${_chapter + 1}/${workChapterCount(w)}',
+                                            style: const TextStyle(
+                                                fontSize: 9,
+                                                height: 1.0,
+                                                color: Colors.white54)),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -8301,7 +8427,7 @@ class _WorkGridState extends State<WorkGrid> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                     color: Colors.black54,
-                    child: Text(w['t'] == 'v' ? '视频' : '图文',
+                    child: Text(workTypeLabel(w),
                         style: const TextStyle(fontSize: 10)))),
             if (coverBadge != null)
               Positioned(
