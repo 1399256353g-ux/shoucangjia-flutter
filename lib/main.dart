@@ -323,29 +323,44 @@ class _AppState extends State<App> {
   @override
   Widget build(BuildContext context) {
     if (!ready) {
-      return const MaterialApp(
-          home: Scaffold(body: Center(child: CircularProgressIndicator())));
+      return MaterialApp(
+        color: kBootBackground,
+        theme: AppTheme.themeData,
+        home: const Scaffold(
+          backgroundColor: kBootBackground,
+          body: Center(child: CircularProgressIndicator()),
+        ),
+      );
     }
     // 主题选取即时生效：AppTheme.current 变化会重建 MaterialApp（设置页预览用）。
     return ValueListenableBuilder<String>(
       valueListenable: AppTheme.current,
-      builder: (context, _, __) => MaterialApp(
-        title: 'Dizi',
-        navigatorKey: navKey,
-        // 主题里带显式 emoji 字体回退链：Windows/Android/iOS 各自命中本机彩色
-        // emoji 字体，避免收藏夹名（如「🦶」）或作者名里的 emoji 显示成方框。
-        theme: AppTheme.themeData,
-        shortcuts: const {
-          SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-        },
-        actions: {
-          DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
-            navKey.currentState?.maybePop();
-            return null;
-          }),
-        },
-        home: cfg.base.isEmpty ? const SettingsPage() : const HomePage(),
-      ),
+      builder: (context, _, __) {
+        final theme = AppTheme.themeData;
+        return MaterialApp(
+          title: 'Dizi',
+          navigatorKey: navKey,
+          color: theme.scaffoldBackgroundColor,
+          // 路由切换/返回手势期间，Navigator 的透明间隙也不能露出白底。
+          builder: (context, child) => ColoredBox(
+            color: theme.scaffoldBackgroundColor,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          // 主题里带显式 emoji 字体回退链：Windows/Android/iOS 各自命中本机彩色
+          // emoji 字体，避免收藏夹名（如「🦶」）或作者名里的 emoji 显示成方框。
+          theme: theme,
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+          },
+          actions: {
+            DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
+              navKey.currentState?.maybePop();
+              return null;
+            }),
+          },
+          home: cfg.base.isEmpty ? const SettingsPage() : const HomePage(),
+        );
+      },
     );
   }
 }

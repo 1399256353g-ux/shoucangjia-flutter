@@ -82,6 +82,12 @@ const List<AppThemeSpec> kAppThemes = <AppThemeSpec>[
 const String kDefaultThemeId = 'deepblue';
 const String kThemePrefsKey = 'app_theme_v1';
 
+/// App 启动/转场时的兜底底色。
+///
+/// 原生启动图与 Flutter 首帧都使用这个颜色，避免 iOS 上滑返回时在图标
+/// 下方露出一块白色（启动图默认白底 + 首帧透明/白底叠加）。
+const Color kBootBackground = Color(0xFF101418);
+
 /// 未知 / 空 id 一律回落到默认主题，避免旧版本或损坏配置导致无主题可用。
 String normalizeThemeId(String? id) {
   if (id == null) return kDefaultThemeId;

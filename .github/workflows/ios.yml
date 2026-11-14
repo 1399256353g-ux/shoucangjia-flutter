@@ -26,6 +26,12 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PL" || true
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 访问局域网图库" "$PL" || true
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Dizi" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Dizi" "$PL"
+      - name: Dark launch screen (I4)
+        run: |
+          python3 tool/ios_surface.py --self-test
+          python3 tool/ios_surface.py --project ios
+          grep -q 'red="0.062745"' ios/Runner/Base.lproj/LaunchScreen.storyboard
+          /usr/libexec/PlistBuddy -c "Print :UIStatusBarStyle" ios/Runner/Info.plist
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build ios --release --no-codesign
