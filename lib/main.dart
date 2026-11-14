@@ -21,6 +21,7 @@ import 'library_badge.dart';
 import 'library_rank.dart';
 import 'likes.dart';
 import 'playback_flow.dart';
+import 'playback_error.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
@@ -4207,6 +4208,39 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   }
 }
 
+// G12：图片加载失败占位（弱网/文件损坏）+ 重试按钮
+class _MediaRetryBox extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _MediaRetryBox({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.broken_image_outlined,
+              size: 40, color: Colors.white38),
+          const SizedBox(height: 8),
+          Text(message,
+              style: const TextStyle(fontSize: 13, color: Colors.white60)),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('重试'),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white38),
+                minimumSize: const Size(104, 34)),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 class PlayerPage extends StatefulWidget {
   final List works;
   final int start;
@@ -4328,6 +4362,13 @@ class _PlayerPageState extends State<PlayerPage>
   Timer? autoTimer;
   Timer? hideTimer;
   Timer? retryTimer;
+  // G12：加载超时 / 播放器报错提示与重试
+  PlaybackFailure? _failure;
+  Timer? _loadTimeout;
+  bool _buffering = false;
+  bool _slowBuffer = false;
+  Timer? _slowBufferTimer;
+  int _imgReload = 0;
   bool manualPic = false;
   StreamSubscription? subPos;
   StreamSubscription? subDur;
@@ -4407,7 +4448,39 @@ class _PlayerPageState extends State<PlayerPage>
       setState(() => pos = p);
     });
     subDur = player.stream.duration.listen((d) {
+      if (d.inMilliseconds > 0) {
+        _loadTimeout?.cancel();
+        _loadTimeout = null;
+      }
       if (mounted) setState(() => dur = d);
+    });
+    // G12：播放器报错（解码失败/流打不开）直接给出可重试提示，
+    // 不再无限转圈；错误可能来自上一条媒体，切条后自动清除。
+    player.stream.error.listen((msg) {
+      if (!mounted || _failure != null) return;
+      _showFailure(classifyPlaybackError(msg));
+    });
+    // G12：弱网缓冲提示 —— 缓冲超过阈值才显示，避免正常起播闪一下
+    player.stream.buffering.listen((b) {
+      if (!mounted) return;
+      if (!b) {
+        _slowBufferTimer?.cancel();
+        _slowBufferTimer = null;
+        if (_buffering || _slowBuffer) {
+          setState(() {
+            _buffering = false;
+            _slowBuffer = false;
+          });
+        }
+        return;
+      }
+      if (_buffering) return;
+      setState(() => _buffering = true);
+      _slowBufferTimer?.cancel();
+      _slowBufferTimer =
+          Timer(slowBufferThreshold, () {
+        if (mounted && _buffering) setState(() => _slowBuffer = true);
+      });
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       focus.requestFocus();
@@ -4457,6 +4530,38 @@ class _PlayerPageState extends State<PlayerPage>
     WatchProgressStore.markDone(lib: _libFor(w), id: _watchIdFor(w));
   }
 
+  // G12：展示失败提示并停止转圈；重试时整条媒体重新打开。
+  void _showFailure(PlaybackFailure f) {
+    if (!mounted) return;
+    _loadTimeout?.cancel();
+    _loadTimeout = null;
+    _slowBufferTimer?.cancel();
+    _slowBufferTimer = null;
+    try {
+      player.pause();
+    } catch (_) {}
+    setState(() {
+      _failure = f;
+      loading = false;
+      _buffering = false;
+      _slowBuffer = false;
+      paused = true;
+    });
+  }
+
+  void _retryPlayback() {
+    if (!mounted) return;
+    _loadTimeout?.cancel();
+    _slowBufferTimer?.cancel();
+    setState(() {
+      _failure = null;
+      loading = true;
+      _buffering = false;
+      _slowBuffer = false;
+    });
+    open(cur);
+  }
+
   Future<void> open(int i) async {
     // 切条前先把上一条的进度落盘
     _saveWatchProgress(force: true);
@@ -4464,6 +4569,8 @@ class _PlayerPageState extends State<PlayerPage>
     autoTimer?.cancel();
     retryTimer?.cancel();
     playGuard?.cancel();
+    _loadTimeout?.cancel();
+    _slowBufferTimer?.cancel();
     manualPic = false;
     _pendingPage = null;
     _mediaToken = -1;
@@ -4474,10 +4581,23 @@ class _PlayerPageState extends State<PlayerPage>
       captionOpen = false;
       loading = true;
       paused = false;
+      _failure = null;
+      _buffering = false;
+      _slowBuffer = false;
       dropDayLeft = 1;
       dropWeekLeft = 3;
       dropTotal = 0;
       dropGlow = false;
+    });
+    // G12：15 秒仍拿不到时长就按超时处理，避免弱网无限转圈
+    _loadTimeout = Timer(playbackLoadTimeout, () {
+      if (!mounted ||
+          my != _openToken ||
+          _failure != null ||
+          dur.inMilliseconds > 0) {
+        return;
+      }
+      _showFailure(timeoutFailure);
     });
     try {
       await player.stop();
@@ -4501,8 +4621,17 @@ class _PlayerPageState extends State<PlayerPage>
           my == _openToken) {
         _mediaToken = my;
       }
-    } catch (_) {}
+    } catch (e) {
+      if (my == _openToken) {
+        _opening = false;
+        _showFailure(classifyPlaybackError(e));
+        return;
+      }
+    }
     if (my != _openToken) return;
+    if (_failure != null) return;
+    _loadTimeout?.cancel();
+    _loadTimeout = null;
     try {
       await player.setVolume(volume);
       await player.setRate(speed);
@@ -4530,7 +4659,7 @@ class _PlayerPageState extends State<PlayerPage>
         await player.setRate(speed);
       } catch (_) {}
     }
-    if (mounted && my == _openToken) {
+    if (mounted && my == _openToken && _failure == null) {
       setState(() {
         loading = false;
         if (w['t'] != 'v') paused = false;
@@ -4539,7 +4668,7 @@ class _PlayerPageState extends State<PlayerPage>
     // F32 兜底：媒体就绪后 2.5 秒仍未起播且用户没暂停，补一次 play，
     // 避免停在片尾/首帧导致连播链路中断。
     playGuard = Timer(const Duration(milliseconds: 2500), () {
-      if (!mounted || my != _openToken) return;
+      if (!mounted || my != _openToken || _failure != null) return;
       if (widget.works[i]['t'] != 'v') return;
       bool playing = false;
       try {
@@ -4558,6 +4687,7 @@ class _PlayerPageState extends State<PlayerPage>
     retryTimer = Timer(const Duration(milliseconds: 1800), () {
       if (mounted &&
           my == _openToken &&
+          _failure == null &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
         player.open(Media(cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
@@ -5094,6 +5224,8 @@ class _PlayerPageState extends State<PlayerPage>
     autoTimer?.cancel();
     hideTimer?.cancel();
     retryTimer?.cancel();
+    _loadTimeout?.cancel();
+    _slowBufferTimer?.cancel();
     _wheelUnlock?.cancel();
     _wheelIdle?.cancel();
     _volHintTimer?.cancel();
@@ -5135,14 +5267,37 @@ class _PlayerPageState extends State<PlayerPage>
   // 长简介/文案：在任务栏内展开缩略全文（H13，参考抖音，不弹独立窗口）
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path, {String? lib}) {
+    final url = cfg.base + cfg.media(path, lib: lib);
+    // G12：图片加载失败（弱网/文件损坏）给出重试，而不是空白
+    Widget retryBox() => _MediaRetryBox(
+          message: '图片加载失败',
+          onRetry: () async {
+            try {
+              await CachedNetworkImage.evictFromCache(url);
+            } catch (_) {}
+            if (mounted) setState(() => _imgReload++);
+          },
+        );
     if (isGifPath(path)) {
-      return Image.network(cfg.base + cfg.media(path, lib: lib),
-          headers: cfg.headers, fit: BoxFit.contain, gaplessPlayback: true);
+      return Image.network(url,
+          key: ValueKey('gif-$cur-$img-$_imgReload'),
+          headers: cfg.headers,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          loadingBuilder: (c, child, p) => p == null
+              ? child
+              : const Center(
+                  child: CircularProgressIndicator(color: Colors.white38)),
+          errorBuilder: (_, __, ___) => retryBox());
     }
     return CachedNetworkImage(
-        imageUrl: cfg.base + cfg.media(path, lib: lib),
+        key: ValueKey('pic-$cur-$img-$_imgReload'),
+        imageUrl: url,
         httpHeaders: cfg.headers,
-        fit: BoxFit.contain);
+        fit: BoxFit.contain,
+        placeholder: (_, __) => const Center(
+            child: CircularProgressIndicator(color: Colors.white38)),
+        errorWidget: (_, __, ___) => retryBox());
   }
 
   // H13：展开/收起任务栏内简介
@@ -5275,6 +5430,55 @@ class _PlayerPageState extends State<PlayerPage>
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$m:$s';
+  }
+
+  // G12：失败提示卡片（标题 + 说明 + 重试），盖在画面上但不影响返回键。
+  Widget _failureOverlay() {
+    final f = _failure!;
+    final icon = f.kind == PlaybackFailureKind.network
+        ? Icons.wifi_off_rounded
+        : f.kind == PlaybackFailureKind.decode
+            ? Icons.broken_image_outlined
+            : Icons.error_outline;
+    return Positioned.fill(
+      child: ColoredBox(
+        color: const Color(0x99000000),
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
+            constraints: const BoxConstraints(maxWidth: 320),
+            decoration: BoxDecoration(
+                color: const Color(0xF21C1C1E),
+                borderRadius: BorderRadius.circular(18)),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(icon, size: 34, color: Colors.white60),
+              const SizedBox(height: 10),
+              Text(f.title,
+                  style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white)),
+              const SizedBox(height: 6),
+              Text(f.detail,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 12.5, height: 1.4, color: Colors.white60)),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: _retryPlayback,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('重试'),
+                style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
+                    minimumSize: const Size(120, 38)),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -5418,6 +5622,40 @@ class _PlayerPageState extends State<PlayerPage>
                   );
                 },
               ),
+              // G12：弱网缓冲提示（延迟出现，避免正常起播闪烁）
+              if (_slowBuffer && _failure == null && !loading)
+                Positioned(
+                  top: pad.top + 14,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(20)),
+                        child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 1.6,
+                                      color: Colors.white70)),
+                              SizedBox(width: 8),
+                              Text('网络较慢，正在缓冲…',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.white70)),
+                            ]),
+                      ),
+                    ),
+                  ),
+                ),
+              // G12：加载超时/解码失败/网络失败 —— 给出重试入口
+              if (_failure != null) _failureOverlay(),
               // G9：双击位置的红心反馈
               if (_heartPos != null)
                 Positioned(
