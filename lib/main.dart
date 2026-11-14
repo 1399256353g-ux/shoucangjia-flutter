@@ -27,6 +27,7 @@ import 'playback_error.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
+import 'swipe_control.dart';
 import 'watch_progress.dart';
 
 Future<void> main() async {
@@ -4294,6 +4295,20 @@ class _PlayerPageState extends State<PlayerPage>
   double _volStartDx = 0;
   Timer? _volHintTimer;
   bool get _volHintVisible => _volAdjusting || showVol;
+  // G15：移动端左右两侧上下滑——左侧亮度、右侧音量，中间仍可翻页。
+  // 亮度用应用内压暗遮罩实现，不引入原生插件；桌面端不启用。
+  double brightness = 100;
+  bool _swipeActive = false;
+  bool _swipeShow = false;
+  SwipeZone? _swipeZone;
+  double _swipeStartY = 0;
+  double _swipeStartValue = 0;
+  double _swipeValue = 0;
+  int _swipeStep = 0;
+  Timer? _swipeHintTimer;
+  bool get _swipeHint => _swipeActive || _swipeShow;
+  bool get _mobileSwipe => swipeEnabledFor(
+      isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
   bool ui = true;
   bool fs = false;
   bool dragging = false;
@@ -5042,6 +5057,124 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  // G15：上下滑开始（左亮度 / 右音量），以按下时的值为基准。
+  void _swipeStart(DragStartDetails d, SwipeZone zone) {
+    _swipeHintTimer?.cancel();
+    hapticTap();
+    final start =
+        zone == SwipeZone.brightness ? brightness : (muted ? 0.0 : volume);
+    setState(() {
+      _swipeZone = zone;
+      _swipeActive = true;
+      _swipeShow = true;
+      _swipeStartY = d.globalPosition.dy;
+      _swipeStartValue = start;
+      _swipeValue = start;
+      _swipeStep = swipeHapticStep(start);
+    });
+  }
+
+  void _swipeUpdate(DragUpdateDetails d) {
+    if (!_swipeActive) return;
+    final zone = _swipeZone;
+    if (zone == null) return;
+    final h = _stageSize.height > 0
+        ? _stageSize.height
+        : MediaQuery.of(context).size.height;
+    final v = swipeValueFromDrag(
+        start: _swipeStartValue, dy: d.globalPosition.dy - _swipeStartY, height: h);
+    final step = swipeHapticStep(v);
+    if (step != _swipeStep) {
+      _swipeStep = step;
+      HapticFeedback.selectionClick();
+    }
+    setState(() {
+      _swipeValue = v;
+      if (zone == SwipeZone.brightness) {
+        brightness = v;
+      } else {
+        volume = v;
+        muted = v == 0;
+        if (v > 0) lastVol = v;
+      }
+    });
+    if (zone == SwipeZone.volume) player.setVolume(v);
+  }
+
+  void _swipeEnd() {
+    if (!_swipeActive) return;
+    _swipeHintTimer?.cancel();
+    setState(() => _swipeActive = false);
+    _swipeHintTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _swipeShow = false);
+    });
+  }
+
+  // 左右两条窄边手势区：中间留给 PageView 上下滑翻页。
+  Widget _swipeEdge(SwipeZone zone, double width, EdgeInsets pad) {
+    return Positioned(
+      left: zone == SwipeZone.brightness ? 0 : null,
+      right: zone == SwipeZone.volume ? 0 : null,
+      top: pad.top + 64,
+      bottom: pad.bottom + 132,
+      width: width,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragStart: (d) => _swipeStart(d, zone),
+        onVerticalDragUpdate: _swipeUpdate,
+        onVerticalDragEnd: (_) => _swipeEnd(),
+        onVerticalDragCancel: _swipeEnd,
+      ),
+    );
+  }
+
+  // G15：拖动期间/松手后的轻量读数（图标 + 进度 + 百分比）。
+  Widget _swipeHintWidget(EdgeInsets pad) {
+    final zone = _swipeZone ?? SwipeZone.brightness;
+    final value = _swipeValue.clamp(0.0, 100.0);
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: pad.top + 96,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(14)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(
+                  zone == SwipeZone.brightness
+                      ? Icons.brightness_6
+                      : (value == 0 ? Icons.volume_off : Icons.volume_up),
+                  size: 18,
+                  color: Colors.white70),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 96,
+                height: 4,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: value / 100.0,
+                    backgroundColor: Colors.white24,
+                    valueColor: const AlwaysStoppedAnimation(Colors.white),
+                    minHeight: 4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('${swipeLabel(zone)} ${value.round()}%',
+                  style:
+                      const TextStyle(fontSize: 11, color: Colors.white70)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   void toggleLoop() {
     // F32：单条循环与连播是完全独立的两组状态。
     // 不再使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
@@ -5250,6 +5383,7 @@ class _PlayerPageState extends State<PlayerPage>
     _wheelUnlock?.cancel();
     _wheelIdle?.cancel();
     _volHintTimer?.cancel();
+    _swipeHintTimer?.cancel();
     // 退出播放页时确保恢复系统 UI 与 Windows 窗口，避免全屏残留
     if (fs) {
       try {
@@ -5833,6 +5967,24 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
+              // G15：移动端调光遮罩（只压暗画面，不影响控件）
+              if (_mobileSwipe && brightness < 100)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ColoredBox(
+                      color: Colors.black
+                          .withValues(alpha: dimOpacityForBrightness(brightness)),
+                    ),
+                  ),
+                ),
+              // G15：左右窄边上下滑（左亮度 / 右音量），中间仍可翻页
+              if (_mobileSwipe) ...[
+                _swipeEdge(SwipeZone.brightness,
+                    swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
+                _swipeEdge(SwipeZone.volume,
+                    swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
+                if (_swipeHint) _swipeHintWidget(pad),
+              ],
               Positioned(
                 left: pad.left + 8,
                 top: pad.top + 8,
@@ -6016,7 +6168,7 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               ),
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
-              if (_volHintVisible && ui)
+              if (_volHintVisible && ui && !_swipeHint)
                 Positioned(
                   right: pad.right + 16,
                   bottom: pad.bottom + 96,
