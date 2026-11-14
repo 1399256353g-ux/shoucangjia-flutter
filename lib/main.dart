@@ -33,6 +33,7 @@ import 'playback_menu.dart';
 import 'preload_plan.dart';
 import 'swipe_control.dart';
 import 'swipe_physics.dart';
+import 'start_fade.dart';
 import 'watch_progress.dart';
 import 'work_safety.dart';
 
@@ -4688,6 +4689,9 @@ class _PlayerPageState extends State<PlayerPage>
   Timer? autoTimer;
   Timer? hideTimer;
   Timer? retryTimer;
+  // I3：起播静音淡入（定时器 + 代数，用户调音量/切条时立即作废）
+  Timer? _fadeTimer;
+  int _fadeGen = 0;
   // G12：加载超时 / 播放器报错提示与重试
   PlaybackFailure? _failure;
   Timer? _loadTimeout;
@@ -5186,8 +5190,33 @@ class _PlayerPageState extends State<PlayerPage>
     if (_failure != null) return;
     _loadTimeout?.cancel();
     _loadTimeout = null;
+    // I3：等首帧/时长就绪再起播，避免解码器刚启动就推进造成画面抽搐。
+    // 预缓冲命中的媒体通常立刻有 duration，这里只是兜底，最多等 ~0.5s。
+    for (var attempt = 0; attempt < firstFrameAttempts; attempt++) {
+      var known = Duration.zero;
+      try {
+        known = player.state.duration;
+      } catch (_) {}
+      if (known.inMilliseconds == 0) known = dur;
+      if (!shouldWaitFirstFrame(
+        attempt: attempt,
+        knownDuration: known,
+        tokenAlive: my == _openToken && mounted,
+        paused: paused,
+      )) {
+        break;
+      }
+      await Future<void>.delayed(
+          const Duration(milliseconds: firstFrameIntervalMs));
+    }
+    if (my != _openToken) return;
+    // I3：视频起播先静音，首帧出来后再分步淡入，避免喇叭先爆一声。
+    final fadeIn = shouldFadeIn(
+        isVideo: w['t'] == 'v', paused: paused, volume: volume);
+    _fadeTimer?.cancel();
+    _fadeGen++;
     try {
-      await player.setVolume(volume);
+      await player.setVolume(fadeIn ? 0 : volume);
       await player.setRate(speed);
     } catch (_) {}
     // G10：同一作品再次打开时从上次位置续播（已看完则从头）
@@ -5212,6 +5241,8 @@ class _PlayerPageState extends State<PlayerPage>
       try {
         await player.setRate(speed);
       } catch (_) {}
+      // I3：起播后再淡入到目标音量（约 270ms），不再「啪」地直接满音量
+      if (fadeIn) _startAudioFade(my);
     }
     if (mounted && my == _openToken && _failure == null) {
       setState(() {
@@ -5548,7 +5579,40 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   // H14：统一设置音量（0–100），静音状态跟随音量归零/恢复。
+  /// I3：从 0 分步抬到当前音量。token 失效、切条或用户手动调音量时作废。
+  void _startAudioFade(int token) {
+    final steps = fadeInSteps(volume);
+    if (steps.isEmpty) {
+      try {
+        player.setVolume(volume);
+      } catch (_) {}
+      return;
+    }
+    final gen = ++_fadeGen;
+    var i = 0;
+    _fadeTimer = Timer.periodic(const Duration(milliseconds: 45), (t) {
+      if (!mounted || gen != _fadeGen || token != _openToken) {
+        t.cancel();
+        return;
+      }
+      if (i >= steps.length) {
+        t.cancel();
+        try {
+          player.setVolume(volume);
+        } catch (_) {}
+        return;
+      }
+      try {
+        player.setVolume(steps[i]);
+      } catch (_) {}
+      i++;
+    });
+  }
+
   void _setVolume(double v) {
+    // 用户主动调音量时取消进行中的淡入，避免定时器把音量又拉回去
+    _fadeTimer?.cancel();
+    _fadeGen++;
     final nv = v.clamp(0.0, 100.0);
     setState(() {
       volume = nv;
@@ -5932,6 +5996,8 @@ class _PlayerPageState extends State<PlayerPage>
     _wheelUnlock?.cancel();
     _wheelIdle?.cancel();
     _volHintTimer?.cancel();
+    _fadeTimer?.cancel();
+    _fadeGen++;
     _swipeHintTimer?.cancel();
     _preloadTimer?.cancel();
     _preloadGen++;
