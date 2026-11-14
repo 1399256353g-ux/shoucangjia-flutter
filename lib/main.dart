@@ -14,6 +14,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_grade.dart';
+import 'background_pause.dart';
 import 'collection_sync.dart';
 import 'cover_badges.dart';
 import 'deleted_cover.dart';
@@ -1135,8 +1136,8 @@ class _ThemePreviewCard extends StatelessWidget {
               Text(spec.subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 11, color: scheme.onSurfaceVariant)),
+                  style:
+                      TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
             ],
           ),
         ),
@@ -1332,21 +1333,18 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
           height: 88,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-              border: Border.all(
-                  color: Theme.of(context).colorScheme.outline),
+              border: Border.all(color: Theme.of(context).colorScheme.outline),
               borderRadius: BorderRadius.circular(10)),
-          child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.keyboard,
-                    size: 26,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant),
-                const SizedBox(height: 8),
-                Text('请按下要绑定的按键…',
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              ]),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.keyboard,
+                size: 26,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(height: 8),
+            Text('请按下要绑定的按键…',
+                style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ]),
         ),
       ),
       actions: [
@@ -2838,11 +2836,13 @@ class _CollectionPageState extends State<CollectionPage> {
                 height: 84,
                 child: cov.isEmpty
                     ? Container(
-                        color:
-                            Theme.of(context).colorScheme.surfaceContainerHighest,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest,
                         child: Icon(Icons.image_not_supported_outlined,
                             size: 20,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant))
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant))
                     : CachedNetworkImage(
                         imageUrl: cfg.base + cfg.media(cov),
                         httpHeaders: cfg.headers,
@@ -3111,8 +3111,7 @@ class _CollectionPageState extends State<CollectionPage> {
                               color: Theme.of(context)
                                   .colorScheme
                                   .surfaceContainerHighest,
-                              child: Text(
-                                  '本地文件已清理，预览退回作者头像；点「跳转」回库查看该作者其他作品',
+                              child: Text('本地文件已清理，预览退回作者头像；点「跳转」回库查看该作者其他作品',
                                   style: TextStyle(
                                       fontSize: 11,
                                       color: Theme.of(context)
@@ -3408,7 +3407,8 @@ class _RankPageState extends State<RankPage> {
                                             style: TextStyle(
                                                 fontSize: 16,
                                                 fontWeight: FontWeight.bold,
-                                                color: _rankColor(context, i)))),
+                                                color:
+                                                    _rankColor(context, i)))),
                                     ClipOval(
                                       child: SizedBox(
                                         width: 42,
@@ -4177,8 +4177,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                                   color: Theme.of(context)
                                                       .colorScheme
                                                       .onSurfaceVariant
-                                                      .withValues(
-                                                          alpha: 0.7))),
+                                                      .withValues(alpha: 0.7))),
                                         ]),
                                   ),
                                   Positioned(
@@ -4283,6 +4282,8 @@ class _PlayerPageState extends State<PlayerPage>
   int _lastKeyNav = 0;
   int? _pendingPage;
   bool paused = false;
+  // G16：是否因切后台而暂停（回前台时只恢复这种暂停）
+  bool _pausedByBackground = false;
   bool loading = true;
   bool muted = false;
   double volume = 100;
@@ -4307,8 +4308,8 @@ class _PlayerPageState extends State<PlayerPage>
   int _swipeStep = 0;
   Timer? _swipeHintTimer;
   bool get _swipeHint => _swipeActive || _swipeShow;
-  bool get _mobileSwipe => swipeEnabledFor(
-      isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
+  bool get _mobileSwipe =>
+      swipeEnabledFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
   bool ui = true;
   bool fs = false;
   bool dragging = false;
@@ -4507,8 +4508,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (_buffering) return;
       setState(() => _buffering = true);
       _slowBufferTimer?.cancel();
-      _slowBufferTimer =
-          Timer(slowBufferThreshold, () {
+      _slowBufferTimer = Timer(slowBufferThreshold, () {
         if (mounted && _buffering) setState(() => _slowBuffer = true);
       });
     });
@@ -4520,13 +4520,22 @@ class _PlayerPageState extends State<PlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
-    if (state != AppLifecycleState.resumed) {
-      // G10：切后台/最小化前落盘，避免异常退出丢进度
-      _saveWatchProgress(force: true);
+    // G16：切后台/最小化/来电时自动暂停（先落盘位置），回前台再恢复；
+    // 移动端 inactive 就暂停，桌面端仅最小化/隐藏暂停（失去焦点不打断）。
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    if (shouldPauseInBackground(state: state.name, isMobile: isMobile)) {
+      _pauseForBackground();
+      return;
     }
     if (state == AppLifecycleState.resumed && mounted) {
+      // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
       focus.requestFocus();
+      if (shouldResumeFromBackground(
+          pausedByBackground: _pausedByBackground,
+          userPaused: paused && !_pausedByBackground)) {
+        _resumeFromBackground();
+        return;
+      }
       // Windows 切回前台后音视频时钟偶发漂移：按已记录位置重新对齐并恢复速率
       if (widget.works[cur]['t'] == 'v' && !paused) {
         try {
@@ -4538,8 +4547,38 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  String _watchIdFor(dynamic w) =>
-      '${(w is Map ? w['id'] : null) ?? ''}';
+  /// G16：切后台自动暂停，并强制写入观看位置。
+  void _pauseForBackground() {
+    // G10：切后台/最小化前落盘，避免异常退出丢进度
+    _saveWatchProgress(force: true);
+    if (widget.works.isEmpty || _failure != null) return;
+    // 用户自己暂停的保持原状，回前台不自动播放
+    if (paused) return;
+    _pausedByBackground = true;
+    pauseAuto();
+    try {
+      player.pause();
+    } catch (_) {}
+    if (mounted) setState(() => paused = true);
+  }
+
+  /// G16：只恢复「因切后台暂停」的播放，并从记忆位置继续。
+  void _resumeFromBackground() {
+    _pausedByBackground = false;
+    if (!mounted) return;
+    final isV = widget.works[cur]['t'] == 'v';
+    setState(() => paused = false);
+    try {
+      if (isV) {
+        if (pos > Duration.zero) player.seek(pos);
+        player.setRate(speed);
+      }
+      player.play();
+    } catch (_) {}
+    if (!isV && !manualPic) startAuto();
+  }
+
+  String _watchIdFor(dynamic w) => '${(w is Map ? w['id'] : null) ?? ''}';
 
   /// G10：把当前视频的播放位置写入本地记录（强制写，用于切条/退出/切后台）。
   void _saveWatchProgress({bool force = false}) {
@@ -4596,6 +4635,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 切条前先把上一条的进度落盘
     _saveWatchProgress(force: true);
     final my = ++_openToken;
+    _pausedByBackground = false;
     autoTimer?.cancel();
     retryTimer?.cancel();
     playGuard?.cancel();
@@ -4692,7 +4732,8 @@ class _PlayerPageState extends State<PlayerPage>
     if (mounted && my == _openToken && _failure == null) {
       setState(() {
         loading = false;
-        if (w['t'] != 'v') paused = false;
+        // 若打开过程中被切到后台，保持暂停，等回前台再恢复
+        if (w['t'] != 'v' && !_pausedByBackground) paused = false;
       });
     }
     // F32 兜底：媒体就绪后 2.5 秒仍未起播且用户没暂停，补一次 play，
@@ -4718,6 +4759,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (mounted &&
           my == _openToken &&
           _failure == null &&
+          !paused &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
         player.open(Media(cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
@@ -4726,7 +4768,8 @@ class _PlayerPageState extends State<PlayerPage>
         _mediaToken = my;
       }
     });
-    if (w['t'] != 'v') startAuto();
+    // 后台打开的作品不启动图文轮播，等回前台再按用户状态恢复
+    if (w['t'] != 'v' && !paused) startAuto();
   }
 
   Future<void> _refreshDrop(String id, int token, String lib) async {
@@ -4857,8 +4900,8 @@ class _PlayerPageState extends State<PlayerPage>
     _navAt = now;
   }
 
-  String _likeKeyFor(dynamic w) => workLikeKey(
-      lib: _libFor(w), id: '${(w is Map ? w['id'] : null) ?? ''}');
+  String _likeKeyFor(dynamic w) =>
+      workLikeKey(lib: _libFor(w), id: '${(w is Map ? w['id'] : null) ?? ''}');
 
   bool _isLiked(dynamic w) => likedKeys.contains(_likeKeyFor(w));
 
@@ -4866,9 +4909,10 @@ class _PlayerPageState extends State<PlayerPage>
     try {
       final sp = await SharedPreferences.getInstance();
       final keys = parseLikedKeys(sp.getStringList(kLikedWorksPrefsKey));
-      if (mounted) setState(() => likedKeys
-        ..clear()
-        ..addAll(keys));
+      if (mounted)
+        setState(() => likedKeys
+          ..clear()
+          ..addAll(keys));
     } catch (_) {}
   }
 
@@ -4970,6 +5014,8 @@ class _PlayerPageState extends State<PlayerPage>
 
   void togglePause() {
     final isV = widget.works[cur]['t'] == 'v';
+    // 用户手动操作后不再视为后台暂停，避免回前台被自动恢复
+    _pausedByBackground = false;
     if (!isV) {
       final willPause = !paused;
       setState(() => paused = willPause);
@@ -4999,8 +5045,8 @@ class _PlayerPageState extends State<PlayerPage>
       if (muted) {
         lastVol = volume > 0 ? volume : lastVol;
       }
-      volume =
-          volumeAfterMuteToggle(nowMuted: muted, current: volume, last: lastVol);
+      volume = volumeAfterMuteToggle(
+          nowMuted: muted, current: volume, last: lastVol);
       showVol = true; // 轻量反馈，不弹模块
     });
     player.setVolume(volume);
@@ -5082,7 +5128,9 @@ class _PlayerPageState extends State<PlayerPage>
         ? _stageSize.height
         : MediaQuery.of(context).size.height;
     final v = swipeValueFromDrag(
-        start: _swipeStartValue, dy: d.globalPosition.dy - _swipeStartY, height: h);
+        start: _swipeStartValue,
+        dy: d.globalPosition.dy - _swipeStartY,
+        height: h);
     final step = swipeHapticStep(v);
     if (step != _swipeStep) {
       _swipeStep = step;
@@ -5166,8 +5214,7 @@ class _PlayerPageState extends State<PlayerPage>
               ),
               const SizedBox(width: 8),
               Text('${swipeLabel(zone)} ${value.round()}%',
-                  style:
-                      const TextStyle(fontSize: 11, color: Colors.white70)),
+                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
             ]),
           ),
         ),
@@ -5530,7 +5577,8 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   // H13：展开/收起任务栏内简介
-  void toggleCaption() {    setState(() => captionOpen = !captionOpen);
+  void toggleCaption() {
+    setState(() => captionOpen = !captionOpen);
   }
 
   // G11：从头播放 —— 清除本作品观看记录并回到开头。
@@ -5588,8 +5636,8 @@ class _PlayerPageState extends State<PlayerPage>
                   child: Text('${w['ti']}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 13, color: cs.onSurfaceVariant)),
+                      style:
+                          TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
                 ),
               ),
             ListTile(
@@ -5878,8 +5926,8 @@ class _PlayerPageState extends State<PlayerPage>
                               alignment: Alignment.center,
                               transform: Matrix4.diagonal3Values(
                                   _picZoom.scale, _picZoom.scale, 1)
-                                ..setTranslationRaw(_picZoom.offset.dx,
-                                    _picZoom.offset.dy, 0),
+                                ..setTranslationRaw(
+                                    _picZoom.offset.dx, _picZoom.offset.dy, 0),
                               child: picView(pics[idx], lib: _curLib),
                             ),
                           ),
@@ -5930,8 +5978,7 @@ class _PlayerPageState extends State<PlayerPage>
                                   width: 12,
                                   height: 12,
                                   child: CircularProgressIndicator(
-                                      strokeWidth: 1.6,
-                                      color: Colors.white70)),
+                                      strokeWidth: 1.6, color: Colors.white70)),
                               SizedBox(width: 8),
                               Text('网络较慢，正在缓冲…',
                                   style: TextStyle(
@@ -5953,8 +6000,9 @@ class _PlayerPageState extends State<PlayerPage>
                       animation: _heartAnim,
                       builder: (_, __) {
                         final t = _heartAnim.value;
-                        final opacity =
-                            t < 0.7 ? 1.0 : (1 - (t - 0.7) / 0.3).clamp(0.0, 1.0);
+                        final opacity = t < 0.7
+                            ? 1.0
+                            : (1 - (t - 0.7) / 0.3).clamp(0.0, 1.0);
                         return Opacity(
                           opacity: opacity,
                           child: Transform.scale(
@@ -5972,8 +6020,8 @@ class _PlayerPageState extends State<PlayerPage>
                 Positioned.fill(
                   child: IgnorePointer(
                     child: ColoredBox(
-                      color: Colors.black
-                          .withValues(alpha: dimOpacityForBrightness(brightness)),
+                      color: Colors.black.withValues(
+                          alpha: dimOpacityForBrightness(brightness)),
                     ),
                   ),
                 ),
@@ -6062,8 +6110,7 @@ class _PlayerPageState extends State<PlayerPage>
                                   GestureDetector(
                                     onTap: () => _setLiked(w, false),
                                     child: const Icon(Icons.favorite,
-                                        size: 14,
-                                        color: Color(0xFFFF3B5C)),
+                                        size: 14, color: Color(0xFFFF3B5C)),
                                   ),
                                 ],
                               ]),
@@ -6097,10 +6144,10 @@ class _PlayerPageState extends State<PlayerPage>
                                               borderRadius:
                                                   BorderRadius.circular(12)),
                                           constraints: BoxConstraints(
-                                              maxHeight: MediaQuery.sizeOf(
-                                                      context)
-                                                  .height *
-                                                  0.42),
+                                              maxHeight:
+                                                  MediaQuery.sizeOf(context)
+                                                          .height *
+                                                      0.42),
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
                                             crossAxisAlignment:
@@ -6112,8 +6159,7 @@ class _PlayerPageState extends State<PlayerPage>
                                                       style: style.copyWith(
                                                           fontSize: 13,
                                                           height: 1.5,
-                                                          color:
-                                                              Colors.white)),
+                                                          color: Colors.white)),
                                                 ),
                                               ),
                                               Align(
@@ -6122,11 +6168,10 @@ class _PlayerPageState extends State<PlayerPage>
                                                 child: GestureDetector(
                                                   onTap: toggleCaption,
                                                   child: const Padding(
-                                                    padding:
-                                                        EdgeInsets.only(
-                                                            left: 6,
-                                                            top: 4,
-                                                            bottom: 2),
+                                                    padding: EdgeInsets.only(
+                                                        left: 6,
+                                                        top: 4,
+                                                        bottom: 2),
                                                     child: Icon(
                                                         Icons.unfold_less,
                                                         size: 16,
@@ -6198,8 +6243,8 @@ class _PlayerPageState extends State<PlayerPage>
                               value: (muted ? 0.0 : volume.clamp(0.0, 100.0)) /
                                   100.0,
                               backgroundColor: Colors.white24,
-                              valueColor: const AlwaysStoppedAnimation(
-                                  Colors.white),
+                              valueColor:
+                                  const AlwaysStoppedAnimation(Colors.white),
                               minHeight: 4,
                             ),
                           ),
@@ -6266,8 +6311,8 @@ class _PlayerPageState extends State<PlayerPage>
                                   behavior: HitTestBehavior.opaque,
                                   onTapUp: (d) {
                                     stopAuto();
-                                    setState(
-                                        () => _setPicIndex(picAt(d.localPosition)));
+                                    setState(() =>
+                                        _setPicIndex(picAt(d.localPosition)));
                                     hapticTap();
                                   },
                                   onHorizontalDragStart: (d) {
@@ -6491,8 +6536,7 @@ class _PlayerPageState extends State<PlayerPage>
                                       else
                                         Icon(Icons.water_drop,
                                             size: 20,
-                                            color: dropGlow &&
-                                                    dropDayLeft >= 0
+                                            color: dropGlow && dropDayLeft >= 0
                                                 ? Colors.lightBlueAccent
                                                 : (dropDayLeft > 0 &&
                                                         dropWeekLeft > 0
