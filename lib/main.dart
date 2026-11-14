@@ -14,7 +14,9 @@ import 'package:window_manager/window_manager.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_grade.dart';
+import 'background_pause.dart';
 import 'collection_sync.dart';
+import 'continue_watching.dart';
 import 'cover_badges.dart';
 import 'deleted_cover.dart';
 import 'emoji_text.dart';
@@ -27,6 +29,8 @@ import 'playback_error.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
+import 'preload_plan.dart';
+import 'swipe_control.dart';
 import 'watch_progress.dart';
 
 Future<void> main() async {
@@ -37,6 +41,8 @@ Future<void> main() async {
   }
   // G10：先载入观看记录，列表首帧就能显示「已看完」角标
   await WatchProgressStore.ensureLoaded();
+  // G17：载入「继续观看」，主页首帧直接显示
+  await ContinueWatchingStore.ensureLoaded();
   runApp(const App());
 }
 
@@ -1134,8 +1140,8 @@ class _ThemePreviewCard extends StatelessWidget {
               Text(spec.subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 11, color: scheme.onSurfaceVariant)),
+                  style:
+                      TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
             ],
           ),
         ),
@@ -1331,21 +1337,18 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
           height: 88,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-              border: Border.all(
-                  color: Theme.of(context).colorScheme.outline),
+              border: Border.all(color: Theme.of(context).colorScheme.outline),
               borderRadius: BorderRadius.circular(10)),
-          child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.keyboard,
-                    size: 26,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant),
-                const SizedBox(height: 8),
-                Text('请按下要绑定的按键…',
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              ]),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.keyboard,
+                size: 26,
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
+            const SizedBox(height: 8),
+            Text('请按下要绑定的按键…',
+                style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ]),
         ),
       ),
       actions: [
@@ -2433,6 +2436,47 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => CollectionPage(name: c['name'], idx: c['idx'])));
   }
 
+  /// G17：点「继续观看」回到原收藏夹列表的同一作品续播；
+  /// 收藏夹失效/作品已删除时退化为单条播放，仍按记录位置续播。
+  Future<void> _openContinue(ContinueItem it) async {
+    final lib = it.lib.isEmpty ? cfg.lib : it.lib;
+    List works = [];
+    if (it.idx > 0) {
+      try {
+        final r = await http
+            .get(cfg.u('/api/c/${it.idx}.json', lib: lib), headers: cfg.headers)
+            .timeout(const Duration(seconds: 10));
+        if (r.statusCode == 200) {
+          final j = jsonDecode(r.body);
+          if (j is Map) works = (j['works'] as List?) ?? [];
+        }
+      } catch (_) {}
+    }
+    var start =
+        works.indexWhere((w) => w is Map && '${w['id'] ?? ''}' == it.id);
+    if (start < 0) {
+      works = [
+        {
+          'id': it.id,
+          'ti': it.title,
+          'a': it.author,
+          'th': it.thumb,
+          't': it.type,
+        }
+      ];
+      start = 0;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => PlayerPage(
+              works: works,
+              start: start,
+              lib: lib,
+              idx: it.idx > 0 ? it.idx : null,
+              colName: it.collection,
+            )));
+  }
+
   // 星标：点击卡片右上角设为/取消默认收藏夹，真正写回服务端
   Future<void> _setDefault(int idx) async {
     final next = defaultIdx == idx ? null : idx;
@@ -2558,53 +2602,213 @@ class _HomePageState extends State<HomePage> {
           ? Center(child: Text('加载失败：$err'))
           : cols.isEmpty
               ? const Center(child: CircularProgressIndicator())
-              : LayoutBuilder(builder: (context, cons) {
-                  final w = cons.maxWidth;
-                  final n = w >= 1200
-                      ? 5
-                      : w >= 900
-                          ? 4
-                          : w >= 620
-                              ? 3
-                              : 2;
-                  return GridView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: n,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 0.72,
-                    ),
-                    itemCount: cols.length,
-                    itemBuilder: (_, i) {
-                      final c = cols[i];
-                      final idx = (c['idx'] as num).toInt();
-                      final remote = (c['cover'] ?? '').toString();
-                      final fallback = covers['$idx'];
-                      final imageUrl = remote.isNotEmpty
-                          ? cfg.u(remote).toString()
-                          : (fallback == null
-                              ? null
-                              : cfg.base + cfg.media(fallback));
-                      final isDefault = defaultIdx != null && idx == defaultIdx;
-                      return _CollectionTile(
-                        idx: idx,
-                        name: '${c['name']}',
-                        count: c['count'] is num
-                            ? (c['count'] as num).toInt()
-                            : null,
-                        imageUrl: imageUrl,
-                        isDefault: isDefault,
-                        syncOff: c['sync'] == false,
-                        onStarTap: () => _setDefault(idx),
-                        onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => CollectionPage(
-                                    name: '${c['name']}', idx: idx))),
-                      );
-                    },
-                  );
-                }),
+              : Column(children: [
+                  _ContinueWatchingStrip(onOpen: _openContinue),
+                  Expanded(child: LayoutBuilder(builder: (context, cons) {
+                    final w = cons.maxWidth;
+                    final n = w >= 1200
+                        ? 5
+                        : w >= 900
+                            ? 4
+                            : w >= 620
+                                ? 3
+                                : 2;
+                    return GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: n,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.72,
+                      ),
+                      itemCount: cols.length,
+                      itemBuilder: (_, i) {
+                        final c = cols[i];
+                        final idx = (c['idx'] as num).toInt();
+                        final remote = (c['cover'] ?? '').toString();
+                        final fallback = covers['$idx'];
+                        final imageUrl = remote.isNotEmpty
+                            ? cfg.u(remote).toString()
+                            : (fallback == null
+                                ? null
+                                : cfg.base + cfg.media(fallback));
+                        final isDefault =
+                            defaultIdx != null && idx == defaultIdx;
+                        return _CollectionTile(
+                          idx: idx,
+                          name: '${c['name']}',
+                          count: c['count'] is num
+                              ? (c['count'] as num).toInt()
+                              : null,
+                          imageUrl: imageUrl,
+                          isDefault: isDefault,
+                          syncOff: c['sync'] == false,
+                          onStarTap: () => _setDefault(idx),
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => CollectionPage(
+                                      name: '${c['name']}', idx: idx))),
+                        );
+                      },
+                    );
+                  })),
+                ]),
+    );
+  }
+}
+
+/// G17：主页顶部「继续观看」横向列表；没有记录时完全不占位。
+class _ContinueWatchingStrip extends StatelessWidget {
+  final void Function(ContinueItem) onOpen;
+  const _ContinueWatchingStrip({required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+        valueListenable: ContinueWatchingStore.revision,
+        builder: (context, _, __) {
+          final items = ContinueWatchingStore.items;
+          if (items.isEmpty) return const SizedBox.shrink();
+          final theme = Theme.of(context);
+          return SizedBox(
+            height: 158,
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 6),
+                child: Row(children: [
+                  Icon(Icons.play_circle_outline,
+                      size: 16, color: theme.colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Text('继续观看',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text('${items.length} 条',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant)),
+                ]),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (_, i) =>
+                      _ContinueTile(item: items[i], onOpen: onOpen),
+                ),
+              ),
+            ]),
+          );
+        });
+  }
+}
+
+class _ContinueTile extends StatelessWidget {
+  final ContinueItem item;
+  final void Function(ContinueItem) onOpen;
+  const _ContinueTile({required this.item, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cover = item.thumb.isEmpty
+        ? null
+        : cfg.base + cfg.media(item.thumb, lib: item.lib);
+    return SizedBox(
+      width: 172,
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => onOpen(item),
+          onLongPress: () {
+            ContinueWatchingStore.remove(item.lib, item.id);
+            ScaffoldMessenger.of(context)
+                .showSnackBar(const SnackBar(content: Text('已从「继续观看」移除')));
+          },
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+              height: 86,
+              width: double.infinity,
+              child: Stack(fit: StackFit.expand, children: [
+                cover == null
+                    ? Container(color: Colors.black26)
+                    : CachedNetworkImage(
+                        imageUrl: cover,
+                        httpHeaders: cfg.headers,
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) =>
+                            Container(color: Colors.black26)),
+                // 底部渐变 + 位置文案
+                const DecoratedBox(
+                    decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Colors.black54],
+                            stops: [0.45, 1]))),
+                Positioned(
+                    left: 6,
+                    bottom: 4,
+                    child: Text(
+                        formatContinueLabel(item.positionMs, item.durationMs),
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600))),
+                Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(4)),
+                        child: Text(item.isVideo ? '视频' : '图文',
+                            style: const TextStyle(
+                                fontSize: 9, color: Colors.white)))),
+                // 观看进度
+                Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: SizedBox(
+                        height: 2,
+                        child: LinearProgressIndicator(
+                            value: item.fraction,
+                            backgroundColor: Colors.white24,
+                            minHeight: 2))),
+              ]),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+              child: Text(item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+              child: Text(
+                  [
+                    if (item.collection.trim().isNotEmpty)
+                      item.collection.trim(),
+                    if (item.author.trim().isNotEmpty) item.author.trim(),
+                  ].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }
@@ -2837,11 +3041,13 @@ class _CollectionPageState extends State<CollectionPage> {
                 height: 84,
                 child: cov.isEmpty
                     ? Container(
-                        color:
-                            Theme.of(context).colorScheme.surfaceContainerHighest,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest,
                         child: Icon(Icons.image_not_supported_outlined,
                             size: 20,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant))
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant))
                     : CachedNetworkImage(
                         imageUrl: cfg.base + cfg.media(cov),
                         httpHeaders: cfg.headers,
@@ -2878,7 +3084,7 @@ class _CollectionPageState extends State<CollectionPage> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 2),
-                Text('抖音已删除${at.isEmpty ? '' : ' · $at'}',
+                Text('抖音平台已删除${at.isEmpty ? '' : ' · $at'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -3110,8 +3316,7 @@ class _CollectionPageState extends State<CollectionPage> {
                               color: Theme.of(context)
                                   .colorScheme
                                   .surfaceContainerHighest,
-                              child: Text(
-                                  '本地文件已清理，预览退回作者头像；点「跳转」回库查看该作者其他作品',
+                              child: Text('本地文件已清理，预览退回作者头像；点「跳转」回库查看该作者其他作品',
                                   style: TextStyle(
                                       fontSize: 11,
                                       color: Theme.of(context)
@@ -3132,7 +3337,11 @@ class _CollectionPageState extends State<CollectionPage> {
                         ? Center(
                             child: Text('无匹配作品：$kw',
                                 style: const TextStyle(color: Colors.grey)))
-                        : WorkGrid(works: list)),
+                        : WorkGrid(
+                            works: list,
+                            collectionIdx: widget.idx,
+                            collectionName: widget.name,
+                          )),
               ),
             ]),
     );
@@ -3407,7 +3616,8 @@ class _RankPageState extends State<RankPage> {
                                             style: TextStyle(
                                                 fontSize: 16,
                                                 fontWeight: FontWeight.bold,
-                                                color: _rankColor(context, i)))),
+                                                color:
+                                                    _rankColor(context, i)))),
                                     ClipOval(
                                       child: SizedBox(
                                         width: 42,
@@ -4176,8 +4386,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                                   color: Theme.of(context)
                                                       .colorScheme
                                                       .onSurfaceVariant
-                                                      .withValues(
-                                                          alpha: 0.7))),
+                                                      .withValues(alpha: 0.7))),
                                         ]),
                                   ),
                                   Positioned(
@@ -4248,26 +4457,61 @@ class PlayerPage extends StatefulWidget {
   final int start;
   // 作品可能来自非当前库（按库筛选 / 全部库），lib 为列表默认所属库
   final String? lib;
+  // G17：「继续观看」需要回到原收藏夹列表续播
+  final int? idx;
+  final String? colName;
   const PlayerPage(
-      {super.key, required this.works, required this.start, this.lib});
+      {super.key,
+      required this.works,
+      required this.start,
+      this.lib,
+      this.idx,
+      this.colName});
   @override
   State<PlayerPage> createState() => _PlayerPageState();
+}
+
+/// G18：两个播放器槽位。A 播放当前作品，B 在后台静音预缓冲下一条；
+/// 切条时交换槽位，预缓冲好的媒体无需重新打开即可起播。
+class _PlaybackSlot {
+  final String tag;
+  late final Player player;
+  late final VideoController vc;
+
+  _PlaybackSlot(this.tag) {
+    player = Player(
+      configuration: const PlayerConfiguration(
+        title: 'Dizi',
+        bufferSize: 32 * 1024 * 1024,
+      ),
+    );
+    // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
+    vc = VideoController(
+      player,
+      configuration: const VideoControllerConfiguration(hwdec: 'auto-safe'),
+    );
+  }
 }
 
 class _PlayerPageState extends State<PlayerPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late final PageController pc = PageController(initialPage: widget.start);
-  // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
-  late final Player player = Player(
-    configuration: const PlayerConfiguration(
-      title: 'Dizi',
-      bufferSize: 32 * 1024 * 1024,
-    ),
-  );
-  late final VideoController vc = VideoController(
-    player,
-    configuration: const VideoControllerConfiguration(hwdec: 'auto-safe'),
-  );
+  late final _PlaybackSlot _slotA = _PlaybackSlot('a');
+  late final _PlaybackSlot _slotB = _PlaybackSlot('b');
+  bool _slotAActive = true;
+  _PlaybackSlot get _active => _slotAActive ? _slotA : _slotB;
+  _PlaybackSlot get _idle => _slotAActive ? _slotB : _slotA;
+  // 对播放页其余代码保持原有 player / vc 接口，内部指向当前活动槽位
+  Player get player => _active.player;
+  VideoController get vc => _active.vc;
+  // G18：下一条预缓冲状态
+  Timer? _preloadTimer;
+  int? _preloadIndex;
+  String? _preloadKey;
+  bool _preloadReady = false;
+  bool _preloadFailed = false;
+  int _preloadGen = 0;
+  final List<StreamSubscription> _playerSubs = <StreamSubscription>[];
   final FocusNode focus = FocusNode();
   int cur = 0;
   int img = 0;
@@ -4282,6 +4526,8 @@ class _PlayerPageState extends State<PlayerPage>
   int _lastKeyNav = 0;
   int? _pendingPage;
   bool paused = false;
+  // G16：是否因切后台而暂停（回前台时只恢复这种暂停）
+  bool _pausedByBackground = false;
   bool loading = true;
   bool muted = false;
   double volume = 100;
@@ -4294,6 +4540,20 @@ class _PlayerPageState extends State<PlayerPage>
   double _volStartDx = 0;
   Timer? _volHintTimer;
   bool get _volHintVisible => _volAdjusting || showVol;
+  // G15：移动端左右两侧上下滑——左侧亮度、右侧音量，中间仍可翻页。
+  // 亮度用应用内压暗遮罩实现，不引入原生插件；桌面端不启用。
+  double brightness = 100;
+  bool _swipeActive = false;
+  bool _swipeShow = false;
+  SwipeZone? _swipeZone;
+  double _swipeStartY = 0;
+  double _swipeStartValue = 0;
+  double _swipeValue = 0;
+  int _swipeStep = 0;
+  Timer? _swipeHintTimer;
+  bool get _swipeHint => _swipeActive || _swipeShow;
+  bool get _mobileSwipe =>
+      swipeEnabledFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
   bool ui = true;
   bool fs = false;
   bool dragging = false;
@@ -4395,8 +4655,24 @@ class _PlayerPageState extends State<PlayerPage>
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
     _loadLikes();
-    player.setPlaylistMode(PlaylistMode.none);
-    player.stream.completed.listen((done) {
+    _bindPlayer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      focus.requestFocus();
+      open(widget.start);
+    });
+  }
+
+  /// G18：监听当前活动槽位。切换预缓冲槽位时先解绑旧槽位，避免
+  /// 旧播放器迟到的 completed/position 事件干扰新作品。
+  void _bindPlayer() {
+    for (final s in _playerSubs) {
+      s.cancel();
+    }
+    _playerSubs.clear();
+    final p = player;
+    p.setPlaylistMode(PlaylistMode.none);
+    _playerSubs.add(p.stream.completed.listen((done) {
+      if (!identical(p, player)) return;
       if (!done || !mounted) return;
       if (_mediaToken != _openToken) return;
       final w = widget.works[cur];
@@ -4432,14 +4708,16 @@ class _PlayerPageState extends State<PlayerPage>
         case VideoEndAction.stop:
           break;
       }
-    });
-    player.stream.playing.listen((v) {
+    }));
+    _playerSubs.add(p.stream.playing.listen((v) {
+      if (!identical(p, player)) return;
       if (!mounted || _opening) return;
       if (widget.works[cur]['t'] == 'v' && v != !paused) {
         setState(() => paused = !v);
       }
-    });
-    subPos = player.stream.position.listen((p) {
+    }));
+    subPos = p.stream.position.listen((position) {
+      if (!identical(p, player)) return;
       if (!mounted) return;
       // G10：记录观看位置（内部 3s 节流，不受 UI 刷新节流影响）；
       // _opening 期间播放器会先上报 0 位置，不能用来覆盖已有进度
@@ -4449,34 +4727,41 @@ class _PlayerPageState extends State<PlayerPage>
           WatchProgressStore.record(
               lib: _libFor(cw),
               id: _watchIdFor(cw),
-              positionMs: p.inMilliseconds,
+              positionMs: position.inMilliseconds,
               durationMs: dur.inMilliseconds);
+          _recordContinue(cw, position.inMilliseconds, dur.inMilliseconds);
         }
       }
       // 位置流每 100ms 左右触发一次；全量 setState 会让视频层频繁重建、
       // 在 Windows 上造成卡顿与音画不同步。这里节流到 200ms，
       // 但跳转/拖动后的大幅变化立即刷新。
       final now = DateTime.now().millisecondsSinceEpoch;
-      final bigJump = (p.inMilliseconds - pos.inMilliseconds).abs() > 1200;
+      final bigJump =
+          (position.inMilliseconds - pos.inMilliseconds).abs() > 1200;
       if (!bigJump && now - _lastPosSet < 200) return;
       _lastPosSet = now;
-      setState(() => pos = p);
+      setState(() => pos = position);
     });
-    subDur = player.stream.duration.listen((d) {
+    subDur = p.stream.duration.listen((d) {
+      if (!identical(p, player)) return;
       if (d.inMilliseconds > 0) {
         _loadTimeout?.cancel();
         _loadTimeout = null;
       }
       if (mounted) setState(() => dur = d);
     });
+    if (subPos != null) _playerSubs.add(subPos!);
+    if (subDur != null) _playerSubs.add(subDur!);
     // G12：播放器报错（解码失败/流打不开）直接给出可重试提示，
     // 不再无限转圈；错误可能来自上一条媒体，切条后自动清除。
-    player.stream.error.listen((msg) {
+    _playerSubs.add(p.stream.error.listen((msg) {
+      if (!identical(p, player)) return;
       if (!mounted || _failure != null) return;
       _showFailure(classifyPlaybackError(msg));
-    });
+    }));
     // G12：弱网缓冲提示 —— 缓冲超过阈值才显示，避免正常起播闪一下
-    player.stream.buffering.listen((b) {
+    _playerSubs.add(p.stream.buffering.listen((b) {
+      if (!identical(p, player)) return;
       if (!mounted) return;
       if (!b) {
         _slowBufferTimer?.cancel();
@@ -4492,26 +4777,30 @@ class _PlayerPageState extends State<PlayerPage>
       if (_buffering) return;
       setState(() => _buffering = true);
       _slowBufferTimer?.cancel();
-      _slowBufferTimer =
-          Timer(slowBufferThreshold, () {
+      _slowBufferTimer = Timer(slowBufferThreshold, () {
         if (mounted && _buffering) setState(() => _slowBuffer = true);
       });
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      focus.requestFocus();
-      open(widget.start);
-    });
+    }));
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
-    if (state != AppLifecycleState.resumed) {
-      // G10：切后台/最小化前落盘，避免异常退出丢进度
-      _saveWatchProgress(force: true);
+    // G16：切后台/最小化/来电时自动暂停（先落盘位置），回前台再恢复；
+    // 移动端 inactive 就暂停，桌面端仅最小化/隐藏暂停（失去焦点不打断）。
+    final isMobile = Platform.isAndroid || Platform.isIOS;
+    if (shouldPauseInBackground(state: state.name, isMobile: isMobile)) {
+      _pauseForBackground();
+      return;
     }
     if (state == AppLifecycleState.resumed && mounted) {
+      // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
       focus.requestFocus();
+      if (shouldResumeFromBackground(
+          pausedByBackground: _pausedByBackground,
+          userPaused: paused && !_pausedByBackground)) {
+        _resumeFromBackground();
+        return;
+      }
       // Windows 切回前台后音视频时钟偶发漂移：按已记录位置重新对齐并恢复速率
       if (widget.works[cur]['t'] == 'v' && !paused) {
         try {
@@ -4523,8 +4812,38 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  String _watchIdFor(dynamic w) =>
-      '${(w is Map ? w['id'] : null) ?? ''}';
+  /// G16：切后台自动暂停，并强制写入观看位置。
+  void _pauseForBackground() {
+    // G10：切后台/最小化前落盘，避免异常退出丢进度
+    _saveWatchProgress(force: true);
+    if (widget.works.isEmpty || _failure != null) return;
+    // 用户自己暂停的保持原状，回前台不自动播放
+    if (paused) return;
+    _pausedByBackground = true;
+    pauseAuto();
+    try {
+      player.pause();
+    } catch (_) {}
+    if (mounted) setState(() => paused = true);
+  }
+
+  /// G16：只恢复「因切后台暂停」的播放，并从记忆位置继续。
+  void _resumeFromBackground() {
+    _pausedByBackground = false;
+    if (!mounted) return;
+    final isV = widget.works[cur]['t'] == 'v';
+    setState(() => paused = false);
+    try {
+      if (isV) {
+        if (pos > Duration.zero) player.seek(pos);
+        player.setRate(speed);
+      }
+      player.play();
+    } catch (_) {}
+    if (!isV && !manualPic) startAuto();
+  }
+
+  String _watchIdFor(dynamic w) => '${(w is Map ? w['id'] : null) ?? ''}';
 
   /// G10：把当前视频的播放位置写入本地记录（强制写，用于切条/退出/切后台）。
   void _saveWatchProgress({bool force = false}) {
@@ -4537,12 +4856,37 @@ class _PlayerPageState extends State<PlayerPage>
         positionMs: pos.inMilliseconds,
         durationMs: dur.inMilliseconds,
         force: force);
+    // G17：退出/切条/切后台时强制刷新「继续观看」的位置
+    _recordContinue(w, pos.inMilliseconds, dur.inMilliseconds, force: true);
+  }
+
+  /// G17：写入「继续观看」条目（含收藏夹信息，便于一键回到原列表续播）。
+  void _recordContinue(dynamic w, int positionMs, int durationMs,
+      {bool force = false}) {
+    if (w is! Map || w['t'] != 'v') return;
+    ContinueWatchingStore.record(
+        ContinueItem(
+          lib: _libFor(w),
+          id: _watchIdFor(w),
+          idx: widget.idx ?? 0,
+          collection: widget.colName ?? '',
+          title: '${w['ti'] ?? ''}',
+          author: '${w['a'] ?? ''}',
+          thumb: '${w['th'] ?? ''}',
+          type: 'v',
+          positionMs: positionMs,
+          durationMs: durationMs,
+          updatedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+        force: force);
   }
 
   /// G10：播放完成时标记「已看完」。
   void _markWatched(dynamic w) {
     if (w is! Map) return;
     WatchProgressStore.markDone(lib: _libFor(w), id: _watchIdFor(w));
+    // G17：看完即从「继续观看」移除
+    ContinueWatchingStore.remove(_libFor(w), _watchIdFor(w));
   }
 
   // G12：展示失败提示并停止转圈；重试时整条媒体重新打开。
@@ -4577,15 +4921,104 @@ class _PlayerPageState extends State<PlayerPage>
     open(cur);
   }
 
+  /// G18：作废当前预缓冲（例如用户跳到别的作品）。默认顺手停掉空闲槽位，
+  /// 避免它在后台继续占带宽。
+  void _cancelPreload({bool stopIdle = true}) {
+    _preloadTimer?.cancel();
+    _preloadTimer = null;
+    _preloadGen++;
+    _preloadReady = false;
+    _preloadFailed = false;
+    _preloadIndex = null;
+    _preloadKey = null;
+    if (stopIdle) {
+      try {
+        _idle.player.stop();
+      } catch (_) {}
+    }
+  }
+
+  /// G18：当前条起播后，延迟一点在空闲槽位静音打开下一条。
+  void _schedulePreload() {
+    _preloadTimer?.cancel();
+    _preloadTimer = null;
+    final next = cur + 1;
+    if (next >= widget.works.length) return;
+    final nw = widget.works[next];
+    final path = preloadMediaPath(nw);
+    if (!shouldPreloadNext(
+        autoplay: autoplay,
+        loopOne: loopOne,
+        index: next,
+        count: widget.works.length,
+        hasMedia: path != null)) {
+      return;
+    }
+    _preloadTimer = Timer(const Duration(milliseconds: 800), () {
+      _startPreload(next, path!);
+    });
+  }
+
+  Future<void> _startPreload(int idx, String path) async {
+    if (!mounted || idx != cur + 1 || !autoplay || loopOne) return;
+    final gen = ++_preloadGen;
+    final nw = widget.works[idx];
+    final nlib = _libFor(nw);
+    final key = preloadKeyFor(nw, nlib);
+    final slot = _idle;
+    _preloadIndex = idx;
+    _preloadKey = key;
+    _preloadReady = false;
+    _preloadFailed = false;
+    StreamSubscription? err;
+    err = slot.player.stream.error.listen((_) {
+      if (gen == _preloadGen) _preloadFailed = true;
+    });
+    try {
+      await slot.player.stop();
+      // 预缓冲槽位保持静音、暂停；切条时再恢复音量并 play
+      await slot.player.setVolume(0);
+      await slot.player.open(
+        Media(cfg.base + cfg.media(path, lib: nlib),
+            httpHeaders: cfg.headers),
+        play: false,
+      );
+      if (gen != _preloadGen) return;
+      _preloadReady = !_preloadFailed;
+    } catch (_) {
+      if (gen == _preloadGen) {
+        _preloadReady = false;
+        _preloadFailed = true;
+      }
+    } finally {
+      await err.cancel();
+    }
+  }
+
   Future<void> open(int i) async {
     // 切条前先把上一条的进度落盘
     _saveWatchProgress(force: true);
+    final w = widget.works[i];
+    final wl = _libFor(w);
+    final key = preloadKeyFor(w, wl);
+    // 命中预缓冲：直接使用空闲槽位，跳过 player.open 的等待
+    final canUsePreload = _preloadReady &&
+        !_preloadFailed &&
+        preloadMatches(
+            preloadedIndex: _preloadIndex,
+            preloadedKey: _preloadKey,
+            index: i,
+            key: key);
+    if (!canUsePreload) _cancelPreload();
     final my = ++_openToken;
+    _pausedByBackground = false;
     autoTimer?.cancel();
     retryTimer?.cancel();
     playGuard?.cancel();
     _loadTimeout?.cancel();
     _slowBufferTimer?.cancel();
+    _preloadTimer?.cancel();
+    _preloadTimer = null;
     manualPic = false;
     _pendingPage = null;
     _mediaToken = -1;
@@ -4614,33 +5047,54 @@ class _PlayerPageState extends State<PlayerPage>
       }
       _showFailure(timeoutFailure);
     });
-    try {
-      await player.stop();
-    } catch (_) {}
+    if (canUsePreload) {
+      final old = _active;
+      final target = _idle;
+      _slotAActive = target == _slotA;
+      _bindPlayer();
+      try {
+        await old.player.stop();
+      } catch (_) {}
+      _mediaToken = my;
+      _preloadReady = false;
+      _preloadFailed = false;
+      _preloadIndex = null;
+      _preloadKey = null;
+      _preloadGen++;
+      setState(() {
+        pos = Duration.zero;
+        final d0 = player.state.duration;
+        dur = d0.inMilliseconds > 0 ? d0 : Duration.zero;
+      });
+    } else {
+      try {
+        await player.stop();
+      } catch (_) {}
+    }
     if (my != _openToken) return;
-    final w = widget.works[i];
-    final wl = _libFor(w);
     _refreshDrop('${w['id'] ?? ''}', my, wl);
     postStat('play', '${w['a'] ?? ''}', lib: wl);
-    try {
-      if (w['t'] == 'v') {
-        await player.open(Media(
-            cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
-            httpHeaders: cfg.headers));
-      } else if ((w['au'] ?? '').toString().isNotEmpty) {
-        await player.open(Media(
-            cfg.base + cfg.media(w['au'].toString(), lib: wl),
-            httpHeaders: cfg.headers));
-      }
-      if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
-          my == _openToken) {
-        _mediaToken = my;
-      }
-    } catch (e) {
-      if (my == _openToken) {
-        _opening = false;
-        _showFailure(classifyPlaybackError(e));
-        return;
+    if (!canUsePreload) {
+      try {
+        if (w['t'] == 'v') {
+          await player.open(Media(
+              cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
+              httpHeaders: cfg.headers));
+        } else if ((w['au'] ?? '').toString().isNotEmpty) {
+          await player.open(Media(
+              cfg.base + cfg.media(w['au'].toString(), lib: wl),
+              httpHeaders: cfg.headers));
+        }
+        if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
+            my == _openToken) {
+          _mediaToken = my;
+        }
+      } catch (e) {
+        if (my == _openToken) {
+          _opening = false;
+          _showFailure(classifyPlaybackError(e));
+          return;
+        }
       }
     }
     if (my != _openToken) return;
@@ -4677,7 +5131,8 @@ class _PlayerPageState extends State<PlayerPage>
     if (mounted && my == _openToken && _failure == null) {
       setState(() {
         loading = false;
-        if (w['t'] != 'v') paused = false;
+        // 若打开过程中被切到后台，保持暂停，等回前台再恢复
+        if (w['t'] != 'v' && !_pausedByBackground) paused = false;
       });
     }
     // F32 兜底：媒体就绪后 2.5 秒仍未起播且用户没暂停，补一次 play，
@@ -4703,6 +5158,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (mounted &&
           my == _openToken &&
           _failure == null &&
+          !paused &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
         player.open(Media(cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
@@ -4711,7 +5167,10 @@ class _PlayerPageState extends State<PlayerPage>
         _mediaToken = my;
       }
     });
-    if (w['t'] != 'v') startAuto();
+    // 后台打开的作品不启动图文轮播，等回前台再按用户状态恢复
+    if (w['t'] != 'v' && !paused) startAuto();
+    // G18：起播稳定后再预缓冲下一条，避免和当前条抢带宽
+    _schedulePreload();
   }
 
   Future<void> _refreshDrop(String id, int token, String lib) async {
@@ -4842,8 +5301,8 @@ class _PlayerPageState extends State<PlayerPage>
     _navAt = now;
   }
 
-  String _likeKeyFor(dynamic w) => workLikeKey(
-      lib: _libFor(w), id: '${(w is Map ? w['id'] : null) ?? ''}');
+  String _likeKeyFor(dynamic w) =>
+      workLikeKey(lib: _libFor(w), id: '${(w is Map ? w['id'] : null) ?? ''}');
 
   bool _isLiked(dynamic w) => likedKeys.contains(_likeKeyFor(w));
 
@@ -4851,9 +5310,10 @@ class _PlayerPageState extends State<PlayerPage>
     try {
       final sp = await SharedPreferences.getInstance();
       final keys = parseLikedKeys(sp.getStringList(kLikedWorksPrefsKey));
-      if (mounted) setState(() => likedKeys
-        ..clear()
-        ..addAll(keys));
+      if (mounted)
+        setState(() => likedKeys
+          ..clear()
+          ..addAll(keys));
     } catch (_) {}
   }
 
@@ -4955,6 +5415,8 @@ class _PlayerPageState extends State<PlayerPage>
 
   void togglePause() {
     final isV = widget.works[cur]['t'] == 'v';
+    // 用户手动操作后不再视为后台暂停，避免回前台被自动恢复
+    _pausedByBackground = false;
     if (!isV) {
       final willPause = !paused;
       setState(() => paused = willPause);
@@ -4984,8 +5446,8 @@ class _PlayerPageState extends State<PlayerPage>
       if (muted) {
         lastVol = volume > 0 ? volume : lastVol;
       }
-      volume =
-          volumeAfterMuteToggle(nowMuted: muted, current: volume, last: lastVol);
+      volume = volumeAfterMuteToggle(
+          nowMuted: muted, current: volume, last: lastVol);
       showVol = true; // 轻量反馈，不弹模块
     });
     player.setVolume(volume);
@@ -5042,17 +5504,146 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  // G15：上下滑开始（左亮度 / 右音量），以按下时的值为基准。
+  void _swipeStart(DragStartDetails d, SwipeZone zone) {
+    _swipeHintTimer?.cancel();
+    hapticTap();
+    final start =
+        zone == SwipeZone.brightness ? brightness : (muted ? 0.0 : volume);
+    setState(() {
+      _swipeZone = zone;
+      _swipeActive = true;
+      _swipeShow = true;
+      _swipeStartY = d.globalPosition.dy;
+      _swipeStartValue = start;
+      _swipeValue = start;
+      _swipeStep = swipeHapticStep(start);
+    });
+  }
+
+  void _swipeUpdate(DragUpdateDetails d) {
+    if (!_swipeActive) return;
+    final zone = _swipeZone;
+    if (zone == null) return;
+    final h = _stageSize.height > 0
+        ? _stageSize.height
+        : MediaQuery.of(context).size.height;
+    final v = swipeValueFromDrag(
+        start: _swipeStartValue,
+        dy: d.globalPosition.dy - _swipeStartY,
+        height: h);
+    final step = swipeHapticStep(v);
+    if (step != _swipeStep) {
+      _swipeStep = step;
+      HapticFeedback.selectionClick();
+    }
+    setState(() {
+      _swipeValue = v;
+      if (zone == SwipeZone.brightness) {
+        brightness = v;
+      } else {
+        volume = v;
+        muted = v == 0;
+        if (v > 0) lastVol = v;
+      }
+    });
+    if (zone == SwipeZone.volume) player.setVolume(v);
+  }
+
+  void _swipeEnd() {
+    if (!_swipeActive) return;
+    _swipeHintTimer?.cancel();
+    setState(() => _swipeActive = false);
+    _swipeHintTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _swipeShow = false);
+    });
+  }
+
+  // 左右两条窄边手势区：中间留给 PageView 上下滑翻页。
+  Widget _swipeEdge(SwipeZone zone, double width, EdgeInsets pad) {
+    return Positioned(
+      left: zone == SwipeZone.brightness ? 0 : null,
+      right: zone == SwipeZone.volume ? 0 : null,
+      top: pad.top + 64,
+      bottom: pad.bottom + 132,
+      width: width,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragStart: (d) => _swipeStart(d, zone),
+        onVerticalDragUpdate: _swipeUpdate,
+        onVerticalDragEnd: (_) => _swipeEnd(),
+        onVerticalDragCancel: _swipeEnd,
+      ),
+    );
+  }
+
+  // G15：拖动期间/松手后的轻量读数（图标 + 进度 + 百分比）。
+  Widget _swipeHintWidget(EdgeInsets pad) {
+    final zone = _swipeZone ?? SwipeZone.brightness;
+    final value = _swipeValue.clamp(0.0, 100.0);
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: pad.top + 96,
+      child: IgnorePointer(
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(14)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(
+                  zone == SwipeZone.brightness
+                      ? Icons.brightness_6
+                      : (value == 0 ? Icons.volume_off : Icons.volume_up),
+                  size: 18,
+                  color: Colors.white70),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 96,
+                height: 4,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: value / 100.0,
+                    backgroundColor: Colors.white24,
+                    valueColor: const AlwaysStoppedAnimation(Colors.white),
+                    minHeight: 4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('${swipeLabel(zone)} ${value.round()}%',
+                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   void toggleLoop() {
     // F32：单条循环与连播是完全独立的两组状态。
     // 不再使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
     // completed 事件），统一由 completed 回调在 Dart 层重播，
     // 这样关闭循环后连播判定立刻恢复，不会偶发停在片尾。
     setState(() => loopOne = !loopOne);
+    if (loopOne) {
+      _cancelPreload();
+    } else {
+      _schedulePreload();
+    }
   }
 
   void toggleAutoplay() {
     // F32：只切连播，不再连带改动单条循环
     setState(() => autoplay = !autoplay);
+    if (autoplay) {
+      _schedulePreload();
+    } else {
+      _cancelPreload();
+    }
   }
 
   void cycleSpeed() {
@@ -5250,6 +5841,9 @@ class _PlayerPageState extends State<PlayerPage>
     _wheelUnlock?.cancel();
     _wheelIdle?.cancel();
     _volHintTimer?.cancel();
+    _swipeHintTimer?.cancel();
+    _preloadTimer?.cancel();
+    _preloadGen++;
     // 退出播放页时确保恢复系统 UI 与 Windows 窗口，避免全屏残留
     if (fs) {
       try {
@@ -5264,7 +5858,12 @@ class _PlayerPageState extends State<PlayerPage>
     subPos?.cancel();
     subDur?.cancel();
     playGuard?.cancel();
-    player.dispose();
+    for (final s in _playerSubs) {
+      s.cancel();
+    }
+    _playerSubs.clear();
+    _slotA.player.dispose();
+    _slotB.player.dispose();
     pc.dispose();
     focus.dispose();
     super.dispose();
@@ -5279,7 +5878,11 @@ class _PlayerPageState extends State<PlayerPage>
       }
       return ClipRect(
         child: RepaintBoundary(
-          child: Video(controller: vc, controls: NoVideoControls),
+          // key 随槽位变化：预缓冲切换后必须重建 Video，才能挂到新控制器
+          child: Video(
+              key: ValueKey('video-${_active.tag}'),
+              controller: vc,
+              controls: NoVideoControls),
         ),
       );
     });
@@ -5396,7 +5999,8 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   // H13：展开/收起任务栏内简介
-  void toggleCaption() {    setState(() => captionOpen = !captionOpen);
+  void toggleCaption() {
+    setState(() => captionOpen = !captionOpen);
   }
 
   // G11：从头播放 —— 清除本作品观看记录并回到开头。
@@ -5405,6 +6009,8 @@ class _PlayerPageState extends State<PlayerPage>
     final w = widget.works[cur];
     final isV = w['t'] == 'v';
     WatchProgressStore.remove(_libFor(w), _watchIdFor(w));
+    // G17：从头播放视为新的观看，先移出「继续观看」，位置到 1s 后重新出现
+    ContinueWatchingStore.remove(_libFor(w), _watchIdFor(w));
     if (isV) {
       try {
         player.seek(Duration.zero);
@@ -5454,8 +6060,8 @@ class _PlayerPageState extends State<PlayerPage>
                   child: Text('${w['ti']}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 13, color: cs.onSurfaceVariant)),
+                      style:
+                          TextStyle(fontSize: 13, color: cs.onSurfaceVariant)),
                 ),
               ),
             ListTile(
@@ -5494,6 +6100,7 @@ class _PlayerPageState extends State<PlayerPage>
                 onTap: () {
                   Navigator.of(ctx).pop();
                   WatchProgressStore.remove(lib, id);
+                  ContinueWatchingStore.remove(lib, id);
                 },
               ),
             const SizedBox(height: 4),
@@ -5744,8 +6351,8 @@ class _PlayerPageState extends State<PlayerPage>
                               alignment: Alignment.center,
                               transform: Matrix4.diagonal3Values(
                                   _picZoom.scale, _picZoom.scale, 1)
-                                ..setTranslationRaw(_picZoom.offset.dx,
-                                    _picZoom.offset.dy, 0),
+                                ..setTranslationRaw(
+                                    _picZoom.offset.dx, _picZoom.offset.dy, 0),
                               child: picView(pics[idx], lib: _curLib),
                             ),
                           ),
@@ -5796,8 +6403,7 @@ class _PlayerPageState extends State<PlayerPage>
                                   width: 12,
                                   height: 12,
                                   child: CircularProgressIndicator(
-                                      strokeWidth: 1.6,
-                                      color: Colors.white70)),
+                                      strokeWidth: 1.6, color: Colors.white70)),
                               SizedBox(width: 8),
                               Text('网络较慢，正在缓冲…',
                                   style: TextStyle(
@@ -5819,8 +6425,9 @@ class _PlayerPageState extends State<PlayerPage>
                       animation: _heartAnim,
                       builder: (_, __) {
                         final t = _heartAnim.value;
-                        final opacity =
-                            t < 0.7 ? 1.0 : (1 - (t - 0.7) / 0.3).clamp(0.0, 1.0);
+                        final opacity = t < 0.7
+                            ? 1.0
+                            : (1 - (t - 0.7) / 0.3).clamp(0.0, 1.0);
                         return Opacity(
                           opacity: opacity,
                           child: Transform.scale(
@@ -5833,6 +6440,24 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
+              // G15：移动端调光遮罩（只压暗画面，不影响控件）
+              if (_mobileSwipe && brightness < 100)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ColoredBox(
+                      color: Colors.black.withValues(
+                          alpha: dimOpacityForBrightness(brightness)),
+                    ),
+                  ),
+                ),
+              // G15：左右窄边上下滑（左亮度 / 右音量），中间仍可翻页
+              if (_mobileSwipe) ...[
+                _swipeEdge(SwipeZone.brightness,
+                    swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
+                _swipeEdge(SwipeZone.volume,
+                    swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
+                if (_swipeHint) _swipeHintWidget(pad),
+              ],
               Positioned(
                 left: pad.left + 8,
                 top: pad.top + 8,
@@ -5910,8 +6535,7 @@ class _PlayerPageState extends State<PlayerPage>
                                   GestureDetector(
                                     onTap: () => _setLiked(w, false),
                                     child: const Icon(Icons.favorite,
-                                        size: 14,
-                                        color: Color(0xFFFF3B5C)),
+                                        size: 14, color: Color(0xFFFF3B5C)),
                                   ),
                                 ],
                               ]),
@@ -5945,10 +6569,10 @@ class _PlayerPageState extends State<PlayerPage>
                                               borderRadius:
                                                   BorderRadius.circular(12)),
                                           constraints: BoxConstraints(
-                                              maxHeight: MediaQuery.sizeOf(
-                                                      context)
-                                                  .height *
-                                                  0.42),
+                                              maxHeight:
+                                                  MediaQuery.sizeOf(context)
+                                                          .height *
+                                                      0.42),
                                           child: Column(
                                             mainAxisSize: MainAxisSize.min,
                                             crossAxisAlignment:
@@ -5960,8 +6584,7 @@ class _PlayerPageState extends State<PlayerPage>
                                                       style: style.copyWith(
                                                           fontSize: 13,
                                                           height: 1.5,
-                                                          color:
-                                                              Colors.white)),
+                                                          color: Colors.white)),
                                                 ),
                                               ),
                                               Align(
@@ -5970,11 +6593,10 @@ class _PlayerPageState extends State<PlayerPage>
                                                 child: GestureDetector(
                                                   onTap: toggleCaption,
                                                   child: const Padding(
-                                                    padding:
-                                                        EdgeInsets.only(
-                                                            left: 6,
-                                                            top: 4,
-                                                            bottom: 2),
+                                                    padding: EdgeInsets.only(
+                                                        left: 6,
+                                                        top: 4,
+                                                        bottom: 2),
                                                     child: Icon(
                                                         Icons.unfold_less,
                                                         size: 16,
@@ -6016,7 +6638,7 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               ),
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
-              if (_volHintVisible && ui)
+              if (_volHintVisible && ui && !_swipeHint)
                 Positioned(
                   right: pad.right + 16,
                   bottom: pad.bottom + 96,
@@ -6046,8 +6668,8 @@ class _PlayerPageState extends State<PlayerPage>
                               value: (muted ? 0.0 : volume.clamp(0.0, 100.0)) /
                                   100.0,
                               backgroundColor: Colors.white24,
-                              valueColor: const AlwaysStoppedAnimation(
-                                  Colors.white),
+                              valueColor:
+                                  const AlwaysStoppedAnimation(Colors.white),
                               minHeight: 4,
                             ),
                           ),
@@ -6114,8 +6736,8 @@ class _PlayerPageState extends State<PlayerPage>
                                   behavior: HitTestBehavior.opaque,
                                   onTapUp: (d) {
                                     stopAuto();
-                                    setState(
-                                        () => _setPicIndex(picAt(d.localPosition)));
+                                    setState(() =>
+                                        _setPicIndex(picAt(d.localPosition)));
                                     hapticTap();
                                   },
                                   onHorizontalDragStart: (d) {
@@ -6339,8 +6961,7 @@ class _PlayerPageState extends State<PlayerPage>
                                       else
                                         Icon(Icons.water_drop,
                                             size: 20,
-                                            color: dropGlow &&
-                                                    dropDayLeft >= 0
+                                            color: dropGlow && dropDayLeft >= 0
                                                 ? Colors.lightBlueAccent
                                                 : (dropDayLeft > 0 &&
                                                         dropWeekLeft > 0
@@ -6984,7 +7605,15 @@ class _AuthorPageState extends State<AuthorPage> {
 class WorkGrid extends StatelessWidget {
   final List works;
   final String? lib;
-  const WorkGrid({super.key, required this.works, this.lib});
+  // G17：带上所属收藏夹，播放页写「继续观看」时才能一键回到原列表
+  final int? collectionIdx;
+  final String? collectionName;
+  const WorkGrid(
+      {super.key,
+      required this.works,
+      this.lib,
+      this.collectionIdx,
+      this.collectionName});
 
   String _libFor(dynamic w) =>
       '${(w is Map ? w['_lib'] : null) ?? lib ?? cfg.lib}';
@@ -7013,8 +7642,12 @@ class WorkGrid extends StatelessWidget {
         final coverBadge = workCoverBadge(w);
         return GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) =>
-                  PlayerPage(works: works, start: i, lib: _libFor(w)))),
+              builder: (_) => PlayerPage(
+                  works: works,
+                  start: i,
+                  lib: _libFor(w),
+                  idx: collectionIdx,
+                  colName: collectionName))),
           child: Stack(fit: StackFit.expand, children: [
             (w['th'] ?? '').toString().isEmpty
                 ? Container(color: Colors.black26)
