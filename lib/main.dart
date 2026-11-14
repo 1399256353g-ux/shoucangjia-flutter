@@ -22,6 +22,7 @@ import 'library_badge.dart';
 import 'library_rank.dart';
 import 'likes.dart';
 import 'playback_flow.dart';
+import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
@@ -4300,6 +4301,19 @@ class _PlayerPageState extends State<PlayerPage>
   bool captionOpen = false;
   bool barHover = false;
   int pointers = 0;
+  // 清屏双指轻触：改为松手时判定，捏合缩放不会误触
+  final Map<int, Offset> _stagePointers = <int, Offset>{};
+  DateTime? _twoFingerAt;
+  bool _twoFingerMoved = false;
+  final Map<int, Offset> _twoFingerStarts = <int, Offset>{};
+  // G14：图文双指缩放（放大后单击恢复）
+  PicZoom _picZoom = PicZoom.initial;
+  final Map<int, Offset> _zoomPointers = <int, Offset>{};
+  Size _stageSize = Size.zero;
+  double _pinchStartDist = 0;
+  PicZoom _pinchStartZoom = PicZoom.initial;
+  Offset _pinchStartFocal = Offset.zero;
+  bool _pinching = false;
   // 每条作品可带 _lib（跨库列表），否则用本页 lib，最后回退当前库
   String _libFor(dynamic w) =>
       '${(w is Map ? w['_lib'] : null) ?? widget.lib ?? cfg.lib}';
@@ -4395,7 +4409,7 @@ class _PlayerPageState extends State<PlayerPage>
           try {
             player.seek(Duration.zero);
             player.play();
-            setState(() => img = 0);
+            setState(() => _setPicIndex(0));
           } catch (_) {}
         } else if (autoplay) {
           next();
@@ -4578,7 +4592,7 @@ class _PlayerPageState extends State<PlayerPage>
     _opening = true;
     setState(() {
       cur = i;
-      img = 0;
+      _setPicIndex(0);
       captionOpen = false;
       loading = true;
       paused = false;
@@ -4783,11 +4797,11 @@ class _PlayerPageState extends State<PlayerPage>
       switch (slideshowAction(
           index: img, count: n, loopOne: loopOne, hasAudio: hasAudio)) {
         case SlideshowAction.nextImage:
-          setState(() => img++);
+          setState(() => _setPicIndex(img + 1));
           break;
         case SlideshowAction.restartImages:
           // 单条循环，或还有背景音乐没放完：图片回到第一张继续
-          setState(() => img = 0);
+          setState(() => _setPicIndex(0));
           break;
         case SlideshowAction.nextWork:
           next();
@@ -4871,6 +4885,12 @@ class _PlayerPageState extends State<PlayerPage>
     focus.requestFocus();
     if (!ui) {
       showUi();
+      _lastStageTapAt = 0;
+      return;
+    }
+    // G14：图片放大时单击只恢复原始大小，不暂停/双击点赞
+    if (_picZoom.isZoomed) {
+      _resetPicZoom();
       _lastStageTapAt = 0;
       return;
     }
@@ -5122,7 +5142,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (w['t'] != 'v') {
       stopAuto();
       final n = (w['m'] as List).length;
-      setState(() => img = (img + dir).clamp(0, n - 1));
+      setState(() => _setPicIndex((img + dir).clamp(0, n - 1)));
     } else {
       // 视频：← / → 快退快进 10 秒（时长未知时也尝试 seek）
       var target = pos + Duration(seconds: 10 * dir);
@@ -5301,9 +5321,82 @@ class _PlayerPageState extends State<PlayerPage>
         errorWidget: (_, __, ___) => retryBox());
   }
 
+  // G14：切图时同步重置缩放（新图从原始大小开始）
+  void _setPicIndex(int v) {
+    img = v;
+    _resetPicZoomState();
+  }
+
+  // G14：清理缩放相关临时状态（在 setState 内调用）
+  void _resetPicZoomState() {
+    _zoomPointers.clear();
+    _pinching = false;
+    _pinchStartDist = 0;
+    _picZoom = PicZoom.initial;
+  }
+
+  // G14：放大状态下单击恢复原始大小
+  void _resetPicZoom() {
+    if (!_picZoom.isZoomed && !_pinching) return;
+    setState(_resetPicZoomState);
+    showUi();
+  }
+
+  void _zoomDown(PointerDownEvent e) {
+    _zoomPointers[e.pointer] = e.localPosition;
+    if (_zoomPointers.length == 2) _startPinch();
+  }
+
+  void _zoomMove(PointerMoveEvent e) {
+    final prev = _zoomPointers[e.pointer];
+    if (prev == null) return;
+    _zoomPointers[e.pointer] = e.localPosition;
+    if (_zoomPointers.length >= 2) {
+      _updatePinch();
+    } else if (_picZoom.isZoomed && _stageSize.width > 0) {
+      // 放大后单指拖动查看局部（不会翻页/换图）
+      final delta = e.localPosition - prev;
+      if (delta != Offset.zero) {
+        setState(() => _picZoom = _picZoom.panBy(delta, _stageSize));
+      }
+    }
+  }
+
+  void _zoomUp(PointerEvent e) {
+    _zoomPointers.remove(e.pointer);
+    if (_zoomPointers.length < 2 && _pinching) {
+      setState(() {
+        _pinching = false;
+        _pinchStartDist = 0;
+      });
+    }
+  }
+
+  void _startPinch() {
+    final pts = _zoomPointers.values.take(2).toList();
+    final d = (pts[0] - pts[1]).distance;
+    if (d < 4) return;
+    _pinchStartDist = d;
+    _pinchStartZoom = _picZoom;
+    final mid = (pts[0] + pts[1]) / 2;
+    _pinchStartFocal =
+        mid - Offset(_stageSize.width / 2, _stageSize.height / 2);
+    // 用户开始缩放时暂停图文自动轮播，避免缩放下图片被切走
+    stopAuto();
+    if (!_pinching) setState(() => _pinching = true);
+  }
+
+  void _updatePinch() {
+    if (_pinchStartDist < 4) return;
+    final pts = _zoomPointers.values.take(2).toList();
+    final d = (pts[0] - pts[1]).distance;
+    final target = pinchScale(_pinchStartZoom.scale, _pinchStartDist, d);
+    setState(() => _picZoom =
+        _pinchStartZoom.scaleTo(target, _pinchStartFocal, _stageSize));
+  }
+
   // H13：展开/收起任务栏内简介
-  void toggleCaption() {
-    setState(() => captionOpen = !captionOpen);
+  void toggleCaption() {    setState(() => captionOpen = !captionOpen);
   }
 
   // G11：从头播放 —— 清除本作品观看记录并回到开头。
@@ -5329,7 +5422,7 @@ class _PlayerPageState extends State<PlayerPage>
       }
     } else {
       stopAuto();
-      setState(() => img = 0);
+      setState(() => _setPicIndex(0));
     }
     hapticTap();
     showUi();
@@ -5503,24 +5596,56 @@ class _PlayerPageState extends State<PlayerPage>
         body: Listener(
           onPointerSignal: onWheel,
           // 双指轻触/捏合：清屏（再次双指恢复功能区）
-          onPointerDown: (_) {
+          // G14：改为松手时判定「轻触」，捏合缩放过程中不会误切清屏。
+          onPointerDown: (e) {
             // 点击画面时确保键盘焦点仍在播放页，避免模拟器丢焦点后方向键失效
             if (!focus.hasFocus) focus.requestFocus();
             pointers++;
+            _stagePointers[e.pointer] = e.localPosition;
             if (pointers == 2) {
-              hapticTap();
-              if (ui) {
-                hideTimer?.cancel();
-                setState(() => ui = false);
-              } else {
-                showUi();
-              }
+              _twoFingerAt = DateTime.now();
+              _twoFingerMoved = false;
+              _twoFingerStarts
+                ..clear()
+                ..addAll(_stagePointers);
             }
           },
-          onPointerUp: (_) {
+          onPointerMove: (e) {
+            final start = _twoFingerStarts[e.pointer];
+            if (start != null && pointers >= 2) {
+              // 与按下时的位置比较，缓慢拖动也能识别为「移动」而非轻触
+              if ((e.localPosition - start).distance > 12) {
+                _twoFingerMoved = true;
+              }
+            }
+            _stagePointers[e.pointer] = e.localPosition;
+          },
+          onPointerUp: (e) {
+            _stagePointers.remove(e.pointer);
+            if (pointers == 2) {
+              final at = _twoFingerAt;
+              final isTap = at != null &&
+                  !_twoFingerMoved &&
+                  DateTime.now().difference(at) <
+                      const Duration(milliseconds: 400);
+              if (isTap) {
+                hapticTap();
+                if (ui) {
+                  hideTimer?.cancel();
+                  setState(() => ui = false);
+                } else {
+                  showUi();
+                }
+              }
+              _twoFingerAt = null;
+              _twoFingerStarts.clear();
+            }
             if (pointers > 0) pointers--;
           },
-          onPointerCancel: (_) {
+          onPointerCancel: (e) {
+            _stagePointers.remove(e.pointer);
+            _twoFingerAt = null;
+            _twoFingerStarts.clear();
             if (pointers > 0) pointers--;
           },
           child: MouseRegion(
@@ -5537,10 +5662,14 @@ class _PlayerPageState extends State<PlayerPage>
                 controller: pc,
                 // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
                 // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
-                physics:
-                    (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
-                        ? const NeverScrollableScrollPhysics()
-                        : null,
+                // G14：图片缩放/捏合期间也禁止翻页，避免缩放时误切作品。
+                physics: (_picZoom.isZoomed ||
+                        _pinching ||
+                        Platform.isWindows ||
+                        Platform.isLinux ||
+                        Platform.isMacOS)
+                    ? const NeverScrollableScrollPhysics()
+                    : null,
                 scrollDirection: Axis.vertical,
                 itemCount: widget.works.length,
                 onPageChanged: open,
@@ -5585,20 +5714,43 @@ class _PlayerPageState extends State<PlayerPage>
                   return GestureDetector(
                     onTapUp: (d) => onStageTap(d.localPosition),
                     // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
-                    onLongPress: _showWorkMenu,
+                    // G14：放大查看时禁用长按菜单，避免平移误触
+                    onLongPress: _picZoom.isZoomed ? null : _showWorkMenu,
                     onHorizontalDragEnd: (d) {
+                      // G14：放大后横向拖动是平移图片，不换图
+                      if (_picZoom.isZoomed) return;
                       stopAuto();
                       final v = d.primaryVelocity ?? 0;
                       setState(() {
                         if (v < -100) {
-                          img = (idx + 1).clamp(0, pics.length - 1);
+                          _setPicIndex((idx + 1).clamp(0, pics.length - 1));
                         } else if (v > 100) {
-                          img = (idx - 1).clamp(0, pics.length - 1);
+                          _setPicIndex((idx - 1).clamp(0, pics.length - 1));
                         }
                       });
                     },
                     child: Stack(fit: StackFit.expand, children: [
-                      picView(pics[idx], lib: _curLib),
+                      // G14：双指缩放 + 放大后单指拖动查看；单击恢复原大小
+                      LayoutBuilder(builder: (_, cons) {
+                        _stageSize = cons.biggest;
+                        return Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: _zoomDown,
+                          onPointerMove: _zoomMove,
+                          onPointerUp: _zoomUp,
+                          onPointerCancel: _zoomUp,
+                          child: ClipRect(
+                            child: Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.diagonal3Values(
+                                  _picZoom.scale, _picZoom.scale, 1)
+                                ..setTranslationRaw(_picZoom.offset.dx,
+                                    _picZoom.offset.dy, 0),
+                              child: picView(pics[idx], lib: _curLib),
+                            ),
+                          ),
+                        );
+                      }),
                       if (pics.length > 1)
                         Positioned(
                           top: pad.top + 2,
@@ -5963,7 +6115,7 @@ class _PlayerPageState extends State<PlayerPage>
                                   onTapUp: (d) {
                                     stopAuto();
                                     setState(
-                                        () => img = picAt(d.localPosition));
+                                        () => _setPicIndex(picAt(d.localPosition)));
                                     hapticTap();
                                   },
                                   onHorizontalDragStart: (d) {
@@ -5992,7 +6144,7 @@ class _PlayerPageState extends State<PlayerPage>
                                   onHorizontalDragEnd: (_) {
                                     final k = dragPic;
                                     setState(() {
-                                      if (k != null) img = k;
+                                      if (k != null) _setPicIndex(k);
                                       dragging = false;
                                       dragPic = null;
                                       dragFrac = null;
@@ -6066,9 +6218,10 @@ class _PlayerPageState extends State<PlayerPage>
                                     player.seek(dur * f);
                                     if (resumeAfterDrag) player.play();
                                   } else if (!isV && pics.isNotEmpty) {
-                                    setState(() => img = (f * (pics.length - 1))
-                                        .round()
-                                        .clamp(0, pics.length - 1));
+                                    setState(() => _setPicIndex(
+                                        (f * (pics.length - 1))
+                                            .round()
+                                            .clamp(0, pics.length - 1)));
                                   }
                                   setState(() {
                                     dragging = false;
