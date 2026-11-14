@@ -33,6 +33,7 @@ import 'playback_menu.dart';
 import 'preload_plan.dart';
 import 'swipe_control.dart';
 import 'watch_progress.dart';
+import 'work_safety.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -3086,7 +3087,7 @@ class _CollectionPageState extends State<CollectionPage> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 2),
-                Text('抖音已删除${at.isEmpty ? '' : ' · $at'}',
+                Text('抖音平台已删除${at.isEmpty ? '' : ' · $at'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -4616,7 +4617,14 @@ class _PlayerPageState extends State<PlayerPage>
   // 每条作品可带 _lib（跨库列表），否则用本页 lib，最后回退当前库
   String _libFor(dynamic w) =>
       '${(w is Map ? w['_lib'] : null) ?? widget.lib ?? cfg.lib}';
-  String get _curLib => _libFor(widget.works[cur]);
+  /// G20：安全取作品。列表里意外出现非 Map 条目时用空 Map 顶部，
+  /// 让该条显示「作品不可用」占位，而不是让整页 build 抛异常。
+  dynamic _workAt(int i) {
+    if (i < 0 || i >= widget.works.length) return const <String, dynamic>{};
+    final w = _workAt(i);
+    return w is Map ? w : const <String, dynamic>{};
+  }
+  String get _curLib => _libFor(_workAt(cur));
   double _hoverDx = -1;
   double _hoverDy = -1;
   bool autoplay = true;
@@ -4714,7 +4722,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (!identical(p, player)) return;
       if (!done || !mounted) return;
       if (_mediaToken != _openToken) return;
-      final w = widget.works[cur];
+      final w = _workAt(cur);
       // G10：播放完成即标记「已看完」
       _markWatched(w);
       if (w['t'] != 'v') {
@@ -4751,7 +4759,7 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.playing.listen((v) {
       if (!identical(p, player)) return;
       if (!mounted || _opening) return;
-      if (widget.works[cur]['t'] == 'v' && v != !paused) {
+      if (_workAt(cur)['t'] == 'v' && v != !paused) {
         setState(() => paused = !v);
       }
     }));
@@ -4761,7 +4769,7 @@ class _PlayerPageState extends State<PlayerPage>
       // G10：记录观看位置（内部 3s 节流，不受 UI 刷新节流影响）；
       // _opening 期间播放器会先上报 0 位置，不能用来覆盖已有进度
       if (!_opening && _mediaToken == _openToken && _mediaToken > 0) {
-        final cw = widget.works[cur];
+        final cw = _workAt(cur);
         if (cw['t'] == 'v') {
           WatchProgressStore.record(
               lib: _libFor(cw),
@@ -4841,7 +4849,7 @@ class _PlayerPageState extends State<PlayerPage>
         return;
       }
       // Windows 切回前台后音视频时钟偶发漂移：按已记录位置重新对齐并恢复速率
-      if (widget.works[cur]['t'] == 'v' && !paused) {
+      if (_workAt(cur)['t'] == 'v' && !paused) {
         try {
           player.seek(pos);
           player.setRate(speed);
@@ -4870,7 +4878,7 @@ class _PlayerPageState extends State<PlayerPage>
   void _resumeFromBackground() {
     _pausedByBackground = false;
     if (!mounted) return;
-    final isV = widget.works[cur]['t'] == 'v';
+    final isV = _workAt(cur)['t'] == 'v';
     setState(() => paused = false);
     try {
       if (isV) {
@@ -4887,7 +4895,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// G10：把当前视频的播放位置写入本地记录（强制写，用于切条/退出/切后台）。
   void _saveWatchProgress({bool force = false}) {
     if (widget.works.isEmpty || cur < 0 || cur >= widget.works.length) return;
-    final w = widget.works[cur];
+    final w = _workAt(cur);
     if (w['t'] != 'v' || dur.inMilliseconds <= 0) return;
     WatchProgressStore.record(
         lib: _libFor(w),
@@ -4983,7 +4991,7 @@ class _PlayerPageState extends State<PlayerPage>
     _preloadTimer = null;
     final next = cur + 1;
     if (next >= widget.works.length) return;
-    final nw = widget.works[next];
+    final nw = _workAt(next);
     final path = preloadMediaPath(nw);
     if (!shouldPreloadNext(
         autoplay: autoplay,
@@ -5001,7 +5009,7 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _startPreload(int idx, String path) async {
     if (!mounted || idx != cur + 1 || !autoplay || loopOne) return;
     final gen = ++_preloadGen;
-    final nw = widget.works[idx];
+    final nw = _workAt(idx);
     final nlib = _libFor(nw);
     final key = preloadKeyFor(nw, nlib);
     final slot = _idle;
@@ -5034,10 +5042,45 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   Future<void> open(int i) async {
+    if (widget.works.isEmpty || i < 0 || i >= widget.works.length) return;
     // 切条前先把上一条的进度落盘
     _saveWatchProgress(force: true);
-    final w = widget.works[i];
+    final w = _workAt(i);
     final wl = _libFor(w);
+    // G20：单条作品数据异常时不再调用播放器（避免未捕获异常卡死整页），
+    // 只切到该条并展示占位，PageView 仍可继续上下滑。
+    if (!workPlayable(w)) {
+      _cancelPreload();
+      autoTimer?.cancel();
+      retryTimer?.cancel();
+      playGuard?.cancel();
+      _loadTimeout?.cancel();
+      _slowBufferTimer?.cancel();
+      _preloadTimer?.cancel();
+      _preloadTimer = null;
+      ++_openToken;
+      _opening = false;
+      _pendingPage = null;
+      _mediaToken = -1;
+      _pausedByBackground = false;
+      try {
+        await player.stop();
+      } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        cur = i;
+        _setPicIndex(0);
+        captionOpen = false;
+        loading = false;
+        paused = true;
+        _failure = null;
+        _buffering = false;
+        _slowBuffer = false;
+        pos = Duration.zero;
+        dur = Duration.zero;
+      });
+      return;
+    }
     final key = preloadKeyFor(w, wl);
     // 命中预缓冲：直接使用空闲槽位，跳过 player.open 的等待
     final canUsePreload = _preloadReady &&
@@ -5116,7 +5159,7 @@ class _PlayerPageState extends State<PlayerPage>
       try {
         if (w['t'] == 'v') {
           await player.open(Media(
-              cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
+              cfg.base + cfg.media(workMediaPaths(w).first, lib: wl),
               httpHeaders: cfg.headers));
         } else if ((w['au'] ?? '').toString().isNotEmpty) {
           await player.open(Media(
@@ -5177,7 +5220,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 避免停在片尾/首帧导致连播链路中断。
     playGuard = Timer(const Duration(milliseconds: 2500), () {
       if (!mounted || my != _openToken || _failure != null) return;
-      if (widget.works[i]['t'] != 'v') return;
+      if (_workAt(i)['t'] != 'v') return;
       bool playing = false;
       try {
         playing = player.state.playing;
@@ -5199,7 +5242,7 @@ class _PlayerPageState extends State<PlayerPage>
           !paused &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
-        player.open(Media(cfg.base + cfg.media(w['m'][0].toString(), lib: wl),
+        player.open(Media(cfg.base + cfg.media(workMediaPaths(w).first, lib: wl),
             httpHeaders: cfg.headers));
         player.play();
         _mediaToken = my;
@@ -5226,7 +5269,7 @@ class _PlayerPageState extends State<PlayerPage>
       v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? fallback);
 
   Future<void> _sendDrop() async {
-    final w = widget.works[cur];
+    final w = _workAt(cur);
     final id = '${w['id'] ?? ''}';
     final author = '${w['a'] ?? ''}';
     if (dropBusy || id.isEmpty || author.isEmpty) return;
@@ -5287,7 +5330,7 @@ class _PlayerPageState extends State<PlayerPage>
         (timer) {
       if (!identical(timer, autoTimer)) return;
       if (!mounted || paused) return;
-      final w = widget.works[cur];
+      final w = _workAt(cur);
       if (w['t'] == 'v') return;
       final n = (w['m'] as List).length;
       final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
@@ -5326,8 +5369,13 @@ class _PlayerPageState extends State<PlayerPage>
   // 连点/连按方向键时直接跳页，避免动画未结束把后续按键吃掉
   void _step(int delta, {bool instant = false}) {
     final base = _pendingPage ?? cur;
-    final target = (base + delta).clamp(0, widget.works.length - 1).toInt();
-    if (target == base) return;
+    // G20：自动/键盘翻页跳过数据异常的作品，避免卡在坏条目上。
+    final target = nextPlayableIndex(
+        current: base,
+        count: widget.works.length,
+        step: delta,
+        playable: (i) => workPlayable(_workAt(i)));
+    if (target < 0 || target == base) return;
     _pendingPage = target;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (instant || now - _navAt < 450) {
@@ -5392,7 +5440,7 @@ class _PlayerPageState extends State<PlayerPage>
       _lastStageTapAt = 0;
       return;
     }
-    final w = widget.works[cur];
+    final w = _workAt(cur);
     final now = DateTime.now().millisecondsSinceEpoch;
     final isDouble = isStageDoubleTap(
         nowMs: now,
@@ -5418,7 +5466,7 @@ class _PlayerPageState extends State<PlayerPage>
   // 双击点赞时撤销第一次点击带来的暂停切换（视频流事件可能迟到，
   // 因此这里直接按点击前状态强制对齐，不依赖 paused 是否已刷新）。
   void _restorePauseAfterTap(bool wasPaused) {
-    final isV = widget.works[cur]['t'] == 'v';
+    final isV = _workAt(cur)['t'] == 'v';
     setState(() => paused = wasPaused);
     if (wasPaused) {
       pauseAuto();
@@ -5436,7 +5484,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
-    final name = '${widget.works[cur]['a'] ?? ''}';
+    final name = '${_workAt(cur)['a'] ?? ''}';
     if (name.isEmpty) return;
     final resume = !paused;
     try {
@@ -5452,7 +5500,7 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void togglePause() {
-    final isV = widget.works[cur]['t'] == 'v';
+    final isV = _workAt(cur)['t'] == 'v';
     // 用户手动操作后不再视为后台暂停，避免回前台被自动恢复
     _pausedByBackground = false;
     if (!isV) {
@@ -5767,7 +5815,7 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _stepImage(int dir) {
-    final w = widget.works[cur];
+    final w = _workAt(cur);
     if (w['t'] != 'v') {
       stopAuto();
       final n = (w['m'] as List).length;
@@ -5926,6 +5974,47 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  /// G20：单条作品异常时的占位页。不包含任何播放器调用，竖直滑动
+  /// 仍由外层 PageView 处理，因此可以直接滑到下一条。
+  Widget _brokenWorkView(dynamic w) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        if (!ui) showUi();
+      },
+      child: Container(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.broken_image_outlined,
+                  size: 42, color: Colors.white38),
+              const SizedBox(height: 12),
+              Text('${workField(w, 'ti', '')}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white70)),
+              const SizedBox(height: 8),
+              Text(workIssueText(w),
+                  style:
+                      const TextStyle(fontSize: 12.5, color: Colors.white54)),
+              const SizedBox(height: 6),
+              Text(workDataFailure.detail,
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(fontSize: 12, color: Colors.white38)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   // 长简介/文案：在任务栏内展开缩略全文（H13，参考抖音，不弹独立窗口）
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path, {String? lib}) {
@@ -6044,7 +6133,7 @@ class _PlayerPageState extends State<PlayerPage>
   // G11：从头播放 —— 清除本作品观看记录并回到开头。
   // 视频直接 seek(0)，图文回到第 1 张；按当前播放/暂停状态继续。
   void _restartPlayback() {
-    final w = widget.works[cur];
+    final w = _workAt(cur);
     final isV = w['t'] == 'v';
     WatchProgressStore.remove(_libFor(w), _watchIdFor(w));
     // G17：从头播放视为新的观看，先移出「继续观看」，位置到 1s 后重新出现
@@ -6074,7 +6163,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   // G11：长按作品信息区弹出播放菜单（视频区域长按仍是 2 倍速）。
   void _showWorkMenu() {
-    final w = widget.works[cur];
+    final w = _workAt(cur);
     final isV = w['t'] == 'v';
     final lib = _libFor(w);
     final id = _watchIdFor(w);
@@ -6178,11 +6267,17 @@ class _PlayerPageState extends State<PlayerPage>
         ? Icons.wifi_off_rounded
         : f.kind == PlaybackFailureKind.decode
             ? Icons.broken_image_outlined
-            : Icons.error_outline;
+            : f.kind == PlaybackFailureKind.data
+                ? Icons.hide_image_outlined
+                : Icons.error_outline;
     return Positioned.fill(
-      child: ColoredBox(
-        color: const Color(0x99000000),
-        child: Center(
+      // G20：遮罩本身不接收指针事件，失败提示不能挡住 PageView 的
+      // 上下滑；只有中间卡片（含重试按钮）可交互。
+      child: Stack(children: [
+        const Positioned.fill(
+          child: IgnorePointer(child: ColoredBox(color: Color(0x99000000))),
+        ),
+        Center(
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 32),
             padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
@@ -6204,27 +6299,39 @@ class _PlayerPageState extends State<PlayerPage>
                   style: const TextStyle(
                       fontSize: 12.5, height: 1.4, color: Colors.white60)),
               const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: _retryPlayback,
-                icon: const Icon(Icons.refresh, size: 18),
-                label: const Text('重试'),
-                style: FilledButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black,
-                    minimumSize: const Size(120, 38)),
-              ),
+              if (f.retryable)
+                FilledButton.icon(
+                  onPressed: _retryPlayback,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('重试'),
+                  style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(120, 38)),
+                )
+              else if (cur < widget.works.length - 1)
+                FilledButton.icon(
+                  onPressed: next,
+                  icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+                  label: const Text('下一条'),
+                  style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(120, 38)),
+                ),
             ]),
           ),
         ),
-      ),
+      ]),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final w = widget.works[cur];
+    final w = _workAt(cur);
+    final broken = !workPlayable(w);
     final isV = w['t'] == 'v';
-    final pics = isV ? <dynamic>[] : (w['m'] as List);
+    final pics = isV ? <String>[] : workMediaPaths(w);
     final idx = pics.isEmpty ? 0 : img.clamp(0, pics.length - 1);
     final progress = (isV && dur.inMilliseconds > 0)
         ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
@@ -6319,7 +6426,8 @@ class _PlayerPageState extends State<PlayerPage>
                 itemCount: widget.works.length,
                 onPageChanged: open,
                 itemBuilder: (_, i) {
-                  final it = widget.works[i];
+                  final it = _workAt(i);
+                  if (!workPlayable(it)) return _brokenWorkView(it);
                   if (i != cur) {
                     return (it['th'] ?? '').toString().isEmpty
                         ? Container(color: Colors.black)
@@ -6513,7 +6621,7 @@ class _PlayerPageState extends State<PlayerPage>
                   ),
                 ),
               ),
-              if (paused)
+              if (paused && !broken)
                 const IgnorePointer(
                   child: Center(
                     child:
@@ -6726,11 +6834,12 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: IgnorePointer(
+              if (!broken)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
                     opacity: ui ? 1 : 0,

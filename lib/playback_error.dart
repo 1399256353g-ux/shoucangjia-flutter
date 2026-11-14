@@ -2,7 +2,7 @@
 ///
 /// 弱网、超时、解码失败在界面上给出不同标题/说明，并统一提供重试入口。
 /// 纯逻辑，方便单元测试；不依赖 Flutter 与播放器实现。
-enum PlaybackFailureKind { network, decode, timeout, unknown }
+enum PlaybackFailureKind { network, decode, timeout, data, unknown }
 
 class PlaybackFailure {
   final PlaybackFailureKind kind;
@@ -11,7 +11,7 @@ class PlaybackFailure {
 
   const PlaybackFailure(this.kind, this.title, this.detail);
 
-  bool get retryable => true;
+  bool get retryable => kind != PlaybackFailureKind.data;
 
   @override
   String toString() => 'PlaybackFailure($kind, $title, $detail)';
@@ -34,6 +34,12 @@ const PlaybackFailure timeoutFailure = PlaybackFailure(
 
 const PlaybackFailure unknownFailure = PlaybackFailure(
     PlaybackFailureKind.unknown, '加载失败', '播放出错了，请重试');
+
+/// G20：单条作品数据异常，重试无意义，直接提示上/下滑切换。
+const PlaybackFailure workDataFailure = PlaybackFailure(
+    PlaybackFailureKind.data,
+    '作品不可用',
+    '作品数据不完整或媒体文件缺失，上滑/下滑查看其他作品');
 
 /// 把播放器/网络异常转成用户能看懂的失败提示。
 PlaybackFailure classifyPlaybackError(Object? error) {
