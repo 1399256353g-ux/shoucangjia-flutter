@@ -100,3 +100,65 @@ num workTotalDuration(dynamic work) {
   }
   return work is Map ? asNum(work['du']) : 0;
 }
+
+/// J6：作者主页作品筛选分类。
+/// 视频=单视频，图文=多图图文，合集=视频合集/图片合集，单图=单张图片。
+const String workFilterVideo = 'video';
+const String workFilterPost = 'post';
+const String workFilterCollection = 'collection';
+const String workFilterPicture = 'picture';
+
+const List<String> workFilterOrder = [
+  workFilterVideo,
+  workFilterPost,
+  workFilterCollection,
+  workFilterPicture,
+];
+
+String workFilterLabel(String type) {
+  switch (type) {
+    case workFilterVideo:
+      return '视频';
+    case workFilterPost:
+      return '图文';
+    case workFilterCollection:
+      return '合集';
+    case workFilterPicture:
+      return '单图';
+    default:
+      return '其他';
+  }
+}
+
+String workFilterType(dynamic work) {
+  if (work is! Map) return 'other';
+  switch (workKind(work)) {
+    case 'chapters':
+    case 'album':
+      return workFilterCollection;
+    case 'post':
+      return workFilterPost;
+    default:
+      if (work['t'] == 'v') return workFilterVideo;
+      if (work['t'] == 'p') return workFilterPicture;
+      return 'other';
+  }
+}
+
+/// 空集合表示不过滤；多选时并按命中。
+List<dynamic> filterWorksByType(List<dynamic> works, Set<String> selected) {
+  if (selected.isEmpty) return List<dynamic>.from(works);
+  return works
+      .where((w) => selected.contains(workFilterType(w)))
+      .toList(growable: false);
+}
+
+/// 各分类数量（按筛选栏顺序，全部返回，含 0）。
+Map<String, int> workTypeCounts(List<dynamic> works) {
+  final out = {for (final t in workFilterOrder) t: 0};
+  for (final w in works) {
+    final t = workFilterType(w);
+    out[t] = (out[t] ?? 0) + 1;
+  }
+  return out;
+}

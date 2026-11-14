@@ -7946,6 +7946,10 @@ class _AuthorPageState extends State<AuthorPage> {
   String bio = '';
   String av = '';
   List works = [];
+  // J6：按作品类型筛选（可多选，空集合=全部）
+  final Set<String> typeFilter = <String>{};
+  List filteredWorks = [];
+  Map<String, int> typeCounts = {};
   String primaryLib = '';
   bool loading = true;
   bool fullSync = true;
@@ -8074,7 +8078,33 @@ class _AuthorPageState extends State<AuthorPage> {
         postStat('visit', widget.name, lib: lib);
       } catch (_) {}
     }
-    if (mounted) setState(() => loading = false);
+    if (mounted) {
+      setState(() {
+        loading = false;
+        _refreshFilter();
+      });
+    }
+  }
+
+  // 仅在数据加载/筛选变化时重算，避免观看进度刷新时反复重建列表
+  void _refreshFilter() {
+    filteredWorks = filterWorksByType(works, typeFilter);
+    typeCounts = workTypeCounts(works);
+  }
+
+  void _toggleType(String type) {
+    setState(() {
+      if (!typeFilter.add(type)) typeFilter.remove(type);
+      _refreshFilter();
+    });
+  }
+
+  void _clearTypeFilter() {
+    if (typeFilter.isEmpty) return;
+    setState(() {
+      typeFilter.clear();
+      _refreshFilter();
+    });
   }
 
   // 点击头像放大查看（可双指缩放，点任意处关闭）
@@ -8192,9 +8222,52 @@ class _AuthorPageState extends State<AuthorPage> {
                   ]),
                 ),
               const Divider(height: 1),
+              if (works.isNotEmpty)
+                SizedBox(
+                  height: 46,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    children: [
+                      Center(
+                        child: FilterChip(
+                            label: Text('全部 ${works.length}',
+                                style: const TextStyle(fontSize: 12)),
+                            selected: typeFilter.isEmpty,
+                            showCheckmark: false,
+                            onSelected: (_) => _clearTypeFilter()),
+                      ),
+                      for (final type in workFilterOrder)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: Center(
+                            child: FilterChip(
+                                label: Text(
+                                    '${workFilterLabel(type)} ${typeCounts[type] ?? 0}',
+                                    style: const TextStyle(fontSize: 12)),
+                                selected: typeFilter.contains(type),
+                                showCheckmark: false,
+                                onSelected: (typeCounts[type] ?? 0) == 0
+                                    ? null
+                                    : (_) => _toggleType(type)),
+                          ),
+                        ),
+                      if (typeFilter.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: Center(
+                            child: TextButton(
+                                onPressed: _clearTypeFilter,
+                                child: const Text('清除',
+                                    style: TextStyle(fontSize: 12))),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               Expanded(
                   child: WorkGrid(
-                      works: works,
+                      works: filteredWorks,
                       lib: primaryLib.isEmpty ? null : primaryLib)),
             ]),
     );

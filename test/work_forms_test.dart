@@ -110,4 +110,50 @@ void main() {
       expect(workTotalDuration({'t': 'v'}), 0);
     });
   });
+
+  group('J6 作品类型筛选', () {
+    final works = <dynamic>[
+      {'id': 'v1', 't': 'v', 'm': ['/v1.mp4']},
+      {'id': 'c1', 't': 'v', 'ch': [_ch(0, '/0.mp4'), _ch(1, '/1.mp4')]},
+      {'id': 'p1', 't': 'p', 'kind': 'post', 'm': ['/1.jpg', '/2.jpg']},
+      {'id': 'a1', 't': 'p', 'kind': 'album', 'm': ['/1.jpg', '/2.jpg']},
+      {'id': 's1', 't': 'p', 'm': ['/1.jpg']},
+      'bad',
+    ];
+
+    test('分类映射', () {
+      expect(workFilterType(works[0]), workFilterVideo);
+      expect(workFilterType(works[1]), workFilterCollection);
+      expect(workFilterType(works[2]), workFilterPost);
+      expect(workFilterType(works[3]), workFilterCollection,
+          reason: '图片合集归入合集');
+      expect(workFilterType(works[4]), workFilterPicture);
+      expect(workFilterType(works[5]), 'other', reason: '坏数据归为其他');
+      expect(workFilterType(null), 'other', reason: '坏数据不抛异常');
+      expect(workFilterLabel(workFilterPicture), '单图');
+    });
+
+    test('空筛选返回全部，多选并集命中', () {
+      expect(filterWorksByType(works, {}).length, works.length);
+      final video = filterWorksByType(works, {workFilterVideo});
+      expect(video.map((w) => w['id']), ['v1']);
+      final multi =
+          filterWorksByType(works, {workFilterPost, workFilterPicture});
+      expect(multi.map((w) => w['id']), ['p1', 's1']);
+      expect(filterWorksByType(works, {workFilterCollection}).length, 2);
+      expect(filterWorksByType(works, {workFilterVideo, workFilterPost,
+          workFilterCollection, workFilterPicture}).length, 5,
+          reason: '坏数据不混入四类筛选');
+    });
+
+    test('计数覆盖四类且含 0', () {
+      final c = workTypeCounts(works);
+      expect(c[workFilterVideo], 1);
+      expect(c[workFilterCollection], 2);
+      expect(c[workFilterPost], 1);
+      expect(c[workFilterPicture], 1);
+      expect(c['other'], 1, reason: '坏数据单独计数');
+      expect(workTypeCounts([])[workFilterVideo], 0);
+    });
+  });
 }
