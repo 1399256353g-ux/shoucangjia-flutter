@@ -24,6 +24,7 @@ import 'emoji_text.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
+import 'library_selector_view.dart';
 import 'library_tree.dart';
 import 'likes.dart';
 import 'playback_flow.dart';
@@ -1714,6 +1715,8 @@ class _LibraryPageState extends State<LibraryPage> {
   LibraryTree? tree;
   Set<String> expanded = <String>{};
   List<String> stars = <String>[];
+  /// J3：旧注册表默认收起，只在需要管理时展开。
+  bool legacyOpen = false;
 
   @override
   void initState() {
@@ -1987,127 +1990,37 @@ class _LibraryPageState extends State<LibraryPage> {
                 ? const Center(child: CircularProgressIndicator())
                 : ListView(
                     children: [
-                      if (tree != null) ..._treeSection(context),
-                      const Divider(height: 24),
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
-                        child: Text('已注册媒体库（点击切换）',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.grey)),
-                      ),
-                      for (final l in libs) _libTile(l),
+                      if (tree != null)
+                        LibrarySelectorView(
+                          tree: tree!,
+                          expanded: expanded,
+                          stars: stars.toSet(),
+                          legacyCount: libs.length,
+                          legacyOpen: legacyOpen,
+                          onToggleSection: _toggleSection,
+                          onToggleStar: _toggleStar,
+                          onTapBasic: _showBasic,
+                          onToggleLegacy: () =>
+                              setState(() => legacyOpen = !legacyOpen),
+                          legacyBuilder: (_) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [for (final l in libs) _libTile(l)],
+                          ),
+                        )
+                      else ...[
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                          child: Text('已注册媒体库（点击切换）',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey)),
+                        ),
+                        for (final l in libs) _libTile(l),
+                      ],
                     ],
                   ),
       ),
-    );
-  }
-
-  /// 大库 / 基础库两级列表：默认全部折叠，只显示大库（J3）。
-  List<Widget> _treeSection(BuildContext context) {
-    final t = tree!;
-    return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-        child: Row(children: [
-          const Icon(Icons.account_tree_outlined, size: 18),
-          const SizedBox(width: 6),
-          const Text('大库 / 基础库',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-          const Spacer(),
-          Text('${t.bigs.length} 大库 · ${t.totalBasics} 基础库',
-              style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        ]),
-      ),
-      if (t.starred.isNotEmpty) ...[
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 8, 16, 2),
-          child: Text('★ 星标基础库（置顶）',
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.amber)),
-        ),
-        for (final b in t.starred) _basicTile(b, pinned: true),
-      ],
-      for (final big in t.bigs) ...[
-        _bigTile(big),
-        if (expanded.contains(big.id))
-          if (t.visibleBasics(big).isEmpty)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(48, 2, 16, 8),
-              child: Text('该大库的基础库已全部星标置顶',
-                  style: TextStyle(fontSize: 11, color: Colors.grey)),
-            )
-          else
-            for (final b in t.visibleBasics(big))
-              _basicTile(b, pinned: false),
-      ],
-      if (t.unassigned.isNotEmpty) ...[
-        _sectionTile(
-          'tree-unassigned',
-          '未归属基础库',
-          '${t.unassigned.length} 个',
-        ),
-        if (expanded.contains('unassigned'))
-          for (final b in t.unassigned)
-            _basicTile(b, pinned: stars.contains(b.id)),
-      ],
-    ];
-  }
-
-  Widget _bigTile(BigLib big) {
-    final open = expanded.contains(big.id);
-    return ListTile(
-      key: ValueKey('big-${big.id}'),
-      leading: Icon(
-          open ? Icons.folder_open : Icons.folder_outlined,
-          color: Theme.of(context).colorScheme.primary),
-      title: Text(big.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text(big.subtitle, style: const TextStyle(fontSize: 11)),
-      trailing: AnimatedRotation(
-        turns: open ? 0.25 : 0,
-        duration: const Duration(milliseconds: 150),
-        child: const Icon(Icons.chevron_right),
-      ),
-      onTap: () => _toggleSection(big.id),
-    );
-  }
-
-  Widget _sectionTile(String id, String title, String sub) {
-    final open = expanded.contains(id);
-    return ListTile(
-      key: ValueKey(id),
-      leading: const Icon(Icons.folder_special_outlined),
-      title: Text(title),
-      subtitle: Text(sub, style: const TextStyle(fontSize: 11)),
-      trailing: AnimatedRotation(
-        turns: open ? 0.25 : 0,
-        duration: const Duration(milliseconds: 150),
-        child: const Icon(Icons.chevron_right),
-      ),
-      onTap: () => _toggleSection(id),
-    );
-  }
-
-  Widget _basicTile(BasicLib b, {required bool pinned}) {
-    return ListTile(
-      key: ValueKey('basic-${b.id}'),
-      dense: true,
-      contentPadding: const EdgeInsets.only(left: 40, right: 8),
-      leading: const Icon(Icons.subdirectory_arrow_right, size: 18),
-      title: Text(b.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text('${b.authors} 作者 · ${b.works} 作品',
-          style: const TextStyle(fontSize: 11)),
-      trailing: IconButton(
-        key: ValueKey('star-${b.id}'),
-        tooltip: pinned ? '取消星标' : '星标并置顶',
-        icon: Icon(pinned ? Icons.star : Icons.star_border,
-            color: pinned ? Colors.amber : null),
-        onPressed: () => _toggleStar(b),
-      ),
-      onTap: () => _showBasic(b),
     );
   }
 
