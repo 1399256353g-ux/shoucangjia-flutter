@@ -32,6 +32,7 @@ import 'playback_flow.dart';
 import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'text_fit.dart';
+import 'ui_auto_hide.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'preload_plan.dart';
@@ -6057,6 +6058,10 @@ class _PlayerPageState extends State<PlayerPage>
         showUi();
       } else {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+        // M4：退出全屏必须彻底取消自动隐藏计时器，否则旧的计时器到期后
+        // 仍会把非全屏的功能区隐藏掉。
+        hideTimer?.cancel();
+        hideTimer = null;
         if (Platform.isWindows) {
           try {
             await windowManager.setFullScreen(false);
@@ -6075,17 +6080,22 @@ class _PlayerPageState extends State<PlayerPage>
     if (!mounted) return;
     setState(() => ui = true);
     hideTimer?.cancel();
-    if (fs) {
-      hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
-        if (!mounted) return;
-        // 拖动进度条或鼠标停留在进度条上时不隐藏
-        if (dragging || barHover) {
-          showUi();
-        } else {
-          setState(() => ui = false);
-        }
-      });
-    }
+    hideTimer = null;
+    if (!UiAutoHidePolicy.shouldSchedule(fullscreen: fs, uiVisible: ui)) return;
+    hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
+      hideTimer = null;
+      // M4：任何时刻都已退出全屏就不再隐藏；拖动/悬停则重新计时。
+      if (!UiAutoHidePolicy.shouldHide(
+        fullscreen: fs,
+        mounted: mounted,
+        dragging: dragging,
+        barHover: barHover,
+      )) {
+        if (mounted && fs) showUi();
+        return;
+      }
+      setState(() => ui = false);
+    });
   }
 
   void onWheel(PointerSignalEvent e) {
