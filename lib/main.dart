@@ -3512,7 +3512,25 @@ class _PlayerPageState extends State<PlayerPage> with WidgetsBindingObserver {
                                       style: const TextStyle(
                                           fontSize: 12, color: Colors.white70)),
                                 ),
-                                if (('${w['ti'] ?? ''}').length > 24)
+                                if (w['del'] == 1) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                      color: Colors.redAccent.withOpacity(0.18),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(
+                                          color:
+                                              Colors.redAccent.withOpacity(0.6),
+                                          width: 0.8)),
+                                  child: const Text('删',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.redAccent)),
+                                ),
+                              ],
+                              if (('${w['ti'] ?? ''}').length > 24)
                                   GestureDetector(
                                     onTap: () =>
                                         showCaption('${w['ti'] ?? ''}'),
