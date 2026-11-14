@@ -7089,8 +7089,8 @@ class _PlayerPageState extends State<PlayerPage>
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 2),
                                   child: Text(
-                                      '第 ${_chapter + 1}/${workChapterCount(widget.works[cur])} 集 · '
-                                      '${chapterLabel(workChapters(widget.works[cur])[_chapter], _chapter)}',
+                                      '第 ${_chapter.clamp(0, workChapterCount(widget.works[cur]) - 1) + 1}/${workChapterCount(widget.works[cur])} 集 · '
+                                      '${chapterLabel(workChapters(widget.works[cur])[_chapter.clamp(0, workChapterCount(widget.works[cur]) - 1)], _chapter)}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
