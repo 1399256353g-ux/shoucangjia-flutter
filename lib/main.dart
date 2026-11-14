@@ -32,6 +32,7 @@ import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'preload_plan.dart';
 import 'swipe_control.dart';
+import 'swipe_physics.dart';
 import 'watch_progress.dart';
 import 'work_safety.dart';
 
@@ -5381,11 +5382,12 @@ class _PlayerPageState extends State<PlayerPage>
     if (target < 0 || target == base) return;
     _pendingPage = target;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (instant || now - _navAt < 450) {
+    // I2：110ms 动画结束后再按键仍走动画，只有连击间隔短于动画才直接跳页
+    if (instant || now - _navAt < pageTurnDuration.inMilliseconds + 150) {
       pc.jumpToPage(target);
     } else {
       pc.animateToPage(target,
-          duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+          duration: pageTurnDuration, curve: pageTurnCurve);
     }
     _navAt = now;
   }
@@ -6424,7 +6426,10 @@ class _PlayerPageState extends State<PlayerPage>
                         Platform.isLinux ||
                         Platform.isMacOS)
                     ? const NeverScrollableScrollPhysics()
-                    : null,
+                    : const DiziPageScrollPhysics(
+                        parent: ClampingScrollPhysics()),
+                // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
+                dragStartBehavior: DragStartBehavior.down,
                 scrollDirection: Axis.vertical,
                 itemCount: widget.works.length,
                 onPageChanged: open,
