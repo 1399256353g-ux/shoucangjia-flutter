@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
 import 'app_theme.dart';
+import 'author_grid.dart';
 import 'author_grade.dart';
 import 'background_pause.dart';
 import 'collection_sync.dart';
@@ -3941,11 +3942,16 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   // G19：作者网格渐进渲染，避免一次构建上千个头像卡顿
   int _shown = 0;
   Timer? syncTimer;
+  // I7：排序结果只算一次并缓存；返回作者页时静默刷新，数据没变就不重建网格
+  List<MapEntry<String, Map<String, dynamic>>> _ordered = const [];
+  final ScrollController _scroll = ScrollController();
+  String _sig = '';
 
   @override
   void initState() {
     super.initState();
     sel = cfg.lib;
+    _scroll.addListener(_maybeLoadMore);
     loadLibs();
     LibraryBadge.load().then((_) {
       if (mounted) setState(() {});
@@ -3959,6 +3965,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   @override
   void dispose() {
     syncTimer?.cancel();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -4051,15 +4058,27 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     } catch (_) {}
   }
 
-  Future<void> load() async {
-    if (mounted) setState(() => err = null);
+  /// [quiet] 为 true 时用于从作者页返回后的静默刷新：
+  /// 不显示加载骨架、不重置滚动位置，数据签名没变就完全不 setState，
+  /// 避免整页 Grid 重建造成返回卡顿（I7）。
+  Future<void> load({bool quiet = false}) async {
+    if (mounted) {
+      if (!quiet) {
+        setState(() {
+          err = null;
+          loading = true;
+        });
+      } else if (err != null) {
+        setState(() => err = null);
+      }
+    }
     final targets = sel == 'all'
         ? libs.map((e) => '${e['id']}').toList()
         : [(sel.isEmpty ? cfg.lib : sel)];
     if (targets.isEmpty) targets.add(cfg.lib);
     final auMap = <String, Map<String, dynamic>>{};
     final stMap = <String, Map<String, dynamic>>{};
-    authorLibs.clear();
+    final auLibs = <String, List<String>>{};
     try {
       for (final lib in targets) {
         final rs = await Future.wait([
@@ -4091,7 +4110,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
               old['bio'] = v['bio'];
             }
           }
-          (authorLibs[e.key] ??= []).add(lib);
+          (auLibs[e.key] ??= []).add(lib);
         }
         if (sj is Map && sj['authors'] is Map) {
           for (final e in (sj['authors'] as Map).entries) {
@@ -4108,20 +4127,67 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         }
       }
       if (!mounted) return;
+      final entries =
+          auMap.entries.map((e) => MapEntry(e.key, e.value)).toList();
+      final sig = _dataSignature(entries, stMap);
+      if (quiet && sig == _sig) {
+        // 返回作者页但统计/头像都没变化：直接结束，网格与滚动位置保持原样
+        if (loading) setState(() => loading = false);
+        return;
+      }
+      final keepScroll = quiet;
       setState(() {
-        authors = auMap.entries.map((e) => MapEntry(e.key, e.value)).toList();
+        authors = entries;
         stats = stMap;
+        authorLibs
+          ..clear()
+          ..addAll(auLibs);
+        _sig = sig;
+        _applyOrder(resetShown: !keepScroll);
         loading = false;
-        _shown = initialGridCount(authors.length);
       });
     } catch (e) {
       if (mounted) {
+        // 静默刷新失败时保留现有列表，不打扰用户
+        if (quiet) return;
         setState(() {
           err = '$e';
           loading = false;
         });
       }
     }
+  }
+
+  /// 仅用于判断「返回后数据是否真的变了」：作者数、头像、作品数与三项统计。
+  String _dataSignature(List<MapEntry<String, Map<String, dynamic>>> entries,
+      Map<String, dynamic> stMap) {
+    final b = StringBuffer(sel)
+      ..write('|')
+      ..write(entries.length);
+    for (final e in entries) {
+      b
+        ..write('|')
+        ..write(e.key)
+        ..write(':')
+        ..write(e.value['av'] ?? '')
+        ..write(':')
+        ..write(e.value['n'] ?? 0)
+        ..write(':')
+        ..write(e.value['bio'] ?? '');
+      final s = stMap[e.key];
+      if (s is Map) {
+        b
+          ..write(':')
+          ..write(s['p'] ?? 0)
+          ..write(':')
+          ..write(s['v'] ?? 0)
+          ..write(':')
+          ..write(s['dr'] ?? 0)
+          ..write(':')
+          ..write(s['lv'] ?? 0);
+      }
+    }
+    return b.toString();
   }
 
   Map<String, dynamic> _s(String name) => stats[name] is Map
@@ -4147,16 +4213,28 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     }
   }
 
-  List<MapEntry<String, Map<String, dynamic>>> get sorted {
-    final list = List.of(authors);
-    list.sort((a, b) {
-      final c = _metric(b).compareTo(_metric(a));
-      if (c != 0) return c;
-      final w = _num(b.value['n']).compareTo(_num(a.value['n']));
-      if (w != 0) return w;
-      return a.key.compareTo(b.key);
-    });
-    return list;
+  /// I7：排序只在数据/排序方式变化时执行一次，结果缓存在 [_ordered]，
+  /// build 与滚动回调都只读缓存，避免上千作者反复排序。
+  void _applyOrder({bool resetShown = true}) {
+    _ordered = sortAuthorEntries(authors,
+        metric: _metric, works: (e) => _num(e.value['n']), name: (e) => e.key);
+    if (resetShown) {
+      _shown = initialGridCount(_ordered.length);
+    } else if (_shown > _ordered.length) {
+      _shown = _ordered.length;
+    }
+  }
+
+  /// 滚动到底部附近时追加一页（固定行高列表，只增加行数）。
+  void _maybeLoadMore() {
+    if (!mounted || !_scroll.hasClients || _shown >= _ordered.length) return;
+    final p = _scroll.position;
+    if (shouldLoadNextPage(
+        pixels: p.pixels,
+        maxScrollExtent: p.maxScrollExtent,
+        viewportDimension: p.viewportDimension)) {
+      setState(() => _shown = nextGridCount(_shown, _ordered.length));
+    }
   }
 
   String _fmtDate(int sec) {
@@ -4194,7 +4272,95 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final ls = authorLibs[name] ?? [sel == 'all' ? cfg.lib : sel];
     await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => AuthorPage(name: name, libs: List<String>.from(ls))));
-    if (mounted) load();
+    // I7：返回时静默刷新统计；数据未变化则完全不 setState，网格不重建
+    if (mounted) await load(quiet: true);
+  }
+
+  Widget _authorCell(
+      MapEntry<String, Map<String, dynamic>> e, double devicePixelRatio) {
+    final av = '${e.value['av'] ?? ''}';
+    final ids = authorLibs[e.key] ??
+        <String>[sel == 'all' ? '${e.value['_lib'] ?? cfg.lib}' : sel];
+    final lib = '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}';
+    // I7：头像按实际显示尺寸 × 像素比解码，避免整张大图进内存
+    final avatarPx =
+        avatarDecodeWidth(displaySize: 58, devicePixelRatio: devicePixelRatio);
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _open(e.key),
+      child: Stack(children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(6, 22, 6, 8),
+          decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12)),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            ClipOval(
+              child: SizedBox(
+                width: 58,
+                height: 58,
+                child: av.isEmpty
+                    ? Container(
+                        color: Colors.blueGrey,
+                        alignment: Alignment.center,
+                        child: Text(e.key.isEmpty ? '?' : e.key[0],
+                            style: const TextStyle(fontSize: 24)))
+                    : CachedNetworkImage(
+                        imageUrl: cfg.base + cfg.media(av, lib: lib),
+                        httpHeaders: cfg.headers,
+                        fit: BoxFit.cover,
+                        memCacheWidth: avatarPx,
+                        fadeInDuration: Duration.zero,
+                        errorWidget: (_, __, ___) => Container(
+                            color: Colors.blueGrey,
+                            alignment: Alignment.center,
+                            child: Text(e.key.isEmpty ? '?' : e.key[0],
+                                style: const TextStyle(fontSize: 24)))),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(e.key,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(_sub(e),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            Text('${_num(e.value['n'])} 作品',
+                maxLines: 1,
+                style: TextStyle(
+                    fontSize: 9,
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant
+                        .withValues(alpha: 0.7))),
+          ]),
+        ),
+        Positioned(
+          top: 5,
+          left: 5,
+          right: 4,
+          child: LibBadges(
+            libIds: ids,
+            order: libs.map((e) => '${e['id']}').toList(),
+            grade: AuthorGrade.gradeFor(
+              plays: _num(_s(e.key)['p']),
+              drops: _num(_s(e.key)['dr']),
+              works: _num(e.value['n']),
+            ),
+            names: {
+              for (final l in libs) '${l['id']}': '${l['name'] ?? l['id']}'
+            },
+          ),
+        ),
+      ]),
+    );
   }
 
   @override
@@ -4288,7 +4454,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                               selected: sort == s.key,
                               onSelected: (_) => setState(() {
                                 sort = s.key;
-                                _shown = initialGridCount(authors.length);
+                                _applyOrder();
                               }),
                             ),
                           ),
@@ -4313,147 +4479,47 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                         ? const Center(
                             child: Text('暂无作者数据',
                                 style: TextStyle(color: Colors.grey)))
-                        : NotificationListener<ScrollNotification>(
-                            onNotification: (n) {
-                              if (_shown < sorted.length &&
-                                  shouldLoadNextPage(
-                                      pixels: n.metrics.pixels,
-                                      maxScrollExtent:
-                                          n.metrics.maxScrollExtent,
-                                      viewportDimension:
-                                          n.metrics.viewportDimension)) {
-                                setState(() => _shown =
-                                    nextGridCount(_shown, sorted.length));
-                              }
-                              return false;
-                            },
-                            child: GridView.builder(
+                        : LayoutBuilder(
+                            builder: (context, cons) {
+                              final geo =
+                                  authorGridGeometry(width: cons.maxWidth);
+                              final total = _ordered.length;
+                              final shown = _shown < total ? _shown : total;
+                              final rows = geo.rowsFor(shown);
+                              final dpr =
+                                  MediaQuery.of(context).devicePixelRatio;
+                              // I7：固定行高列表，滚动时按 itemExtent 复用行，
+                              // 不再逐项测量网格，返回/下拉都更顺滑
+                              return ListView.builder(
+                                controller: _scroll,
                                 padding:
                                     const EdgeInsets.fromLTRB(12, 4, 12, 16),
-                                gridDelegate:
-                                    const SliverGridDelegateWithMaxCrossAxisExtent(
-                                        maxCrossAxisExtent: 132,
-                                        childAspectRatio: 0.80,
-                                        mainAxisSpacing: 10,
-                                        crossAxisSpacing: 10),
-                                itemCount: _shown < sorted.length
-                                    ? _shown
-                                    : sorted.length,
-                                itemBuilder: (_, i) {
-                                  final e = sorted[i];
-                                  final av = '${e.value['av'] ?? ''}';
-                                  final ids = authorLibs[e.key] ??
-                                      <String>[
-                                        sel == 'all'
-                                            ? '${e.value['_lib'] ?? cfg.lib}'
-                                            : sel
-                                      ];
-                                  return InkWell(
-                                    borderRadius: BorderRadius.circular(12),
-                                    onTap: () => _open(e.key),
-                                    child: Stack(children: [
-                                      Container(
-                                        padding: const EdgeInsets.fromLTRB(
-                                            6, 22, 6, 8),
-                                        decoration: BoxDecoration(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .surfaceContainerHighest,
-                                            borderRadius:
-                                                BorderRadius.circular(12)),
-                                        child: Column(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              ClipOval(
-                                                child: SizedBox(
-                                                  width: 58,
-                                                  height: 58,
-                                                  child: av.isEmpty
-                                                      ? Container(
-                                                          color:
-                                                              Colors.blueGrey,
-                                                          alignment:
-                                                              Alignment.center,
-                                                          child: Text(
-                                                              e.key.isEmpty
-                                                                  ? '?'
-                                                                  : e.key[0],
-                                                              style: const TextStyle(
-                                                                  fontSize:
-                                                                      24)))
-                                                      : CachedNetworkImage(
-                                                          imageUrl: cfg.base +
-                                                              cfg.media(av,
-                                                                  lib:
-                                                                      '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}'),
-                                                          httpHeaders:
-                                                              cfg.headers,
-                                                          fit: BoxFit.cover,
-                                                          memCacheWidth: 174,
-                                                          errorWidget: (_, __, ___) =>
-                                                              Container(
-                                                                  color: Colors
-                                                                      .blueGrey,
-                                                                  alignment: Alignment.center,
-                                                                  child: Text(e.key.isEmpty ? '?' : e.key[0], style: const TextStyle(fontSize: 24)))),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Text(e.key,
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  textAlign: TextAlign.center,
-                                                  style: const TextStyle(
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w600)),
-                                              const SizedBox(height: 2),
-                                              Text(_sub(e),
-                                                  maxLines: 1,
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                      fontSize: 10,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant)),
-                                              Text('${_num(e.value['n'])} 作品',
-                                                  maxLines: 1,
-                                                  style: TextStyle(
-                                                      fontSize: 9,
-                                                      color: Theme.of(context)
-                                                          .colorScheme
-                                                          .onSurfaceVariant
-                                                          .withValues(
-                                                              alpha: 0.7))),
-                                            ]),
-                                      ),
-                                      Positioned(
-                                        top: 5,
-                                        left: 5,
-                                        right: 4,
-                                        child: LibBadges(
-                                          libIds: ids,
-                                          order: libs
-                                              .map((e) => '${e['id']}')
-                                              .toList(),
-                                          grade: AuthorGrade.gradeFor(
-                                            plays: _num(_s(e.key)['p']),
-                                            drops: _num(_s(e.key)['dr']),
-                                            works: _num(e.value['n']),
-                                          ),
-                                          names: {
-                                            for (final l in libs)
-                                              '${l['id']}':
-                                                  '${l['name'] ?? l['id']}'
-                                          },
+                                itemExtent: geo.rowExtent,
+                                cacheExtent: geo.rowExtent * 4,
+                                itemCount: rows,
+                                itemBuilder: (_, row) {
+                                  return Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      for (var c = 0; c < geo.columns; c++) ...[
+                                        if (c > 0) const SizedBox(width: 10),
+                                        SizedBox(
+                                          width: geo.cellWidth,
+                                          height: geo.rowExtent - 10,
+                                          child: (row * geo.columns + c) < shown
+                                              ? _authorCell(
+                                                  _ordered[
+                                                      row * geo.columns + c],
+                                                  dpr)
+                                              : const SizedBox.shrink(),
                                         ),
-                                      ),
-                                    ]),
+                                      ],
+                                    ],
                                   );
-                                }),
+                                },
+                              );
+                            },
                           ),
                   ),
                 ]),
@@ -4622,6 +4688,7 @@ class _PlayerPageState extends State<PlayerPage>
   // 每条作品可带 _lib（跨库列表），否则用本页 lib，最后回退当前库
   String _libFor(dynamic w) =>
       '${(w is Map ? w['_lib'] : null) ?? widget.lib ?? cfg.lib}';
+
   /// G20：安全取作品。列表里意外出现非 Map 条目时用空 Map 顶部，
   /// 让该条显示「作品不可用」占位，而不是让整页 build 抛异常。
   dynamic _workAt(int i) {
@@ -4629,6 +4696,7 @@ class _PlayerPageState extends State<PlayerPage>
     final w = _workAt(i);
     return w is Map ? w : const <String, dynamic>{};
   }
+
   String get _curLib => _libFor(_workAt(cur));
   double _hoverDx = -1;
   double _hoverDy = -1;
@@ -5211,8 +5279,8 @@ class _PlayerPageState extends State<PlayerPage>
     }
     if (my != _openToken) return;
     // I3：视频起播先静音，首帧出来后再分步淡入，避免喇叭先爆一声。
-    final fadeIn = shouldFadeIn(
-        isVideo: w['t'] == 'v', paused: paused, volume: volume);
+    final fadeIn =
+        shouldFadeIn(isVideo: w['t'] == 'v', paused: paused, volume: volume);
     _fadeTimer?.cancel();
     _fadeGen++;
     try {
@@ -5277,7 +5345,8 @@ class _PlayerPageState extends State<PlayerPage>
           !paused &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
-        player.open(Media(cfg.base + cfg.media(workMediaPaths(w).first, lib: wl),
+        player.open(Media(
+            cfg.base + cfg.media(workMediaPaths(w).first, lib: wl),
             httpHeaders: cfg.headers));
         player.play();
         _mediaToken = my;
@@ -6077,8 +6146,7 @@ class _PlayerPageState extends State<PlayerPage>
               const SizedBox(height: 6),
               Text(workDataFailure.detail,
                   textAlign: TextAlign.center,
-                  style:
-                      const TextStyle(fontSize: 12, color: Colors.white38)),
+                  style: const TextStyle(fontSize: 12, color: Colors.white38)),
             ]),
           ),
         ),
@@ -6913,312 +6981,322 @@ class _PlayerPageState extends State<PlayerPage>
                   right: 0,
                   bottom: 0,
                   child: IgnorePointer(
-                  ignoring: !ui,
-                  child: AnimatedOpacity(
-                    opacity: ui ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Container(
-                      decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.transparent, Colors.black87])),
-                      padding: EdgeInsets.only(
-                          left: pad.left + 12,
-                          right: pad.right + 12,
-                          top: 10,
-                          bottom: 6 + pad.bottom),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Row(children: [
-                          Text(
-                              isV
-                                  ? '${fmt(pos)} / ${fmt(dur)}'
-                                  : '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}',
-                              style: const TextStyle(
-                                  fontSize: 10, color: Colors.white60)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: LayoutBuilder(builder: (ctx, cons) {
-                              void seekAt(Offset p) {
-                                if (!isV || dur.inMilliseconds == 0) return;
-                                final f =
-                                    (p.dx / cons.maxWidth).clamp(0.0, 1.0);
-                                player.seek(dur * f);
-                              }
+                    ignoring: !ui,
+                    child: AnimatedOpacity(
+                      opacity: ui ? 1 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [Colors.transparent, Colors.black87])),
+                        padding: EdgeInsets.only(
+                            left: pad.left + 12,
+                            right: pad.right + 12,
+                            top: 10,
+                            bottom: 6 + pad.bottom),
+                        child:
+                            Column(mainAxisSize: MainAxisSize.min, children: [
+                          Row(children: [
+                            Text(
+                                isV
+                                    ? '${fmt(pos)} / ${fmt(dur)}'
+                                    : '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.white60)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: LayoutBuilder(builder: (ctx, cons) {
+                                void seekAt(Offset p) {
+                                  if (!isV || dur.inMilliseconds == 0) return;
+                                  final f =
+                                      (p.dx / cons.maxWidth).clamp(0.0, 1.0);
+                                  player.seek(dur * f);
+                                }
 
-                              // 图文：按图片数量分段显示进度，当前张高亮
-                              if (!isV && pics.length > 1) {
-                                // H1：按下即进入拖动，跨段震动反馈，松手才切换图片；
-                                // 拖动中的目标段放大到与视频进度条一致（7px）。
-                                int picAt(Offset p) => picIndexAtFraction(
-                                    p.dx / cons.maxWidth, pics.length);
+                                // 图文：按图片数量分段显示进度，当前张高亮
+                                if (!isV && pics.length > 1) {
+                                  // H1：按下即进入拖动，跨段震动反馈，松手才切换图片；
+                                  // 拖动中的目标段放大到与视频进度条一致（7px）。
+                                  int picAt(Offset p) => picIndexAtFraction(
+                                      p.dx / cons.maxWidth, pics.length);
+                                  return GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTapUp: (d) {
+                                      stopAuto();
+                                      setState(() =>
+                                          _setPicIndex(picAt(d.localPosition)));
+                                      hapticTap();
+                                    },
+                                    onHorizontalDragStart: (d) {
+                                      stopAuto();
+                                      final k = picAt(d.localPosition);
+                                      setState(() {
+                                        dragging = true;
+                                        dragPic = k;
+                                        dragFrac = ((k + 0.5) / pics.length)
+                                            .clamp(0.0, 1.0);
+                                      });
+                                      hapticTap();
+                                    },
+                                    onHorizontalDragUpdate: (d) {
+                                      final f =
+                                          (d.localPosition.dx / cons.maxWidth)
+                                              .clamp(0.0, 1.0);
+                                      final k =
+                                          picIndexAtFraction(f, pics.length);
+                                      if (k != dragPic) hapticSelect();
+                                      setState(() {
+                                        dragPic = k;
+                                        dragFrac = f;
+                                      });
+                                    },
+                                    onHorizontalDragEnd: (_) {
+                                      final k = dragPic;
+                                      setState(() {
+                                        if (k != null) _setPicIndex(k);
+                                        dragging = false;
+                                        dragPic = null;
+                                        dragFrac = null;
+                                      });
+                                    },
+                                    onHorizontalDragCancel: () {
+                                      setState(() {
+                                        dragging = false;
+                                        dragPic = null;
+                                        dragFrac = null;
+                                      });
+                                    },
+                                    child: SizedBox(
+                                      height: 30,
+                                      child: Row(
+                                        children:
+                                            List.generate(pics.length, (k) {
+                                          final selected =
+                                              k == (dragging ? dragPic : idx);
+                                          final active = k <=
+                                              (dragging
+                                                  ? (dragPic ?? idx)
+                                                  : idx);
+                                          return Expanded(
+                                            child: Container(
+                                              height: 30,
+                                              alignment: Alignment.center,
+                                              child: AnimatedContainer(
+                                                duration: const Duration(
+                                                    milliseconds: 120),
+                                                height: dragging
+                                                    ? (selected ? 7 : 3)
+                                                    : (selected ? 6 : 3),
+                                                margin:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 1.5),
+                                                decoration: BoxDecoration(
+                                                  color: active
+                                                      ? (selected
+                                                          ? Colors.white
+                                                          : Colors.white70)
+                                                      : Colors.white24,
+                                                  borderRadius:
+                                                      BorderRadius.circular(3),
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        }),
+                                      ),
+                                    ),
+                                  );
+                                }
+
                                 return GestureDetector(
                                   behavior: HitTestBehavior.opaque,
-                                  onTapUp: (d) {
-                                    stopAuto();
-                                    setState(() =>
-                                        _setPicIndex(picAt(d.localPosition)));
-                                    hapticTap();
-                                  },
-                                  onHorizontalDragStart: (d) {
-                                    stopAuto();
-                                    final k = picAt(d.localPosition);
+                                  onTapUp: (d) => seekAt(d.localPosition),
+                                  onHorizontalDragStart: (_) {
+                                    resumeAfterDrag = !paused;
+                                    if (!paused) player.pause();
                                     setState(() {
                                       dragging = true;
-                                      dragPic = k;
-                                      dragFrac = ((k + 0.5) / pics.length)
-                                          .clamp(0.0, 1.0);
+                                      dragFrac = progress;
                                     });
-                                    hapticTap();
                                   },
                                   onHorizontalDragUpdate: (d) {
                                     final f =
                                         (d.localPosition.dx / cons.maxWidth)
                                             .clamp(0.0, 1.0);
-                                    final k =
-                                        picIndexAtFraction(f, pics.length);
-                                    if (k != dragPic) hapticSelect();
-                                    setState(() {
-                                      dragPic = k;
-                                      dragFrac = f;
-                                    });
+                                    setState(() => dragFrac = f);
                                   },
                                   onHorizontalDragEnd: (_) {
-                                    final k = dragPic;
+                                    final f = dragFrac ?? progress;
+                                    if (isV && dur.inMilliseconds > 0) {
+                                      player.seek(dur * f);
+                                      if (resumeAfterDrag) player.play();
+                                    } else if (!isV && pics.isNotEmpty) {
+                                      setState(() => _setPicIndex(
+                                          (f * (pics.length - 1))
+                                              .round()
+                                              .clamp(0, pics.length - 1)));
+                                    }
                                     setState(() {
-                                      if (k != null) _setPicIndex(k);
                                       dragging = false;
-                                      dragPic = null;
                                       dragFrac = null;
                                     });
                                   },
-                                  onHorizontalDragCancel: () {
-                                    setState(() {
-                                      dragging = false;
-                                      dragPic = null;
-                                      dragFrac = null;
-                                    });
-                                  },
-                                  child: SizedBox(
-                                    height: 30,
-                                    child: Row(
-                                      children: List.generate(pics.length, (k) {
-                                        final selected =
-                                            k == (dragging ? dragPic : idx);
-                                        final active = k <=
-                                            (dragging ? (dragPic ?? idx) : idx);
-                                        return Expanded(
-                                          child: Container(
-                                            height: 30,
-                                            alignment: Alignment.center,
-                                            child: AnimatedContainer(
-                                              duration: const Duration(
-                                                  milliseconds: 120),
-                                              height: dragging
-                                                  ? (selected ? 7 : 3)
-                                                  : (selected ? 6 : 3),
-                                              margin:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 1.5),
-                                              decoration: BoxDecoration(
-                                                color: active
-                                                    ? (selected
-                                                        ? Colors.white
-                                                        : Colors.white70)
-                                                    : Colors.white24,
-                                                borderRadius:
-                                                    BorderRadius.circular(3),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      }),
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              return GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTapUp: (d) => seekAt(d.localPosition),
-                                onHorizontalDragStart: (_) {
-                                  resumeAfterDrag = !paused;
-                                  if (!paused) player.pause();
-                                  setState(() {
-                                    dragging = true;
-                                    dragFrac = progress;
-                                  });
-                                },
-                                onHorizontalDragUpdate: (d) {
-                                  final f = (d.localPosition.dx / cons.maxWidth)
-                                      .clamp(0.0, 1.0);
-                                  setState(() => dragFrac = f);
-                                },
-                                onHorizontalDragEnd: (_) {
-                                  final f = dragFrac ?? progress;
-                                  if (isV && dur.inMilliseconds > 0) {
-                                    player.seek(dur * f);
-                                    if (resumeAfterDrag) player.play();
-                                  } else if (!isV && pics.isNotEmpty) {
-                                    setState(() => _setPicIndex(
-                                        (f * (pics.length - 1))
-                                            .round()
-                                            .clamp(0, pics.length - 1)));
-                                  }
-                                  setState(() {
-                                    dragging = false;
-                                    dragFrac = null;
-                                  });
-                                },
-                                child: MouseRegion(
-                                  onEnter: (_) =>
-                                      setState(() => barHover = true),
-                                  onExit: (_) =>
-                                      setState(() => barHover = false),
-                                  child: SizedBox(
-                                    height: 30,
-                                    child: Stack(
-                                      alignment: Alignment.centerLeft,
-                                      children: [
-                                        Container(
-                                            height:
-                                                (dragging || barHover) ? 7 : 3,
-                                            color: Colors.white24),
-                                        FractionallySizedBox(
-                                          alignment: Alignment.centerLeft,
-                                          widthFactor: dragFrac ?? progress,
-                                          child: Container(
+                                  child: MouseRegion(
+                                    onEnter: (_) =>
+                                        setState(() => barHover = true),
+                                    onExit: (_) =>
+                                        setState(() => barHover = false),
+                                    child: SizedBox(
+                                      height: 30,
+                                      child: Stack(
+                                        alignment: Alignment.centerLeft,
+                                        children: [
+                                          Container(
                                               height: (dragging || barHover)
                                                   ? 7
                                                   : 3,
-                                              color: dragging
-                                                  ? Colors.white
-                                                  : Colors.white70),
-                                        ),
+                                              color: Colors.white24),
+                                          FractionallySizedBox(
+                                            alignment: Alignment.centerLeft,
+                                            widthFactor: dragFrac ?? progress,
+                                            child: Container(
+                                                height: (dragging || barHover)
+                                                    ? 7
+                                                    : 3,
+                                                color: dragging
+                                                    ? Colors.white
+                                                    : Colors.white70),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ),
+                            const SizedBox(width: 8),
+                            Text('${cur + 1} / ${widget.works.length}',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.white54)),
+                          ]),
+                          Row(children: [
+                            // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
+                            // I1：移动端隐藏音量按钮，音量由系统音量键控制
+                            if (_volumeUi)
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: toggleMute,
+                                onLongPressStart: _volLongPressStart,
+                                onLongPressMoveUpdate: _volLongPressMove,
+                                onLongPressEnd: (_) => _volDragEnd(),
+                                onHorizontalDragStart: _volDragStart,
+                                onHorizontalDragUpdate: _volDragUpdate,
+                                onHorizontalDragEnd: _volDragEnd,
+                                child: Tooltip(
+                                  message: '点击静音 / 长按拖动调音量',
+                                  child: SizedBox(
+                                    width: 48,
+                                    height: 48,
+                                    child: Icon(
+                                        muted || volume == 0
+                                            ? Icons.volume_off
+                                            : (volume < 50
+                                                ? Icons.volume_down
+                                                : Icons.volume_up),
+                                        color: Colors.white70),
+                                  ),
+                                ),
+                              ),
+                            IconButton(
+                                onPressed: cycleSpeed,
+                                icon: Text('${speed}x',
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.white70))),
+                            IconButton(
+                                onPressed: toggleAutoplay,
+                                tooltip: '自动连播',
+                                icon: Icon(Icons.skip_next,
+                                    color: autoplay
+                                        ? Colors.white70
+                                        : Colors.white24)),
+                            IconButton(
+                                onPressed: toggleLoop,
+                                tooltip: '单条循环',
+                                icon: Icon(Icons.repeat_one,
+                                    color: loopOne
+                                        ? Colors.white70
+                                        : Colors.white24)),
+                            // H15：水滴图标下方常驻当前水滴数；默认灰、点击后变蓝并 +1 弹跳
+                            Tooltip(
+                              message:
+                                  '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: (dropBusy ||
+                                        dropDayLeft <= 0 ||
+                                        dropWeekLeft <= 0)
+                                    ? null
+                                    : _sendDrop,
+                                child: SizedBox(
+                                  width: 46,
+                                  height: 48,
+                                  child: ScaleTransition(
+                                    scale: _dropScale,
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        if (dropBusy)
+                                          const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: Colors.white54))
+                                        else
+                                          Icon(Icons.water_drop,
+                                              size: 20,
+                                              color:
+                                                  dropGlow && dropDayLeft >= 0
+                                                      ? Colors.lightBlueAccent
+                                                      : (dropDayLeft > 0 &&
+                                                              dropWeekLeft > 0
+                                                          ? Colors.white38
+                                                          : Colors.white24)),
+                                        const SizedBox(height: 1),
+                                        Text('$dropTotal',
+                                            style: TextStyle(
+                                                fontSize: 9,
+                                                height: 1.0,
+                                                fontWeight: FontWeight.w600,
+                                                color: dropGlow
+                                                    ? Colors.lightBlueAccent
+                                                    : (dropDayLeft > 0 &&
+                                                            dropWeekLeft > 0
+                                                        ? Colors.white54
+                                                        : Colors.white24))),
                                       ],
                                     ),
                                   ),
                                 ),
-                              );
-                            }),
-                          ),
-                          const SizedBox(width: 8),
-                          Text('${cur + 1} / ${widget.works.length}',
-                              style: const TextStyle(
-                                  fontSize: 10, color: Colors.white54)),
-                        ]),
-                        Row(children: [
-                          // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
-                          // I1：移动端隐藏音量按钮，音量由系统音量键控制
-                          if (_volumeUi)
-                          GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: toggleMute,
-                            onLongPressStart: _volLongPressStart,
-                            onLongPressMoveUpdate: _volLongPressMove,
-                            onLongPressEnd: (_) => _volDragEnd(),
-                            onHorizontalDragStart: _volDragStart,
-                            onHorizontalDragUpdate: _volDragUpdate,
-                            onHorizontalDragEnd: _volDragEnd,
-                            child: Tooltip(
-                              message: '点击静音 / 长按拖动调音量',
-                              child: SizedBox(
-                                width: 48,
-                                height: 48,
-                                child: Icon(
-                                    muted || volume == 0
-                                        ? Icons.volume_off
-                                        : (volume < 50
-                                            ? Icons.volume_down
-                                            : Icons.volume_up),
-                                    color: Colors.white70),
                               ),
                             ),
-                          ),
-                          IconButton(
-                              onPressed: cycleSpeed,
-                              icon: Text('${speed}x',
-                                  style: const TextStyle(
-                                      fontSize: 11, color: Colors.white70))),
-                          IconButton(
-                              onPressed: toggleAutoplay,
-                              tooltip: '自动连播',
-                              icon: Icon(Icons.skip_next,
-                                  color: autoplay
-                                      ? Colors.white70
-                                      : Colors.white24)),
-                          IconButton(
-                              onPressed: toggleLoop,
-                              tooltip: '单条循环',
-                              icon: Icon(Icons.repeat_one,
-                                  color: loopOne
-                                      ? Colors.white70
-                                      : Colors.white24)),
-                          // H15：水滴图标下方常驻当前水滴数；默认灰、点击后变蓝并 +1 弹跳
-                          Tooltip(
-                            message:
-                                '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: (dropBusy ||
-                                      dropDayLeft <= 0 ||
-                                      dropWeekLeft <= 0)
-                                  ? null
-                                  : _sendDrop,
-                              child: SizedBox(
-                                width: 46,
-                                height: 48,
-                                child: ScaleTransition(
-                                  scale: _dropScale,
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      if (dropBusy)
-                                        const SizedBox(
-                                            width: 18,
-                                            height: 18,
-                                            child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Colors.white54))
-                                      else
-                                        Icon(Icons.water_drop,
-                                            size: 20,
-                                            color: dropGlow && dropDayLeft >= 0
-                                                ? Colors.lightBlueAccent
-                                                : (dropDayLeft > 0 &&
-                                                        dropWeekLeft > 0
-                                                    ? Colors.white38
-                                                    : Colors.white24)),
-                                      const SizedBox(height: 1),
-                                      Text('$dropTotal',
-                                          style: TextStyle(
-                                              fontSize: 9,
-                                              height: 1.0,
-                                              fontWeight: FontWeight.w600,
-                                              color: dropGlow
-                                                  ? Colors.lightBlueAccent
-                                                  : (dropDayLeft > 0 &&
-                                                          dropWeekLeft > 0
-                                                      ? Colors.white54
-                                                      : Colors.white24))),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                              onPressed: toggleFs,
-                              icon: Icon(
-                                  fs ? Icons.fullscreen_exit : Icons.fullscreen,
-                                  color: Colors.white70)),
+                            const Spacer(),
+                            IconButton(
+                                onPressed: toggleFs,
+                                icon: Icon(
+                                    fs
+                                        ? Icons.fullscreen_exit
+                                        : Icons.fullscreen,
+                                    color: Colors.white70)),
+                          ]),
                         ]),
-                      ]),
+                      ),
                     ),
                   ),
                 ),
-              ),
             ]),
           ),
         ),
