@@ -24,6 +24,7 @@ import 'emoji_text.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
+import 'library_tree.dart';
 import 'likes.dart';
 import 'playback_flow.dart';
 import 'pic_zoom.dart';
@@ -1701,11 +1702,18 @@ class LibraryPage extends StatefulWidget {
 }
 
 class _LibraryPageState extends State<LibraryPage> {
+  static const String _starKey = 'lib_tree_stars_v1';
+
   List<Map<String, dynamic>> libs = [];
   String? defaultId;
   bool loading = true;
   String? err;
   bool changed = false;
+
+  /// J2：大库/基础库两级选择。v1 服务端没有 bigLibraries 时为 null，走原列表。
+  LibraryTree? tree;
+  Set<String> expanded = <String>{};
+  List<String> stars = <String>[];
 
   @override
   void initState() {
@@ -1741,7 +1749,80 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (e) {
       if (mounted) setState(() => err = '$e');
     }
+    await _loadTree();
     if (mounted) setState(() => loading = false);
+  }
+
+  /// 读取 v2 索引与本地星标；任何失败都只影响大库区，不影响已注册库。
+  Future<void> _loadTree() async {
+    try {
+      final r = await http
+          .get(Uri.parse('${cfg.base}/api/libraries.json'),
+              headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(r.body);
+      if (j is! Map) return;
+      final sp = await SharedPreferences.getInstance();
+      final saved = sp.getStringList(_starKey) ?? <String>[];
+      final t = LibraryTree.parse(Map<String, dynamic>.from(j), stars: saved);
+      if (!mounted) return;
+      setState(() {
+        stars = saved;
+        tree = t;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleStar(BasicLib b) async {
+    final next = toggleStar(stars, b.id);
+    setState(() {
+      stars = next;
+      tree = tree?.withStars(next);
+    });
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setStringList(_starKey, next);
+    } catch (_) {}
+  }
+
+  void _toggleSection(String id) =>
+      setState(() => expanded = toggleExpanded(expanded, id));
+
+  void _showBasic(BasicLib b) {
+    final pinned = stars.contains(b.id);
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (c) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(b.name,
+                style: Theme.of(c).textTheme.titleMedium,
+                textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text('${b.authors} 位作者 · ${b.works} 个作品',
+                style: const TextStyle(color: Colors.grey)),
+            if (b.rel.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(b.rel,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  textAlign: TextAlign.center),
+            ],
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: () {
+                Navigator.pop(c);
+                _toggleStar(b);
+              },
+              icon: Icon(pinned ? Icons.star : Icons.star_border),
+              label: Text(pinned ? '取消星标' : '设为基础库星标（置顶）'),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   Future<void> _switchTo(Map<String, dynamic> l) async {
@@ -1904,80 +1985,188 @@ class _LibraryPageState extends State<LibraryPage> {
             ? Center(child: Text('加载失败：$err'))
             : loading
                 ? const Center(child: CircularProgressIndicator())
-                : ListView.separated(
-                    itemCount: libs.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (_, i) {
-                      final l = libs[i];
-                      final id = '${l['id']}';
-                      final isCur = id == cfg.lib;
-                      final isDef = id == defaultId;
-                      final cr = (l['crawler'] as Map?) ?? const {};
-                      final scripts =
-                          (l['crawlerScripts'] as List?) ?? const [];
-                      return ListTile(
-                        leading: Icon(
-                            isCur
-                                ? Icons.radio_button_checked
-                                : Icons.radio_button_unchecked,
-                            color: isCur ? Colors.amber : Colors.grey),
-                        title: Text('${l['name']}  ${isDef ? '★' : ''}'),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                                '$id · ${l['count'] ?? 0} 条 / ${l['cols'] ?? 0} 个收藏夹',
-                                style: const TextStyle(fontSize: 12)),
-                            Text('${l['base']}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.grey)),
-                            Text(
-                                '爬虫：${cr['enabled'] == true ? '已启用' : '未启用'} · ${cr['schedule'] ?? '04:10'} · 脚本 ${scripts.length} 个 · ${(l['indexOk'] == true) ? '索引正常' : '索引缺失'}',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color: l['indexOk'] == true
-                                        ? Colors.grey
-                                        : Colors.redAccent)),
-                          ],
-                        ),
-                        isThreeLine: true,
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (v) {
-                            if (v == 'default') _setDefault(l);
-                            if (v == 'crawler') {
-                              Navigator.of(context)
-                                  .push(MaterialPageRoute(
-                                      builder: (_) =>
-                                          CrawlerConfigPage(lib: l)))
-                                  .then((_) => load());
-                            }
-                            if (v == 'maint') {
-                              Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => MaintenancePage(lib: l)));
-                            }
-                            if (v == 'delete') _delete(l);
-                          },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(
-                                value: 'default', child: Text('设为默认库')),
-                            const PopupMenuItem(
-                                value: 'crawler', child: Text('爬虫配置')),
-                            const PopupMenuItem(
-                                value: 'maint', child: Text('维护检查')),
-                            const PopupMenuItem(
-                                value: 'delete', child: Text('删除库（保留文件）')),
-                          ],
-                        ),
-                        onTap: () {
-                          changed = changed || !isCur;
-                          _switchTo(l);
-                        },
-                      );
-                    },
+                : ListView(
+                    children: [
+                      if (tree != null) ..._treeSection(context),
+                      const Divider(height: 24),
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 4, 16, 4),
+                        child: Text('已注册媒体库（点击切换）',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey)),
+                      ),
+                      for (final l in libs) _libTile(l),
+                    ],
                   ),
       ),
+    );
+  }
+
+  /// 大库 / 基础库两级列表：默认全部折叠，只显示大库（J3）。
+  List<Widget> _treeSection(BuildContext context) {
+    final t = tree!;
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Row(children: [
+          const Icon(Icons.account_tree_outlined, size: 18),
+          const SizedBox(width: 6),
+          const Text('大库 / 基础库',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const Spacer(),
+          Text('${t.bigs.length} 大库 · ${t.totalBasics} 基础库',
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ]),
+      ),
+      if (t.starred.isNotEmpty) ...[
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 8, 16, 2),
+          child: Text('★ 星标基础库（置顶）',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.amber)),
+        ),
+        for (final b in t.starred) _basicTile(b, pinned: true),
+      ],
+      for (final big in t.bigs) ...[
+        _bigTile(big),
+        if (expanded.contains(big.id))
+          if (t.visibleBasics(big).isEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(48, 2, 16, 8),
+              child: Text('该大库的基础库已全部星标置顶',
+                  style: TextStyle(fontSize: 11, color: Colors.grey)),
+            )
+          else
+            for (final b in t.visibleBasics(big))
+              _basicTile(b, pinned: false),
+      ],
+      if (t.unassigned.isNotEmpty) ...[
+        _sectionTile(
+          'tree-unassigned',
+          '未归属基础库',
+          '${t.unassigned.length} 个',
+        ),
+        if (expanded.contains('unassigned'))
+          for (final b in t.unassigned)
+            _basicTile(b, pinned: stars.contains(b.id)),
+      ],
+    ];
+  }
+
+  Widget _bigTile(BigLib big) {
+    final open = expanded.contains(big.id);
+    return ListTile(
+      key: ValueKey('big-${big.id}'),
+      leading: Icon(
+          open ? Icons.folder_open : Icons.folder_outlined,
+          color: Theme.of(context).colorScheme.primary),
+      title: Text(big.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text(big.subtitle, style: const TextStyle(fontSize: 11)),
+      trailing: AnimatedRotation(
+        turns: open ? 0.25 : 0,
+        duration: const Duration(milliseconds: 150),
+        child: const Icon(Icons.chevron_right),
+      ),
+      onTap: () => _toggleSection(big.id),
+    );
+  }
+
+  Widget _sectionTile(String id, String title, String sub) {
+    final open = expanded.contains(id);
+    return ListTile(
+      key: ValueKey(id),
+      leading: const Icon(Icons.folder_special_outlined),
+      title: Text(title),
+      subtitle: Text(sub, style: const TextStyle(fontSize: 11)),
+      trailing: AnimatedRotation(
+        turns: open ? 0.25 : 0,
+        duration: const Duration(milliseconds: 150),
+        child: const Icon(Icons.chevron_right),
+      ),
+      onTap: () => _toggleSection(id),
+    );
+  }
+
+  Widget _basicTile(BasicLib b, {required bool pinned}) {
+    return ListTile(
+      key: ValueKey('basic-${b.id}'),
+      dense: true,
+      contentPadding: const EdgeInsets.only(left: 40, right: 8),
+      leading: const Icon(Icons.subdirectory_arrow_right, size: 18),
+      title: Text(b.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+      subtitle: Text('${b.authors} 作者 · ${b.works} 作品',
+          style: const TextStyle(fontSize: 11)),
+      trailing: IconButton(
+        key: ValueKey('star-${b.id}'),
+        tooltip: pinned ? '取消星标' : '星标并置顶',
+        icon: Icon(pinned ? Icons.star : Icons.star_border,
+            color: pinned ? Colors.amber : null),
+        onPressed: () => _toggleStar(b),
+      ),
+      onTap: () => _showBasic(b),
+    );
+  }
+
+  Widget _libTile(Map<String, dynamic> l) {
+    final id = '${l['id']}';
+    final isCur = id == cfg.lib;
+    final isDef = id == defaultId;
+    final cr = (l['crawler'] as Map?) ?? const {};
+    final scripts = (l['crawlerScripts'] as List?) ?? const [];
+    return ListTile(
+      leading: Icon(
+          isCur ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          color: isCur ? Colors.amber : Colors.grey),
+      title: Text('${l['name']}  ${isDef ? '★' : ''}'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$id · ${l['count'] ?? 0} 条 / ${l['cols'] ?? 0} 个收藏夹',
+              style: const TextStyle(fontSize: 12)),
+          Text('${l['base']}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          Text(
+              '爬虫：${cr['enabled'] == true ? '已启用' : '未启用'} · ${cr['schedule'] ?? '04:10'} · 脚本 ${scripts.length} 个 · ${(l['indexOk'] == true) ? '索引正常' : '索引缺失'}',
+              style: TextStyle(
+                  fontSize: 11,
+                  color: l['indexOk'] == true
+                      ? Colors.grey
+                      : Colors.redAccent)),
+        ],
+      ),
+      isThreeLine: true,
+      trailing: PopupMenuButton<String>(
+        onSelected: (v) {
+          if (v == 'default') _setDefault(l);
+          if (v == 'crawler') {
+            Navigator.of(context)
+                .push(MaterialPageRoute(
+                    builder: (_) => CrawlerConfigPage(lib: l)))
+                .then((_) => load());
+          }
+          if (v == 'maint') {
+            Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MaintenancePage(lib: l)));
+          }
+          if (v == 'delete') _delete(l);
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: 'default', child: Text('设为默认库')),
+          const PopupMenuItem(value: 'crawler', child: Text('爬虫配置')),
+          const PopupMenuItem(value: 'maint', child: Text('维护检查')),
+          const PopupMenuItem(value: 'delete', child: Text('删除库（保留文件）')),
+        ],
+      ),
+      onTap: () {
+        changed = changed || !isCur;
+        _switchTo(l);
+      },
     );
   }
 }
