@@ -4594,6 +4594,9 @@ class _PlayerPageState extends State<PlayerPage>
   bool get _swipeHint => _swipeActive || _swipeShow;
   bool get _mobileSwipe =>
       swipeEnabledFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
+  // I1：音量调节 UI 仅桌面端保留，移动端交给系统音量键。
+  bool get _volumeUi => volumeUiEnabled(
+      isDesktop: Platform.isWindows || Platform.isMacOS || Platform.isLinux);
   bool ui = true;
   bool fs = false;
   bool dragging = false;
@@ -6596,11 +6599,10 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
-              // G15：左右窄边上下滑（左亮度 / 右音量），中间仍可翻页
+              // G15：移动端左右窄边上下滑（左亮度 / 右音量），中间仍可翻页
+              // I1：移动端音量改由系统音量键控制，右侧音量手势已移除
               if (_mobileSwipe) ...[
                 _swipeEdge(SwipeZone.brightness,
-                    swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
-                _swipeEdge(SwipeZone.volume,
                     swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
                 if (_swipeHint) _swipeHintWidget(pad),
               ],
@@ -6784,7 +6786,7 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               ),
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
-              if (_volHintVisible && ui && !_swipeHint)
+              if (_volumeUi && _volHintVisible && ui && !_swipeHint)
                 Positioned(
                   right: pad.right + 16,
                   bottom: pad.bottom + 96,
@@ -7036,6 +7038,8 @@ class _PlayerPageState extends State<PlayerPage>
                         ]),
                         Row(children: [
                           // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
+                          // I1：移动端隐藏音量按钮，音量由系统音量键控制
+                          if (_volumeUi)
                           GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onTap: toggleMute,
