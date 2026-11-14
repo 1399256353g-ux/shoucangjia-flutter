@@ -20,6 +20,7 @@ import 'continue_watching.dart';
 import 'cover_badges.dart';
 import 'deleted_cover.dart';
 import 'emoji_text.dart';
+import 'infinite.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
 import 'likes.dart';
@@ -2961,6 +2962,7 @@ class _CollectionPageState extends State<CollectionPage> {
   Map<String, dynamic> authorsIndex = {};
   String filter = 'all';
   String sort = 'new';
+  bool _loaded = false;
   bool searching = false;
   String kw = '';
   final TextEditingController _q = TextEditingController();
@@ -3138,14 +3140,20 @@ class _CollectionPageState extends State<CollectionPage> {
     try {
       final r = await http.get(cfg.u('/api/c/${widget.idx}.json'),
           headers: cfg.headers);
-      if (r.statusCode != 200) return;
-      final m = jsonDecode(r.body);
-      if (!mounted) return;
-      setState(() {
-        works = (m['works'] as List);
-        deleted = (m['deleted'] as List?) ?? [];
-      });
-    } catch (_) {}
+      if (r.statusCode == 200) {
+        final m = jsonDecode(r.body);
+        if (!mounted) return;
+        setState(() {
+          works = (m['works'] as List);
+          deleted = (m['deleted'] as List?) ?? [];
+          _loaded = true;
+        });
+      } else if (mounted) {
+        setState(() => _loaded = true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loaded = true);
+    }
     // 作者索引用于「已删除」列表回退显示头像；失败不影响主列表
     try {
       final a =
@@ -3267,8 +3275,8 @@ class _CollectionPageState extends State<CollectionPage> {
           ),
         ],
       ),
-      body: works.isEmpty
-          ? const Center(child: CircularProgressIndicator())
+      body: !_loaded
+          ? const WorkGridSkeleton(count: 18)
           : Column(children: [
               Padding(
                 padding:
@@ -3927,6 +3935,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   bool loading = true;
   String? err;
   bool syncing = false;
+  // G19：作者网格渐进渲染，避免一次构建上千个头像卡顿
+  int _shown = 0;
   Timer? syncTimer;
 
   @override
@@ -4099,6 +4109,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         authors = auMap.entries.map((e) => MapEntry(e.key, e.value)).toList();
         stats = stMap;
         loading = false;
+        _shown = initialGridCount(authors.length);
       });
     } catch (e) {
       if (mounted) {
@@ -4205,7 +4216,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
       ]),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const WorkGridSkeleton(count: 18)
           : err != null
               ? Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -4234,6 +4245,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                               setState(() {
                                 sel = 'all';
                                 loading = true;
+                                _shown = 0;
                               });
                               load();
                             },
@@ -4250,6 +4262,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                 setState(() {
                                   sel = '${l['id']}';
                                   loading = true;
+                                  _shown = 0;
                                 });
                                 load();
                               },
@@ -4270,7 +4283,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                             child: ChoiceChip(
                               label: Text(s.value),
                               selected: sort == s.key,
-                              onSelected: (_) => setState(() => sort = s.key),
+                              onSelected: (_) => setState(() {
+                                sort = s.key;
+                                _shown = initialGridCount(authors.length);
+                              }),
                             ),
                           ),
                       ],
@@ -4294,125 +4310,148 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                         ? const Center(
                             child: Text('暂无作者数据',
                                 style: TextStyle(color: Colors.grey)))
-                        : GridView.builder(
-                            padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-                            gridDelegate:
-                                const SliverGridDelegateWithMaxCrossAxisExtent(
-                                    maxCrossAxisExtent: 132,
-                                    childAspectRatio: 0.80,
-                                    mainAxisSpacing: 10,
-                                    crossAxisSpacing: 10),
-                            itemCount: sorted.length,
-                            itemBuilder: (_, i) {
-                              final e = sorted[i];
-                              final av = '${e.value['av'] ?? ''}';
-                              final ids = authorLibs[e.key] ??
-                                  <String>[
-                                    sel == 'all'
-                                        ? '${e.value['_lib'] ?? cfg.lib}'
-                                        : sel
-                                  ];
-                              return InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: () => _open(e.key),
-                                child: Stack(children: [
-                                  Container(
-                                    padding:
-                                        const EdgeInsets.fromLTRB(6, 22, 6, 8),
-                                    decoration: BoxDecoration(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .surfaceContainerHighest,
-                                        borderRadius:
-                                            BorderRadius.circular(12)),
-                                    child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          ClipOval(
-                                            child: SizedBox(
-                                              width: 58,
-                                              height: 58,
-                                              child: av.isEmpty
-                                                  ? Container(
-                                                      color: Colors.blueGrey,
-                                                      alignment:
-                                                          Alignment.center,
-                                                      child: Text(
-                                                          e.key.isEmpty
-                                                              ? '?'
-                                                              : e.key[0],
-                                                          style: const TextStyle(
-                                                              fontSize: 24)))
-                                                  : CachedNetworkImage(
-                                                      imageUrl: cfg.base +
-                                                          cfg.media(av,
-                                                              lib:
-                                                                  '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}'),
-                                                      httpHeaders: cfg.headers,
-                                                      fit: BoxFit.cover,
-                                                      memCacheWidth: 174,
-                                                      errorWidget: (_, __, ___) => Container(
+                        : NotificationListener<ScrollNotification>(
+                            onNotification: (n) {
+                              if (_shown < sorted.length &&
+                                  shouldLoadNextPage(
+                                      pixels: n.metrics.pixels,
+                                      maxScrollExtent:
+                                          n.metrics.maxScrollExtent,
+                                      viewportDimension:
+                                          n.metrics.viewportDimension)) {
+                                setState(() => _shown =
+                                    nextGridCount(_shown, sorted.length));
+                              }
+                              return false;
+                            },
+                            child: GridView.builder(
+                                padding:
+                                    const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                                gridDelegate:
+                                    const SliverGridDelegateWithMaxCrossAxisExtent(
+                                        maxCrossAxisExtent: 132,
+                                        childAspectRatio: 0.80,
+                                        mainAxisSpacing: 10,
+                                        crossAxisSpacing: 10),
+                                itemCount: _shown < sorted.length
+                                    ? _shown
+                                    : sorted.length,
+                                itemBuilder: (_, i) {
+                                  final e = sorted[i];
+                                  final av = '${e.value['av'] ?? ''}';
+                                  final ids = authorLibs[e.key] ??
+                                      <String>[
+                                        sel == 'all'
+                                            ? '${e.value['_lib'] ?? cfg.lib}'
+                                            : sel
+                                      ];
+                                  return InkWell(
+                                    borderRadius: BorderRadius.circular(12),
+                                    onTap: () => _open(e.key),
+                                    child: Stack(children: [
+                                      Container(
+                                        padding: const EdgeInsets.fromLTRB(
+                                            6, 22, 6, 8),
+                                        decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .surfaceContainerHighest,
+                                            borderRadius:
+                                                BorderRadius.circular(12)),
+                                        child: Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              ClipOval(
+                                                child: SizedBox(
+                                                  width: 58,
+                                                  height: 58,
+                                                  child: av.isEmpty
+                                                      ? Container(
                                                           color:
                                                               Colors.blueGrey,
                                                           alignment:
                                                               Alignment.center,
                                                           child: Text(
-                                                              e.key.isEmpty ? '?' : e.key[0],
-                                                              style: const TextStyle(fontSize: 24)))),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 6),
-                                          Text(e.key,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
-                                              style: const TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.w600)),
-                                          const SizedBox(height: 2),
-                                          Text(_sub(e),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                  fontSize: 10,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant)),
-                                          Text('${_num(e.value['n'])} 作品',
-                                              maxLines: 1,
-                                              style: TextStyle(
-                                                  fontSize: 9,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurfaceVariant
-                                                      .withValues(alpha: 0.7))),
-                                        ]),
-                                  ),
-                                  Positioned(
-                                    top: 5,
-                                    left: 5,
-                                    right: 4,
-                                    child: LibBadges(
-                                      libIds: ids,
-                                      order: libs
-                                          .map((e) => '${e['id']}')
-                                          .toList(),
-                                      grade: AuthorGrade.gradeFor(
-                                        plays: _num(_s(e.key)['p']),
-                                        drops: _num(_s(e.key)['dr']),
-                                        works: _num(e.value['n']),
+                                                              e.key.isEmpty
+                                                                  ? '?'
+                                                                  : e.key[0],
+                                                              style: const TextStyle(
+                                                                  fontSize:
+                                                                      24)))
+                                                      : CachedNetworkImage(
+                                                          imageUrl: cfg.base +
+                                                              cfg.media(av,
+                                                                  lib:
+                                                                      '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}'),
+                                                          httpHeaders:
+                                                              cfg.headers,
+                                                          fit: BoxFit.cover,
+                                                          memCacheWidth: 174,
+                                                          errorWidget: (_, __, ___) =>
+                                                              Container(
+                                                                  color: Colors
+                                                                      .blueGrey,
+                                                                  alignment: Alignment.center,
+                                                                  child: Text(e.key.isEmpty ? '?' : e.key[0], style: const TextStyle(fontSize: 24)))),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Text(e.key,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  textAlign: TextAlign.center,
+                                                  style: const TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600)),
+                                              const SizedBox(height: 2),
+                                              Text(_sub(e),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant)),
+                                              Text('${_num(e.value['n'])} 作品',
+                                                  maxLines: 1,
+                                                  style: TextStyle(
+                                                      fontSize: 9,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant
+                                                          .withValues(
+                                                              alpha: 0.7))),
+                                            ]),
                                       ),
-                                      names: {
-                                        for (final l in libs)
-                                          '${l['id']}':
-                                              '${l['name'] ?? l['id']}'
-                                      },
-                                    ),
-                                  ),
-                                ]),
-                              );
-                            }),
+                                      Positioned(
+                                        top: 5,
+                                        left: 5,
+                                        right: 4,
+                                        child: LibBadges(
+                                          libIds: ids,
+                                          order: libs
+                                              .map((e) => '${e['id']}')
+                                              .toList(),
+                                          grade: AuthorGrade.gradeFor(
+                                            plays: _num(_s(e.key)['p']),
+                                            drops: _num(_s(e.key)['dr']),
+                                            works: _num(e.value['n']),
+                                          ),
+                                          names: {
+                                            for (final l in libs)
+                                              '${l['id']}':
+                                                  '${l['name'] ?? l['id']}'
+                                          },
+                                        ),
+                                      ),
+                                    ]),
+                                  );
+                                }),
+                          ),
                   ),
                 ]),
     );
@@ -4979,8 +5018,7 @@ class _PlayerPageState extends State<PlayerPage>
       // 预缓冲槽位保持静音、暂停；切条时再恢复音量并 play
       await slot.player.setVolume(0);
       await slot.player.open(
-        Media(cfg.base + cfg.media(path, lib: nlib),
-            httpHeaders: cfg.headers),
+        Media(cfg.base + cfg.media(path, lib: nlib), httpHeaders: cfg.headers),
         play: false,
       );
       if (gen != _preloadGen) return;
@@ -7520,7 +7558,7 @@ class _AuthorPageState extends State<AuthorPage> {
                   : const Icon(Icons.sync)),
       ]),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const _AuthorPageSkeleton()
           : Column(children: [
               Padding(
                 padding: const EdgeInsets.all(14),
@@ -7602,7 +7640,115 @@ class _AuthorPageState extends State<AuthorPage> {
   }
 }
 
-class WorkGrid extends StatelessWidget {
+// G19：骨架屏占位（首屏/图片加载时避免白屏）
+class _SkeletonPulse extends StatefulWidget {
+  final Widget child;
+  const _SkeletonPulse({required this.child});
+  @override
+  State<_SkeletonPulse> createState() => _SkeletonPulseState();
+}
+
+class _SkeletonPulseState extends State<_SkeletonPulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900))
+    ..repeat(reverse: true);
+  late final Animation<double> _a = Tween<double>(begin: 0.35, end: 0.8)
+      .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      FadeTransition(opacity: _a, child: widget.child);
+}
+
+class SkeletonBlock extends StatelessWidget {
+  final double? width;
+  final double? height;
+  final BorderRadius? radius;
+  const SkeletonBlock({super.key, this.width, this.height, this.radius});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withValues(alpha: 0.55),
+        borderRadius: radius ?? BorderRadius.circular(8),
+      ),
+    );
+  }
+}
+
+// 网格骨架：与 WorkGrid 相同的网格密度，用于收藏夹/作者页首屏
+class WorkGridSkeleton extends StatelessWidget {
+  final int count;
+  const WorkGridSkeleton({super.key, this.count = 18});
+
+  @override
+  Widget build(BuildContext context) {
+    return _SkeletonPulse(
+      child: GridView.builder(
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(12),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 180,
+            childAspectRatio: 3 / 4,
+            mainAxisSpacing: 2,
+            crossAxisSpacing: 2),
+        itemCount: count,
+        itemBuilder: (_, __) => const SkeletonBlock(radius: BorderRadius.zero),
+      ),
+    );
+  }
+}
+
+// 作者主页骨架：头像/简介占位 + 作品网格
+class _AuthorPageSkeleton extends StatelessWidget {
+  const _AuthorPageSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return _SkeletonPulse(
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const SkeletonBlock(
+                width: 64,
+                height: 64,
+                radius: BorderRadius.all(Radius.circular(32))),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    SkeletonBlock(width: 64, height: 10),
+                    SizedBox(height: 10),
+                    SkeletonBlock(width: 220, height: 12),
+                    SizedBox(height: 8),
+                    SkeletonBlock(width: 160, height: 12),
+                  ]),
+            ),
+          ]),
+        ),
+        const Divider(height: 1),
+        const Expanded(child: WorkGridSkeleton(count: 12)),
+      ]),
+    );
+  }
+}
+
+class WorkGrid extends StatefulWidget {
   final List works;
   final String? lib;
   // G17：带上所属收藏夹，播放页写「继续观看」时才能一键回到原列表
@@ -7615,8 +7761,52 @@ class WorkGrid extends StatelessWidget {
       this.collectionIdx,
       this.collectionName});
 
+  @override
+  State<WorkGrid> createState() => _WorkGridState();
+}
+
+class _WorkGridState extends State<WorkGrid> {
+  final ScrollController _scroll = ScrollController();
+  int _shown = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _shown = initialGridCount(widget.works.length);
+    _scroll.addListener(_maybeLoadMore);
+  }
+
+  @override
+  void didUpdateWidget(covariant WorkGrid old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.works, widget.works) ||
+        old.works.length != widget.works.length) {
+      // 重新加载/筛选后回到首屏分页，避免沿用上一个列表的滚动位置
+      _shown = initialGridCount(widget.works.length);
+    }
+    if (_shown > widget.works.length) _shown = widget.works.length;
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _maybeLoadMore() {
+    if (!_scroll.hasClients) return;
+    if (_shown >= widget.works.length) return;
+    final p = _scroll.position;
+    if (shouldLoadNextPage(
+        pixels: p.pixels,
+        maxScrollExtent: p.maxScrollExtent,
+        viewportDimension: p.viewportDimension)) {
+      setState(() => _shown = nextGridCount(_shown, widget.works.length));
+    }
+  }
+
   String _libFor(dynamic w) =>
-      '${(w is Map ? w['_lib'] : null) ?? lib ?? cfg.lib}';
+      '${(w is Map ? w['_lib'] : null) ?? widget.lib ?? cfg.lib}';
 
   @override
   Widget build(BuildContext context) {
@@ -7627,13 +7817,21 @@ class WorkGrid extends StatelessWidget {
   }
 
   Widget _buildGrid(BuildContext context) {
+    final works = widget.works;
+    if (works.isEmpty) {
+      return const Center(
+          child: Text('暂无作品', style: TextStyle(color: Colors.grey)));
+    }
+    final total = works.length;
+    final shown = _shown > total ? total : _shown;
     return GridView.builder(
+      controller: _scroll,
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: 180,
           childAspectRatio: 3 / 4,
           mainAxisSpacing: 2,
           crossAxisSpacing: 2),
-      itemCount: works.length,
+      itemCount: shown,
       itemBuilder: (_, i) {
         final w = works[i];
         final wp = WatchProgressStore.of(
@@ -7646,8 +7844,8 @@ class WorkGrid extends StatelessWidget {
                   works: works,
                   start: i,
                   lib: _libFor(w),
-                  idx: collectionIdx,
-                  colName: collectionName))),
+                  idx: widget.collectionIdx,
+                  colName: widget.collectionName))),
           child: Stack(fit: StackFit.expand, children: [
             (w['th'] ?? '').toString().isEmpty
                 ? Container(color: Colors.black26)
@@ -7656,6 +7854,9 @@ class WorkGrid extends StatelessWidget {
                         cfg.media(w['th'].toString(), lib: _libFor(w)),
                     httpHeaders: cfg.headers,
                     fit: BoxFit.cover,
+                    // 图片解码前用骨架占位，滚动时不再白块闪烁
+                    placeholder: (_, __) =>
+                        const SkeletonBlock(radius: BorderRadius.zero),
                     errorWidget: (_, __, ___) =>
                         Container(color: Colors.black26)),
             Positioned(
