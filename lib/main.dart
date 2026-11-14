@@ -19,6 +19,7 @@ import 'deleted_cover.dart';
 import 'emoji_text.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
+import 'likes.dart';
 import 'playback_flow.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
@@ -4214,7 +4215,7 @@ class PlayerPage extends StatefulWidget {
 }
 
 class _PlayerPageState extends State<PlayerPage>
-    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   late final PageController pc = PageController(initialPage: widget.start);
   // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
   late final Player player = Player(
@@ -4299,6 +4300,24 @@ class _PlayerPageState extends State<PlayerPage>
             .chain(CurveTween(curve: Curves.elasticOut)),
         weight: 60),
   ]).animate(_dropAnim);
+  // G9：双击点赞（仅本地标记）。红心在点击位置弹一下并淡出。
+  final Set<String> likedKeys = <String>{};
+  Offset? _heartPos;
+  int _lastStageTapAt = 0;
+  Offset _lastStageTapPos = Offset.zero;
+  bool _tapWasPausedBefore = false;
+  late final AnimationController _heartAnim = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 650));
+  late final Animation<double> _heartScale = TweenSequence<double>([
+    TweenSequenceItem(
+        tween: Tween(begin: 0.55, end: 1.25)
+            .chain(CurveTween(curve: Curves.easeOutBack)),
+        weight: 45),
+    TweenSequenceItem(
+        tween: Tween(begin: 1.25, end: 1.0)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 55),
+  ]).animate(_heartAnim);
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
@@ -4315,6 +4334,7 @@ class _PlayerPageState extends State<PlayerPage>
     WidgetsBinding.instance.addObserver(this);
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
+    _loadLikes();
     player.setPlaylistMode(PlaylistMode.none);
     player.stream.completed.listen((done) {
       if (!done || !mounted) return;
@@ -4619,16 +4639,92 @@ class _PlayerPageState extends State<PlayerPage>
     _navAt = now;
   }
 
-  // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停
-  void onStageTap() {
+  String _likeKeyFor(dynamic w) => workLikeKey(
+      lib: _libFor(w), id: '${(w is Map ? w['id'] : null) ?? ''}');
+
+  bool _isLiked(dynamic w) => likedKeys.contains(_likeKeyFor(w));
+
+  Future<void> _loadLikes() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final keys = parseLikedKeys(sp.getStringList(kLikedWorksPrefsKey));
+      if (mounted) setState(() => likedKeys
+        ..clear()
+        ..addAll(keys));
+    } catch (_) {}
+  }
+
+  Future<void> _setLiked(dynamic w, bool liked, {Offset? at}) async {
+    final key = _likeKeyFor(w);
+    if (key.isEmpty) return;
+    final next = updateLikedKeys(likedKeys, key, liked: liked);
+    setState(() {
+      likedKeys
+        ..clear()
+        ..addAll(next);
+    });
+    if (liked && at != null) {
+      hapticTap();
+      setState(() => _heartPos = at);
+      _heartAnim.forward(from: 0);
+    } else if (!liked) {
+      hapticSelect();
+    }
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setStringList(kLikedWorksPrefsKey, next);
+    } catch (_) {}
+  }
+
+  // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停；
+  // 320ms 内在相近位置再次点击视为双击：点赞并恢复到点击前的播放状态。
+  void onStageTap([Offset? pos]) {
     focus.requestFocus();
     if (!ui) {
       showUi();
+      _lastStageTapAt = 0;
       return;
     }
+    final w = widget.works[cur];
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final isDouble = isStageDoubleTap(
+        nowMs: now,
+        lastMs: _lastStageTapAt,
+        lastPos: _lastStageTapAt > 0 ? _lastStageTapPos : null,
+        pos: pos);
+    if (isDouble) {
+      _lastStageTapAt = 0;
+      // 第一次点击已经切换过一次暂停；双击时按点击前的状态恢复。
+      _restorePauseAfterTap(_tapWasPausedBefore);
+      if (!_isLiked(w)) _setLiked(w, true, at: pos);
+      showUi();
+      return;
+    }
+    _lastStageTapAt = now;
+    _lastStageTapPos = pos ?? Offset.zero;
+    _tapWasPausedBefore = paused;
     hapticTap();
     togglePause();
     showUi();
+  }
+
+  // 双击点赞时撤销第一次点击带来的暂停切换（视频流事件可能迟到，
+  // 因此这里直接按点击前状态强制对齐，不依赖 paused 是否已刷新）。
+  void _restorePauseAfterTap(bool wasPaused) {
+    final isV = widget.works[cur]['t'] == 'v';
+    setState(() => paused = wasPaused);
+    if (wasPaused) {
+      pauseAuto();
+      try {
+        player.pause();
+      } catch (_) {}
+    } else {
+      try {
+        player.setRate(speed);
+        player.play();
+      } catch (_) {}
+      if (!isV && !manualPic) startAuto();
+    }
   }
 
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
@@ -4933,6 +5029,7 @@ class _PlayerPageState extends State<PlayerPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _dropAnim.dispose();
+    _heartAnim.dispose();
     autoTimer?.cancel();
     hideTimer?.cancel();
     retryTimer?.cancel();
@@ -5074,7 +5171,7 @@ class _PlayerPageState extends State<PlayerPage>
                   }
                   if (it['t'] == 'v') {
                     return GestureDetector(
-                      onTap: onStageTap,
+                      onTapUp: (d) => onStageTap(d.localPosition),
                       onHorizontalDragEnd: (d) {
                         // 右划快速进入作者主页
                         final v = d.primaryVelocity ?? 0;
@@ -5099,7 +5196,7 @@ class _PlayerPageState extends State<PlayerPage>
                     );
                   }
                   return GestureDetector(
-                    onTap: onStageTap,
+                    onTapUp: (d) => onStageTap(d.localPosition),
                     onHorizontalDragEnd: (d) {
                       stopAuto();
                       final v = d.primaryVelocity ?? 0;
@@ -5137,6 +5234,30 @@ class _PlayerPageState extends State<PlayerPage>
                   );
                 },
               ),
+              // G9：双击位置的红心反馈
+              if (_heartPos != null)
+                Positioned(
+                  left: _heartPos!.dx - 30,
+                  top: _heartPos!.dy - 30,
+                  child: IgnorePointer(
+                    child: AnimatedBuilder(
+                      animation: _heartAnim,
+                      builder: (_, __) {
+                        final t = _heartAnim.value;
+                        final opacity =
+                            t < 0.7 ? 1.0 : (1 - (t - 0.7) / 0.3).clamp(0.0, 1.0);
+                        return Opacity(
+                          opacity: opacity,
+                          child: Transform.scale(
+                            scale: _heartScale.value,
+                            child: const Icon(Icons.favorite,
+                                size: 58, color: Color(0xFFFF3B5C)),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
               Positioned(
                 left: pad.left + 8,
                 top: pad.top + 8,
@@ -5205,6 +5326,16 @@ class _PlayerPageState extends State<PlayerPage>
                                   Text('${w['d']}',
                                       style: const TextStyle(
                                           fontSize: 11, color: Colors.white54)),
+                                ],
+                                // G9：本地喜欢标记，点红心可取消
+                                if (_isLiked(w)) ...[
+                                  const SizedBox(width: 6),
+                                  GestureDetector(
+                                    onTap: () => _setLiked(w, false),
+                                    child: const Icon(Icons.favorite,
+                                        size: 14,
+                                        color: Color(0xFFFF3B5C)),
+                                  ),
                                 ],
                               ]),
                               Row(children: [
