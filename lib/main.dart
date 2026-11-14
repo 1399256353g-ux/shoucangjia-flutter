@@ -23,6 +23,7 @@ import 'likes.dart';
 import 'playback_flow.dart';
 import 'text_fit.dart';
 import 'volume_control.dart';
+import 'playback_menu.dart';
 import 'watch_progress.dart';
 
 Future<void> main() async {
@@ -5149,6 +5150,127 @@ class _PlayerPageState extends State<PlayerPage>
     setState(() => captionOpen = !captionOpen);
   }
 
+  // G11：从头播放 —— 清除本作品观看记录并回到开头。
+  // 视频直接 seek(0)，图文回到第 1 张；按当前播放/暂停状态继续。
+  void _restartPlayback() {
+    final w = widget.works[cur];
+    final isV = w['t'] == 'v';
+    WatchProgressStore.remove(_libFor(w), _watchIdFor(w));
+    if (isV) {
+      try {
+        player.seek(Duration.zero);
+      } catch (_) {}
+      setState(() => pos = Duration.zero);
+      if (paused) {
+        // 从头播放视为一次新的观看，直接开始
+        setState(() => paused = false);
+        try {
+          player.setRate(speed);
+        } catch (_) {}
+        try {
+          player.play();
+        } catch (_) {}
+      }
+    } else {
+      stopAuto();
+      setState(() => img = 0);
+    }
+    hapticTap();
+    showUi();
+  }
+
+  // G11：长按作品信息区弹出播放菜单（视频区域长按仍是 2 倍速）。
+  void _showWorkMenu() {
+    final w = widget.works[cur];
+    final isV = w['t'] == 'v';
+    final lib = _libFor(w);
+    final id = _watchIdFor(w);
+    final menu = buildPlaybackMenu(
+        isVideo: isV, progress: WatchProgressStore.of(lib, id));
+    hapticTap();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      showDragHandle: true,
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return SafeArea(
+          top: false,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (('${w['ti'] ?? ''}').isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('${w['ti']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 13, color: cs.onSurfaceVariant)),
+                ),
+              ),
+            ListTile(
+              leading: const Icon(Icons.replay),
+              title: const Text('从头播放'),
+              subtitle: Text(isV ? '清除观看进度并回到 00:00' : '回到第 1 张'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _restartPlayback();
+              },
+            ),
+            if (menu.canResume)
+              ListTile(
+                leading: const Icon(Icons.play_circle_outline),
+                title: const Text('继续观看'),
+                subtitle: Text('上次看到 ${formatMenuPosition(menu.resumeAtMs)}'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _resumePlayback(menu.resumeAtMs);
+                },
+              ),
+            if (menu.canMarkDone)
+              ListTile(
+                leading: const Icon(Icons.check_circle_outline),
+                title: const Text('标记为已看完'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _markWatched(w);
+                  hapticTap();
+                },
+              ),
+            if (menu.canClear)
+              ListTile(
+                leading: Icon(Icons.delete_outline, color: cs.error),
+                title: Text('清除观看记录', style: TextStyle(color: cs.error)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  WatchProgressStore.remove(lib, id);
+                },
+              ),
+            const SizedBox(height: 4),
+          ]),
+        );
+      },
+    );
+  }
+
+  // G11：跳到记录位置（「继续观看」）
+  void _resumePlayback(int at) {
+    try {
+      player.seek(Duration(milliseconds: at));
+    } catch (_) {}
+    setState(() => pos = Duration(milliseconds: at));
+    if (paused) {
+      setState(() => paused = false);
+      try {
+        player.setRate(speed);
+      } catch (_) {}
+      try {
+        player.play();
+      } catch (_) {}
+    }
+  }
+
   String fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -5257,6 +5379,8 @@ class _PlayerPageState extends State<PlayerPage>
                   }
                   return GestureDetector(
                     onTapUp: (d) => onStageTap(d.localPosition),
+                    // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
+                    onLongPress: _showWorkMenu,
                     onHorizontalDragEnd: (d) {
                       stopAuto();
                       final v = d.primaryVelocity ?? 0;
@@ -5353,6 +5477,8 @@ class _PlayerPageState extends State<PlayerPage>
                     duration: const Duration(milliseconds: 200),
                     child: GestureDetector(
                       onTap: openAuthor,
+                      // G11：长按信息区弹出播放菜单（视频区长按仍是 2 倍速）
+                      onLongPress: _showWorkMenu,
                       child: Row(children: [
                         if ((w['av'] ?? '').toString().isNotEmpty)
                           ClipOval(
