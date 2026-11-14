@@ -19,6 +19,7 @@ import 'background_pause.dart';
 import 'collection_sync.dart';
 import 'continue_watching.dart';
 import 'cover_badges.dart';
+import 'decode_fallback.dart';
 import 'deleted_cover.dart';
 import 'emoji_text.dart';
 import 'infinite.dart';
@@ -4688,7 +4689,7 @@ class _PlaybackSlot {
   late final Player player;
   late final VideoController vc;
 
-  _PlaybackSlot(this.tag) {
+  _PlaybackSlot(this.tag, {DecodeMode mode = DecodeMode.hardware}) {
     player = Player(
       configuration: const PlayerConfiguration(
         title: 'Dizi',
@@ -4698,7 +4699,7 @@ class _PlaybackSlot {
     // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
     vc = VideoController(
       player,
-      configuration: const VideoControllerConfiguration(hwdec: 'auto-safe'),
+      configuration: VideoControllerConfiguration(hwdec: hwdecFor(mode)),
     );
   }
 }
@@ -4706,8 +4707,13 @@ class _PlaybackSlot {
 class _PlayerPageState extends State<PlayerPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late final PageController pc = PageController(initialPage: widget.start);
-  late final _PlaybackSlot _slotA = _PlaybackSlot('a');
-  late final _PlaybackSlot _slotB = _PlaybackSlot('b');
+  // F34：解码失败时可整体切换到软件解码，槽位因此不是 final
+  _PlaybackSlot _slotA = _PlaybackSlot('a');
+  _PlaybackSlot _slotB = _PlaybackSlot('b');
+  DecodeMode _decodeMode = DecodeMode.hardware;
+  bool _softwareDecodeRetried = false;
+  // 槽位重建后强制重建 Video，避免沿用旧控制器的纹理
+  int _videoGen = 0;
   bool _slotAActive = true;
   _PlaybackSlot get _active => _slotAActive ? _slotA : _slotB;
   _PlaybackSlot get _idle => _slotAActive ? _slotB : _slotA;
@@ -4982,7 +4988,13 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.error.listen((msg) {
       if (!identical(p, player)) return;
       if (!mounted || _failure != null) return;
-      _showFailure(classifyPlaybackError(msg));
+      final failure = classifyPlaybackError(msg);
+      // F34：模拟器/个别解码器上硬件解码失败时，先用软件解码重试一次
+      if (_shouldSoftRetry(failure.kind)) {
+        _retryWithSoftwareDecode();
+        return;
+      }
+      _showFailure(failure);
     }));
     // G12：弱网缓冲提示 —— 缓冲超过阈值才显示，避免正常起播闪一下
     _playerSubs.add(p.stream.buffering.listen((b) {
@@ -5131,6 +5143,49 @@ class _PlayerPageState extends State<PlayerPage>
       _slowBuffer = false;
       paused = true;
     });
+  }
+
+  /// F34：是否值得自动切软件解码重试（每条媒体最多一次）。
+  bool _shouldSoftRetry(PlaybackFailureKind? kind) =>
+      shouldRetryWithSoftwareDecode(
+        kind: kind,
+        mode: _decodeMode,
+        alreadyRetried: _softwareDecodeRetried,
+        isVideo: _workAt(cur)['t'] == 'v',
+        tokenAlive: mounted,
+      );
+
+  /// F34：重建两个播放器槽位为软件解码，并重开当前作品。
+  /// 只在硬件解码报解码错误时触发一次，坏文件不会反复重建播放器。
+  Future<void> _retryWithSoftwareDecode() async {
+    if (_softwareDecodeRetried || _decodeMode == DecodeMode.software) return;
+    _softwareDecodeRetried = true;
+    _decodeMode = DecodeMode.software;
+    final old = <_PlaybackSlot>[_slotA, _slotB];
+    _cancelPreload();
+    for (final s in _playerSubs) {
+      s.cancel();
+    }
+    _playerSubs.clear();
+    _slotA = _PlaybackSlot('a', mode: _decodeMode);
+    _slotB = _PlaybackSlot('b', mode: _decodeMode);
+    _slotAActive = true;
+    _videoGen++;
+    _bindPlayer();
+    for (final s in old) {
+      try {
+        await s.player.dispose();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _failure = null;
+      loading = true;
+      paused = false;
+      _buffering = false;
+      _slowBuffer = false;
+    });
+    await open(cur);
   }
 
   void _retryPlayback() {
@@ -5351,7 +5406,13 @@ class _PlayerPageState extends State<PlayerPage>
       } catch (e) {
         if (my == _openToken) {
           _opening = false;
-          _showFailure(classifyPlaybackError(e));
+          final failure = classifyPlaybackError(e);
+          // F34：打开阶段就报解码错误时同样先试软件解码
+          if (_shouldSoftRetry(failure.kind)) {
+            _retryWithSoftwareDecode();
+            return;
+          }
+          _showFailure(failure);
           return;
         }
       }
@@ -6208,7 +6269,7 @@ class _PlayerPageState extends State<PlayerPage>
         child: RepaintBoundary(
           // key 随槽位变化：预缓冲切换后必须重建 Video，才能挂到新控制器
           child: Video(
-              key: ValueKey('video-${_active.tag}'),
+              key: ValueKey('video-${_active.tag}-$_videoGen'),
               controller: vc,
               controls: NoVideoControls),
         ),
