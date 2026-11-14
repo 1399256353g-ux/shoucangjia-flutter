@@ -15,6 +15,7 @@ import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_grade.dart';
 import 'collection_sync.dart';
+import 'cover_badges.dart';
 import 'deleted_cover.dart';
 import 'emoji_text.dart';
 import 'library_badge.dart';
@@ -6855,6 +6856,8 @@ class WorkGrid extends StatelessWidget {
         final w = works[i];
         final wp = WatchProgressStore.of(
             _libFor(w), '${(w is Map ? w['id'] : null) ?? ''}');
+        // G13：视频右下角显示时长，图文显示图片张数
+        final coverBadge = workCoverBadge(w);
         return GestureDetector(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
@@ -6878,6 +6881,21 @@ class WorkGrid extends StatelessWidget {
                     color: Colors.black54,
                     child: Text(w['t'] == 'v' ? '视频' : '图文',
                         style: const TextStyle(fontSize: 10)))),
+            if (coverBadge != null)
+              Positioned(
+                  right: 4,
+                  bottom: 4,
+                  child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 2),
+                      decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4)),
+                      child: Text(coverBadge,
+                          style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500)))),
             // G10：已看完角标 / 未看完的进度条
             if (wp != null && wp.done)
               Positioned(
