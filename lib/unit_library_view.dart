@@ -271,7 +271,7 @@ class StarredEntryCard extends StatelessWidget {
 }
 
 /// 星标单元库页：星标只属于单元库，基础库不再单独收藏。
-class StarredUnitsPage extends StatelessWidget {
+class StarredUnitsPage extends StatefulWidget {
   final List<UnitLibrary> units;
   final void Function(UnitLibrary unit) onOpenUnit;
   final void Function(UnitLibrary unit) onToggleUnitStar;
@@ -289,10 +289,22 @@ class StarredUnitsPage extends StatelessWidget {
   });
 
   @override
+  State<StarredUnitsPage> createState() => _StarredUnitsPageState();
+}
+
+class _StarredUnitsPageState extends State<StarredUnitsPage> {
+  late List<UnitLibrary> units = List<UnitLibrary>.from(widget.units);
+
+  void _toggle(UnitLibrary u) {
+    setState(() => units.removeWhere((e) => e.id == u.id));
+    widget.onToggleUnitStar(u);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('星标单元库'),
-          actions: const [HomeAction()]),
+      appBar: AppBar(
+          title: const Text('星标单元库'), actions: const [HomeAction()]),
       body: units.isEmpty
           ? const Center(
               child: Padding(
@@ -317,11 +329,11 @@ class StarredUnitsPage extends StatelessWidget {
                 final u = units[i];
                 return UnitLibraryCard(
                   unit: u,
-                  coverUrl: unitCoverOf?.call(u) ?? '',
-                  headers: unitHeadersOf(u, headersOf),
+                  coverUrl: widget.unitCoverOf?.call(u) ?? '',
+                  headers: unitHeadersOf(u, widget.headersOf),
                   starred: true,
-                  onToggleStar: () => onToggleUnitStar(u),
-                  onTap: () => onOpenUnit(u),
+                  onToggleStar: () => _toggle(u),
+                  onTap: () => widget.onOpenUnit(u),
                 );
               },
             ),
@@ -375,96 +387,81 @@ class UnitLibraryCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final server = unit.node.serverLabel;
     final showCrawler = onConfigure != null && canConfigure(unit);
-    final top = unit.rel.trim().isEmpty || unit.id == 'secret';
-    final badgeColor =
-        top ? const Color(0xFF6B7280) : Color(LibraryBadge.colorFor(unit.id));
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Material(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(radius),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: ValueKey(onTap == null
               ? 'unit-head-${unit.id}'
               : 'unit-${unit.id}'),
           borderRadius: BorderRadius.circular(radius),
           onTap: onTap,
-          // 与基础库/作品卡相同的卡片形状：封面在上、词条、名称、统计，
-          // 只是整体更大；由外层网格决定宽高，不写死尺寸。
-          child: Padding(
+          // 封面铺满整张卡片；不贴来源词条；名称与统计压在底部渐变上。
+          child: SizedBox.expand(
             key: ValueKey('unit-card-${unit.id}'),
-            padding: const EdgeInsets.fromLTRB(12, 12, 8, 10),
             child: Stack(children: [
-              Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: WorkPlaysStore.revision,
-                    builder: (_, __, ___) => _CoverThumb(
-                      key: ValueKey('unit-cover-${unit.id}'),
-                      url: unitCoverUrl(unit, customUrl: coverUrl),
-                      headers: headers,
-                      size: coverSize,
-                      fallbackIcon: Icons.folder_copy_outlined,
-                      fallbackColor: scheme.primary,
+              // 封面铺满（自定义封面优先，其次自动获取）。
+              ValueListenableBuilder<int>(
+                valueListenable: WorkPlaysStore.revision,
+                builder: (_, __, ___) => _UnitCoverFill(
+                  key: ValueKey('unit-cover-${unit.id}'),
+                  url: unitCoverUrl(unit, customUrl: coverUrl),
+                  headers: headers,
+                  fallbackIcon: Icons.folder_copy_outlined,
+                ),
+              ),
+              // 底部渐变：名称 + 作者/作品 + 基础库描述。
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(12, 26, 12, 10),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x00000000), Color(0xC7000000)],
                     ),
                   ),
-                ]),
-                const SizedBox(height: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: badgeColor.withValues(alpha: 0.9),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    unit.name.length > 10
-                        ? '${unit.name.substring(0, 10)}…'
-                        : unit.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 9.5,
-                      color:
-                          Color(LibraryBadge.textColorOn(badgeColor.toARGB32())),
-                      fontWeight: FontWeight.w600,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(unit.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 15,
+                              height: 1.2,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text(
+                          '${formatCount(unit.authors)} 作者 · '
+                          '${formatCount(unit.works)} 作品 · '
+                          '${unit.basicCount} 个基础库',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 10.5, color: Colors.white70)),
+                      if (server.isNotEmpty)
+                        Text(server,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.white54)),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Expanded(
-                  child: Text(unit.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 15,
-                          height: 1.2,
-                          fontWeight: FontWeight.w600)),
-                ),
-                const SizedBox(height: 4),
-                Text('${formatCount(unit.authors)} 作者 · '
-                    '${formatCount(unit.works)} 作品',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10.5, color: Colors.grey)),
-                // 大库描述：该单元库包含的基础库数量。
-                Text('${unit.basicCount} 个基础库',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10, color: Colors.grey)),
-                if (server.isNotEmpty)
-                  Text(server,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10, color: Colors.grey)),
-              ],
-            ),
+              ),
               // 与基础库卡片一致的右上角操作区（爬虫配置 / 星标）。
               Positioned(
-                top: 0,
-                right: 0,
+                top: 6,
+                right: 6,
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (showCrawler)
                     IconButton(
@@ -479,19 +476,10 @@ class UnitLibraryCard extends StatelessWidget {
                       onPressed: onConfigure,
                     ),
                   if (onToggleStar != null)
-                    IconButton(
+                    _StarButton(
                       key: ValueKey('unit-star-${unit.id}'),
-                      tooltip: starred ? '取消星标' : '星标单元库',
-                      iconSize: 20,
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints.tightFor(width: 30, height: 30),
-                      icon: Icon(
-                        starred ? Icons.star : Icons.star_border,
-                        color: starred ? Colors.amber : Colors.grey,
-                      ),
-                      onPressed: onToggleStar,
+                      starred: starred,
+                      onTap: onToggleStar!,
                     ),
                 ]),
               ),
@@ -499,6 +487,79 @@ class UnitLibraryCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 单元库封面：铺满整张卡片；无图时显示默认图标。
+class _UnitCoverFill extends StatelessWidget {
+  final String url;
+  final Map<String, String> headers;
+  final IconData fallbackIcon;
+
+  const _UnitCoverFill({
+    super.key,
+    required this.url,
+    required this.headers,
+    required this.fallbackIcon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fallback = Container(
+      color: scheme.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: Icon(fallbackIcon, size: 34, color: scheme.primary),
+    );
+    if (url.isEmpty) return fallback;
+    return CachedNetworkImage(
+      imageUrl: url,
+      httpHeaders: headers,
+      fit: BoxFit.cover,
+      fadeInDuration: Duration.zero,
+      errorWidget: (_, __, ___) => fallback,
+    );
+  }
+}
+
+/// 星标按钮：本地状态立即反馈（点亮/取消），再回调保存。
+class _StarButton extends StatefulWidget {
+  final bool starred;
+  final VoidCallback onTap;
+
+  const _StarButton({super.key, required this.starred, required this.onTap});
+
+  @override
+  State<_StarButton> createState() => _StarButtonState();
+}
+
+class _StarButtonState extends State<_StarButton> {
+  late bool _on = widget.starred;
+
+  @override
+  void didUpdateWidget(covariant _StarButton old) {
+    super.didUpdateWidget(old);
+    if (old.starred != widget.starred) _on = widget.starred;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: _on ? '取消星标' : '星标单元库',
+      iconSize: 22,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+      icon: Icon(_on ? Icons.star : Icons.star_border,
+          color: _on ? Colors.amber : Colors.white70),
+      onPressed: () {
+        setState(() => _on = !_on);
+        widget.onTap();
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+            duration: const Duration(milliseconds: 900),
+            content: Text(_on ? '已加入星标单元库' : '已取消星标')));
+      },
     );
   }
 }

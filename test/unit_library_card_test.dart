@@ -32,9 +32,11 @@ void main() {
   testWidgets('单元库卡片：与基础库同卡片形状（圆角 12、封面更大）', (t) async {
     await t.pumpWidget(host(UnitLibraryCard(unit: unit, onTap: () {})));
 
+    final card = t.getRect(find.byKey(ValueKey('unit-card-${unit.id}')));
     final cover = t.getSize(find.byKey(ValueKey('unit-cover-${unit.id}')));
-    expect(cover.width, 72);
-    expect(cover.height, 72);
+    // 封面铺满整张卡片。
+    expect(cover.width, card.width);
+    expect(cover.height, card.height);
 
     // 圆角与基础库卡片一致（12）。
     final mat = t.widget<Material>(find
@@ -47,9 +49,9 @@ void main() {
 
   testWidgets('单元库卡片：标题 + 作者/作品数', (t) async {
     await t.pumpWidget(host(UnitLibraryCard(unit: unit, onTap: () {})));
-    // 词条与标题都显示单元库名（与基础库卡片一致）。
-    expect(find.text('(1) A'), findsNWidgets(2));
-    expect(find.text('3 作者 · 30 作品'), findsOneWidget);
+    // 不再贴来源词条：只显示一次名称，统计与基础库数量合并一行。
+    expect(find.text('(1) A'), findsOneWidget);
+    expect(find.textContaining('3 作者 · 30 作品'), findsOneWidget);
   });
 
   testWidgets('爬虫配置入口在卡片右上角', (t) async {
