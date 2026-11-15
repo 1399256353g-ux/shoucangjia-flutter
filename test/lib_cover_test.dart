@@ -98,11 +98,41 @@ void main() {
       expect(pickBasicCover(rel: '(1) A/x').isEmpty, isTrue);
     });
 
-    test('单元库只用自定义封面', () {
+    test('单元库：自定义封面优先', () {
       expect(pickUnitCover(rel: '(1) A').isEmpty, isTrue);
       final p = pickUnitCover(rel: '(1) A', version: 'v1');
       expect(p.path, '(1) A/_cover/v1.jpg');
       expect(p.custom, isTrue);
+    });
+
+    test('单元库：无自定义时用子树内播放量最高的作品封面', () {
+      final p = pickUnitCover(
+          rel: '(1) A', bestThumb: '/media/lib-01/a/th.jpg');
+      expect(p.custom, isFalse);
+      expect(p.path, '/media/lib-01/a/th.jpg');
+    });
+  });
+
+  group('媒体地址', () {
+    test('媒体路径已带 /media/ 时原样返回', () {
+      expect(libraryMediaPath('lib-01', '/media/lib-01/a.jpg'),
+          '/media/lib-01/a.jpg');
+      expect(libraryMediaPath('lib-01', '/a/b.jpg'), '/media/lib-01/a/b.jpg');
+      expect(libraryMediaPath('', '/a/b.jpg'), '/media/a/b.jpg');
+      expect(libraryMediaPath('lib-01', ''), '');
+    });
+
+    test('绝对地址拼接（去掉 base 尾部斜杠）', () {
+      expect(
+          absoluteMediaUrl('http://nas:8090/',
+              lib: 'lib-01', path: '/media/lib-01/a.jpg'),
+          'http://nas:8090/media/lib-01/a.jpg');
+      expect(
+          absoluteMediaUrl('http://nas:8090',
+              lib: 'lib-01', path: 'a.jpg'),
+          'http://nas:8090/media/lib-01/a.jpg');
+      expect(absoluteMediaUrl('', lib: 'lib-01', path: 'a.jpg'), '');
+      expect(absoluteMediaUrl('http://nas:8090', lib: 'lib-01', path: ''), '');
     });
   });
 }

@@ -3,8 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_tree.dart';
 import 'package:shoucangjia/unit_library.dart';
 import 'package:shoucangjia/unit_library_view.dart';
+import 'package:shoucangjia/work_plays.dart';
 
-BasicLib basic(String id, String rel, {int authors = 1, int works = 10}) =>
+BasicLib basic(String id, String rel,
+        {int authors = 1, int works = 10, String serverBase = ''}) =>
     BasicLib(
       id: id,
       name: rel.split('/').last,
@@ -12,6 +14,7 @@ BasicLib basic(String id, String rel, {int authors = 1, int works = 10}) =>
       bigId: '',
       authors: authors,
       works: works,
+      serverBase: serverBase,
     );
 
 Widget host(Widget child) => MaterialApp(home: Scaffold(body: child));
@@ -153,5 +156,74 @@ void main() {
     expect(find.byKey(const ValueKey('unit-big-01')), findsOneWidget);
     await t.tap(find.byKey(const ValueKey('unit-star-big-01')));
     expect(toggled, 'big-01');
+  });
+
+  group('单元库封面解析', () {
+    tearDown(() => WorkPlaysStore.resetForTest(items: const {}));
+
+    final playTree = buildUnitTree(
+      nodes: const [
+        LibNode(id: 'big-01', rel: '(1) A', name: '(1) A'),
+        LibNode(id: 'big-01-sub', rel: '(1) A/sub', name: 'sub'),
+      ],
+      basics: [
+        basic('l1', '(1) A/x', serverBase: 'http://nas:8090'),
+        basic('l2', '(1) A/sub/y', serverBase: 'http://nas:8090'),
+      ],
+    )!;
+
+    test('自定义封面优先于播放量', () {
+      WorkPlaysStore.resetForTest(items: {
+        'l1/w1': const WorkPlay(count: 9, thumb: '/media/l1/x/th.jpg'),
+      });
+      expect(
+          unitCoverUrl(playTree,
+              customUrl: 'http://nas:8090/media/l1/x/_cover/v1.jpg'),
+          'http://nas:8090/media/l1/x/_cover/v1.jpg');
+    });
+
+    test('无自定义时取整棵子树内播放量最高的作品封面', () {
+      WorkPlaysStore.resetForTest(items: {
+        'l1/w1': const WorkPlay(count: 2, thumb: '/media/l1/x/a.jpg'),
+        'l2/w2': const WorkPlay(count: 7, thumb: '/media/l2/y/b.jpg'),
+      });
+      final top = topPlayedInUnit(playTree);
+      expect(top?.basic.id, 'l2');
+      expect(top?.thumb, '/media/l2/y/b.jpg');
+      expect(unitCoverUrl(playTree), 'http://nas:8090/media/l2/y/b.jpg');
+    });
+
+    test('相对缩略图按基础库前缀补齐', () {
+      WorkPlaysStore.resetForTest(items: {
+        'l1/w1': const WorkPlay(count: 4, thumb: 'x/th.jpg'),
+      });
+      expect(unitCoverUrl(playTree),
+          'http://nas:8090/media/l1/x/th.jpg');
+    });
+
+    test('播放记录只有空缩略图时回退默认图', () {
+      WorkPlaysStore.resetForTest(items: {
+        'l1/w1': const WorkPlay(count: 6, thumb: ''),
+      });
+      expect(topPlayedInUnit(playTree), isNull);
+      expect(unitCoverUrl(playTree), '');
+    });
+
+    test('thumbUrlOf 可替换 URL 拼装（交给 cfg 处理鉴权/路由）', () {
+      WorkPlaysStore.resetForTest(items: {
+        'l1/w1': const WorkPlay(count: 4, thumb: '/media/l1/x/th.jpg'),
+      });
+      expect(
+          unitCoverUrl(playTree,
+              thumbUrlOf: (b, th) => 'custom:$th@${b.id}'),
+          'custom:/media/l1/x/th.jpg@l1');
+    });
+
+    test('单元库卡片鉴权头取子树第一个基础库的连接', () {
+      expect(unitHeadersOf(playTree, null), isEmpty);
+      expect(
+          unitHeadersOf(playTree, ([lib]) => {'Authorization': 'Basic $lib'}),
+          {'Authorization': 'Basic l1'});
+    });
   });
 }

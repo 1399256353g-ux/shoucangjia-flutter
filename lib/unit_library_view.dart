@@ -1,19 +1,100 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'library_badge.dart';
 import 'library_tree.dart';
+import 'lib_cover.dart';
 import 'unit_library.dart';
+import 'work_plays.dart';
 
 /// L5-C：卡片封面（空串表示用默认图）。由调用方解析 `_cover/` 与播放量。
 typedef CoverOf = String Function(BasicLib basic);
 typedef UnitCoverOf = String Function(UnitLibrary unit);
 
-/// 封面缩略图：有图显示图片，无图显示默认图标。
+/// 单元库子树里「本机播放量最高且有缩略图」的作品：所属基础库 + 次数 + 缩略图。
+/// 同分按缩略图路径升序，结果稳定；没有则 null。
+({BasicLib basic, int count, String thumb})? topPlayedInUnit(UnitLibrary unit) {
+  ({BasicLib basic, int count, String thumb})? best;
+  for (final b in unit.allBasics) {
+    for (final v in WorkPlaysStore.countsFor(b.id).values) {
+      final th = v.thumb.trim();
+      if (th.isEmpty || v.count <= 0) continue;
+      if (best == null ||
+          v.count > best.count ||
+          (v.count == best.count && th.compareTo(best.thumb) < 0)) {
+        best = (basic: b, count: v.count, thumb: th);
+      }
+    }
+  }
+  return best;
+}
+
+/// 单元库封面 URL（优先级高 → 低，交给 [pickUnitCover] 判定）：
+///  1. 自定义 `_cover/<version>.<ext>`（节点带版本指针时自行拼；否则用
+///     调用方解析好的 [customUrl]）；
+///  2. 子树内「App 播放量最高」作品的封面（含下级单元库）；
+///  3. 空串 → 卡片回退默认图标。
+String unitCoverUrl(
+  UnitLibrary unit, {
+  String customUrl = '',
+  String Function(BasicLib basic, String thumb)? thumbUrlOf,
+}) {
+  final preset = customUrl.trim();
+  // 调用方已解析好的地址（自定义封面，鉴权/路由由调用方掌握）优先。
+  if (preset.isNotEmpty) return preset;
+  final top = topPlayedInUnit(unit);
+  final pick = pickUnitCover(
+    rel: unit.rel,
+    version: unit.node.coverVersion,
+    ext: unit.node.coverExt,
+    bestThumb: top?.thumb ?? '',
+  );
+  if (pick.isEmpty) return '';
+  final basics = unit.allBasics;
+  final basic = top?.basic ?? (basics.isEmpty ? null : basics.first);
+  if (basic == null) return '';
+  if (thumbUrlOf != null) return thumbUrlOf(basic, pick.path);
+  final base = basic.serverBase.trim().isNotEmpty
+      ? basic.serverBase
+      : unit.node.serverBase;
+  return absoluteMediaUrl(base, lib: basic.id, path: pick.path);
+}
+
+/// 单元库卡片的鉴权头：媒体按基础库路由，用子树第一个基础库的连接。
+Map<String, String> unitHeadersOf(
+  UnitLibrary unit,
+  Map<String, String> Function([String? lib])? headersOf,
+) {
+  if (headersOf == null) return const <String, String>{};
+  final basics = unit.allBasics;
+  return basics.isEmpty ? headersOf(null) : headersOf(basics.first.id);
+}
+
+/// 基础库卡片/基础库页的封面 URL（优先级高 → 低）：
+///  1. [preset]：调用方已解析好的地址（自定义封面等）；
+///  2. 本库「App 播放量最高」作品的封面；
+///  3. 空串 → 卡片回退默认图标。
+String basicCoverUrl(BasicLib basic, {String preset = ''}) {
+  final p = preset.trim();
+  if (p.isNotEmpty) return p;
+  final top = topPlayed(WorkPlaysStore.countsFor(basic.id));
+  final pick = pickBasicCover(
+    rel: basic.rel,
+    version: basic.coverVersion,
+    ext: basic.coverExt,
+    bestThumb: top?.thumb ?? '',
+  );
+  if (pick.isEmpty) return '';
+  return absoluteMediaUrl(basic.serverBase, lib: basic.id, path: pick.path);
+}
+
+/// 封面缩略图：有图显示图片（带鉴权头、按显示尺寸解码），无图显示默认图标。
 class _CoverThumb extends StatelessWidget {
   final String url;
   final double size;
   final IconData fallbackIcon;
   final Color fallbackColor;
+  final Map<String, String> headers;
 
   const _CoverThumb({
     super.key,
@@ -21,11 +102,18 @@ class _CoverThumb extends StatelessWidget {
     required this.size,
     required this.fallbackIcon,
     required this.fallbackColor,
+    this.headers = const <String, String>{},
   });
+
+  Widget _fallback() => Icon(fallbackIcon,
+      color: fallbackColor, size: size * 0.44);
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 缩略图按「显示尺寸 × 像素比」解码，避免整张大图进内存。
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final px = (size * (dpr <= 0 ? 1.0 : dpr)).round();
     final box = Container(
       width: size,
       height: size,
@@ -35,12 +123,14 @@ class _CoverThumb extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: url.isEmpty
-          ? Icon(fallbackIcon, color: fallbackColor, size: size * 0.44)
-          : Image.network(
-              url,
+          ? _fallback()
+          : CachedNetworkImage(
+              imageUrl: url,
+              httpHeaders: headers,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Icon(fallbackIcon,
-                  color: fallbackColor, size: size * 0.44),
+              memCacheWidth: px < 1 ? 1 : px,
+              fadeInDuration: Duration.zero,
+              errorWidget: (_, __, ___) => _fallback(),
             ),
     );
     return Semantics(
@@ -69,6 +159,8 @@ class UnitLibraryHomeView extends StatelessWidget {
   final void Function(BasicLib b) onTapBasic;
   final VoidCallback onOpenStars;
   final UnitCoverOf? unitCoverOf;
+  /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
+  final Map<String, String> Function([String? lib])? headersOf;
 
   const UnitLibraryHomeView({
     super.key,
@@ -79,6 +171,7 @@ class UnitLibraryHomeView extends StatelessWidget {
     required this.onTapBasic,
     required this.onOpenStars,
     this.unitCoverOf,
+    this.headersOf,
   });
 
   @override
@@ -110,6 +203,7 @@ class UnitLibraryHomeView extends StatelessWidget {
         UnitLibraryCard(
           unit: tree,
           coverUrl: unitCoverOf?.call(tree) ?? '',
+          headers: unitHeadersOf(tree, headersOf),
           starred: stars.contains(tree.id),
           onToggleStar: () => onToggleUnitStar(tree),
           onTap: () => onOpenUnit(tree),
@@ -165,6 +259,8 @@ class StarredUnitsPage extends StatelessWidget {
   final void Function(UnitLibrary unit) onOpenUnit;
   final void Function(UnitLibrary unit) onToggleUnitStar;
   final UnitCoverOf? unitCoverOf;
+  /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
+  final Map<String, String> Function([String? lib])? headersOf;
 
   const StarredUnitsPage({
     super.key,
@@ -172,6 +268,7 @@ class StarredUnitsPage extends StatelessWidget {
     required this.onOpenUnit,
     required this.onToggleUnitStar,
     this.unitCoverOf,
+    this.headersOf,
   });
 
   @override
@@ -196,6 +293,7 @@ class StarredUnitsPage extends StatelessWidget {
                   UnitLibraryCard(
                     unit: u,
                     coverUrl: unitCoverOf?.call(u) ?? '',
+                    headers: unitHeadersOf(u, headersOf),
                     starred: true,
                     onToggleStar: () => onToggleUnitStar(u),
                     onTap: () => onOpenUnit(u),
@@ -223,6 +321,8 @@ class UnitLibraryCard extends StatelessWidget {
   /// 为空表示纯展示卡片（单元库详情页顶部的自身卡片），不显示进入箭头。
   final VoidCallback? onTap;
   final String coverUrl;
+  /// 封面请求的鉴权头（媒体接口需要 Basic 认证）。
+  final Map<String, String> headers;
 
   /// 星标标记的是「单元库」，不是基础库。
   final bool starred;
@@ -236,6 +336,7 @@ class UnitLibraryCard extends StatelessWidget {
     required this.unit,
     this.onTap,
     this.coverUrl = '',
+    this.headers = const <String, String>{},
     this.starred = false,
     this.onToggleStar,
     this.onConfigure,
@@ -273,12 +374,16 @@ class UnitLibraryCard extends StatelessWidget {
                 onTap: onTap,
                 child: Row(children: [
                   const SizedBox(width: 10),
-                  _CoverThumb(
-                    key: ValueKey('unit-cover-${unit.id}'),
-                    url: coverUrl,
-                    size: coverSize,
-                    fallbackIcon: Icons.folder_copy_outlined,
-                    fallbackColor: scheme.primary,
+                  ValueListenableBuilder<int>(
+                    valueListenable: WorkPlaysStore.revision,
+                    builder: (_, __, ___) => _CoverThumb(
+                      key: ValueKey('unit-cover-${unit.id}'),
+                      url: unitCoverUrl(unit, customUrl: coverUrl),
+                      headers: headers,
+                      size: coverSize,
+                      fallbackIcon: Icons.folder_copy_outlined,
+                      fallbackColor: scheme.primary,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -370,6 +475,8 @@ class UnitLibraryPage extends StatelessWidget {
   final void Function(BasicLib b) onTapBasic;
   final CoverOf? coverOf;
   final UnitCoverOf? unitCoverOf;
+  /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
+  final Map<String, String> Function([String? lib])? headersOf;
   /// L5-D：非顶级单元库可配置独立爬虫（SECRET 顶级不显示入口）。
   final void Function(UnitLibrary unit)? onConfigureUnit;
 
@@ -382,6 +489,7 @@ class UnitLibraryPage extends StatelessWidget {
     required this.onTapBasic,
     this.coverOf,
     this.unitCoverOf,
+    this.headersOf,
     this.onConfigureUnit,
   });
 
@@ -412,6 +520,7 @@ class UnitLibraryPage extends StatelessWidget {
           UnitLibraryCard(
             unit: unit,
             coverUrl: unitCoverOf?.call(unit) ?? '',
+            headers: unitHeadersOf(unit, headersOf),
             starred: stars.contains(unit.id),
             onToggleStar: () => onToggleUnitStar(unit),
             onConfigure: onConfigureUnit == null
@@ -428,6 +537,7 @@ class UnitLibraryPage extends StatelessWidget {
               UnitLibraryCard(
                 unit: c,
                 coverUrl: unitCoverOf?.call(c) ?? '',
+                headers: unitHeadersOf(c, headersOf),
                 starred: stars.contains(c.id),
                 onToggleStar: () => onToggleUnitStar(c),
                 onTap: () => onOpenUnit(c),
@@ -456,6 +566,7 @@ class UnitLibraryPage extends StatelessWidget {
               itemBuilder: (c, i) => BasicLibCard(
                 basic: sorted[i],
                 coverUrl: coverOf?.call(sorted[i]) ?? '',
+                headers: headersOf?.call(sorted[i].id) ?? const {},
                 unitLabel: unit.name,
                 unitKey: unit.id,
                 onTap: () => onTapBasic(sorted[i]),
@@ -473,6 +584,8 @@ class BasicLibCard extends StatelessWidget {
   final BasicLib basic;
   final VoidCallback onTap;
   final String coverUrl;
+  /// 封面请求的鉴权头（媒体接口需要 Basic 认证）。
+  final Map<String, String> headers;
   /// 所属单元库（节点文件夹）。只有单元库有资格生成位置词条；
   /// 为空表示该卡片不在单元库语境下，不显示词条。
   final String unitLabel;
@@ -483,6 +596,7 @@ class BasicLibCard extends StatelessWidget {
     required this.basic,
     required this.onTap,
     this.coverUrl = '',
+    this.headers = const <String, String>{},
     this.unitLabel = '',
     this.unitKey = '',
   });
@@ -538,11 +652,16 @@ class BasicLibCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                _CoverThumb(
-                  url: coverUrl,
-                  size: 26,
-                  fallbackIcon: Icons.folder_outlined,
-                  fallbackColor: scheme.primary,
+                ValueListenableBuilder<int>(
+                  valueListenable: WorkPlaysStore.revision,
+                  builder: (_, __, ___) => _CoverThumb(
+                    key: ValueKey('basic-cover-${basic.id}'),
+                    url: basicCoverUrl(basic, preset: coverUrl),
+                    headers: headers,
+                    size: 26,
+                    fallbackIcon: Icons.folder_outlined,
+                    fallbackColor: scheme.primary,
+                  ),
                 ),
                 const Spacer(),
               ]),

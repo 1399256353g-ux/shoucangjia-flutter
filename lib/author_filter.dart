@@ -31,33 +31,44 @@ class AuthorLibNode {
 
 /// 作者筛选状态；全部为空即“未筛选”。
 class AuthorFilterState {
+  /// J10 旧维度：基础库/大库（保留以兼容历史数据与测试）。
   final Set<String> basics;
   final Set<String> bigs;
+  /// L5 新维度：单元库（作者总览/推荐/排行统一按此筛选）。
+  final Set<String> units;
   final Set<String> grades;
   final Set<String> types;
 
   AuthorFilterState({
     Set<String>? basics,
     Set<String>? bigs,
+    Set<String>? units,
     Set<String>? grades,
     Set<String>? types,
   })  : basics = {...?basics},
         bigs = {...?bigs},
+        units = {...?units},
         grades = {...?grades},
         types = {...?types};
 
   bool get isActive =>
       basics.isNotEmpty ||
       bigs.isNotEmpty ||
+      units.isNotEmpty ||
       grades.isNotEmpty ||
       types.isNotEmpty;
 
   int get activeCount =>
-      basics.length + bigs.length + grades.length + types.length;
+      basics.length +
+      bigs.length +
+      units.length +
+      grades.length +
+      types.length;
 
   AuthorFilterState copy() => AuthorFilterState(
         basics: basics,
         bigs: bigs,
+        units: units,
         grades: grades,
         types: types,
       );
@@ -65,6 +76,7 @@ class AuthorFilterState {
   void clear() {
     basics.clear();
     bigs.clear();
+    units.clear();
     grades.clear();
     types.clear();
   }
@@ -77,6 +89,11 @@ class AuthorFilterState {
   void toggleBig(String id) {
     if (id.isEmpty) return;
     if (!bigs.remove(id)) bigs.add(id);
+  }
+
+  void toggleUnit(String id) {
+    if (id.isEmpty) return;
+    if (!units.remove(id)) units.add(id);
   }
 
   void toggleGrade(String g) {
@@ -94,13 +111,16 @@ class AuthorFilterState {
   bool matches({
     required String basicId,
     required String bigId,
+    String unitId = '',
     required String grade,
     required Set<String> workTypes,
   }) {
-    if (basics.isNotEmpty || bigs.isNotEmpty) {
+    if (basics.isNotEmpty || bigs.isNotEmpty || units.isNotEmpty) {
       final byBasic = basicId.isNotEmpty && basics.contains(basicId);
       final byBig = bigId.isNotEmpty && bigs.contains(bigId);
-      if (!byBasic && !byBig) return false;
+      final byUnit = unitId.isNotEmpty && units.contains(unitId);
+      // 库维度内取并集：基础库/大库/单元库任一命中即可。
+      if (!byBasic && !byBig && !byUnit) return false;
     }
     if (grades.isNotEmpty) {
       if (grade.isEmpty || !grades.contains(grade)) return false;
@@ -116,8 +136,13 @@ class AuthorFilterState {
   String summary({
     Map<String, String> basicNames = const {},
     Map<String, String> bigNames = const {},
+    Map<String, String> unitNames = const {},
   }) {
     final parts = <String>[];
+    if (units.isNotEmpty) {
+      final names = units.map((id) => unitNames[id] ?? id).toList()..sort();
+      parts.add('单元库 ${names.join('/')}');
+    }
     if (basics.isNotEmpty) {
       final names = basics.map((id) => basicNames[id] ?? id).toList()..sort();
       parts.add('基础库 ${names.join('/')}');
@@ -240,6 +265,7 @@ int countMatchingAuthors(
   AuthorFilterState filter, {
   required String Function(Map<String, dynamic> author) basicIdOf,
   required String Function(Map<String, dynamic> author) bigIdOf,
+  String Function(Map<String, dynamic> author)? unitIdOf,
   required String Function(String name, Map<String, dynamic> author) gradeOf,
   required Set<String> Function(String name) typesOf,
 }) {
@@ -248,6 +274,7 @@ int countMatchingAuthors(
     if (filter.matches(
       basicId: basicIdOf(e.value),
       bigId: bigIdOf(e.value),
+      unitId: unitIdOf?.call(e.value) ?? '',
       grade: gradeOf(e.key, e.value),
       workTypes: typesOf(e.key),
     )) {

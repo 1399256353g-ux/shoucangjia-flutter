@@ -5303,6 +5303,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   List<MapEntry<String, Map<String, dynamic>>> _ordered = const [];
   final ScrollController _scroll = ScrollController();
   String _sig = '';
+  // T1：作者卡没有现成头像（av 为空）时，从该作者作品图里挑一张兜底。
+  // 只对缺头像的作者发一次请求，结果按「库|作者」缓存在内存里。
+  final Map<String, String> _avFallback = {};
+  final Set<String> _avLookup = {};
   // J11：作者筛选状态全 App 共享（总览/排行/搜索/推荐同一份）
   AuthorFilterState get filter => authorFilter.value;
   Map<String, Set<String>> authorTypes = {};
@@ -5750,6 +5754,26 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     }
   }
 
+  // T1：为缺头像的作者取一张作品图兜底（每条作者+库只发一次请求）。
+  Future<void> _fetchFallbackAvatar(
+      String name, String lib, String idx) async {
+    if (!mounted) return;
+    final key = '$lib|$name';
+    if (_avLookup.contains(key)) return;
+    _avLookup.add(key);
+    try {
+      final r = await http.get(cfg.u('/api/a/$idx.json', lib: lib),
+          headers: cfg.headers);
+      if (r.statusCode != 200) return;
+      final m = jsonDecode(r.body);
+      final pick = pickFallbackAvatar(avatarCandidatesFromWorks(
+          ((m is Map ? m['works'] : null) as List?)?.whereType<Map>() ??
+              const <Map>[]));
+      if (pick == null || pick.isEmpty || !mounted) return;
+      setState(() => _avFallback[key] = pick);
+    } catch (_) {}
+  }
+
   Future<void> _open(String name) async {
     final ls = authorLibs[name] ?? [sel == 'all' ? cfg.lib : sel];
     await Navigator.of(context).push(MaterialPageRoute(
@@ -5781,6 +5805,17 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     // I7：头像按实际显示尺寸 × 像素比解码，避免整张大图进内存
     final avatarPx =
         avatarDecodeWidth(displaySize: 58, devicePixelRatio: devicePixelRatio);
+    // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位
+    final fallbackKey = '$lib|${e.key}';
+    final shownAv = av.isNotEmpty ? av : (_avFallback[fallbackKey] ?? '');
+    if (av.isEmpty && shownAv.isEmpty) {
+      final idx = '${e.value['i'] ?? ''}';
+      if (idx.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _fetchFallbackAvatar(e.key, lib, idx);
+        });
+      }
+    }
     // 卡片尺寸固定：网格给定 170 高 / ≤150 宽，内部一律用固定高度，
     // 文字只做单行省略，绝不因内容多少改变卡片大小。
     final scheme = Theme.of(context).colorScheme;
@@ -5805,14 +5840,14 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                       child: SizedBox(
                         width: 58,
                         height: 58,
-                        child: av.isEmpty
+                        child: shownAv.isEmpty
                             ? Container(
                                 color: Colors.blueGrey,
                                 alignment: Alignment.center,
                                 child: Text(e.key.isEmpty ? '?' : e.key[0],
                                     style: const TextStyle(fontSize: 24)))
                             : CachedNetworkImage(
-                                imageUrl: cfg.mediaUrl(av, lib: lib),
+                                imageUrl: cfg.mediaUrl(shownAv, lib: lib),
                                 httpHeaders: cfg.headersFor(lib),
                                 fit: BoxFit.cover,
                                 memCacheWidth: avatarPx,
@@ -10256,7 +10291,25 @@ class _AuthorPageState extends State<AuthorPage> {
                                         primaryLib.isEmpty ? null : primaryLib),
                                     width: 64,
                                     height: 64,
-                                    fit: BoxFit.cover)),
+                                    // T1：按 64×DPR 解码，失败也保持 64×64 不抽动
+                                    memCacheWidth: avatarDecodeWidth(
+                                        displaySize: 64,
+                                        devicePixelRatio:
+                                            MediaQuery.devicePixelRatioOf(
+                                                context)),
+                                    fadeInDuration: Duration.zero,
+                                    fit: BoxFit.cover,
+                                    errorWidget: (_, __, ___) => Container(
+                                        width: 64,
+                                        height: 64,
+                                        color: Colors.blueGrey,
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                            widget.name.isEmpty
+                                                ? '?'
+                                                : widget.name[0],
+                                            style: const TextStyle(
+                                                fontSize: 26))))),
                       ),
                       const SizedBox(width: 12),
                       Expanded(

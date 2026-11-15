@@ -329,3 +329,55 @@ String formatCount(int n) {
   final s = (n / 10000).toStringAsFixed(1);
   return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}万';
 }
+
+/// 手动模式的节点列表：`/api/nodes` 的相对路径 → 单元库节点。
+/// 空数组表示只有顶级 SECRET（不生成任何下级节点）。
+List<LibNode> nodesFromMarks(Iterable<String> marks) {
+  final out = <LibNode>[];
+  final seen = <String>{};
+  for (final raw in marks) {
+    final rel = splitRel(raw).join('/');
+    if (rel.isEmpty || !seen.add(rel)) continue;
+    out.add(LibNode(id: rel, rel: rel, name: splitRel(rel).last));
+  }
+  return out;
+}
+
+/// 基础库 id → 所属单元库 id。
+///
+/// 每个基础库在 [buildUnitTree] 里只会归属一个单元库；
+/// 没有归属的基础库挂在顶级单元库（SECRET）下。
+Map<String, String> unitOfBasics(UnitLibrary root) {
+  final out = <String, String>{};
+  void walk(UnitLibrary u) {
+    for (final c in u.children) {
+      walk(c);
+    }
+    for (final b in u.basics) {
+      out[b.id] = u.id;
+    }
+  }
+
+  walk(root);
+  return out;
+}
+
+/// 筛选用单元库列表：只保留含基础库的单元库，深度优先，SECRET 放最后。
+List<UnitLibrary> flattenUnits(UnitLibrary root) {
+  final out = <UnitLibrary>[];
+  void walk(UnitLibrary u) {
+    if (u.basics.isNotEmpty) out.add(u);
+    for (final c in u.children) {
+      walk(c);
+    }
+  }
+
+  walk(root);
+  // 顶级 SECRET 固定放最后，避免它排在小库前面。
+  final secret = out.where((u) => u.node.id == root.node.id).toList();
+  if (secret.isNotEmpty) {
+    out.removeWhere((u) => u.node.id == root.node.id);
+    out.addAll(secret);
+  }
+  return out;
+}

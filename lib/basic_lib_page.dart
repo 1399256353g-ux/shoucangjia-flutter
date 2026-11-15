@@ -1,11 +1,21 @@
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_tree.dart';
 import 'work_card.dart';
+
+/// 作者卡片头像：优先用服务端下发的 `av`；为空时用兜底图（该作者作品首图）。
+/// 两者都为空时由调用方回退到「首字」占位。
+String pickAuthorAvatar({String av = '', String fallback = ''}) {
+  final a = av.trim();
+  if (a.isNotEmpty) return a;
+  return fallback.trim();
+}
 
 /// M10：基础库页面「作者视图 / 作品视图」双视图。
 ///
@@ -46,6 +56,10 @@ class _BasicLibPageState extends State<BasicLibPage>
 
   List<Map<String, dynamic>> authors = [];
   List<dynamic> works = [];
+  /// 作者 → `av` 头像路径（`/api/authors.json` 下发；空表示无头像）。
+  final Map<String, String> _authorAv = <String, String>{};
+  /// 作者 → 兜底头像（该作者第一件作品的缩略图）。
+  final Map<String, String> _authorFallback = <String, String>{};
   /// 作品类型多选筛选（空集合 = 全部）；只在本地过滤，不影响接口分页。
   final Set<String> _typeFilter = <String>{};
   int total = 0;
@@ -59,6 +73,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     super.initState();
     _worksScroll.addListener(_onScroll);
     _loadAuthors();
+    _loadAvatars();
     _loadWorks(reset: true);
   }
 
@@ -104,6 +119,43 @@ class _BasicLibPageState extends State<BasicLibPage>
     }
   }
 
+  /// 作者头像索引：`/api/authors.json` 的 `av`（索引文件里没有头像）。
+  Future<void> _loadAvatars() async {
+    try {
+      final r = await http
+          .get(widget.urlOf('/api/authors.json', lib: widget.basic.id),
+              headers: widget.headersOf(widget.basic.id))
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      if (j is! Map) return;
+      final map = <String, String>{};
+      j.forEach((k, v) {
+        if (v is! Map) return;
+        final av = '${v['av'] ?? ''}'.trim();
+        if (av.isNotEmpty) map['$k'] = av;
+      });
+      if (!mounted) return;
+      setState(() {
+        _authorAv
+          ..clear()
+          ..addAll(map);
+      });
+    } catch (_) {}
+  }
+
+  /// 兜底头像：每个作者第一件作品的缩略图（作品分页更新时重建）。
+  void _rebuildAuthorFallback() {
+    _authorFallback.clear();
+    for (final w in works) {
+      if (w is! Map) continue;
+      final a = '${w['a'] ?? ''}'.trim();
+      if (a.isEmpty || _authorFallback.containsKey(a)) continue;
+      final th = _thumbOf(w);
+      if (th.isNotEmpty) _authorFallback[a] = th;
+    }
+  }
+
   Future<void> _loadWorks({bool reset = false}) async {
     if (reset) {
       works = [];
@@ -133,6 +185,8 @@ class _BasicLibPageState extends State<BasicLibPage>
         total = _int(j['total']);
         loadingWorks = false;
         loadingMore = false;
+        // 头像兜底跟着作品更新（作者第一件作品的缩略图）
+        _rebuildAuthorFallback();
       });
     } catch (e) {
       if (!mounted) return;
@@ -245,16 +299,10 @@ class _BasicLibPageState extends State<BasicLibPage>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: scheme.primary.withValues(alpha: 0.15),
-                    child: Text(
-                      name.isEmpty ? '?' : name.characters.first,
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.primary),
-                    ),
+                  _authorAvatar(
+                    key: ValueKey('basic-author-avatar-${a['id'] ?? i}'),
+                    context: c,
+                    name: name,
                   ),
                   const SizedBox(height: 8),
                   Expanded(
@@ -281,6 +329,53 @@ class _BasicLibPageState extends State<BasicLibPage>
           ),
         );
       },
+    );
+  }
+
+  /// 作者卡片头像：有 `av` 用 `av`（带鉴权、按显示尺寸解码），
+  /// 否则用兜底图（该作者第一件作品的缩略图），都没有时回退首字占位。
+  Widget _authorAvatar({
+    Key? key,
+    required BuildContext context,
+    required String name,
+    double size = 48,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final initial = name.isEmpty ? '?' : name.characters.first;
+    final placeholder = Center(
+      child: Text(initial,
+          style: TextStyle(
+              fontSize: size * 0.38,
+              fontWeight: FontWeight.w600,
+              color: scheme.primary)),
+    );
+    final path = pickAuthorAvatar(
+        av: _authorAv[name] ?? '', fallback: _authorFallback[name] ?? '');
+    final url =
+        path.isEmpty ? '' : widget.mediaUrlOf(path, lib: widget.basic.id);
+    // 缩略按显示尺寸 × 像素比解码，避免整张头像原图进内存。
+    final px = avatarDecodeWidth(
+        displaySize: size,
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context));
+    return ClipOval(
+      child: Container(
+        key: key,
+        width: size,
+        height: size,
+        color: scheme.primary.withValues(alpha: 0.15),
+        child: url.isEmpty
+            ? placeholder
+            : CachedNetworkImage(
+                imageUrl: url,
+                httpHeaders: widget.headersOf(widget.basic.id),
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                memCacheWidth: px,
+                fadeInDuration: Duration.zero,
+                errorWidget: (_, __, ___) => placeholder,
+              ),
+      ),
     );
   }
 

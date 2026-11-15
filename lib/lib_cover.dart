@@ -4,8 +4,9 @@
 ///  1. 文件夹自定义封面：`_cover/<version>.<ext>`（版本指针由服务端扫描写入
 ///     `libraries.json` 的 `cover` / `cover_ext`；只新增文件、不改旧文件，
 ///     旧图因此全部保留，回滚只需把指针改回旧版本）。
-///  2. 基础库：本机「App 本地播放量最高」且带缩略图的作品封面。
-///  3. 单元库（上级文件夹）：默认图（文件夹图标），不借用作品封面。
+///  2. 本机「App 本地播放量最高」且带缩略图的作品封面：
+///     基础库取库内最高，单元库取整棵子树（含下级单元库）最高。
+///  3. 都没有 → 默认图（文件夹图标）。
 ///
 /// 本文件不碰网络与文件系统，只做「该用哪张图」的判定。
 library;
@@ -110,6 +111,33 @@ class CoverPick {
   bool get isEmpty => path.isEmpty;
 }
 
+/// 媒体路径统一成 `/media/<lib>/<相对路径>`：
+///  - 已带 `/media/` 前缀（服务端索引下发的 `th`）原样返回；
+///  - 相对路径按库前缀补齐（与 `Cfg.media` 规则一致）；
+///  - 空路径返回空串。
+String libraryMediaPath(String lib, String path) {
+  final p = path.trim();
+  if (p.isEmpty) return '';
+  if (p.startsWith('/media/')) return p;
+  final l = lib.trim();
+  final rest = p.replaceFirst(RegExp(r'^/+'), '');
+  if (l.isEmpty) return '/media/$rest';
+  return '/media/${Uri.encodeComponent(l)}/$rest';
+}
+
+/// 媒体绝对地址：`<base>/media/<lib>/<相对路径>`。
+/// [base] 为空时返回空串（调用方回退默认图）。
+String absoluteMediaUrl(
+  String base, {
+  required String lib,
+  required String path,
+}) {
+  final b = base.trim().replaceFirst(RegExp(r'/+$'), '');
+  final p = libraryMediaPath(lib, path);
+  if (b.isEmpty || p.isEmpty) return '';
+  return '$b$p';
+}
+
 /// 基础库封面：
 ///  - 有自定义版本 → `_cover/<version>.<ext>`；
 ///  - 否则取本机播放量最高的作品缩略图（[bestThumb]，由 WorkPlaysStore 提供）；
@@ -127,12 +155,19 @@ CoverPick pickBasicCover({
   return const CoverPick.none();
 }
 
-/// 单元库（上级文件夹）封面：只用自定义封面，否则默认图。
+/// 单元库（上级文件夹）封面：
+///  - 有自定义版本 → `_cover/<version>.<ext>`；
+///  - 否则取子树内本机播放量最高的作品缩略图（[bestThumb]，整棵子树合并）；
+///  - 都没有 → 空（显示默认图）。
 CoverPick pickUnitCover({
   required String rel,
+  String bestThumb = '',
   String version = '',
   String ext = 'jpg',
 }) {
   final custom = coverImageRel(rel, version, ext: ext);
-  return custom.isEmpty ? const CoverPick.none() : CoverPick(custom, custom: true);
+  if (custom.isNotEmpty) return CoverPick(custom, custom: true);
+  final th = bestThumb.trim();
+  if (th.isNotEmpty) return CoverPick(th);
+  return const CoverPick.none();
 }
