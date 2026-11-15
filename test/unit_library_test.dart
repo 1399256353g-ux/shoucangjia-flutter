@@ -121,6 +121,33 @@ void main() {
       expect(nodes.map((n) => n.rel), ['(1) A', '(1) A/(9) G']);
       expect(nodes.last.name, '(9) G');
     });
+
+    test('手动模式：空节点＝只有顶级 SECRET，不回退自动节点', () {
+      final json = {
+        'nodesMode': 'manual',
+        'nodes': <dynamic>[],
+        'bigLibraries': [
+          {'id': 'big-01', 'name': '(1) A', 'path': '/r/Secret/(1) A'},
+        ],
+        'groups': [
+          {'id': 'grp-01', 'name': '(9) G', 'path': '/r/Secret/(1) A/(9) G'},
+        ],
+      };
+      expect(nodesFromV2(json, root: '/r/Secret'), isEmpty);
+    });
+
+    test('手动模式：只认 owner 勾选的节点', () {
+      final json = {
+        'nodesMode': 'manual',
+        'nodes': [
+          {'id': 'nd-001', 'rel': '(1) A', 'name': '(1) A'},
+        ],
+        'bigLibraries': <dynamic>[],
+        'groups': <dynamic>[],
+      };
+      final nodes = nodesFromV2(json);
+      expect(nodes.map((n) => n.rel), ['(1) A']);
+    });
   });
 
   test('formatCount 千/万分位', () {

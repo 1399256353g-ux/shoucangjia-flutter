@@ -281,8 +281,23 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     ));
   }
 
-  // J14：优先用服务端扫出的「通用分类节点」（任意层级上级目录）。
+  // 手动模式（服务端 `nodesMode: manual`）：节点文件夹只认 owner 在「文件结构」
+  // 里勾选的目录（/api/nodes）；空数组＝只有顶级 SECRET，绝不回退自动节点。
+  final manual =
+      '${json['nodesMode'] ?? ''}'.trim().toLowerCase() == 'manual';
   final rawNodes = json['nodes'];
+  if (manual) {
+    if (rawNodes is List) {
+      for (final x in rawNodes) {
+        if (x is! Map) continue;
+        if ('${x['rel'] ?? ''}'.trim().isEmpty) continue;
+        add(x);
+      }
+    }
+    return out;
+  }
+
+  // J14：优先用服务端扫出的「通用分类节点」（任意层级上级目录）。
   if (rawNodes is List && rawNodes.isNotEmpty) {
     var used = false;
     for (final x in rawNodes) {

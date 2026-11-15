@@ -2863,6 +2863,7 @@ class _LibraryPageState extends State<LibraryPage> {
                       ],
                     ],
                   );
+  }
 
   Widget _libTile(Map<String, dynamic> l) {
     final id = '${l['id']}';
@@ -3260,13 +3261,13 @@ class _MaintenancePageState extends State<MaintenancePage> {
       );
 }
 
-class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+class CollectionsPage extends StatefulWidget {
+  const CollectionsPage({super.key});
   @override
-  State<HomePage> createState() => _HomePageState();
+  State<CollectionsPage> createState() => _CollectionsPageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _CollectionsPageState extends State<CollectionsPage> {
   List cols = [];
   final Map<String, String> covers = {};
   String? err;
@@ -3610,6 +3611,121 @@ class _HomePageState extends State<HomePage> {
                     );
                   })),
                 ]),
+    );
+  }
+}
+
+/// L5：主页＝单元库卡片（不是抖音收藏夹）。
+///
+/// 抖音收藏没有特殊地位：它只是「文件结构」里被设为节点的普通目录，
+/// 和其他单元库平级。按 idx 的旧收藏夹列表从右上角「收藏夹」进入。
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int _libEpoch = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncCurrentLib();
+  }
+
+  /// 只同步「当前库」指向服务端默认库，用于播放/同步路由；不拉收藏夹列表。
+  Future<void> _syncCurrentLib() async {
+    try {
+      final r = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return;
+      final lj = jsonDecode(r.body) as Map<String, dynamic>;
+      final ls = ((lj['libraries'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (ls.isEmpty) return;
+      Map<String, dynamic>? pick;
+      for (final e in ls) {
+        if (e['id'] == cfg.lib) {
+          pick = e;
+          break;
+        }
+      }
+      pick ??= ls.firstWhere((e) => e['id'] == lj['default'],
+          orElse: () => ls.first);
+      final changed = cfg.lib != pick['id'];
+      cfg.lib = '${pick['id']}';
+      cfg.libName = fixDisplayName('${pick['name'] ?? cfg.lib}');
+      if (changed) {
+        final sp = await SharedPreferences.getInstance();
+        await sp.setString('lib', cfg.lib);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _openCollections() async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const CollectionsPage()));
+  }
+
+  /// 「文件结构」：列出库下全部文件夹，勾选哪些是节点文件夹（单元库）。
+  Future<void> _openFolders() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => FolderStructurePage(
+        urlOf: (path) => Uri.parse('${cfg.base}$path'),
+        headersOf: () => cfg.headers,
+      ),
+    ));
+    if (!mounted) return;
+    setState(() => _libEpoch++);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 12,
+        title: const Text('媒体库'),
+        actions: [
+          IconButton(
+              key: const ValueKey('open-collections'),
+              icon: const Icon(Icons.video_library_outlined),
+              tooltip: '收藏夹',
+              onPressed: _openCollections),
+          IconButton(
+              key: const ValueKey('open-folder-structure-home'),
+              icon: const Icon(Icons.account_tree_outlined),
+              tooltip: '文件结构 / 节点文件夹',
+              onPressed: _openFolders),
+          IconButton(
+              icon: const Icon(Icons.auto_awesome),
+              tooltip: '推荐',
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RecommendPage()))),
+          IconButton(
+              icon: const Icon(Icons.people_alt_outlined),
+              tooltip: '作者',
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const AuthorGridPage()))),
+          IconButton(
+              icon: const Icon(Icons.leaderboard_outlined),
+              tooltip: '排行榜',
+              onPressed: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const RankPage()))),
+          IconButton(
+              icon: const Icon(Icons.search),
+              tooltip: '搜索',
+              onPressed: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const SearchPage()))),
+          IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const SettingsHubPage()))),
+        ],
+      ),
+      body: LibraryPage(key: ValueKey('home-libs-$_libEpoch'), embedded: true),
     );
   }
 }
@@ -5193,7 +5309,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     super.initState();
     authorFilter.addListener(_onSharedFilter);
     sel = cfg.lib;
-    _scroll.addListener(_maybeLoadMore);
     loadLibs();
     LibraryBadge.load().then((_) {
       if (mounted) setState(() {});
@@ -5593,21 +5708,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     _ordered = sortAuthorEntries(base,
         metric: _metric, works: (e) => _num(e.value['n']), name: (e) => e.key);
     if (resetShown) {
-      _shown = initialGridCount(_ordered.length);
+      _shown = _ordered.length;
     } else if (_shown > _ordered.length) {
       _shown = _ordered.length;
-    }
-  }
-
-  /// 滚动到底部附近时追加一页（固定行高列表，只增加行数）。
-  void _maybeLoadMore() {
-    if (!mounted || !_scroll.hasClients || _shown >= _ordered.length) return;
-    final p = _scroll.position;
-    if (shouldLoadNextPage(
-        pixels: p.pixels,
-        maxScrollExtent: p.maxScrollExtent,
-        viewportDimension: p.viewportDimension)) {
-      setState(() => _shown = nextGridCount(_shown, _ordered.length));
     }
   }
 
@@ -5879,48 +5982,24 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                         ? const Center(
                             child: Text('暂无作者数据',
                                 style: TextStyle(color: Colors.grey)))
-                        : LayoutBuilder(
-                            builder: (context, cons) {
-                              final geo =
-                                  authorGridGeometry(width: cons.maxWidth);
-                              final total = _ordered.length;
-                              final shown = _shown < total ? _shown : total;
-                              final rows = geo.rowsFor(shown);
-                              final dpr =
-                                  MediaQuery.of(context).devicePixelRatio;
-                              // I7：固定行高列表，滚动时按 itemExtent 复用行，
-                              // 不再逐项测量网格，返回/下拉都更顺滑
-                              return ListView.builder(
-                                controller: _scroll,
-                                padding:
-                                    const EdgeInsets.fromLTRB(12, 4, 12, 16),
-                                itemExtent: geo.rowExtent,
-                                cacheExtent: geo.rowExtent * 4,
-                                itemCount: rows,
-                                itemBuilder: (_, row) {
-                                  return Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      for (var c = 0; c < geo.columns; c++) ...[
-                                        if (c > 0) const SizedBox(width: 10),
-                                        SizedBox(
-                                          width: geo.cellWidth,
-                                          height: geo.rowExtent - 10,
-                                          child: (row * geo.columns + c) < shown
-                                              ? _authorCell(
-                                                  _ordered[
-                                                      row * geo.columns + c],
-                                                  dpr)
-                                              : const SizedBox.shrink(),
-                                        ),
-                                      ],
-                                    ],
-                                  );
-                                },
-                              );
-                            },
-                          ),
+                        : Builder(builder: (context) {
+                            final dpr = MediaQuery.of(context).devicePixelRatio;
+                            // 全量作者 + 固定高度网格：GridView 自身虚拟化，
+                            // 卡片尺寸统一，不再用「渐进显示」限制条数。
+                            return GridView.builder(
+                              controller: _scroll,
+                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                              gridDelegate:
+                                  const SliverGridDelegateWithMaxCrossAxisExtent(
+                                maxCrossAxisExtent: 150,
+                                mainAxisSpacing: 10,
+                                crossAxisSpacing: 10,
+                                mainAxisExtent: 170,
+                              ),
+                              itemCount: _ordered.length,
+                              itemBuilder: (_, i) => _authorCell(_ordered[i], dpr),
+                            );
+                          }),
                   ),
                 ]),
     );
@@ -10391,13 +10470,13 @@ class WorkGrid extends StatefulWidget {
 class _WorkGridState extends State<WorkGrid> {
   final ScrollController _scroll = ScrollController();
   int _shown = 0;
-
   @override
   void initState() {
     super.initState();
     _shown = initialGridCount(widget.works.length);
     _scroll.addListener(_maybeLoadMore);
   }
+
 
   @override
   void didUpdateWidget(covariant WorkGrid old) {
