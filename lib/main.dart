@@ -14,6 +14,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_filter.dart';
+import 'author_drag.dart';
 import 'author_filter_bar.dart';
 import 'author_filter_ui.dart';
 import 'author_grid.dart';
@@ -7018,6 +7019,73 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  // M9：作者页跟手拖拽。拖动开始时透明路由即入栈（进度 0），位移由手指驱动。
+  AuthorDragController? _authorDrag;
+  double _authorDragDx = 0;
+  bool _authorDragResume = false;
+  bool _authorDragClosing = false;
+
+  void _authorDragStart() {
+    if (_authorDrag != null) return;
+    final name = '${_workAt(cur)['a'] ?? ''}';
+    if (name.isEmpty) return;
+    _authorDragDx = 0;
+    _authorDragClosing = false;
+    _authorDragResume = !paused;
+    try {
+      player.pause();
+    } catch (_) {}
+    final c = AuthorDragController(vsync: this);
+    final route = AuthorDragRoute(
+      drag: c,
+      builder: (_) => AuthorPage(name: name, libs: [_curLib]),
+    );
+    _authorDrag = c;
+    Navigator.of(context).push(route).whenComplete(() {
+      final ac = _authorDrag;
+      _authorDrag = null;
+      ac?.dispose();
+      if (_authorDragResume && mounted && !fs) {
+        try {
+          player.play();
+        } catch (_) {}
+      }
+    });
+  }
+
+  void _authorDragUpdate(double dx, double width) {
+    final c = _authorDrag;
+    if (c == null || _authorDragClosing) return;
+    _authorDragDx += dx;
+    c.progress = AuthorDrag.progress(dx: _authorDragDx, width: width);
+  }
+
+  void _authorDragEnd(double velocity) {
+    final c = _authorDrag;
+    if (c == null || _authorDragClosing) return;
+    if (AuthorDrag.completes(progress: c.progress, velocity: velocity)) {
+      c.settleTo(1, opening: true);
+    } else {
+      _authorDragCancel();
+    }
+  }
+
+  void _authorDragCancel() {
+    final c = _authorDrag;
+    if (c == null || _authorDragClosing) return;
+    _authorDragClosing = true;
+    c.settleTo(0, opening: false).then((_) {
+      if (!mounted) return;
+      final nav = Navigator.of(context);
+      final route = ModalRoute.of(context);
+      if (nav.canPop()) {
+        nav.pop();
+      } else if (route != null) {
+        nav.removeRoute(route);
+      }
+    });
+  }
+
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
     final name = '${_workAt(cur)['a'] ?? ''}';
@@ -7528,6 +7596,9 @@ class _PlayerPageState extends State<PlayerPage>
     _swipeHintTimer?.cancel();
     _preloadTimer?.cancel();
     _preloadGen++;
+    // M9：播放页退出时清掉未完成的作者页拖拽控制器
+    _authorDrag?.dispose();
+    _authorDrag = null;
     // M2：曾主动锁定方向时恢复系统默认（全部方向），避免影响后续页面。
     if (_orientationForced) {
       try {
@@ -8144,12 +8215,14 @@ class _PlayerPageState extends State<PlayerPage>
                     if (it['t'] == 'v') {
                       return GestureDetector(
                         onTapUp: (d) => onStageTap(d.localPosition),
-                        onHorizontalDragEnd: (d) {
-                          // 右划快速进入作者主页
-                          final v = d.primaryVelocity ?? 0;
-                          if (v < -200)
-                            openAuthor(); // 向左划拉出作者页（抖音式待 M9 改为跟手拖拽）
-                        },
+                        // M9：抖音式跟手拖拽——向左拖作者页随手指从右侧滑入，
+                        // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
+                        onHorizontalDragStart: (_) => _authorDragStart(),
+                        onHorizontalDragUpdate: (d) =>
+                            _authorDragUpdate(d.delta.dx, MediaQuery.sizeOf(context).width),
+                        onHorizontalDragEnd: (d) =>
+                            _authorDragEnd(d.primaryVelocity ?? 0),
+                        onHorizontalDragCancel: _authorDragCancel,
                         onLongPressStart: (_) => player.setRate(2.0),
                         onLongPressEnd: (_) => player.setRate(speed),
                         child: Stack(fit: StackFit.expand, children: [
