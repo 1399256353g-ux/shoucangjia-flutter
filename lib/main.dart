@@ -21,6 +21,7 @@ import 'author_filter_ui.dart';
 import 'author_grid.dart';
 import 'author_grade.dart';
 import 'basic_lib_page.dart';
+import 'folder_structure_page.dart';
 import 'background_pause.dart';
 import 'collection_sync.dart';
 import 'continue_watching.dart';
@@ -649,7 +650,7 @@ class _AppState extends State<App> {
             return null;
           }),
         },
-        home: cfg.base.isEmpty ? const SettingsPage() : const HomePage(),
+        home: cfg.base.isEmpty ? const SettingsPage() : const LibraryPage(),
       ),
     );
   }
@@ -2231,7 +2232,10 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
 }
 
 class LibraryPage extends StatefulWidget {
-  const LibraryPage({super.key});
+  /// L5：内嵌到主页时只渲染内容（无 Scaffold/AppBar）——主页＝单元库卡片。
+  final bool embedded;
+
+  const LibraryPage({super.key, this.embedded = false});
   @override
   State<LibraryPage> createState() => _LibraryPageState();
 }
@@ -2426,11 +2430,19 @@ class _LibraryPageState extends State<LibraryPage> {
         return;
       }
       final t = LibraryTree.parse(merged, stars: saved);
-      final nodes = nodesFromV2(merged, root: '${merged['root'] ?? ''}');
+      // 节点文件夹由 owner 在「文件结构」里指定；默认为空 = 只有顶级 SECRET。
+      final marked = await _fetchMarkedNodes();
+      final nodes = marked
+          .map((rel) => LibNode(
+                id: 'node:$rel',
+                rel: rel,
+                name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
+              ))
+          .toList(growable: false);
       final units = buildUnitTree(
         nodes: nodes,
         basics: t?.allBasics ?? const <BasicLib>[],
-        topName: '${merged['root'] ?? ''}'.trim().isEmpty ? 'SECRET' : 'SECRET',
+        topName: 'SECRET',
       );
       if (!mounted) return;
       setState(() {
@@ -2474,6 +2486,44 @@ class _LibraryPageState extends State<LibraryPage> {
         onToggleStar: _toggleStar,
         onTapBasic: _showBasic,
         coverOf: _coverUrlFor,
+      ),
+    ));
+  }
+
+  /// 鉴权头（拆分拼接，避免与既有写法混用）。
+  String _authFor(ServerConn s) =>
+      'Basic ' + base64Encode(utf8.encode(s.user + ':' + s.pass));
+
+  /// 读取 owner 指定的节点文件夹（服务端 nodes.json）；失败时按「只有 SECRET」处理。
+  Future<List<String>> _fetchMarkedNodes() async {
+    if (servers.isEmpty) return const [];
+    final s = servers.first;
+    try {
+      final r = await http
+          .get(Uri.parse('${s.base}/api/nodes'), headers: {
+        'Authorization':
+            _authFor(s),
+      }).timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return const [];
+      final j = jsonDecode(r.body);
+      final list = (j is Map) ? j['nodes'] : null;
+      if (list is! List) return const [];
+      return list.map((e) => '$e'.trim()).where((e) => e.isNotEmpty).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> _openFolders() async {
+    if (servers.isEmpty) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => FolderStructurePage(
+        urlOf: (path) => Uri.parse('${servers.first.base}$path'),
+        headersOf: () => {
+          'Authorization':
+              _authFor(servers.first),
+        },
+        onSaved: (_) async => load(),
       ),
     ));
   }
@@ -2715,6 +2765,7 @@ class _LibraryPageState extends State<LibraryPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.embedded) return _body();
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -2733,13 +2784,22 @@ class _LibraryPageState extends State<LibraryPage> {
                 await load();
               }),
           IconButton(
+              icon: const Icon(Icons.account_tree_outlined),
+              tooltip: '文件结构 / 节点设置',
+              onPressed: _openFolders),
+          IconButton(
               icon: const Icon(Icons.add), onPressed: _add, tooltip: '添加库'),
         ]),
-        body: err != null
-            ? Center(child: Text('加载失败：$err'))
-            : loading
-                ? const Center(child: CircularProgressIndicator())
-                : ListView(
+        body: _body(),
+      ),
+    );
+  }
+
+  /// 内容区：主页内嵌与独立「媒体库」页共用。
+  Widget _body() {
+    if (err != null) return Center(child: Text('加载失败：$err'));
+    if (loading) return const Center(child: CircularProgressIndicator());
+    return ListView(
                     children: [
                       if (warn != null)
                         Container(
@@ -2802,10 +2862,7 @@ class _LibraryPageState extends State<LibraryPage> {
                         for (final l in libs) _libTile(l),
                       ],
                     ],
-                  ),
-      ),
-    );
-  }
+                  );
 
   Widget _libTile(Map<String, dynamic> l) {
     final id = '${l['id']}';
