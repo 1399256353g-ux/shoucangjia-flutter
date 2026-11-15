@@ -39,6 +39,7 @@ import 'playback_menu.dart';
 import 'preload_plan.dart';
 import 'swipe_control.dart';
 import 'swipe_physics.dart';
+import 'stage_tap.dart';
 import 'start_fade.dart';
 import 'watch_progress.dart';
 import 'work_forms.dart';
@@ -6130,38 +6131,61 @@ class _PlayerPageState extends State<PlayerPage>
   // 320ms 内在相近位置再次点击视为双击：点赞并恢复到点击前的播放状态。
   void onStageTap([Offset? pos]) {
     focus.requestFocus();
-    if (!ui) {
-      showUi();
-      _lastStageTapAt = 0;
-      return;
-    }
-    // G14：图片放大时单击只恢复原始大小，不暂停/双击点赞
-    if (_picZoom.isZoomed) {
-      _resetPicZoom();
-      _lastStageTapAt = 0;
-      return;
-    }
     final w = _workAt(cur);
     final now = DateTime.now().millisecondsSinceEpoch;
+    // M1：全屏单击只切换功能区显隐，不暂停；非全屏保持单击暂停。
+    // 双击仍可点赞，即使第一次单击已把全屏功能区收起。
     final isDouble = isStageDoubleTap(
         nowMs: now,
         lastMs: _lastStageTapAt,
         lastPos: _lastStageTapAt > 0 ? _lastStageTapPos : null,
         pos: pos);
-    if (isDouble) {
-      _lastStageTapAt = 0;
-      // 第一次点击已经切换过一次暂停；双击时按点击前的状态恢复。
-      _restorePauseAfterTap(_tapWasPausedBefore);
-      if (!_isLiked(w)) _setLiked(w, true, at: pos);
-      showUi();
-      return;
+    final action = stageTapAction(
+      uiVisible: ui,
+      fullscreen: fs,
+      zoomed: _picZoom.isZoomed,
+      doubleTap: isDouble,
+    );
+    switch (action) {
+      case StageTapAction.resetZoom:
+        // G14：图片放大时单击只恢复原始大小，不暂停/双击点赞
+        _resetPicZoom();
+        _lastStageTapAt = 0;
+        return;
+      case StageTapAction.like:
+        _lastStageTapAt = 0;
+        // 非全屏时第一次单击已经切换过暂停；双击按点击前状态恢复。
+        if (!fs) _restorePauseAfterTap(_tapWasPausedBefore);
+        if (!_isLiked(w)) _setLiked(w, true, at: pos);
+        showUi();
+        return;
+      case StageTapAction.showUi:
+        showUi();
+        _lastStageTapAt = 0;
+        return;
+      case StageTapAction.hideUi:
+        // 记录这次点击，使紧接着的第二次点击仍可判定为双击点赞。
+        _lastStageTapAt = now;
+        _lastStageTapPos = pos ?? Offset.zero;
+        hideUiNow();
+        return;
+      case StageTapAction.togglePause:
+        _lastStageTapAt = now;
+        _lastStageTapPos = pos ?? Offset.zero;
+        _tapWasPausedBefore = paused;
+        hapticTap();
+        togglePause();
+        showUi();
+        return;
     }
-    _lastStageTapAt = now;
-    _lastStageTapPos = pos ?? Offset.zero;
-    _tapWasPausedBefore = paused;
-    hapticTap();
-    togglePause();
-    showUi();
+  }
+
+  /// M1：立即收起功能区（取消自动隐藏计时器，避免残留定时器再触发）。
+  void hideUiNow() {
+    hideTimer?.cancel();
+    hideTimer = null;
+    if (!mounted) return;
+    setState(() => ui = false);
   }
 
   // 双击点赞时撤销第一次点击带来的暂停切换（视频流事件可能迟到，
