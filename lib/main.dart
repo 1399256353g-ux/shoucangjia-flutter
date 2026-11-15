@@ -28,6 +28,7 @@ import 'continue_watching.dart';
 import 'cover_badges.dart';
 import 'decode_fallback.dart';
 import 'deleted_cover.dart';
+import 'home_action.dart';
 import 'emoji_text.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
@@ -260,7 +261,11 @@ class LibMeta {
                   final list = nj is Map ? nj['nodes'] : null;
                   if (list is List) {
                     for (final e in list) {
-                      final s = '$e'.trim();
+                      // /api/nodes 既可能是字符串，也可能是 {id,rel,name} 对象。
+                      final s = (e is Map
+                              ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}'
+                              : '$e')
+                          .trim();
                       if (s.isNotEmpty) marks.add(s);
                     }
                   }
@@ -317,9 +322,25 @@ class LibMeta {
   /// L5：作者所属单元库 id；无法匹配基础库时为空。
   /// 有基础库但没有节点归属时回落到顶级 `secret`。
   String unitIdFor(String mediaPath) {
+    // 先按节点文件夹（单元库）路径匹配：作者头像/作品通常放在单元库目录下，
+    // 而不是某一个基础库的深层目录里。
+    final rel = decodeMediaRel(mediaPath);
+    if (rel.isNotEmpty) {
+      String bestRel = '';
+      String bestId = '';
+      for (final u in units) {
+        final r = u.rel.trim();
+        if (r.isEmpty) continue;
+        if ((rel == r || rel.startsWith('$r/')) && r.length > bestRel.length) {
+          bestRel = r;
+          bestId = u.id;
+        }
+      }
+      if (bestId.isNotEmpty) return bestId;
+    }
     final b = idFor(mediaPath);
-    if (b.isEmpty) return '';
-    return basicToUnit[b] ?? 'secret';
+    if (b.isNotEmpty) return basicToUnit[b] ?? 'secret';
+    return rel.isEmpty ? '' : 'secret';
   }
 
   String unitNameOf(String id) {
@@ -1351,11 +1372,10 @@ class UnitBadges extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final unitId = meta?.unitIdFor(mediaPath) ?? '';
-    final id = unitId.isEmpty ? fallbackId : unitId;
+    // 不再回退到「库名」词条（抖音收藏已废弃）；没有单元库归属就显示 SECRET。
+    final id = unitId.isEmpty ? 'secret' : unitId;
     final names = <String, String>{...?meta?.unitNames};
-    if (unitId.isEmpty && id.isNotEmpty) {
-      names[id] = fallbackName.isEmpty ? id : fallbackName;
-    }
+    names['secret'] = 'SECRET';
     final gray = unitId.isEmpty || unitId == 'secret';
     return LibBadges(
       libIds: id.isEmpty ? const [] : <String>[id],
@@ -1363,20 +1383,6 @@ class UnitBadges extends StatelessWidget {
       names: names,
       grayIds: gray ? <String>{id} : const {},
       grade: grade,
-    );
-  }
-}
-
-/// 深页面统一「返回主页」按钮：直接回到根路由（主页）。
-class HomeAction extends StatelessWidget {
-  const HomeAction({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: '返回主页',
-      icon: const Icon(Icons.home_outlined),
-      onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
     );
   }
 }
@@ -2658,7 +2664,13 @@ class _LibraryPageState extends State<LibraryPage> {
       final j = jsonDecode(r.body);
       final list = (j is Map) ? j['nodes'] : null;
       if (list is! List) return const [];
-      return list.map((e) => '$e'.trim()).where((e) => e.isNotEmpty).toList();
+      return list
+          .map((e) => (e is Map
+                  ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}'
+                  : '$e')
+              .trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
     } catch (_) {
       return const [];
     }
@@ -3649,7 +3661,10 @@ class _CollectionsPageState extends State<CollectionsPage> {
                         size: 18, color: theme.colorScheme.primary),
                     const SizedBox(width: 6),
                     Flexible(
-                        child: Text(cfg.libName.isEmpty ? '抖音收藏夹' : cfg.libName,
+                        // 抖音收藏已废弃，不再作为界面标题出现。
+                        child: Text(cfg.lib == 'douyin' || cfg.libName.isEmpty
+                                ? '媒体库'
+                                : cfg.libName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium
@@ -10310,8 +10325,7 @@ class _SearchPageState extends State<SearchPage> {
                                                 0),
                                   ),
                                   const SizedBox(height: 2),
-                                  Text(
-                                      '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
+                                  Text('@${w['a']} · ${e['col']}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis),
                                 ]);

@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_tree.dart';
@@ -232,6 +233,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       appBar: AppBar(
         title: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          const HomeAction(),
           IconButton(
             key: const ValueKey('basic-categories'),
             tooltip: '分类树',

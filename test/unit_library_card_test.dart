@@ -29,12 +29,8 @@ void main() {
   )!;
   final unit = tree.children.first;
 
-  testWidgets('单元库卡片：与基础库同圆角，但更高、封面更大', (t) async {
+  testWidgets('单元库卡片：与基础库同卡片形状（圆角 12、封面更大）', (t) async {
     await t.pumpWidget(host(UnitLibraryCard(unit: unit, onTap: () {})));
-
-    final rect = t.getRect(find.byKey(ValueKey('unit-card-${unit.id}')));
-    expect(rect.height, UnitLibraryCard.height);
-    expect(UnitLibraryCard.height, 150);
 
     final cover = t.getSize(find.byKey(ValueKey('unit-cover-${unit.id}')));
     expect(cover.width, 72);
@@ -68,14 +64,14 @@ void main() {
     final card = t.getRect(find.byKey(ValueKey('unit-card-${unit.id}')));
     final btn =
         t.getRect(find.byKey(ValueKey('unit-crawler-${unit.id}')));
-    // 贴右上角
-    expect(btn.top - card.top, lessThan(4));
-    expect(card.right - btn.right, lessThan(20));
+    // 右上角操作区（与基础库卡片的顶部封面行一致）
+    expect(btn.top - card.top, lessThan(64));
+    expect(card.right - btn.right, lessThan(64));
 
-    // 星标在右下角，两者不重叠
+    // 星标同排、不与爬虫入口重叠
     final star = t.getRect(find.byKey(ValueKey('unit-star-${unit.id}')));
-    expect(star.center.dy - card.top, greaterThan(90));
-    expect(star.top, greaterThanOrEqualTo(btn.bottom));
+    expect((star.center.dy - btn.center.dy).abs(), lessThan(2));
+    expect(star.left, greaterThanOrEqualTo(btn.right));
 
     await t.tap(find.byKey(ValueKey('unit-crawler-${unit.id}')));
     expect(opened, unit.id);

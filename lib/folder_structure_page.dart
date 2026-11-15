@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'home_action.dart';
+
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
 /// 供 owner 指定「节点文件夹」（单元库）。默认只有 SECRET 顶级节点。
 ///
@@ -422,6 +424,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       appBar: AppBar(
         title: const Text('文件结构'),
         actions: [
+          const HomeAction(),
           TextButton(
             onPressed: (dirty && !saving) ? _save : null,
             child: saving

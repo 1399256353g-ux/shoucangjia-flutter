@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'home_action.dart';
 import 'unit_crawler.dart';
 import 'unit_library.dart';
 
@@ -145,6 +146,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       appBar: AppBar(
         title: Text('爬虫配置 · ${widget.unit.name}'),
         actions: [
+          const HomeAction(),
           TextButton(
             onPressed: (!hasScript || saving) ? null : save,
             child: Text(saving ? '保存中…' : '保存'),

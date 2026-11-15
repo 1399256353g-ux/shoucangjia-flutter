@@ -45,15 +45,14 @@ void main() {
     expect(find.text('单元库'), findsOneWidget);
     expect(find.byKey(const ValueKey('starred-entry')), findsOneWidget);
     expect(find.text('1 个'), findsOneWidget);
-    // 主页只给顶级单元库一张卡；下级单元库不铺在主页
-    expect(find.byKey(ValueKey('unit-${tree.id}')), findsOneWidget);
-    expect(find.byKey(const ValueKey('unit-big-01')), findsNothing);
-    expect(find.byKey(const ValueKey('unit-big-02')), findsNothing);
+    // 主页把顶级下的单元库卡片铺成网格（与基础库卡片同形状）
+    expect(find.byKey(const ValueKey('unit-big-01')), findsOneWidget);
+    expect(find.byKey(const ValueKey('unit-big-02')), findsOneWidget);
     // 基础库卡片也不在主页出现（层级递减：点进单元库才有）
     expect(find.byKey(const ValueKey('basic-card-l1')), findsNothing);
 
-    await t.tap(find.byKey(ValueKey('unit-${tree.id}')));
-    expect(opened, tree.id);
+    await t.tap(find.byKey(const ValueKey('unit-big-01')));
+    expect(opened, 'big-01');
   });
 
   testWidgets('主页星标点的是单元库本身', (t) async {
@@ -66,8 +65,8 @@ void main() {
       onTapBasic: (_) {},
       onOpenStars: () {},
     )));
-    await t.tap(find.byKey(ValueKey('unit-star-${tree.id}')));
-    expect(toggled, tree.id);
+    await t.tap(find.byKey(const ValueKey('unit-star-big-01')));
+    expect(toggled, 'big-01');
   });
 
   testWidgets('单元库页显示基础库卡片与词条，基础库不再有星标', (t) async {

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'home_action.dart';
 import 'category_tree.dart';
 import 'library_tree.dart';
 
@@ -186,6 +187,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
         title: Text('分类 · ${widget.basic.name}',
             maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          const HomeAction(),
           if (renaming)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 14),
