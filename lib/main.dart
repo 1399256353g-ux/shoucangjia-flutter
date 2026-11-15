@@ -41,6 +41,7 @@ import 'swipe_control.dart';
 import 'swipe_physics.dart';
 import 'stage_tap.dart';
 import 'start_fade.dart';
+import 'source_lib.dart';
 import 'watch_progress.dart';
 import 'work_forms.dart';
 import 'work_safety.dart';
@@ -148,6 +149,94 @@ class Cfg {
 
 final cfg = Cfg();
 final navKey = GlobalKey<NavigatorState>();
+
+/// J9：作者来源词条所需的基础库映射与统计。
+/// 一次加载后按库缓存，词条显示「基础库」名称（如「🦶」），不是大库名。
+class LibMeta {
+  final List<BasicLibRef> basics;
+  final Map<String, dynamic> stats;
+
+  const LibMeta({required this.basics, required this.stats});
+
+  static final Map<String, LibMeta> cache = <String, LibMeta>{};
+  static final Map<String, Future<LibMeta>> _loading = <String, Future<LibMeta>>{};
+
+  static Future<LibMeta> load(String lib) {
+    final hit = cache[lib];
+    if (hit != null) return Future.value(hit);
+    return _loading.putIfAbsent(lib, () async {
+      var basics = const <BasicLibRef>[];
+      var stats = <String, dynamic>{};
+      try {
+        final rs = await Future.wait([
+          http.get(cfg.u('/api/libraries.json', lib: lib), headers: cfg.headers),
+          http.get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers),
+          http.get(cfg.u('/api/author_stats.json', lib: lib),
+              headers: cfg.headers),
+        ]).timeout(const Duration(seconds: 10));
+        if (rs[0].statusCode == 200 && rs[1].statusCode == 200) {
+          final lj = jsonDecode(rs[0].body);
+          final reg = jsonDecode(rs[1].body);
+          var base = '';
+          if (reg is Map && reg['libraries'] is List) {
+            for (final e in reg['libraries'] as List) {
+              if (e is Map && '${e['id']}' == lib) {
+                base = '${e['base'] ?? e['dir'] ?? ''}';
+                break;
+              }
+            }
+          }
+          if (lj is Map && base.isNotEmpty) {
+            basics = basicsUnderBase(Map<String, dynamic>.from(lj), base);
+          }
+        }
+        if (rs[2].statusCode == 200) {
+          final sj = jsonDecode(rs[2].body);
+          if (sj is Map && sj['authors'] is Map) {
+            stats = Map<String, dynamic>.from(sj['authors'] as Map);
+          }
+        }
+      } catch (_) {}
+      final meta = LibMeta(basics: basics, stats: stats);
+      cache[lib] = meta;
+      _loading.remove(lib);
+      return meta;
+    });
+  }
+
+  static void invalidate(String lib) {
+    cache.remove(lib);
+  }
+
+  /// 基础库词条显示名：路径命中基础库时用其名称，否则回落到传入的库名。
+  String labelFor(String mediaPath, String fallback) {
+    final b = basicLibForMedia(basics, mediaPath);
+    if (b == null) return '';
+    return basicLibLabel(b, fallback);
+  }
+
+  /// 作者所属基础库 id（用于配色）；未命中返回空。
+  String idFor(String mediaPath) =>
+      basicLibForMedia(basics, mediaPath)?.id ?? '';
+
+  List<String> get order => basics.map((e) => e.id).toList();
+
+  Map<String, String> get names => {
+        for (final b in basics) b.id: basicLibLabel(b, b.name),
+      };
+
+  int _n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+
+  String gradeFor(String author, int works) {
+    final s = stats[author];
+    final m = s is Map ? s : const {};
+    return AuthorGrade.gradeFor(
+      plays: _n(m['p']),
+      drops: _n(m['dr']),
+      works: works,
+    );
+  }
+}
 
 // 作者统计上报（播放/访问），失败静默，不影响播放
 void postStat(String type, String author, {String? lib}) {
@@ -3908,6 +3997,7 @@ class _RankPageState extends State<RankPage> {
   List<Map<String, dynamic>> libs = [];
   String sel = '';
   List rows = [];
+  final Map<String, LibMeta> metas = {};
   bool loading = true;
   String? err;
 
@@ -3958,8 +4048,21 @@ class _RankPageState extends State<RankPage> {
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(r.body);
       if (!mounted) return;
+      final list = (j is Map && j['authors'] is List) ? j['authors'] as List : [];
+      final need = <String>{
+        if (sel != 'all' && sel.isNotEmpty) sel,
+        for (final e in list)
+          if (e is Map && '${e['lib'] ?? ''}'.isNotEmpty) '${e['lib']}',
+        if (sel == 'all') ...libs.map((e) => '${e['id']}'),
+      };
+      for (final lib in need) {
+        try {
+          metas[lib] = await LibMeta.load(lib);
+        } catch (_) {}
+      }
+      if (!mounted) return;
       setState(() {
-        rows = (j is Map && j['authors'] is List) ? j['authors'] as List : [];
+        rows = list;
         loading = false;
       });
     } catch (e) {
@@ -4143,6 +4246,19 @@ class _RankPageState extends State<RankPage> {
                             final name = '${e['name'] ?? ''}';
                             final av = '${e['avatar'] ?? ''}';
                             final score = _n(e['score']);
+                            final rowLib = sel == 'all'
+                                ? '${e['lib'] ?? cfg.lib}'
+                                : (sel.isEmpty ? cfg.lib : sel);
+                            final meta = metas[rowLib];
+                            final basicId = meta?.idFor(av) ?? '';
+                            final badgeIds = <String>[
+                              basicId.isEmpty ? rowLib : basicId
+                            ];
+                            final badgeNames = <String, String>{
+                              ...?meta?.names,
+                              for (final l in libs)
+                                '${l['id']}': '${l['name'] ?? l['id']}',
+                            };
                             return ListTile(
                               contentPadding:
                                   const EdgeInsets.symmetric(horizontal: 4),
@@ -4196,13 +4312,30 @@ class _RankPageState extends State<RankPage> {
                                   style: const TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w600)),
-                              subtitle: Text(
-                                  '播放 ${_n(e['plays'])} · 水滴 ${_n(e['drops'])} · ${_n(e['works'])} 作品',
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSurfaceVariant)),
+                              subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    LibBadges(
+                                      libIds: badgeIds,
+                                      order: <String>[
+                                        ...?meta?.order,
+                                        ...libs.map((e) => '${e['id']}'),
+                                      ],
+                                      names: badgeNames,
+                                      grade: meta == null
+                                          ? ''
+                                          : meta.gradeFor(
+                                              name, _n(e['works'])),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                        '播放 ${_n(e['plays'])} · 水滴 ${_n(e['drops'])} · ${_n(e['works'])} 作品',
+                                        style: TextStyle(
+                                            fontSize: 10,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant)),
+                                  ]),
                               trailing: Text(
                                   metric == 'drop' ? '💧 $score' : '$score',
                                   style: const TextStyle(
@@ -4462,6 +4595,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   List<Map<String, dynamic>> libs = [];
   String sel = '';
   final Map<String, List<String>> authorLibs = {};
+  // J9：库 -> 基础库/统计映射，用于显示基础库来源词条
+  final Map<String, LibMeta> metas = {};
   String sort = 'plays';
   bool loading = true;
   String? err;
@@ -4654,6 +4789,12 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         }
       }
       if (!mounted) return;
+      for (final lib in targets) {
+        try {
+          metas[lib] = await LibMeta.load(lib);
+        } catch (_) {}
+      }
+      if (!mounted) return;
       final entries =
           auMap.entries.map((e) => MapEntry(e.key, e.value)).toList();
       final sig = _dataSignature(entries, stMap);
@@ -4806,9 +4947,22 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Widget _authorCell(
       MapEntry<String, Map<String, dynamic>> e, double devicePixelRatio) {
     final av = '${e.value['av'] ?? ''}';
-    final ids = authorLibs[e.key] ??
-        <String>[sel == 'all' ? '${e.value['_lib'] ?? cfg.lib}' : sel];
     final lib = '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}';
+    final meta = metas[lib] ?? metas[sel];
+    final basicId = meta?.idFor(av) ?? '';
+    final ids = <String>[basicId.isEmpty ? lib : basicId];
+    String libLabel(String id) {
+      final fromMeta = meta?.names[id];
+      if (fromMeta != null && fromMeta.isNotEmpty) return fromMeta;
+      for (final l in libs) {
+        if ('${l['id']}' == id) return '${l['name'] ?? l['id']}';
+      }
+      return id;
+    }
+    final order = <String>[
+      ...?meta?.order,
+      ...libs.map((e) => '${e['id']}'),
+    ];
     // I7：头像按实际显示尺寸 × 像素比解码，避免整张大图进内存
     final avatarPx =
         avatarDecodeWidth(displaySize: 58, devicePixelRatio: devicePixelRatio);
@@ -4881,9 +5035,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
               drops: _num(_s(e.key)['dr']),
               works: _num(e.value['n']),
             ),
-            names: {
-              for (final l in libs) '${l['id']}': '${l['name'] ?? l['id']}'
-            },
+            names: {for (final id in {...ids, ...order}) id: libLabel(id)},
           ),
         ),
       ]),
@@ -5306,6 +5458,9 @@ class _PlayerPageState extends State<PlayerPage>
   bool _buffering = false;
   bool _slowBuffer = false;
   Timer? _slowBufferTimer;
+  // J9：当前库的基础库/统计，用于信息行的来源词条与等级词条
+  LibMeta? _meta;
+  String _metaLib = '';
   int _imgReload = 0;
   bool manualPic = false;
   StreamSubscription? subPos;
@@ -5318,11 +5473,21 @@ class _PlayerPageState extends State<PlayerPage>
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
     _loadLikes();
+    _ensureMetaFor(_curLib);
     _bindPlayer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       focus.requestFocus();
       open(widget.start);
     });
+  }
+
+  Future<void> _ensureMetaFor(String lib) async {
+    if (lib.isEmpty || lib == _metaLib) return;
+    _metaLib = lib;
+    try {
+      final m = await LibMeta.load(lib);
+      if (mounted) setState(() => _meta = m);
+    } catch (_) {}
   }
 
   /// G18：监听当前活动槽位。切换预缓冲槽位时先解绑旧槽位，避免
@@ -5716,6 +5881,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (i != cur) _chapter = 0;
     final w = _workAt(i);
     final wl = _libFor(w);
+    _ensureMetaFor(wl);
     // G20：单条作品数据异常时不再调用播放器（避免未捕获异常卡死整页），
     // 只切到该条并展示占位，PageView 仍可继续上下滑。
     if (!workPlayable(w)) {
@@ -7532,6 +7698,38 @@ class _PlayerPageState extends State<PlayerPage>
                                   ),
                                 ],
                               ]),
+                              // J9：来源词条（基础库）+ 等级词条，半透明不遮画面
+                              if (_meta != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Opacity(
+                                    opacity: 0.7,
+                                    child: LibBadges(
+                                      libIds: [
+                                        _meta!
+                                                .idFor('${w['av'] ?? ''}')
+                                                .isEmpty
+                                            ? _curLib
+                                            : _meta!
+                                                .idFor('${w['av'] ?? ''}')
+                                      ],
+                                      order: _meta!.order,
+                                      names: {
+                                        ..._meta!.names,
+                                        _curLib: cfg.libName.isEmpty
+                                            ? _curLib
+                                            : cfg.libName,
+                                      },
+                                      grade: _meta!.gradeFor(
+                                          '${w['a'] ?? ''}',
+                                          widget.works
+                                              .where((e) =>
+                                                  e is Map &&
+                                                  e['a'] == w['a'])
+                                              .length),
+                                    ),
+                                  ),
+                                ),
                               if (workChapterCount(widget.works[cur]) > 1)
                                 Padding(
                                   padding: const EdgeInsets.only(bottom: 2),
@@ -8197,6 +8395,8 @@ class _SearchPageState extends State<SearchPage> {
   List<Map<String, dynamic>> libs = [];
   String sel = '';
   List all = [];
+  final Map<String, LibMeta> metas = {};
+  final Map<String, int> authorWorkCount = {};
   bool loading = true;
   String kw = '';
   int _loadToken = 0;
@@ -8261,6 +8461,9 @@ class _SearchPageState extends State<SearchPage> {
     final out = <Map<String, dynamic>>[];
     try {
       for (final lib in targets) {
+        try {
+          metas[lib] = await LibMeta.load(lib);
+        } catch (_) {}
         final r = await http.get(cfg.u('/api/index.json', lib: lib),
             headers: cfg.headers);
         if (r.statusCode != 200) continue;
@@ -8283,6 +8486,12 @@ class _SearchPageState extends State<SearchPage> {
       }
     } catch (_) {}
     if (!mounted || token != _loadToken) return;
+    authorWorkCount.clear();
+    for (final e in out) {
+      final w = e['w'];
+      final key = '${e['_lib']}|${w is Map ? w['a'] ?? '' : ''}';
+      authorWorkCount[key] = (authorWorkCount[key] ?? 0) + 1;
+    }
     setState(() {
       all = out;
       loading = false;
@@ -8361,10 +8570,39 @@ class _SearchPageState extends State<SearchPage> {
                                   fit: BoxFit.cover)),
                       title: Text('${w['ti']}',
                           maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Text(
-                          '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
+                      subtitle: Builder(builder: (_) {
+                        final lib = '${e['_lib']}';
+                        final meta = metas[lib];
+                        final av = '${w['av'] ?? ''}';
+                        final basicId = meta?.idFor(av) ?? '';
+                        final author = '${w['a'] ?? ''}';
+                        return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              LibBadges(
+                                libIds: [basicId.isEmpty ? lib : basicId],
+                                order: <String>[
+                                  ...?meta?.order,
+                                  ...libs.map((e) => '${e['id']}'),
+                                ],
+                                names: {
+                                  ...?meta?.names,
+                                  for (final l in libs)
+                                    '${l['id']}': '${l['name'] ?? l['id']}',
+                                },
+                                grade: meta == null
+                                    ? ''
+                                    : meta.gradeFor(
+                                        author,
+                                        authorWorkCount['$lib|$author'] ?? 0),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                  '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                            ]);
+                      }),
                       onTap: () => Navigator.of(context).push(MaterialPageRoute(
                           builder: (_) => PlayerPage(
                               works: e['works'],
@@ -8400,6 +8638,7 @@ class _AuthorPageState extends State<AuthorPage> {
   bool loading = true;
   bool fullSync = true;
   bool syncing = false;
+  LibMeta? meta;
   Timer? syncTimer;
 
   List<String> get _libs =>
@@ -8524,6 +8763,11 @@ class _AuthorPageState extends State<AuthorPage> {
         postStat('visit', widget.name, lib: lib);
       } catch (_) {}
     }
+    if (primaryLib.isNotEmpty) {
+      try {
+        meta = await LibMeta.load(primaryLib);
+      } catch (_) {}
+    }
     if (mounted) {
       setState(() {
         loading = false;
@@ -8633,6 +8877,26 @@ class _AuthorPageState extends State<AuthorPage> {
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                            LibBadges(
+                              libIds: [
+                                (meta?.idFor(av) ?? '').isEmpty
+                                    ? (primaryLib.isEmpty
+                                        ? cfg.lib
+                                        : primaryLib)
+                                    : meta!.idFor(av)
+                              ],
+                              order: meta?.order ?? const [],
+                              names: {
+                                ...?meta?.names,
+                                if (primaryLib.isNotEmpty)
+                                  primaryLib: cfg.libName.isEmpty
+                                      ? primaryLib
+                                      : cfg.libName,
+                              },
+                              grade: meta?.gradeFor(widget.name, works.length) ??
+                                  '',
+                            ),
+                            const SizedBox(height: 6),
                             const Text('作者简介',
                                 style: TextStyle(
                                     fontSize: 12, color: Colors.grey)),

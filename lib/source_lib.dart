@@ -1,0 +1,105 @@
+/// 作者来源词条（J9）的纯逻辑：
+/// 从作品/头像的媒体路径反查所属「基础库」，词条显示基础库名称而不是大库名。
+/// 媒体路径形如 `/media/(1)%20%E5%85%B6%E4%BB%96/@作者/_avatar/x.jpg`，
+/// 基础库形如 `lib-008`，其相对库根的路径为 `(1) 其他`。
+class BasicLibRef {
+  final String id;
+  final String name;
+  final String rel;
+
+  const BasicLibRef({required this.id, required this.name, required this.rel});
+
+  @override
+  String toString() => 'BasicLibRef($id,$name,$rel)';
+}
+
+/// 去掉名称前的编号前缀「(12) 」并折叠空白，用于容错匹配。
+String normalizeLibLabel(String raw) {
+  var s = raw.trim();
+  while (true) {
+    final m = RegExp(r'^\(\s*\d+\s*\)\s*').firstMatch(s);
+    if (m == null) break;
+    s = s.substring(m.end).trim();
+  }
+  return s.replaceAll(RegExp(r'\s+'), ' ');
+}
+
+/// 把媒体 URL 解码为相对库根的路径（去掉 `/media/` 前缀）。
+/// 非法百分号编码时退化为原串，避免抛异常。
+String decodeMediaRel(String mediaPath) {
+  var p = mediaPath.trim();
+  final q = p.indexOf('?');
+  if (q >= 0) p = p.substring(0, q);
+  if (p.startsWith('/media/')) p = p.substring(7);
+  try {
+    p = Uri.decodeComponent(p);
+  } catch (_) {}
+  while (p.startsWith('/')) {
+    p = p.substring(1);
+  }
+  return p;
+}
+
+/// 把基础库的绝对路径换算成相对注册库根目录的路径；不在此根下返回空串。
+String relUnderBase(String basePath, String basicPath) {
+  var b = basePath.trim();
+  var p = basicPath.trim();
+  if (b.isEmpty || p.isEmpty) return '';
+  while (b.endsWith('/')) {
+    b = b.substring(0, b.length - 1);
+  }
+  while (p.endsWith('/')) {
+    p = p.substring(0, p.length - 1);
+  }
+  if (p == b) return '';
+  if (!p.startsWith('$b/')) return '';
+  return p.substring(b.length + 1);
+}
+
+/// 解析 `/api/libraries.json` 的基础库列表，只保留注册库根下的基础库。
+List<BasicLibRef> basicsUnderBase(
+    Map<String, dynamic> librariesJson, String basePath) {
+  final out = <BasicLibRef>[];
+  final raw = librariesJson['basicLibraries'];
+  if (raw is! List) return out;
+  for (final e in raw) {
+    if (e is! Map) continue;
+    final id = '${e['id'] ?? ''}';
+    final name = '${e['name'] ?? ''}';
+    final path = '${e['path'] ?? ''}';
+    if (id.isEmpty || name.isEmpty) continue;
+    final rel = relUnderBase(basePath, path);
+    if (rel.isEmpty) continue;
+    out.add(BasicLibRef(id: id, name: name, rel: rel));
+  }
+  out.sort((a, b) => a.rel.compareTo(b.rel));
+  return out;
+}
+
+/// 按媒体路径匹配基础库：取相对路径前缀最长者，避免父目录误匹配。
+BasicLibRef? basicLibForMedia(
+    List<BasicLibRef> basics, String mediaPath) {
+  if (basics.isEmpty) return null;
+  final rel = decodeMediaRel(mediaPath);
+  if (rel.isEmpty) return null;
+  BasicLibRef? best;
+  var bestLen = -1;
+  for (final b in basics) {
+    final r = b.rel;
+    if (r.isEmpty) continue;
+    if (rel == r || rel.startsWith('$r/')) {
+      if (r.length > bestLen) {
+        best = b;
+        bestLen = r.length;
+      }
+    }
+  }
+  return best;
+}
+
+/// 词条显示名：基础库名去掉编号前缀，例如「(8) 🦶」→「🦶」。
+String basicLibLabel(BasicLibRef? lib, String fallback) {
+  if (lib == null) return fallback;
+  final n = normalizeLibLabel(lib.name);
+  return n.isEmpty ? fallback : n;
+}
