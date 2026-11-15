@@ -277,3 +277,16 @@ class AuthorFilterShared extends ValueNotifier<AuthorFilterState> {
 
 /// 全局单例；页面只读 [value]，通过 [apply]/[clearAll] 修改。
 final AuthorFilterShared authorFilter = AuthorFilterShared();
+
+/// J11：把共享筛选应用到任意列表。
+///
+/// 各页面只需要提供「单条是否命中」的 [match]，过滤/未过滤两种分支
+/// 与列表复制策略集中在这里，避免每个页面各写一套导致行为漂移。
+List<T> applyAuthorFilter<T>(
+  Iterable<T> items,
+  AuthorFilterState filter,
+  bool Function(T item, AuthorFilterState filter) match,
+) {
+  if (!filter.isActive) return List<T>.from(items);
+  return items.where((e) => match(e, filter)).toList(growable: false);
+}

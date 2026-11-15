@@ -7254,11 +7254,12 @@ class _PlayerPageState extends State<PlayerPage>
     hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
       hideTimer = null;
       // M4：任何时刻都已退出全屏就不再隐藏；拖动/悬停则重新计时。
+      // L15：全屏下鼠标静止也隐藏；仅拖动进度条时保持显示（不再因悬停而不隐藏）
       if (!UiAutoHidePolicy.shouldHide(
         fullscreen: fs,
         mounted: mounted,
         dragging: dragging,
-        barHover: barHover,
+        barHover: false,
       )) {
         if (mounted && fs) showUi();
         return;

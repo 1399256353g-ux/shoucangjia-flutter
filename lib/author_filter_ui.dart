@@ -154,7 +154,7 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
             child: Row(children: [
               Expanded(
                 child: Text(
-                  f.isActive ? '匹配 $matched 位作者' : '共 $matched 位作者',
+                  f.isActive ? '命中 $matched 项' : '共 $matched 项',
                   style: const TextStyle(fontSize: 13),
                 ),
               ),
