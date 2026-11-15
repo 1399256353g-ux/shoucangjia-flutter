@@ -2437,25 +2437,6 @@ class _LibraryPageState extends State<LibraryPage> {
                   textAlign: TextAlign.center),
             ],
             const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: () {
-                final i = cols.indexWhere((c) => '${c['name']}' == b.name);
-                Navigator.pop(c);
-                if (i < 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('该基础库尚未同步索引，请先执行一次同步')));
-                  return;
-                }
-                final col = cols[i];
-                Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => CollectionPage(
-                        name: '${col['name']}',
-                        idx: (col['idx'] as num).toInt())));
-              },
-              icon: const Icon(Icons.folder_open),
-              label: const Text('打开作品'),
-            ),
-            const SizedBox(height: 8),
             FilledButton.tonalIcon(
               onPressed: () {
                 Navigator.pop(c);
@@ -3777,6 +3758,7 @@ class _CollectionPageState extends State<CollectionPage> {
   LibMeta? meta;
   Map<String, Set<String>> authorTypes = {};
   bool typesLoading = false;
+  final Map<String, int> _authorWorks = {};
 
   bool _match(Map w) {
     if (kw.isEmpty) return true;
@@ -3785,15 +3767,14 @@ class _CollectionPageState extends State<CollectionPage> {
         '${w['a'] ?? ''}'.toLowerCase().contains(k);
   }
 
-  Map<String, int> get _authorWorkCount {
-    final out = <String, int>{};
+  void _countAuthorWorks() {
+    _authorWorks.clear();
     for (final w in works) {
       if (w is! Map) continue;
       final a = '${w['a'] ?? ''}';
       if (a.isEmpty) continue;
-      out[a] = (out[a] ?? 0) + 1;
+      _authorWorks[a] = (_authorWorks[a] ?? 0) + 1;
     }
-    return out;
   }
 
   bool _matchAuthor(Map w, AuthorFilterState f) {
@@ -3805,7 +3786,7 @@ class _CollectionPageState extends State<CollectionPage> {
     return f.matches(
       basicId: meta?.idFor(av) ?? '',
       bigId: meta?.bigIdFor(av) ?? '',
-      grade: meta?.gradeFor(author, _authorWorkCount[author] ?? 0) ?? '',
+      grade: meta?.gradeFor(author, _authorWorks[author] ?? 0) ?? '',
       workTypes: types,
     );
   }
@@ -4054,6 +4035,7 @@ class _CollectionPageState extends State<CollectionPage> {
         setState(() {
           works = (m['works'] as List);
           deleted = (m['deleted'] as List?) ?? [];
+          _countAuthorWorks();
           _loaded = true;
         });
       } else if (mounted) {
