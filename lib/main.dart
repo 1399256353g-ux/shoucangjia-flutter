@@ -5199,6 +5199,8 @@ class _PlayerPageState extends State<PlayerPage>
   // I1：音量调节 UI 仅桌面端保留，移动端交给系统音量键。
   bool get _volumeUi => volumeUiEnabled(
       isDesktop: Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+  // M1 仅移动端改变全屏单击语义；M3 要求 Windows 交互不变（仍单击暂停）。
+  bool get _mobileStageTap => Platform.isAndroid || Platform.isIOS;
   bool ui = true;
   bool fs = false;
   bool dragging = false;
@@ -6142,7 +6144,7 @@ class _PlayerPageState extends State<PlayerPage>
         pos: pos);
     final action = stageTapAction(
       uiVisible: ui,
-      fullscreen: fs,
+      fullscreen: fs && _mobileStageTap,
       zoomed: _picZoom.isZoomed,
       doubleTap: isDouble,
     );
@@ -6154,8 +6156,11 @@ class _PlayerPageState extends State<PlayerPage>
         return;
       case StageTapAction.like:
         _lastStageTapAt = 0;
-        // 非全屏时第一次单击已经切换过暂停；双击按点击前状态恢复。
-        if (!fs) _restorePauseAfterTap(_tapWasPausedBefore);
+        // 非「移动端全屏单击语义」时第一次单击已经切换过暂停；
+        // 双击按点击前状态恢复（Windows 全屏行为与窗口态一致，见 M3）。
+        if (!(fs && _mobileStageTap)) {
+          _restorePauseAfterTap(_tapWasPausedBefore);
+        }
         if (!_isLiked(w)) _setLiked(w, true, at: pos);
         showUi();
         return;
