@@ -38,6 +38,7 @@ import 'library_tree.dart';
 import 'unit_crawler_page.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
+import 'work_card.dart';
 import 'likes.dart';
 import 'multi_server.dart';
 import 'playback_flow.dart';
@@ -10543,8 +10544,16 @@ class _WorkGridState extends State<WorkGrid> {
         final wp = WatchProgressStore.of(
             _libFor(w), '${(w is Map ? w['id'] : null) ?? ''}');
         // G13：视频右下角显示时长，图文显示图片张数
-        final coverBadge = workCoverBadge(w);
-        return GestureDetector(
+        return WorkCard(
+          title: '${w['ti'] ?? ''}',
+          typeLabel: workTypeLabel(w),
+          coverUrl: (w['th'] ?? '').toString().isEmpty
+              ? ''
+              : cfg.mediaUrl(w['th'].toString(), lib: _libFor(w)),
+          headers: cfg.headersFor(_libFor(w)),
+          badge: workCoverBadge(w),
+          done: wp != null && wp.done,
+          progress: (wp != null && !wp.done) ? wp.fraction : 0,
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => PlayerPage(
                   works: works,
@@ -10552,103 +10561,6 @@ class _WorkGridState extends State<WorkGrid> {
                   lib: _libFor(w),
                   idx: widget.collectionIdx,
                   colName: widget.collectionName))),
-          child: Stack(fit: StackFit.expand, children: [
-            (w['th'] ?? '').toString().isEmpty
-                ? Container(color: Colors.black26)
-                : CachedNetworkImage(
-                    imageUrl: cfg.mediaUrl(w['th'].toString(), lib: _libFor(w)),
-                    httpHeaders: cfg.headersFor(_libFor(w)),
-                    fit: BoxFit.cover,
-                    // 图片解码前用骨架占位，滚动时不再白块闪烁
-                    placeholder: (_, __) =>
-                        const SkeletonBlock(radius: BorderRadius.zero),
-                    errorWidget: (_, __, ___) =>
-                        Container(color: Colors.black26)),
-            // 统一卡片样式：标题 + 类型都压在封面底部，不额外占位
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: IgnorePointer(
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(6, 18, 6, 5),
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x00000000), Color(0xB3000000)],
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${(w is Map ? (w['ti'] ?? '') : '')}'.trim().isEmpty
-                            ? '未命名'
-                            : '${w['ti']}'.trim(),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 11.5,
-                            height: 1.25,
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(workTypeLabel(w),
-                          maxLines: 1,
-                          style: TextStyle(
-                              fontSize: 9.5,
-                              color: Colors.white.withValues(alpha: 0.85))),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            if (coverBadge != null)
-              Positioned(
-                  right: 4,
-                  bottom: 4,
-                  child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(4)),
-                      child: Text(coverBadge,
-                          style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500)))),
-            // G10：已看完角标 / 未看完的进度条
-            if (wp != null && wp.done)
-              Positioned(
-                  left: 4,
-                  top: 4,
-                  child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 2),
-                      decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(4)),
-                      child: const Text('已看完',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600))))
-            else if (wp != null && wp.fraction > 0.01)
-              Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: SizedBox(
-                      height: 2,
-                      child: LinearProgressIndicator(
-                          value: wp.fraction,
-                          backgroundColor: Colors.black26,
-                          minHeight: 2))),
-          ]),
         );
       },
     );

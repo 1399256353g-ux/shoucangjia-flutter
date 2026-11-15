@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'category_tree_page.dart';
 import 'library_tree.dart';
+import 'work_card.dart';
 
 /// M10：基础库页面「作者视图 / 作品视图」双视图。
 ///
@@ -309,72 +310,19 @@ class _BasicLibPageState extends State<BasicLibPage>
         }
         final w = works[i];
         final thumb = _thumbOf(w);
-        return InkWell(
+        final kind = w is Map ? '${w['kind']}' : '';
+        final typeLabel = kind.contains('chapter')
+            ? '合集'
+            : (w is Map && '${w['t']}' == 'p' ? '图文' : '视频');
+        return WorkCard(
           key: ValueKey('basic-work-${w is Map ? w['id'] : i}'),
+          title: w is Map ? '${w['ti'] ?? ''}' : '',
+          typeLabel: typeLabel,
+          coverUrl: thumb.isEmpty
+              ? ''
+              : widget.mediaUrlOf(thumb, lib: widget.basic.id),
+          headers: widget.headersOf(widget.basic.id),
           onTap: widget.onPlay == null ? null : () => widget.onPlay!(works, i),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Stack(fit: StackFit.expand, children: [
-              thumb.isEmpty
-                  ? Container(
-                      color: Colors.black12,
-                      child: const Icon(Icons.movie_outlined,
-                          size: 22, color: Colors.grey))
-                  : Image.network(
-                      widget.mediaUrlOf(thumb, lib: widget.basic.id),
-                      headers: widget.headersOf(widget.basic.id),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: Colors.black12,
-                        child: const Icon(Icons.broken_image_outlined,
-                            size: 20, color: Colors.grey),
-                      ),
-                    ),
-              // 与 WorkGrid 同款：标题两行 + 类型压在封面底部
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(6, 18, 6, 5),
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x00000000), Color(0xB3000000)],
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${w is Map ? (w['ti'] ?? '') : ''}'.trim().isEmpty
-                            ? '未命名'
-                            : '${w['ti']}'.trim(),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 11.5,
-                            height: 1.25,
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                          w is Map && '${w['kind']}'.contains('chapter')
-                              ? '合集'
-                              : (w is Map && '${w['t']}' == 'p' ? '图文' : '视频'),
-                          maxLines: 1,
-                          style: TextStyle(
-                              fontSize: 9.5,
-                              color: Colors.white.withValues(alpha: 0.85))),
-                    ],
-                  ),
-                ),
-              ),
-            ]),
-          ),
         );
       },
     );
