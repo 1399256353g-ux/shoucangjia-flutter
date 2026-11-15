@@ -33,7 +33,6 @@ import 'infinite.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
-import 'library_selector_view.dart';
 import 'loop_link.dart';
 import 'library_tree.dart';
 import 'unit_crawler_page.dart';
@@ -2463,17 +2462,7 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (_) {}
   }
 
-  Future<void> _toggleStar(BasicLib b) async {
-    final next = toggleStar(stars, b.id);
-    setState(() {
-      stars = next;
-      tree = tree?.withStars(next);
-    });
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setStringList(_starKey, next);
-    } catch (_) {}
-  }
+
 
   /// L5-C：基础库封面（自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图）。
   String _coverUrlFor(BasicLib b) => _basicCoverUrl(b);
@@ -2526,6 +2515,30 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (_) {
       return const [];
     }
+  }
+
+  /// 已注册媒体库管理（添加/删除/默认/爬虫），从首页移入独立面板。
+  void _openRegisteredLibs() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (c) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(c).size.height * 0.72,
+          child: Column(children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text('已注册媒体库（管理）',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+            Expanded(
+              child: ListView(children: [for (final l in libs) _libTile(l)]),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   Future<void> _openFolders() async {
@@ -2594,9 +2607,6 @@ class _LibraryPageState extends State<LibraryPage> {
     Navigator.of(c).pop();
     _showBasic(b);
   }
-
-  void _toggleSection(String id) =>
-      setState(() => expanded = toggleExpanded(expanded, id));
 
   void _showBasic(BasicLib b) {
     Navigator.of(context).push(MaterialPageRoute<void>(
@@ -2802,6 +2812,10 @@ class _LibraryPageState extends State<LibraryPage> {
               tooltip: '文件结构 / 节点设置',
               onPressed: _openFolders),
           IconButton(
+              icon: const Icon(Icons.tune),
+              tooltip: '已注册媒体库（管理）',
+              onPressed: _openRegisteredLibs),
+          IconButton(
               icon: const Icon(Icons.add), onPressed: _add, tooltip: '添加库'),
         ]),
         body: _body(),
@@ -2847,34 +2861,18 @@ class _LibraryPageState extends State<LibraryPage> {
                           onOpenStars: _openStars,
                           unitCoverOf: (u) => _unitCoverUrl(u),
                         )
-                      else if (tree != null)
-                        LibrarySelectorView(
-                          tree: tree!,
-                          expanded: expanded,
-                          stars: stars.toSet(),
-                          legacyCount: libs.length,
-                          legacyOpen: legacyOpen,
-                          onToggleSection: _toggleSection,
-                          onToggleStar: _toggleStar,
-                          onTapBasic: _showBasic,
-                          onToggleLegacy: () =>
-                              setState(() => legacyOpen = !legacyOpen),
-                          legacyBuilder: (_) => Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [for (final l in libs) _libTile(l)],
-                          ),
-                        )
-                      else ...[
+                      else
                         const Padding(
-                          padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-                          child: Text('已注册媒体库（点击切换）',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey)),
+                          padding: EdgeInsets.fromLTRB(24, 48, 24, 48),
+                          child: Center(
+                            child: Text(
+                              '还没有可显示的单元库\n先在设置 → 媒体库连接，或在「文件结构」里指定节点文件夹',
+                              textAlign: TextAlign.center,
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ),
                         ),
-                        for (final l in libs) _libTile(l),
-                      ],
                     ],
                   );
   }

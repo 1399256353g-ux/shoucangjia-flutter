@@ -118,7 +118,7 @@ class UnitLibraryHomeView extends StatelessWidget {
   }
 }
 
-/// 「星标基础库」入口（原「默认收藏夹」）：点进单独的选择页。
+/// 「星标单元库」入口（单元库才有星标资格）：点进单独的选择页。
 class StarredEntryCard extends StatelessWidget {
   final int count;
   final VoidCallback onTap;
@@ -143,7 +143,7 @@ class StarredEntryCard extends StatelessWidget {
               const Icon(Icons.star, color: Colors.amber, size: 20),
               const SizedBox(width: 10),
               const Expanded(
-                child: Text('星标基础库',
+                child: Text('星标单元库',
                     style:
                         TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               ),
@@ -232,61 +232,72 @@ class UnitLibraryCard extends StatelessWidget {
       child: Material(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          key: ValueKey('unit-${unit.id}'),
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: SizedBox(
-            height: 116,
-            child: Row(children: [
-              const SizedBox(width: 14),
-              _CoverThumb(
-                url: coverUrl,
-                size: 64,
-                fallbackIcon: Icons.folder_copy_outlined,
-                fallbackColor: scheme.primary,
+        child: SizedBox(
+          height: 116,
+          child: Row(children: [
+            // 卡片主体：点这里进入单元库
+            Expanded(
+              child: InkWell(
+                key: ValueKey('unit-${unit.id}'),
+                borderRadius: const BorderRadius.horizontal(
+                    left: Radius.circular(14)),
+                onTap: onTap,
+                child: Row(children: [
+                  const SizedBox(width: 14),
+                  _CoverThumb(
+                    url: coverUrl,
+                    size: 64,
+                    fallbackIcon: Icons.folder_copy_outlined,
+                    fallbackColor: scheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(unit.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        Text(unit.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.grey)),
+                        if (server.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(server,
+                              style: const TextStyle(
+                                  fontSize: 10, color: Colors.grey)),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: Colors.grey),
+                  const SizedBox(width: 6),
+                ]),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(unit.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 6),
-                    Text(unit.subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            const TextStyle(fontSize: 11, color: Colors.grey)),
-                    if (server.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(server,
-                          style:
-                              const TextStyle(fontSize: 10, color: Colors.grey)),
-                    ],
-                  ],
-                ),
-              ),
-              if (onToggleStar != null)
-                InkResponse(
-                  key: ValueKey('unit-star-${unit.id}'),
-                  onTap: onToggleStar,
-                  radius: 20,
+            ),
+            // 星标独立在卡片点击区之外，避免点星标误进单元库
+            if (onToggleStar != null)
+              InkResponse(
+                key: ValueKey('unit-star-${unit.id}'),
+                onTap: onToggleStar,
+                radius: 22,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Icon(
                     starred ? Icons.star : Icons.star_border,
-                    size: 20,
+                    size: 22,
                     color: starred ? Colors.amber : Colors.grey,
                   ),
                 ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
-              const SizedBox(width: 10),
-            ]),
-          ),
+              ),
+            const SizedBox(width: 6),
+          ]),
         ),
       ),
     );
@@ -319,7 +330,8 @@ class UnitLibraryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sorted = unit.allBasics;
+    // 只列直属基础库；下级基础库跟随各自的单元库，避免 SECRET 直通全部。
+    final sorted = unit.basics;
     // 每张基础库卡片的词条来自「直接上级单元库」。
     final ownerLabel = <String, String>{};
     final ownerKey = <String, String>{};
