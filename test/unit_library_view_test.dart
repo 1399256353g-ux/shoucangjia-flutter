@@ -42,13 +42,15 @@ void main() {
     expect(find.text('单元库'), findsOneWidget);
     expect(find.byKey(const ValueKey('starred-entry')), findsOneWidget);
     expect(find.text('1 个'), findsOneWidget);
-    expect(find.byKey(const ValueKey('unit-big-01')), findsOneWidget);
-    expect(find.byKey(const ValueKey('unit-big-02')), findsOneWidget);
-    // 基础库卡片不在主页出现（层级递减：点进单元库才有）
+    // 主页只给顶级单元库一张卡；下级单元库不铺在主页
+    expect(find.byKey(ValueKey('unit-${tree.id}')), findsOneWidget);
+    expect(find.byKey(const ValueKey('unit-big-01')), findsNothing);
+    expect(find.byKey(const ValueKey('unit-big-02')), findsNothing);
+    // 基础库卡片也不在主页出现（层级递减：点进单元库才有）
     expect(find.byKey(const ValueKey('basic-card-l1')), findsNothing);
 
-    await t.tap(find.byKey(const ValueKey('unit-big-02')));
-    expect(opened, 'big-02');
+    await t.tap(find.byKey(ValueKey('unit-${tree.id}')));
+    expect(opened, tree.id);
   });
 
   testWidgets('单元库页显示基础库卡片与词条', (t) async {

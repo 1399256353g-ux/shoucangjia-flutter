@@ -105,12 +105,12 @@ class UnitLibraryHomeView extends StatelessWidget {
             child: Text('当前连接下没有可显示的单元库',
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
           ),
-        for (final u in units)
-          UnitLibraryCard(
-            unit: u,
-            coverUrl: unitCoverOf?.call(u) ?? '',
-            onTap: () => onOpenUnit(u),
-          ),
+        // 主页只给「顶级单元库」一张卡；下级单元库在进入后再显示。
+        UnitLibraryCard(
+          unit: tree,
+          coverUrl: unitCoverOf?.call(tree) ?? '',
+          onTap: () => onOpenUnit(tree),
+        ),
       ],
     );
   }
@@ -310,6 +310,20 @@ class UnitLibraryPage extends StatelessWidget {
       ...basics.where((b) => stars.contains(b.id)),
       ...basics.where((b) => !stars.contains(b.id)),
     ];
+    // 每张基础库卡片的词条来自「直接上级单元库」。
+    final ownerLabel = <String, String>{};
+    final ownerKey = <String, String>{};
+    void walkOwners(UnitLibrary u) {
+      for (final b in u.basics) {
+        ownerLabel[b.id] = u.name;
+        ownerKey[b.id] = u.id;
+      }
+      for (final c in u.children) {
+        walkOwners(c);
+      }
+    }
+
+    walkOwners(unit);
     return Scaffold(
       appBar: AppBar(
         title: Text(unit.name),
@@ -383,6 +397,10 @@ class BasicLibCard extends StatelessWidget {
   final VoidCallback onToggleStar;
   final VoidCallback onTap;
   final String coverUrl;
+  /// 所属单元库（节点文件夹）。只有单元库有资格生成位置词条；
+  /// 为空表示该卡片不在单元库语境下，不显示词条。
+  final String unitLabel;
+  final String unitKey;
 
   const BasicLibCard({
     super.key,
@@ -391,6 +409,8 @@ class BasicLibCard extends StatelessWidget {
     required this.onToggleStar,
     required this.onTap,
     this.coverUrl = '',
+    this.unitLabel = '',
+    this.unitKey = '',
   });
 
   /// 词条文本：基础库名去掉「(序号) 」前缀。
@@ -400,8 +420,9 @@ class BasicLibCard extends StatelessWidget {
   }
 
   Widget _badge() {
-    final text = badgeText(basic.name);
-    final color = Color(LibraryBadge.colorFor(basic.id));
+    // 位置词条只由「单元库」生成：取所属单元库名称与配色，不再用基础库自身。
+    final text = badgeText(unitLabel);
+    final color = Color(LibraryBadge.colorFor(unitKey.isEmpty ? unitLabel : unitKey));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -456,7 +477,8 @@ class BasicLibCard extends StatelessWidget {
                 ),
               ]),
               const SizedBox(height: 5),
-              Align(alignment: Alignment.centerLeft, child: _badge()),
+              if (unitLabel.isNotEmpty)
+                Align(alignment: Alignment.centerLeft, child: _badge()),
               const SizedBox(height: 4),
               Expanded(
                 child: Text(basic.name,

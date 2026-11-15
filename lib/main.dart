@@ -650,7 +650,7 @@ class _AppState extends State<App> {
             return null;
           }),
         },
-        home: cfg.base.isEmpty ? const SettingsPage() : const LibraryPage(),
+        home: cfg.base.isEmpty ? const SettingsPage() : const HomePage(),
       ),
     );
   }
