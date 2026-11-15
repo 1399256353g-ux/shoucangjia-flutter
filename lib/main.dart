@@ -2453,6 +2453,16 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (_) {}
   }
 
+  /// 星标标记单元库（不是基础库）。
+  Future<void> _toggleUnitStar(UnitLibrary u) async {
+    final next = toggleStar(stars, u.id);
+    setState(() => stars = next);
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setStringList(_starKey, next);
+    } catch (_) {}
+  }
+
   Future<void> _toggleStar(BasicLib b) async {
     final next = toggleStar(stars, b.id);
     setState(() {
@@ -2476,34 +2486,22 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   void _openStars() {
-    final starred = stars
-        .map((id) => tree?.basicById(id))
-        .whereType<BasicLib>()
-        .toList(growable: false);
+    final root = unitTree;
+    final starred = <UnitLibrary>[];
+    if (root != null) {
+      for (final id in stars) {
+        final u = root.findById(id);
+        if (u != null) starred.add(u);
+      }
+    }
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => StarredLibrariesPage(
-        basics: starred,
-        onToggleStar: _toggleStar,
-        onTapBasic: _showBasic,
-        coverOf: _coverUrlFor,
-        unitOf: _unitOf,
+      builder: (_) => StarredUnitsPage(
+        units: starred,
+        onOpenUnit: _openUnit,
+        onToggleUnitStar: _toggleUnitStar,
+        unitCoverOf: _unitCoverUrl,
       ),
     ));
-  }
-
-  /// 位置词条只由单元库生成：找出基础库所属的单元库（见 unit_library.dart 收敛规则）。
-  UnitLibrary? _unitOf(BasicLib b) {
-    UnitLibrary? walk(UnitLibrary u) {
-      if (u.basics.any((x) => x.id == b.id)) return u;
-      for (final c in u.children) {
-        final hit = walk(c);
-        if (hit != null) return hit;
-      }
-      return null;
-    }
-
-    final root = unitTree;
-    return root == null ? null : walk(root);
   }
 
   /// 鉴权头（拆分拼接，避免与既有写法混用）。
@@ -2554,14 +2552,14 @@ class _LibraryPageState extends State<LibraryPage> {
             unit: sub,
             stars: stars.toSet(),
             onOpenUnit: (s2) => _openUnit(s2),
-            onToggleStar: _toggleStar,
+            onToggleUnitStar: _toggleUnitStar,
             onTapBasic: (b) => _showBasicOn(c, b),
             coverOf: _coverUrlFor,
             unitCoverOf: _unitCoverUrl,
             onConfigureUnit: _openUnitCrawler,
           ),
         )),
-        onToggleStar: _toggleStar,
+        onToggleUnitStar: _toggleUnitStar,
         onTapBasic: (b) => _showBasicOn(c, b),
         coverOf: _coverUrlFor,
         unitCoverOf: _unitCoverUrl,
@@ -2844,7 +2842,7 @@ class _LibraryPageState extends State<LibraryPage> {
                           tree: unitTree!,
                           stars: stars.toSet(),
                           onOpenUnit: _openUnit,
-                          onToggleStar: _toggleStar,
+                          onToggleUnitStar: _toggleUnitStar,
                           onTapBasic: _showBasic,
                           onOpenStars: _openStars,
                           unitCoverOf: (u) => _unitCoverUrl(u),
@@ -3681,10 +3679,7 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
-  Future<void> _openCollections() async {
-    await Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const CollectionsPage()));
-  }
+
 
   /// 「文件结构」：列出库下全部文件夹，勾选哪些是节点文件夹（单元库）。
   Future<void> _openFolders() async {
@@ -3705,11 +3700,6 @@ class _HomePageState extends State<HomePage> {
         titleSpacing: 12,
         title: const Text('媒体库'),
         actions: [
-          IconButton(
-              key: const ValueKey('open-collections'),
-              icon: const Icon(Icons.video_library_outlined),
-              tooltip: '收藏夹',
-              onPressed: _openCollections),
           IconButton(
               key: const ValueKey('open-folder-structure-home'),
               icon: const Icon(Icons.account_tree_outlined),

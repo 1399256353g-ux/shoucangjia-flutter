@@ -35,6 +35,7 @@ jobs:
         run: |
           $line = Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)' | Select-Object -First 1
           $ver = $line.Matches.Groups[1].Value.Split('+')[0]
+          if (Test-Path "build/windows/x64/runner/Release/shoucangjia.exe") { Rename-Item "build/windows/x64/runner/Release/shoucangjia.exe" "Dizi.exe" -Force }
           Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "Dizi-$ver-windows.zip" -Force
           Get-Item "Dizi-$ver-windows.zip" | Select-Object Name,Length
       - uses: actions/upload-artifact@v4

@@ -32,9 +32,9 @@ void main() {
     var opened = '';
     await t.pumpWidget(host(UnitLibraryHomeView(
       tree: tree,
-      stars: const {'l1'},
+      stars: const {'big-01'},
       onOpenUnit: (u) => opened = u.id,
-      onToggleStar: (_) {},
+      onToggleUnitStar: (_) {},
       onTapBasic: (_) {},
       onOpenStars: () => opened = 'stars',
     )));
@@ -53,20 +53,57 @@ void main() {
     expect(opened, tree.id);
   });
 
-  testWidgets('单元库页显示基础库卡片与词条', (t) async {
+  testWidgets('主页星标点的是单元库本身', (t) async {
+    String? toggled;
+    await t.pumpWidget(host(UnitLibraryHomeView(
+      tree: tree,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (u) => toggled = u.id,
+      onTapBasic: (_) {},
+      onOpenStars: () {},
+    )));
+    await t.tap(find.byKey(ValueKey('unit-star-${tree.id}')));
+    expect(toggled, tree.id);
+  });
+
+  testWidgets('单元库页显示基础库卡片与词条，基础库不再有星标', (t) async {
     await t.pumpWidget(host(UnitLibraryPage(
       unit: tree.children.first,
       stars: const {},
       onOpenUnit: (_) {},
-      onToggleStar: (_) {},
+      onToggleUnitStar: (_) {},
       onTapBasic: (_) {},
     )));
 
     expect(find.text('基础库'), findsOneWidget);
     expect(find.byKey(const ValueKey('basic-card-l1')), findsOneWidget);
-    expect(find.byKey(const ValueKey('star-card-l1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('star-card-l1')), findsNothing);
     // 词条文本去掉「(序号) 」前缀
     expect(BasicLibCard.badgeText('(8) 🦶'), '🦶');
+  });
+
+  testWidgets('下级单元库卡片可星标', (t) async {
+    // 造一个带下级单元库的层级
+    final nested = buildUnitTree(
+      nodes: const [
+        LibNode(id: 'big-01', rel: '(1) A', name: '(1) A'),
+        LibNode(id: 'big-01-sub', rel: '(1) A/sub', name: 'sub'),
+      ],
+      basics: [basic('l1', '(1) A/sub/x')],
+    )!;
+    String? toggled;
+    await t.pumpWidget(host(UnitLibraryPage(
+      unit: nested.children.first,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (u) => toggled = u.id,
+      onTapBasic: (_) {},
+    )));
+    final btn = find.byKey(const ValueKey('unit-star-big-01-sub'));
+    expect(btn, findsOneWidget);
+    await t.tap(btn);
+    expect(toggled, isNotNull);
   });
 
   testWidgets('非顶级单元库显示爬虫配置入口并可打开', (t) async {
@@ -75,7 +112,7 @@ void main() {
       unit: tree.children.first,
       stars: const {},
       onOpenUnit: (_) {},
-      onToggleStar: (_) {},
+      onToggleUnitStar: (_) {},
       onTapBasic: (_) {},
       onConfigureUnit: (u) => opened = u.id,
     )));
@@ -90,31 +127,31 @@ void main() {
       unit: tree,
       stars: const {},
       onOpenUnit: (_) {},
-      onToggleStar: (_) {},
+      onToggleUnitStar: (_) {},
       onTapBasic: (_) {},
       onConfigureUnit: (_) {},
     )));
     expect(find.byKey(const ValueKey('unit-crawler-secret')), findsNothing);
   });
 
-  testWidgets('星标页空态有引导文案', (t) async {
-    await t.pumpWidget(host(StarredLibrariesPage(
-      basics: const [],
-      onToggleStar: (_) {},
-      onTapBasic: (_) {},
+  testWidgets('星标单元库页空态有引导文案', (t) async {
+    await t.pumpWidget(host(StarredUnitsPage(
+      units: const [],
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (_) {},
     )));
-    expect(find.textContaining('还没有星标的基础库'), findsOneWidget);
+    expect(find.textContaining('还没有星标的单元库'), findsOneWidget);
   });
 
-  testWidgets('星标页列出星标基础库并支持取消', (t) async {
+  testWidgets('星标单元库页列出星标单元库并支持取消', (t) async {
     String? toggled;
-    await t.pumpWidget(host(StarredLibrariesPage(
-      basics: [basic('l2', '(2) B/y')],
-      onToggleStar: (b) => toggled = b.id,
-      onTapBasic: (_) {},
+    await t.pumpWidget(host(StarredUnitsPage(
+      units: [tree.children.first],
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (u) => toggled = u.id,
     )));
-    expect(find.byKey(const ValueKey('basic-card-l2')), findsOneWidget);
-    await t.tap(find.byKey(const ValueKey('star-card-l2')));
-    expect(toggled, 'l2');
+    expect(find.byKey(const ValueKey('unit-big-01')), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('unit-star-big-01')));
+    expect(toggled, 'big-01');
   });
 }

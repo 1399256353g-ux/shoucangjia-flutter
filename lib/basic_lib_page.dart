@@ -325,6 +325,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                               size: 22, color: Colors.grey))
                       : Image.network(
                           widget.mediaUrlOf(thumb, lib: widget.basic.id),
+                          headers: widget.headersOf(widget.basic.id),
                           fit: BoxFit.cover,
                           errorBuilder: (_, __, ___) => Container(
                             color: Colors.black12,

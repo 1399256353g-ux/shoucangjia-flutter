@@ -64,7 +64,7 @@ class UnitLibraryHomeView extends StatelessWidget {
   final UnitLibrary tree;
   final Set<String> stars;
   final void Function(UnitLibrary unit) onOpenUnit;
-  final void Function(BasicLib b) onToggleStar;
+  final void Function(UnitLibrary unit) onToggleUnitStar;
   final void Function(BasicLib b) onTapBasic;
   final VoidCallback onOpenStars;
   final UnitCoverOf? unitCoverOf;
@@ -74,7 +74,7 @@ class UnitLibraryHomeView extends StatelessWidget {
     required this.tree,
     required this.stars,
     required this.onOpenUnit,
-    required this.onToggleStar,
+    required this.onToggleUnitStar,
     required this.onTapBasic,
     required this.onOpenStars,
     this.unitCoverOf,
@@ -109,6 +109,8 @@ class UnitLibraryHomeView extends StatelessWidget {
         UnitLibraryCard(
           unit: tree,
           coverUrl: unitCoverOf?.call(tree) ?? '',
+          starred: stars.contains(tree.id),
+          onToggleStar: () => onToggleUnitStar(tree),
           onTap: () => onOpenUnit(tree),
         ),
       ],
@@ -156,57 +158,48 @@ class StarredEntryCard extends StatelessWidget {
   }
 }
 
-/// 星标基础库选择页：只列出被星标的基础库卡片。
-class StarredLibrariesPage extends StatelessWidget {
-  final List<BasicLib> basics;
-  final void Function(BasicLib b) onToggleStar;
-  final void Function(BasicLib b) onTapBasic;
-  final CoverOf? coverOf;
-  /// 所属单元库（节点文件夹）：只有单元库有资格生成位置词条。
-  final UnitLibrary? Function(BasicLib b)? unitOf;
+/// 星标单元库页：星标只属于单元库，基础库不再单独收藏。
+class StarredUnitsPage extends StatelessWidget {
+  final List<UnitLibrary> units;
+  final void Function(UnitLibrary unit) onOpenUnit;
+  final void Function(UnitLibrary unit) onToggleUnitStar;
+  final UnitCoverOf? unitCoverOf;
 
-  const StarredLibrariesPage({
+  const StarredUnitsPage({
     super.key,
-    required this.basics,
-    required this.onToggleStar,
-    required this.onTapBasic,
-    this.coverOf,
-    this.unitOf,
+    required this.units,
+    required this.onOpenUnit,
+    required this.onToggleUnitStar,
+    this.unitCoverOf,
   });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('星标基础库')),
-      body: basics.isEmpty
+      appBar: AppBar(title: const Text('星标单元库')),
+      body: units.isEmpty
           ? const Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  '还没有星标的基础库\n在单元库内点基础库卡片右上角的星标即可加入',
+                  '还没有星标的单元库\n在单元库卡片右侧点星标即可加入',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ),
             )
-          : GridView.builder(
-              padding: const EdgeInsets.all(12),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 220,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 0.92,
-              ),
-              itemCount: basics.length,
-              itemBuilder: (c, i) => BasicLibCard(
-                basic: basics[i],
-                starred: true,
-                coverUrl: coverOf?.call(basics[i]) ?? '',
-                unitLabel: unitOf?.call(basics[i])?.name ?? '',
-                unitKey: unitOf?.call(basics[i])?.id ?? '',
-                onToggleStar: () => onToggleStar(basics[i]),
-                onTap: () => onTapBasic(basics[i]),
-              ),
+          : ListView(
+              padding: const EdgeInsets.only(bottom: 24),
+              children: [
+                for (final u in units)
+                  UnitLibraryCard(
+                    unit: u,
+                    coverUrl: unitCoverOf?.call(u) ?? '',
+                    starred: true,
+                    onToggleStar: () => onToggleUnitStar(u),
+                    onTap: () => onOpenUnit(u),
+                  ),
+              ],
             ),
     );
   }
@@ -217,12 +210,17 @@ class UnitLibraryCard extends StatelessWidget {
   final UnitLibrary unit;
   final VoidCallback onTap;
   final String coverUrl;
+  /// 星标标记的是「单元库」，不是基础库。
+  final bool starred;
+  final VoidCallback? onToggleStar;
 
   const UnitLibraryCard({
     super.key,
     required this.unit,
     required this.onTap,
     this.coverUrl = '',
+    this.starred = false,
+    this.onToggleStar,
   });
 
   @override
@@ -274,6 +272,17 @@ class UnitLibraryCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (onToggleStar != null)
+                InkResponse(
+                  key: ValueKey('unit-star-${unit.id}'),
+                  onTap: onToggleStar,
+                  radius: 20,
+                  child: Icon(
+                    starred ? Icons.star : Icons.star_border,
+                    size: 20,
+                    color: starred ? Colors.amber : Colors.grey,
+                  ),
+                ),
               const Icon(Icons.chevron_right, color: Colors.grey),
               const SizedBox(width: 10),
             ]),
@@ -289,7 +298,7 @@ class UnitLibraryPage extends StatelessWidget {
   final UnitLibrary unit;
   final Set<String> stars;
   final void Function(UnitLibrary unit) onOpenUnit;
-  final void Function(BasicLib b) onToggleStar;
+  final void Function(UnitLibrary unit) onToggleUnitStar;
   final void Function(BasicLib b) onTapBasic;
   final CoverOf? coverOf;
   final UnitCoverOf? unitCoverOf;
@@ -301,7 +310,7 @@ class UnitLibraryPage extends StatelessWidget {
     required this.unit,
     required this.stars,
     required this.onOpenUnit,
-    required this.onToggleStar,
+    required this.onToggleUnitStar,
     required this.onTapBasic,
     this.coverOf,
     this.unitCoverOf,
@@ -310,11 +319,7 @@ class UnitLibraryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final basics = unit.allBasics;
-    final sorted = [
-      ...basics.where((b) => stars.contains(b.id)),
-      ...basics.where((b) => !stars.contains(b.id)),
-    ];
+    final sorted = unit.allBasics;
     // 每张基础库卡片的词条来自「直接上级单元库」。
     final ownerLabel = <String, String>{};
     final ownerKey = <String, String>{};
@@ -360,6 +365,8 @@ class UnitLibraryPage extends StatelessWidget {
               UnitLibraryCard(
                 unit: c,
                 coverUrl: unitCoverOf?.call(c) ?? '',
+                starred: stars.contains(c.id),
+                onToggleStar: () => onToggleUnitStar(c),
                 onTap: () => onOpenUnit(c),
               ),
           ],
@@ -382,11 +389,9 @@ class UnitLibraryPage extends StatelessWidget {
               itemCount: sorted.length,
               itemBuilder: (c, i) => BasicLibCard(
                 basic: sorted[i],
-                starred: stars.contains(sorted[i].id),
                 coverUrl: coverOf?.call(sorted[i]) ?? '',
                 unitLabel: unit.name,
                 unitKey: unit.id,
-                onToggleStar: () => onToggleStar(sorted[i]),
                 onTap: () => onTapBasic(sorted[i]),
               ),
             ),
@@ -397,11 +402,9 @@ class UnitLibraryPage extends StatelessWidget {
   }
 }
 
-/// 基础库卡片（中）：来源词条、名称、作者/作品数、星标。
+/// 基础库卡片（中）：来源词条、名称、作者/作品数。
 class BasicLibCard extends StatelessWidget {
   final BasicLib basic;
-  final bool starred;
-  final VoidCallback onToggleStar;
   final VoidCallback onTap;
   final String coverUrl;
   /// 所属单元库（节点文件夹）。只有单元库有资格生成位置词条；
@@ -412,8 +415,6 @@ class BasicLibCard extends StatelessWidget {
   const BasicLibCard({
     super.key,
     required this.basic,
-    required this.starred,
-    required this.onToggleStar,
     required this.onTap,
     this.coverUrl = '',
     this.unitLabel = '',
@@ -472,16 +473,6 @@ class BasicLibCard extends StatelessWidget {
                   fallbackColor: scheme.primary,
                 ),
                 const Spacer(),
-                InkResponse(
-                  key: ValueKey('star-card-${basic.id}'),
-                  onTap: onToggleStar,
-                  radius: 16,
-                  child: Icon(
-                    starred ? Icons.star : Icons.star_border,
-                    size: 18,
-                    color: starred ? Colors.amber : Colors.grey,
-                  ),
-                ),
               ]),
               const SizedBox(height: 5),
               if (unitLabel.isNotEmpty)
