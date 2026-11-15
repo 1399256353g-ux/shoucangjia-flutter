@@ -1,3 +1,5 @@
+import 'lib_cover.dart';
+
 // 「大库 / 基础库」两级选择模型（纯函数，便于单测）。
 //
 // 数据来源：/api/libraries.json（v2，由 NAS `lib_scan.py` 生成）
@@ -18,6 +20,9 @@ class BasicLib {
   final String bigId;
   final int authors;
   final int works;
+  /// L5-C：自定义封面版本（`_cover/<version>.<ext>`）；空串表示无自定义封面。
+  final String coverVersion;
+  final String coverExt;
   /// J7：来源连接（多 IP 聚合时用于路由与去重展示）。
   final String serverId;
   final String serverBase;
@@ -30,6 +35,8 @@ class BasicLib {
     required this.bigId,
     required this.authors,
     required this.works,
+    this.coverVersion = '',
+    this.coverExt = 'jpg',
     this.serverId = '',
     this.serverBase = '',
     this.serverLabel = '',
@@ -42,6 +49,7 @@ class BasicLib {
         'big_id': bigId,
         'authors': authors,
         'works': works,
+        if (coverVersion.isNotEmpty) 'cover': {'v': coverVersion, 'e': coverExt},
         if (serverId.isNotEmpty) '_serverId': serverId,
         if (serverBase.isNotEmpty) '_serverBase': serverBase,
         if (serverLabel.isNotEmpty) '_serverLabel': serverLabel,
@@ -107,6 +115,8 @@ class LibraryTree {
         bigId: '${raw['big_id'] ?? ''}'.trim(),
         authors: _num(raw['authors']),
         works: _num(raw['works']),
+        coverVersion: coverPointerOf(raw['cover']).version,
+        coverExt: coverPointerOf(raw['cover']).ext,
         serverId: '${raw['_serverId'] ?? ''}'.trim(),
         serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
         serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
