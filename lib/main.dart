@@ -37,9 +37,11 @@ import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'text_fit.dart';
 import 'ui_auto_hide.dart';
+import 'ui_fade.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'player_controls.dart';
+import 'preload_policy.dart';
 import 'preload_plan.dart';
 import 'swipe_control.dart';
 import 'swipe_physics.dart';
@@ -159,6 +161,7 @@ final navKey = GlobalKey<NavigatorState>();
 class LibMeta {
   final List<BasicLibRef> basics;
   final Map<String, dynamic> stats;
+
   /// J10：大库 id → 名称，用于作者筛选里的「大库」多选。
   final Map<String, String> bigNames;
 
@@ -219,8 +222,7 @@ class LibMeta {
           }
         }
       } catch (_) {}
-      final meta =
-          LibMeta(basics: basics, stats: stats, bigNames: bigNames);
+      final meta = LibMeta(basics: basics, stats: stats, bigNames: bigNames);
       cache[lib] = meta;
       _loading.remove(lib);
       return meta;
@@ -322,11 +324,9 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
       }
       final libJson = jsonDecode(utf8.decode(lj.bodyBytes));
       if (base.isEmpty || libJson is! Map) return <String, Set<String>>{};
-      final basics = basicsUnderBase(
-          Map<String, dynamic>.from(libJson), base);
-      final parts = await Future.wait([
-        for (final b in basics) _typesFromLibIndex(lib, b.id)
-      ]);
+      final basics = basicsUnderBase(Map<String, dynamic>.from(libJson), base);
+      final parts = await Future.wait(
+          [for (final b in basics) _typesFromLibIndex(lib, b.id)]);
       return mergeAuthorTypes(parts);
     } catch (_) {
       return <String, Set<String>>{};
@@ -361,11 +361,9 @@ Future<Map<String, Set<String>>> _typesFromLibIndex(
 }
 
 /// 汇总多个注册库的作者类型。
-Future<Map<String, Set<String>>> loadAuthorTypes(
-    Iterable<String> libs) async {
-  final parts = await Future.wait([
-    for (final l in libs.toSet()) _authorTypesForLib(l)
-  ]);
+Future<Map<String, Set<String>>> loadAuthorTypes(Iterable<String> libs) async {
+  final parts =
+      await Future.wait([for (final l in libs.toSet()) _authorTypesForLib(l)]);
   return mergeAuthorTypes(parts);
 }
 
@@ -1726,6 +1724,45 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
           onChangeEnd: (_) => _persist(),
         ),
         const Text('全屏播放时无操作多久后自动隐藏进度条与控制栏；点击屏幕可再次呼出。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const Divider(height: 32),
+        Row(children: [
+          const Expanded(
+              child: Text('滑动预加载条数',
+                  style: TextStyle(fontWeight: FontWeight.bold))),
+          Text(AppSettings.preloadPerSide == 0
+              ? '关闭'
+              : '前后各 ${AppSettings.preloadPerSide} 条',
+              style: const TextStyle(color: Colors.amber)),
+        ]),
+        Slider(
+          value: AppSettings.preloadPerSide.toDouble(),
+          min: 0,
+          max: preloadMaxPerSide.toDouble(),
+          divisions: preloadMaxPerSide,
+          label: '${AppSettings.preloadPerSide}',
+          onChanged: (v) => setState(
+              () => AppSettings.preloadPerSide = clampPreloadPerSide(v.round())),
+          onChangeEnd: (_) => _persist(),
+        ),
+        const Text('按滑动方向提前打开前后各 N 条媒体，切条时首帧已就绪；0 为关闭。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 12),
+        const Text('预加载内存上限', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, children: [
+          for (final mb in preloadMemoryOptions)
+            ChoiceChip(
+              label: Text('$mb MB'),
+              selected: AppSettings.preloadMemoryMb == mb,
+              onSelected: (_) {
+                setState(() => AppSettings.preloadMemoryMb =
+                    clampPreloadMemoryMb(mb));
+                _persist();
+              },
+            ),
+        ]),
+        const Text('超出上限时优先淘汰离当前条目最远的缓存，正在播放的条目不受影响。',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
       ]),
     );
@@ -3734,7 +3771,13 @@ class _CollectionPageState extends State<CollectionPage> {
     } else if (sort == 'title') {
       v.sort((a, b) => '${a['ti']}'.compareTo('${b['ti']}'));
     } else {
-      v.sort((a, b) => '${b['d']}'.compareTo('${a['d']}'));
+      // 按入库时间（目录 mtime）倒序，缺失时退回发布日期
+      v.sort((a, b) {
+        final ax = (a['at'] is num) ? (a['at'] as num).toInt() : 0;
+        final bx = (b['at'] is num) ? (b['at'] as num).toInt() : 0;
+        if (ax != bx) return bx.compareTo(ax);
+        return '${b['d']}'.compareTo('${a['d']}');
+      });
     }
     return v;
   }
@@ -5147,8 +5190,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         works: _num(e.value['n']),
       );
 
-  Set<String> _typesOf(String name) =>
-      authorTypes[name] ?? const <String>{};
+  Set<String> _typesOf(String name) => authorTypes[name] ?? const <String>{};
 
   /// J10：把当前可见的 meta 汇总成筛选面板需要的节点。
   List<AuthorLibNode> get _filterBasics {
@@ -5665,10 +5707,14 @@ class PlayerPage extends StatefulWidget {
 /// 切条时交换槽位，预缓冲好的媒体无需重新打开即可起播。
 class _PlaybackSlot {
   final String tag;
+  final int sid;
+  /// 每次换媒体/取消预加载时递增，迟到的异步任务据此放弃。
+  int epoch = 0;
   late final Player player;
   late final VideoController vc;
 
-  _PlaybackSlot(this.tag, {DecodeMode mode = DecodeMode.hardware}) {
+  _PlaybackSlot(this.tag,
+      {this.sid = 0, DecodeMode mode = DecodeMode.hardware}) {
     player = Player(
       configuration: const PlayerConfiguration(
         title: 'Dizi',
@@ -5687,25 +5733,28 @@ class _PlayerPageState extends State<PlayerPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late final PageController pc = PageController(initialPage: widget.start);
   // F34：解码失败时可整体切换到软件解码，槽位因此不是 final
-  _PlaybackSlot _slotA = _PlaybackSlot('a');
-  _PlaybackSlot _slotB = _PlaybackSlot('b');
+  // M6：播放器槽位池。A 为当前播放器，其余槽位用于按滑动方向预加载，
+  // 命中缓存时直接切换为活动槽位，避免切条重新打开媒体。
+  late final List<_PlaybackSlot> _slots = <_PlaybackSlot>[_PlaybackSlot('a')];
+  int _slotActive = 0;
+  int _slotSeq = 1;
   DecodeMode _decodeMode = DecodeMode.hardware;
   bool _softwareDecodeRetried = false;
   // 槽位重建后强制重建 Video，避免沿用旧控制器的纹理
   int _videoGen = 0;
-  bool _slotAActive = true;
-  _PlaybackSlot get _active => _slotAActive ? _slotA : _slotB;
-  _PlaybackSlot get _idle => _slotAActive ? _slotB : _slotA;
+  _PlaybackSlot get _active => _slots[_slotActive];
   // 对播放页其余代码保持原有 player / vc 接口，内部指向当前活动槽位
   Player get player => _active.player;
   VideoController get vc => _active.vc;
-  // G18：下一条预缓冲状态
+  // M6：预加载账本 + 运行状态
+  final PreloadCache _preloadCache =
+      PreloadCache(maxEntries: preloadMaxPerSide * 2);
+  final Map<int, String> _preloadBusy = <int, String>{};
   Timer? _preloadTimer;
-  int? _preloadIndex;
-  String? _preloadKey;
-  bool _preloadReady = false;
-  bool _preloadFailed = false;
   int _preloadGen = 0;
+  bool _preloadRunning = false;
+  // 最近一次滑动/切条方向：1 向下，-1 向上，0 未知
+  int _preloadDir = 0;
   final List<StreamSubscription> _playerSubs = <StreamSubscription>[];
   final FocusNode focus = FocusNode();
   int cur = 0;
@@ -5758,6 +5807,8 @@ class _PlayerPageState extends State<PlayerPage>
   bool get _mobileStageTap => Platform.isAndroid || Platform.isIOS;
   bool ui = true;
   bool fs = false;
+  // M5：非全屏上下拖拽切条期间，功能区整体淡化（松手恢复）。
+  bool _pageSwiping = false;
   // M2：是否由播放页主动锁定过屏幕方向（退出时需恢复系统默认）。
   bool _orientationForced = false;
   bool dragging = false;
@@ -6158,21 +6209,23 @@ class _PlayerPageState extends State<PlayerPage>
         tokenAlive: mounted,
       );
 
-  /// F34：重建两个播放器槽位为软件解码，并重开当前作品。
+  /// F34：重建播放器槽位为软件解码，并重开当前作品。
   /// 只在硬件解码报解码错误时触发一次，坏文件不会反复重建播放器。
   Future<void> _retryWithSoftwareDecode() async {
     if (_softwareDecodeRetried || _decodeMode == DecodeMode.software) return;
     _softwareDecodeRetried = true;
     _decodeMode = DecodeMode.software;
-    final old = <_PlaybackSlot>[_slotA, _slotB];
+    final old = List<_PlaybackSlot>.from(_slots);
     _cancelPreload();
     for (final s in _playerSubs) {
       s.cancel();
     }
     _playerSubs.clear();
-    _slotA = _PlaybackSlot('a', mode: _decodeMode);
-    _slotB = _PlaybackSlot('b', mode: _decodeMode);
-    _slotAActive = true;
+    _slots
+      ..clear()
+      ..add(_PlaybackSlot('a', mode: _decodeMode));
+    _slotSeq = 1;
+    _slotActive = 0;
     _videoGen++;
     _bindPlayer();
     for (final s in old) {
@@ -6204,76 +6257,158 @@ class _PlayerPageState extends State<PlayerPage>
     open(cur);
   }
 
-  /// G18：作废当前预缓冲（例如用户跳到别的作品）。默认顺手停掉空闲槽位，
-  /// 避免它在后台继续占带宽。
-  void _cancelPreload({bool stopIdle = true}) {
+  /// M6：作废正在进行的预加载计划（保留已就绪缓存）。
+  void _invalidatePreload() {
     _preloadTimer?.cancel();
     _preloadTimer = null;
     _preloadGen++;
-    _preloadReady = false;
-    _preloadFailed = false;
-    _preloadIndex = null;
-    _preloadKey = null;
-    if (stopIdle) {
+  }
+
+  /// 清空预加载缓存并停掉所有非活动槽位（关闭连播/单条循环等场景）。
+  void _cancelPreload({bool stopIdle = true}) {
+    _invalidatePreload();
+    if (!stopIdle) return;
+    for (final s in _slots) {
+      if (s.sid == _active.sid) continue;
+      _preloadCache.removeSlot(s.sid);
       try {
-        _idle.player.stop();
+        s.player.stop();
       } catch (_) {}
     }
   }
 
-  /// G18：当前条起播后，延迟一点在空闲槽位静音打开下一条。
-  void _schedulePreload() {
-    _preloadTimer?.cancel();
-    _preloadTimer = null;
-    final next = cur + 1;
-    if (next >= widget.works.length) return;
-    final nw = _workAt(next);
-    final path = preloadMediaPath(nw);
-    if (!shouldPreloadNext(
-        autoplay: autoplay,
-        loopOne: loopOne,
-        index: next,
-        count: widget.works.length,
-        hasMedia: path != null)) {
-      return;
+  _PlaybackSlot? _slotBySid(int sid) {
+    for (final s in _slots) {
+      if (s.sid == sid) return s;
     }
-    _preloadTimer = Timer(const Duration(milliseconds: 800), () {
-      _startPreload(next, path!);
+    return null;
+  }
+
+  /// 命中缓存的槽位：键与序号都必须一致。
+  _PlaybackSlot? _cachedSlotFor(String key, int index) {
+    for (final s in _slots) {
+      if (s.sid == _active.sid) continue;
+      final e = _preloadCache.entryOfSlot(s.sid);
+      if (e != null && e.key == key && e.index == index) return s;
+    }
+    return null;
+  }
+
+  /// M6：当前条起播后，按滑动方向预载前后各 N 条。
+  void _schedulePreload() {
+    _invalidatePreload();
+    if (AppSettings.preloadPerSide <= 0) return;
+    if (widget.works.length <= 1) return;
+    final gen = _preloadGen;
+    _preloadTimer = Timer(const Duration(milliseconds: 600), () {
+      if (gen == _preloadGen) _runPreloads();
     });
   }
 
-  Future<void> _startPreload(int idx, String path) async {
-    if (!mounted || idx != cur + 1 || !autoplay || loopOne) return;
-    final gen = ++_preloadGen;
-    final nw = _workAt(idx);
-    final nlib = _libFor(nw);
-    final key = preloadKeyFor(nw, nlib);
-    final slot = _idle;
-    _preloadIndex = idx;
-    _preloadKey = key;
-    _preloadReady = false;
-    _preloadFailed = false;
-    StreamSubscription? err;
-    err = slot.player.stream.error.listen((_) {
-      if (gen == _preloadGen) _preloadFailed = true;
-    });
+  int get _preloadByteLimit => AppSettings.preloadMemoryMb * 1024 * 1024;
+
+  /// 为预加载挑一个槽位：优先淘汰最远的缓存条目并复用其槽位，
+  /// 否则在预算内新建，最后复用空闲槽位。
+  _PlaybackSlot? _slotForPreload() {
+    final victim = _preloadCache.evictionSlot(
+      current: cur,
+      direction: _preloadDir,
+      protectedSlots: <int>{_active.sid},
+      protectedKeys: _preloadBusy.values.toSet(),
+    );
+    if (victim != null) {
+      final slot = _slotBySid(victim);
+      _preloadCache.removeSlot(victim);
+      if (slot != null) return slot;
+    }
+    final maxSlots = preloadSlotBudget(AppSettings.preloadMemoryMb);
+    if (_slots.length < maxSlots &&
+        _preloadCache.canFit(preloadEntryBytes, byteLimit: _preloadByteLimit)) {
+      final sid = _slotSeq++;
+      final s = _PlaybackSlot('s$sid', sid: sid, mode: _decodeMode);
+      _slots.add(s);
+      return s;
+    }
+    // 预算已满但也没有可淘汰条目：复用空闲的非活动槽位。
+    for (final s in _slots) {
+      if (s.sid == _active.sid) continue;
+      if (_preloadBusy.containsKey(s.sid)) continue;
+      _preloadCache.removeSlot(s.sid);
+      return s;
+    }
+    return null;
+  }
+
+  /// 在槽位中静音打开目标媒体，等到解封装/首帧就绪后登记缓存。
+  Future<bool> _preloadInto(
+      _PlaybackSlot slot, int idx, String key, int gen, String path) async {
+    final lib = _libFor(_workAt(idx));
+    _preloadBusy[slot.sid] = key;
+    final epoch = ++slot.epoch;
     try {
       await slot.player.stop();
-      // 预缓冲槽位保持静音、暂停；切条时再恢复音量并 play
       await slot.player.setVolume(0);
       await slot.player.open(
-        Media(cfg.mediaUrl(path, lib: nlib), httpHeaders: cfg.headersFor(nlib)),
+        Media(cfg.mediaUrl(path, lib: lib), httpHeaders: cfg.headersFor(lib)),
         play: false,
       );
-      if (gen != _preloadGen) return;
-      _preloadReady = !_preloadFailed;
+      var ready = false;
+      for (var i = 0; i < preloadReadyAttempts; i++) {
+        if (!mounted || gen != _preloadGen || slot.epoch != epoch) return false;
+        var d = Duration.zero;
+        try {
+          d = slot.player.state.duration;
+        } catch (_) {}
+        if (d.inMilliseconds > 0) {
+          ready = true;
+          break;
+        }
+        await Future<void>.delayed(preloadReadyInterval);
+      }
+      if (!ready) return false;
+      // 再给解码器一点时间铺好首帧，命中时直接出画面。
+      await Future<void>.delayed(preloadFirstFrameDelay);
+      if (!mounted || gen != _preloadGen || slot.epoch != epoch) return false;
+      _preloadCache.put(PreloadEntry(slot: slot.sid, index: idx, key: key));
+      return true;
     } catch (_) {
-      if (gen == _preloadGen) {
-        _preloadReady = false;
-        _preloadFailed = true;
+      try {
+        await slot.player.stop();
+      } catch (_) {}
+      return false;
+    } finally {
+      _preloadBusy.remove(slot.sid);
+    }
+  }
+
+  Future<void> _runPreloads() async {
+    if (!mounted || _preloadRunning) return;
+    if (AppSettings.preloadPerSide <= 0) return;
+    _preloadRunning = true;
+    final gen = ++_preloadGen;
+    try {
+      final targets = preloadCandidates(
+        index: cur,
+        count: widget.works.length,
+        perSide: AppSettings.preloadPerSide,
+        direction: _preloadDir,
+      );
+      for (final idx in targets) {
+        if (!mounted || gen != _preloadGen) return;
+        if (idx == cur || idx < 0 || idx >= widget.works.length) continue;
+        final w = _workAt(idx);
+        if (!workPlayable(w)) continue;
+        final path = preloadMediaPath(w);
+        if (path == null) continue;
+        final key = preloadKeyFor(w, _libFor(w));
+        if (_preloadCache.containsKey(key)) continue;
+        if (_preloadBusy.containsValue(key)) continue;
+        final slot = _slotForPreload();
+        if (slot == null) return;
+        await _preloadInto(slot, idx, key, gen, path);
       }
     } finally {
-      await err.cancel();
+      _preloadRunning = false;
     }
   }
 
@@ -6321,15 +6456,12 @@ class _PlayerPageState extends State<PlayerPage>
       return;
     }
     final key = preloadKeyFor(w, wl);
-    // 命中预缓冲：直接使用空闲槽位，跳过 player.open 的等待
-    final canUsePreload = _preloadReady &&
-        !_preloadFailed &&
-        preloadMatches(
-            preloadedIndex: _preloadIndex,
-            preloadedKey: _preloadKey,
-            index: i,
-            key: key);
-    if (!canUsePreload) _cancelPreload();
+    // 记录滑动方向，供后续预加载排序
+    if (i != cur) _preloadDir = i > cur ? 1 : -1;
+    // M6：命中预加载缓存时直接换槽位，跳过 player.open 与转圈。
+    final cachedSlot = _cachedSlotFor(key, i);
+    final canUsePreload = cachedSlot != null;
+    _invalidatePreload();
     final my = ++_openToken;
     _pausedByBackground = false;
     autoTimer?.cancel();
@@ -6347,7 +6479,8 @@ class _PlayerPageState extends State<PlayerPage>
       cur = i;
       _setPicIndex(0);
       captionOpen = false;
-      loading = true;
+      // 缓存命中说明首帧已就绪，直接显示画面，不闪加载圈
+      loading = !canUsePreload;
       paused = false;
       _failure = null;
       _buffering = false;
@@ -6369,18 +6502,14 @@ class _PlayerPageState extends State<PlayerPage>
     });
     if (canUsePreload) {
       final old = _active;
-      final target = _idle;
-      _slotAActive = target == _slotA;
+      final target = cachedSlot;
+      _slotActive = _slots.indexOf(target);
+      _preloadCache.removeSlot(target.sid);
       _bindPlayer();
       try {
         await old.player.stop();
       } catch (_) {}
       _mediaToken = my;
-      _preloadReady = false;
-      _preloadFailed = false;
-      _preloadIndex = null;
-      _preloadKey = null;
-      _preloadGen++;
       setState(() {
         pos = Duration.zero;
         final d0 = player.state.duration;
@@ -7138,6 +7267,12 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  /// M5：只在状态真正变化时重建，避免滚动通知每帧触发 setState。
+  void _setPageSwiping(bool value) {
+    if (!mounted || _pageSwiping == value) return;
+    setState(() => _pageSwiping = value);
+  }
+
   void onWheel(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
     final dy = e.scrollDelta.dy;
@@ -7307,8 +7442,10 @@ class _PlayerPageState extends State<PlayerPage>
       s.cancel();
     }
     _playerSubs.clear();
-    _slotA.player.dispose();
-    _slotB.player.dispose();
+    for (final s in _slots) {
+      s.player.dispose();
+    }
+    _preloadCache.clear();
     pc.dispose();
     focus.dispose();
     super.dispose();
@@ -7763,8 +7900,15 @@ class _PlayerPageState extends State<PlayerPage>
     final w = _workAt(cur);
     final broken = !workPlayable(w);
     // M3：任务栏平台策略——桌面端无横竖屏按钮，播放/暂停常驻。
-    final taskbar = taskbarPolicyFor(
-        isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
+    final taskbar =
+        taskbarPolicyFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
+    // M5：非全屏拖动切条时功能区整体淡化，松手恢复；全屏沿用隐藏逻辑。
+    final chromeOpacity = ChromeFade.opacity(
+        uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
+    final chromeMs = ChromeFade.durationMs(swiping: _pageSwiping);
+    // 圆点历史上不受 ui 控制（清屏时仍显示），M5 只叠加滑动淡化，避免改变全屏行为。
+    final dotsOpacity = ChromeFade.opacity(
+        uiVisible: true, fullscreen: fs, swiping: _pageSwiping);
     final isV = w['t'] == 'v';
     final pics = isV ? <String>[] : workMediaPaths(w);
     final idx = pics.isEmpty ? 0 : img.clamp(0, pics.length - 1);
@@ -7845,124 +7989,143 @@ class _PlayerPageState extends State<PlayerPage>
               if (d > 1.5) showUi();
             },
             child: Stack(children: [
-              PageView.builder(
-                controller: pc,
-                // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
-                // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
-                // G14：图片缩放/捏合期间也禁止翻页，避免缩放时误切作品。
-                physics: (_picZoom.isZoomed ||
-                        _pinching ||
-                        Platform.isWindows ||
-                        Platform.isLinux ||
-                        Platform.isMacOS)
-                    ? const NeverScrollableScrollPhysics()
-                    : const DiziPageScrollPhysics(
-                        parent: ClampingScrollPhysics()),
-                // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
-                dragStartBehavior: DragStartBehavior.down,
-                scrollDirection: Axis.vertical,
-                itemCount: widget.works.length,
-                onPageChanged: open,
-                itemBuilder: (_, i) {
-                  final it = _workAt(i);
-                  if (!workPlayable(it)) return _brokenWorkView(it);
-                  if (i != cur) {
-                    return (it['th'] ?? '').toString().isEmpty
-                        ? Container(color: Colors.black)
-                        : CachedNetworkImage(
-                            imageUrl: cfg.mediaUrl(it['th'].toString(),
-                                lib: _libFor(it)),
-                            httpHeaders: cfg.headersFor(_libFor(it)),
-                            fit: BoxFit.contain);
+              // M5：捕获垂直翻页（同一条视频列表）的拖拽生命周期，
+              // 只在「真实拖拽开始 → 滚动结束」之间淡化功能区。
+              NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (n.depth != 0) return false;
+                  if (n is ScrollStartNotification && n.dragDetails != null) {
+                    _setPageSwiping(true);
+                  } else if (n is ScrollEndNotification) {
+                    _setPageSwiping(false);
                   }
-                  if (it['t'] == 'v') {
-                    return GestureDetector(
-                      onTapUp: (d) => onStageTap(d.localPosition),
-                      onHorizontalDragEnd: (d) {
-                        // 右划快速进入作者主页
-                        final v = d.primaryVelocity ?? 0;
-                        if (v < -200) openAuthor(); // 向左划拉出作者页（抖音式待 M9 改为跟手拖拽）
-                      },
-                      onLongPressStart: (_) => player.setRate(2.0),
-                      onLongPressEnd: (_) => player.setRate(speed),
-                      child: Stack(fit: StackFit.expand, children: [
-                        if ((it['th'] ?? '').toString().isNotEmpty)
-                          CachedNetworkImage(
+                  return false;
+                },
+                child: PageView.builder(
+                  controller: pc,
+                  // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
+                  // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
+                  // G14：图片缩放/捏合期间也禁止翻页，避免缩放时误切作品。
+                  physics: (_picZoom.isZoomed ||
+                          _pinching ||
+                          Platform.isWindows ||
+                          Platform.isLinux ||
+                          Platform.isMacOS)
+                      ? const NeverScrollableScrollPhysics()
+                      : const DiziPageScrollPhysics(
+                          parent: ClampingScrollPhysics()),
+                  // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
+                  dragStartBehavior: DragStartBehavior.down,
+                  scrollDirection: Axis.vertical,
+                  itemCount: widget.works.length,
+                  onPageChanged: open,
+                  itemBuilder: (_, i) {
+                    final it = _workAt(i);
+                    if (!workPlayable(it)) return _brokenWorkView(it);
+                    if (i != cur) {
+                      return (it['th'] ?? '').toString().isEmpty
+                          ? Container(color: Colors.black)
+                          : CachedNetworkImage(
                               imageUrl: cfg.mediaUrl(it['th'].toString(),
                                   lib: _libFor(it)),
                               httpHeaders: cfg.headersFor(_libFor(it)),
-                              fit: BoxFit.contain),
-                        videoView(),
-                        if (loading)
-                          const Center(
-                              child: CircularProgressIndicator(
-                                  color: Colors.white38)),
-                      ]),
-                    );
-                  }
-                  return GestureDetector(
-                    onTapUp: (d) => onStageTap(d.localPosition),
-                    // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
-                    // G14：放大查看时禁用长按菜单，避免平移误触
-                    onLongPress: _picZoom.isZoomed ? null : _showWorkMenu,
-                    onHorizontalDragEnd: (d) {
-                      // G14：放大后横向拖动是平移图片，不换图
-                      if (_picZoom.isZoomed) return;
-                      stopAuto();
-                      final v = d.primaryVelocity ?? 0;
-                      setState(() {
-                        if (v < -100) {
-                          _setPicIndex((idx + 1).clamp(0, pics.length - 1));
-                        } else if (v > 100) {
-                          _setPicIndex((idx - 1).clamp(0, pics.length - 1));
-                        }
-                      });
-                    },
-                    child: Stack(fit: StackFit.expand, children: [
-                      // G14：双指缩放 + 放大后单指拖动查看；单击恢复原大小
-                      LayoutBuilder(builder: (_, cons) {
-                        _stageSize = cons.biggest;
-                        return Listener(
-                          behavior: HitTestBehavior.opaque,
-                          onPointerDown: _zoomDown,
-                          onPointerMove: _zoomMove,
-                          onPointerUp: _zoomUp,
-                          onPointerCancel: _zoomUp,
-                          child: ClipRect(
-                            child: Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.diagonal3Values(
-                                  _picZoom.scale, _picZoom.scale, 1)
-                                ..setTranslationRaw(
-                                    _picZoom.offset.dx, _picZoom.offset.dy, 0),
-                              child: picView(pics[idx], lib: _curLib),
+                              fit: BoxFit.contain);
+                    }
+                    if (it['t'] == 'v') {
+                      return GestureDetector(
+                        onTapUp: (d) => onStageTap(d.localPosition),
+                        onHorizontalDragEnd: (d) {
+                          // 右划快速进入作者主页
+                          final v = d.primaryVelocity ?? 0;
+                          if (v < -200)
+                            openAuthor(); // 向左划拉出作者页（抖音式待 M9 改为跟手拖拽）
+                        },
+                        onLongPressStart: (_) => player.setRate(2.0),
+                        onLongPressEnd: (_) => player.setRate(speed),
+                        child: Stack(fit: StackFit.expand, children: [
+                          if ((it['th'] ?? '').toString().isNotEmpty)
+                            CachedNetworkImage(
+                                imageUrl: cfg.mediaUrl(it['th'].toString(),
+                                    lib: _libFor(it)),
+                                httpHeaders: cfg.headersFor(_libFor(it)),
+                                fit: BoxFit.contain),
+                          videoView(),
+                          if (loading)
+                            const Center(
+                                child: CircularProgressIndicator(
+                                    color: Colors.white38)),
+                        ]),
+                      );
+                    }
+                    return GestureDetector(
+                      onTapUp: (d) => onStageTap(d.localPosition),
+                      // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
+                      // G14：放大查看时禁用长按菜单，避免平移误触
+                      onLongPress: _picZoom.isZoomed ? null : _showWorkMenu,
+                      onHorizontalDragEnd: (d) {
+                        // G14：放大后横向拖动是平移图片，不换图
+                        if (_picZoom.isZoomed) return;
+                        stopAuto();
+                        final v = d.primaryVelocity ?? 0;
+                        setState(() {
+                          if (v < -100) {
+                            _setPicIndex((idx + 1).clamp(0, pics.length - 1));
+                          } else if (v > 100) {
+                            _setPicIndex((idx - 1).clamp(0, pics.length - 1));
+                          }
+                        });
+                      },
+                      child: Stack(fit: StackFit.expand, children: [
+                        // G14：双指缩放 + 放大后单指拖动查看；单击恢复原大小
+                        LayoutBuilder(builder: (_, cons) {
+                          _stageSize = cons.biggest;
+                          return Listener(
+                            behavior: HitTestBehavior.opaque,
+                            onPointerDown: _zoomDown,
+                            onPointerMove: _zoomMove,
+                            onPointerUp: _zoomUp,
+                            onPointerCancel: _zoomUp,
+                            child: ClipRect(
+                              child: Transform(
+                                alignment: Alignment.center,
+                                transform: Matrix4.diagonal3Values(
+                                    _picZoom.scale, _picZoom.scale, 1)
+                                  ..setTranslationRaw(_picZoom.offset.dx,
+                                      _picZoom.offset.dy, 0),
+                                child: picView(pics[idx], lib: _curLib),
+                              ),
+                            ),
+                          );
+                        }),
+                        if (pics.length > 1)
+                          Positioned(
+                            top: pad.top + 2,
+                            right: pad.right + 4,
+                            child: AnimatedOpacity(
+                              opacity: dotsOpacity,
+                              duration: Duration(milliseconds: chromeMs),
+                              curve: Curves.easeOut,
+                              child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: List.generate(
+                                      pics.length,
+                                      (k) => Container(
+                                            width: 4,
+                                            height: 4,
+                                            margin: const EdgeInsets.symmetric(
+                                                horizontal: 1.5),
+                                            decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: k == idx
+                                                    ? Colors.white
+                                                    : Colors.white24),
+                                          ))),
                             ),
                           ),
-                        );
-                      }),
-                      if (pics.length > 1)
-                        Positioned(
-                          top: pad.top + 2,
-                          right: pad.right + 4,
-                          child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: List.generate(
-                                  pics.length,
-                                  (k) => Container(
-                                        width: 4,
-                                        height: 4,
-                                        margin: const EdgeInsets.symmetric(
-                                            horizontal: 1.5),
-                                        decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: k == idx
-                                                ? Colors.white
-                                                : Colors.white24),
-                                      ))),
-                        ),
-                    ]),
-                  );
-                },
+                      ]),
+                    );
+                  },
+                ),
               ),
               // G12：弱网缓冲提示（延迟出现，避免正常起播闪烁）
               if (_slowBuffer && _failure == null && !loading)
@@ -8045,8 +8208,9 @@ class _PlayerPageState extends State<PlayerPage>
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
-                    opacity: ui ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
+                    opacity: chromeOpacity,
+                    duration: Duration(milliseconds: chromeMs),
+                    curve: Curves.easeOut,
                     child: IconButton(
                         onPressed: () => Navigator.of(context).maybePop(),
                         icon:
@@ -8070,8 +8234,9 @@ class _PlayerPageState extends State<PlayerPage>
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
-                    opacity: ui ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
+                    opacity: chromeOpacity,
+                    duration: Duration(milliseconds: chromeMs),
+                    curve: Curves.easeOut,
                     child: GestureDetector(
                       onTap: openAuthor,
                       // G11：长按信息区弹出播放菜单（视频区长按仍是 2 倍速）
@@ -8316,8 +8481,9 @@ class _PlayerPageState extends State<PlayerPage>
                   child: IgnorePointer(
                     ignoring: !ui,
                     child: AnimatedOpacity(
-                      opacity: ui ? 1 : 0,
-                      duration: const Duration(milliseconds: 200),
+                      opacity: chromeOpacity,
+                      duration: Duration(milliseconds: chromeMs),
+                      curve: Curves.easeOut,
                       child: Container(
                         decoration: const BoxDecoration(
                             gradient: LinearGradient(
@@ -8802,8 +8968,8 @@ class _RecommendPageState extends State<RecommendPage> {
     final out = <AuthorBigNode>[];
     for (final b in _filterBasics) {
       if (b.bigId.isEmpty) continue;
-      out.add(AuthorBigNode(
-          id: b.bigId, name: meta?.bigNames[b.bigId] ?? b.bigId));
+      out.add(
+          AuthorBigNode(id: b.bigId, name: meta?.bigNames[b.bigId] ?? b.bigId));
     }
     final seen = <String>{};
     out.removeWhere((e) => !seen.add(e.id));
@@ -9123,8 +9289,7 @@ class _SearchPageState extends State<SearchPage> {
     return f.matches(
       basicId: meta?.idFor(av) ?? '',
       bigId: meta?.bigIdFor(av) ?? '',
-      grade:
-          meta?.gradeFor(author, authorWorkCount['$lib|$author'] ?? 0) ?? '',
+      grade: meta?.gradeFor(author, authorWorkCount['$lib|$author'] ?? 0) ?? '',
       workTypes: types,
     );
   }
@@ -9233,64 +9398,68 @@ class _SearchPageState extends State<SearchPage> {
                               ? '没有符合筛选条件的结果'
                               : '没有找到相关作品',
                           style: const TextStyle(color: Colors.grey)))
-              : ListView.builder(
-                  itemCount: res.length,
-                  itemBuilder: (_, i) {
-                    final e = res[i];
-                    final w = e['w'];
-                    return ListTile(
-                      leading: SizedBox(
-                          width: 40,
-                          height: 54,
-                          child: (w['th'] ?? '').toString().isEmpty
-                              ? Container(color: Colors.black26)
-                              : CachedNetworkImage(
-                                  imageUrl: cfg.mediaUrl(w['th'].toString(),
-                                      lib: '${e['_lib']}'),
-                                  httpHeaders: cfg.headersFor('${e['_lib']}'),
-                                  fit: BoxFit.cover)),
-                      title: Text('${w['ti']}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Builder(builder: (_) {
-                        final lib = '${e['_lib']}';
-                        final meta = metas[lib];
-                        final av = '${w['av'] ?? ''}';
-                        final basicId = meta?.idFor(av) ?? '';
-                        final author = '${w['a'] ?? ''}';
-                        return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              LibBadges(
-                                libIds: [basicId.isEmpty ? lib : basicId],
-                                order: <String>[
-                                  ...?meta?.order,
-                                  ...libs.map((e) => '${e['id']}'),
-                                ],
-                                names: {
-                                  ...?meta?.names,
-                                  for (final l in libs)
-                                    '${l['id']}': '${l['name'] ?? l['id']}',
-                                },
-                                grade: meta == null
-                                    ? ''
-                                    : meta.gradeFor(author,
-                                        authorWorkCount['$lib|$author'] ?? 0),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                  '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis),
-                            ]);
-                      }),
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => PlayerPage(
-                              works: e['works'],
-                              start: e['i'],
-                              lib: '${e['_lib']}'))),
-                    );
-                  },
-                ),
+                  : ListView.builder(
+                      itemCount: res.length,
+                      itemBuilder: (_, i) {
+                        final e = res[i];
+                        final w = e['w'];
+                        return ListTile(
+                          leading: SizedBox(
+                              width: 40,
+                              height: 54,
+                              child: (w['th'] ?? '').toString().isEmpty
+                                  ? Container(color: Colors.black26)
+                                  : CachedNetworkImage(
+                                      imageUrl: cfg.mediaUrl(w['th'].toString(),
+                                          lib: '${e['_lib']}'),
+                                      httpHeaders:
+                                          cfg.headersFor('${e['_lib']}'),
+                                      fit: BoxFit.cover)),
+                          title: Text('${w['ti']}',
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: Builder(builder: (_) {
+                            final lib = '${e['_lib']}';
+                            final meta = metas[lib];
+                            final av = '${w['av'] ?? ''}';
+                            final basicId = meta?.idFor(av) ?? '';
+                            final author = '${w['a'] ?? ''}';
+                            return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  LibBadges(
+                                    libIds: [basicId.isEmpty ? lib : basicId],
+                                    order: <String>[
+                                      ...?meta?.order,
+                                      ...libs.map((e) => '${e['id']}'),
+                                    ],
+                                    names: {
+                                      ...?meta?.names,
+                                      for (final l in libs)
+                                        '${l['id']}': '${l['name'] ?? l['id']}',
+                                    },
+                                    grade: meta == null
+                                        ? ''
+                                        : meta.gradeFor(
+                                            author,
+                                            authorWorkCount['$lib|$author'] ??
+                                                0),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                      '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                ]);
+                          }),
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => PlayerPage(
+                                      works: e['works'],
+                                      start: e['i'],
+                                      lib: '${e['_lib']}'))),
+                        );
+                      },
+                    ),
         ),
       ]),
     );

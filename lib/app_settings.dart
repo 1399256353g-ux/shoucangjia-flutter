@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'preload_policy.dart';
+
 /// 播放器可重绑定的动作（桌面端，尤其 Windows）。
 enum PlayerAction { next, prev, playPause, mute, fullscreen, forward, back }
 
@@ -34,6 +36,10 @@ class AppSettings {
   static double defaultSpeed = 1.0;
   static int imageIntervalSec = 3;
   static int hideUiSec = 3;
+  /// M6：滑动方向前后各预载多少条（0 = 关闭）。
+  static int preloadPerSide = preloadDefaultPerSide;
+  /// M6：预加载缓存内存上限（MB）。
+  static int preloadMemoryMb = preloadDefaultMemoryMb;
 
   static final Map<PlayerAction, int> keyIds =
       Map<PlayerAction, int>.from(_defaultKeyIds);
@@ -42,6 +48,8 @@ class AppSettings {
         'speed': defaultSpeed,
         'imageInterval': imageIntervalSec,
         'hideUi': hideUiSec,
+        'preloadPerSide': preloadPerSide,
+        'preloadMemory': preloadMemoryMb,
         'keys': {
           for (final e in keyIds.entries) e.key.name: e.value,
         },
@@ -56,6 +64,10 @@ class AppSettings {
     if (ii != null) imageIntervalSec = ii.clamp(1, 20);
     final h = (j['hideUi'] as num?)?.toInt();
     if (h != null) hideUiSec = h.clamp(1, 30);
+    final pp = (j['preloadPerSide'] as num?)?.toInt();
+    if (pp != null) preloadPerSide = clampPreloadPerSide(pp);
+    final pm = (j['preloadMemory'] as num?)?.toInt();
+    if (pm != null) preloadMemoryMb = clampPreloadMemoryMb(pm);
     final keys = j['keys'];
     if (keys is Map) {
       for (final a in PlayerAction.values) {
@@ -69,6 +81,8 @@ class AppSettings {
     defaultSpeed = 1.0;
     imageIntervalSec = 3;
     hideUiSec = 3;
+    preloadPerSide = preloadDefaultPerSide;
+    preloadMemoryMb = preloadDefaultMemoryMb;
     keyIds
       ..clear()
       ..addAll(_defaultKeyIds);
