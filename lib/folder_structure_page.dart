@@ -30,6 +30,8 @@ class _FolderRow {
   final int depth;
   final int authors;
   final List<_FolderRow> children;
+  /// 基础库目录：永远不允许勾选为「节点文件夹」（单元库）。
+  final bool isBasic;
 
   _FolderRow({
     required this.rel,
@@ -37,6 +39,7 @@ class _FolderRow {
     required this.depth,
     required this.authors,
     required this.children,
+    this.isBasic = false,
   });
 }
 
@@ -47,9 +50,71 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   final Set<String> expanded = <String>{};
   final Set<String> nodes = <String>{};
   final Set<String> saved = <String>{};
+  /// 基础库 rel 集合（来自 `/api/libraries.json` 的 `basicLibraries`）。
+  Set<String> basicRels = <String>{};
   bool loading = true;
   bool saving = false;
   String? err;
+
+  /// 接口可能直接给出的「是否基础库」字段名。
+  static const List<String> _basicFlagKeys = <String>[
+    'basic',
+    'isBasic',
+    'is_basic',
+    'isBasicLib',
+    'is_basic_lib',
+    'basicLib',
+  ];
+
+  /// 统一 rel：去掉首尾 `/`，压缩重复 `/`。
+  static String normalizeRel(String rel) {
+    final parts = rel
+        .trim()
+        .replaceAll('\\', '/')
+        .split('/')
+        .where((s) => s.isNotEmpty)
+        .toList(growable: false);
+    return parts.join('/');
+  }
+
+  /// 父链中是否有「@作者」这一级目录（接口未标记基础库时的兜底判断）。
+  static bool hasAuthorMarkerInParents(String rel) {
+    final parts = normalizeRel(rel).split('/');
+    if (parts.length < 2) return false;
+    for (var i = 0; i < parts.length - 1; i++) {
+      final s = parts[i].trim();
+      if (s.startsWith('@') && s.contains('作者')) return true;
+    }
+    return false;
+  }
+
+  static bool? _explicitBasicFlag(Map raw) {
+    for (final k in _basicFlagKeys) {
+      final v = raw[k];
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String && v.trim().isNotEmpty) {
+        final s = v.trim().toLowerCase();
+        if (s == 'true' || s == '1' || s == 'yes') return true;
+        if (s == 'false' || s == '0' || s == 'no') return false;
+      }
+    }
+    return null;
+  }
+
+  static bool _isBasicFolder(
+    Map raw,
+    String rel,
+    int authors,
+    Set<String> basics,
+  ) {
+    final explicit = _explicitBasicFlag(raw);
+    if (explicit != null) return explicit;
+    if (basics.contains(normalizeRel(rel))) return true;
+    // 兜底：有作者且父链下存在「@作者」目录 → 视为基础库。
+    if (authors > 0 && hasAuthorMarkerInParents(rel)) return true;
+    return false;
+  }
 
   @override
   void initState() {
@@ -63,21 +128,31 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       err = null;
     });
     try {
-      final r = await http
-          .get(widget.urlOf('/api/folders'), headers: widget.headersOf())
-          .timeout(const Duration(seconds: 20));
+      final rs = await Future.wait<Object>([
+        http
+            .get(widget.urlOf('/api/folders'), headers: widget.headersOf())
+            .timeout(const Duration(seconds: 20)),
+        _fetchBasicRels(),
+      ]);
+      final r = rs[0] as http.Response;
+      final basics = rs[1] as Set<String>;
       if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
       final j = jsonDecode(utf8.decode(r.bodyBytes));
       final top = j['top'];
       topName = '${top is Map ? (top['name'] ?? 'SECRET') : 'SECRET'}';
       topRel = '${top is Map ? (top['rel'] ?? '') : ''}';
+      final serverNodes =
+          ((j['nodes'] as List?) ?? const []).map((e) => '$e').toList();
       nodes
         ..clear()
-        ..addAll(((j['nodes'] as List?) ?? const []).map((e) => '$e'));
+        ..addAll(serverNodes);
+      // 基础库永远不能是节点：清掉历史误选（保留 saved 原值，让「保存」可落盘）。
+      nodes.removeWhere((e) => basics.contains(normalizeRel(e)));
       saved
         ..clear()
-        ..addAll(nodes);
-      rows = _parse(((j['folders'] as List?) ?? const []));
+        ..addAll(serverNodes);
+      basicRels = basics;
+      rows = _parse(((j['folders'] as List?) ?? const []), basics);
       if (!mounted) return;
       setState(() => loading = false);
     } catch (e) {
@@ -89,18 +164,46 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     }
   }
 
-  List<_FolderRow> _parse(List list) {
+  /// 读取 `/api/libraries.json` 的基础库 rel 集合；失败不影响主流程。
+  Future<Set<String>> _fetchBasicRels() async {
+    try {
+      final r = await http
+          .get(widget.urlOf('/api/libraries.json'),
+              headers: widget.headersOf())
+          .timeout(const Duration(seconds: 20));
+      if (r.statusCode != 200) return <String>{};
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      if (j is! Map) return <String>{};
+      final raw = j['basicLibraries'];
+      if (raw is! List) return <String>{};
+      final out = <String>{};
+      for (final e in raw) {
+        if (e is! Map) continue;
+        final rel = normalizeRel('${e['rel'] ?? ''}');
+        if (rel.isNotEmpty) out.add(rel);
+      }
+      return out;
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  List<_FolderRow> _parse(List list, Set<String> basics) {
     final out = <_FolderRow>[];
     for (final raw in list) {
       if (raw is! Map) continue;
       final rel = '${raw['rel'] ?? ''}'.trim();
       if (rel.isEmpty) continue;
+      final authors =
+          (raw['authors'] is num) ? (raw['authors'] as num).toInt() : 0;
       out.add(_FolderRow(
         rel: rel,
         name: '${raw['name'] ?? rel}'.trim(),
         depth: (raw['depth'] is num) ? (raw['depth'] as num).toInt() : 1,
-        authors: (raw['authors'] is num) ? (raw['authors'] as num).toInt() : 0,
-        children: _parse((raw['dirs'] as List?) ?? const []),
+        authors: authors,
+        children:
+            _parse((raw['dirs'] as List?) ?? const [], basics),
+        isBasic: _isBasicFolder(raw, rel, authors, basics),
       ));
     }
     return out;
@@ -109,6 +212,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   Future<void> _save() async {
     setState(() => saving = true);
     try {
+      // 双保险：基础库目录永远不进 nodes。
+      nodes.removeWhere((e) => _isBasicRel(e));
       final r = await http
           .post(
             widget.urlOf('/api/nodes'),
@@ -153,21 +258,73 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   }
 
   void _toggleNode(String rel) {
+    if (_isBasicRel(rel)) return;
     setState(() {
       if (!nodes.remove(rel)) nodes.add(rel);
     });
+  }
+
+  bool _isBasicRel(String rel) {
+    final n = normalizeRel(rel);
+    if (basicRels.contains(n)) return true;
+    return _findRow(rows, rel)?.isBasic ?? false;
+  }
+
+  _FolderRow? _findRow(List<_FolderRow> list, String rel) {
+    for (final r in list) {
+      if (r.rel == rel) return r;
+      final hit = _findRow(r.children, rel);
+      if (hit != null) return hit;
+    }
+    return null;
+  }
+
+  /// 当前树里所有可设为节点的目录：非叶子（有下级）且不是基础库。
+  List<String> get _nodeCandidates {
+    final out = <String>[];
+    void walk(List<_FolderRow> list) {
+      for (final r in list) {
+        if (!r.isBasic && r.children.isNotEmpty) out.add(r.rel);
+        walk(r.children);
+      }
+    }
+    walk(rows);
+    return out;
+  }
+
+  /// 一键把所有非基础库文件夹设为节点，并剔除基础库。
+  void _setAllNonBasicAsNodes() {
+    final candidates = _nodeCandidates;
+    final basicsInNodes = nodes.where((e) => _isBasicRel(e)).toList();
+    if (candidates.isEmpty && basicsInNodes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('没有可设为节点的文件夹')),
+      );
+      return;
+    }
+    final before = nodes.length;
+    setState(() {
+      nodes.removeWhere((e) => _isBasicRel(e));
+      nodes.addAll(candidates);
+    });
+    final added = nodes.length - (before - basicsInNodes.length);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('已选入 ${candidates.length} 个非基础库文件夹'
+          '（新增 ${added > 0 ? added : 0}，共 ${nodes.length} 个节点），点「保存」生效'),
+    ));
   }
 
   Widget _buildRow(_FolderRow r) {
     final open = expanded.contains(r.rel);
     final isNode = nodes.contains(r.rel);
     final hasKids = r.children.isNotEmpty;
+    final isBasic = r.isBasic;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InkWell(
           key: ValueKey('folder-${r.rel}'),
-          onTap: () => _toggleNode(r.rel),
+          onTap: isBasic ? null : () => _toggleNode(r.rel),
           child: Padding(
             padding: EdgeInsets.fromLTRB(10.0 + (r.depth - 1) * 18, 6, 8, 6),
             child: Row(children: [
@@ -186,9 +343,11 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                     : const SizedBox.shrink(),
               ),
               Icon(
-                isNode ? Icons.hub_outlined : Icons.folder_outlined,
+                isBasic
+                    ? Icons.inventory_2_outlined
+                    : (isNode ? Icons.hub_outlined : Icons.folder_outlined),
                 size: 17,
-                color: isNode
+                color: isNode && !isBasic
                     ? Theme.of(context).colorScheme.primary
                     : Colors.grey,
               ),
@@ -203,7 +362,10 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                         style: TextStyle(
                             fontSize: 13,
                             fontWeight:
-                                isNode ? FontWeight.w700 : FontWeight.w500)),
+                                isNode && !isBasic
+                                    ? FontWeight.w700
+                                    : FontWeight.w500,
+                            color: isBasic ? Colors.grey : null)),
                     if (r.authors > 0)
                       Text('${r.authors} 位作者',
                           style: const TextStyle(
@@ -211,7 +373,21 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                   ],
                 ),
               ),
-              if (isNode)
+              if (isBasic)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text('基础库',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey)),
+                )
+              else if (isNode)
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -228,8 +404,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                 ),
               Switch(
                 key: ValueKey('node-switch-${r.rel}'),
-                value: isNode,
-                onChanged: (_) => _toggleNode(r.rel),
+                value: isNode && !isBasic,
+                onChanged: isBasic ? null : (_) => _toggleNode(r.rel),
               ),
             ]),
           ),
@@ -296,8 +472,36 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                     ),
                     const Padding(
                       padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
-                      child: Text('点目录行或右侧开关，把目录设为「节点文件夹」（单元库）；默认只有顶级 SECRET。',
+                      child: Text(
+                          '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）；默认只有顶级 SECRET。'
+                          '「基础库」目录固定排除，不能设为节点。',
                           style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                      child: Row(children: [
+                        Expanded(
+                          child: FilledButton.tonalIcon(
+                            key: const ValueKey('bulk-set-nodes'),
+                            onPressed: (loading || saving || rows.isEmpty)
+                                ? null
+                                : _setAllNonBasicAsNodes,
+                            icon: const Icon(Icons.account_tree_outlined,
+                                size: 16),
+                            label: const Text(
+                                '一键把所有非基础库文件夹设为节点',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                        if (basicRels.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Text('基础库 ${basicRels.length} 个',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.grey)),
+                        ],
+                      ]),
                     ),
                     for (final r in rows) _buildRow(r),
                     if (rows.isEmpty)

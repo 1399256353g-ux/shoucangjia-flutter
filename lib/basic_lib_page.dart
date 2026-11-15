@@ -46,6 +46,8 @@ class _BasicLibPageState extends State<BasicLibPage>
 
   List<Map<String, dynamic>> authors = [];
   List<dynamic> works = [];
+  /// 作品类型多选筛选（空集合 = 全部）；只在本地过滤，不影响接口分页。
+  final Set<String> _typeFilter = <String>{};
   int total = 0;
   bool loadingAuthors = true;
   bool loadingWorks = true;
@@ -291,6 +293,28 @@ class _BasicLibPageState extends State<BasicLibPage>
           child: Text(err ?? '该基础库下没有作品',
               style: const TextStyle(fontSize: 12, color: Colors.grey)));
     }
+    final shown = filtered;
+    return Column(children: [
+      _typeFilterBar(),
+      if (shown.isEmpty)
+        Expanded(
+          child: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text('该类型下暂无作品',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              TextButton(
+                  onPressed: _typeFilter.isEmpty ? null : _clearTypeFilter,
+                  child: const Text('清除筛选')),
+            ]),
+          ),
+        )
+      else
+        Expanded(child: _worksGrid(shown)),
+    ]);
+  }
+
+  Widget _worksGrid(List<dynamic> filtered) {
     return GridView.builder(
       controller: _worksScroll,
       padding: const EdgeInsets.all(10),
@@ -300,31 +324,119 @@ class _BasicLibPageState extends State<BasicLibPage>
         crossAxisSpacing: 8,
         childAspectRatio: 0.72,
       ),
-      itemCount: works.length + (loadingMore ? 1 : 0),
+      itemCount: filtered.length + (loadingMore ? 1 : 0),
       itemBuilder: (c, i) {
-        if (i >= works.length) {
+        if (i >= filtered.length) {
           return const Center(
               child: SizedBox(
                   width: 18, height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2)));
         }
-        final w = works[i];
+        final w = filtered[i];
         final thumb = _thumbOf(w);
-        final kind = w is Map ? '${w['kind']}' : '';
-        final typeLabel = kind.contains('chapter')
-            ? '合集'
-            : (w is Map && '${w['t']}' == 'p' ? '图文' : '视频');
         return WorkCard(
           key: ValueKey('basic-work-${w is Map ? w['id'] : i}'),
           title: w is Map ? '${w['ti'] ?? ''}' : '',
-          typeLabel: typeLabel,
+          typeLabel: _typeLabel(_workType(w)),
           coverUrl: thumb.isEmpty
               ? ''
               : widget.mediaUrlOf(thumb, lib: widget.basic.id),
           headers: widget.headersOf(widget.basic.id),
-          onTap: widget.onPlay == null ? null : () => widget.onPlay!(works, i),
+          onTap:
+              widget.onPlay == null ? null : () => widget.onPlay!(filtered, i),
         );
       },
+    );
+  }
+
+  // ---- 作品类型筛选（全部/视频/图文/合集，多选，本地过滤） ----
+
+  static const List<String> _typeOrder = <String>['video', 'post', 'collection'];
+
+  /// 作品类型：视频 / 图文 / 合集（与卡片右上角标签保持一致）。
+  static String _workType(dynamic w) {
+    if (w is! Map) return 'video';
+    final kind = '${w['kind'] ?? ''}';
+    if (kind == 'chapters' || kind == 'album') return 'collection';
+    if (kind == 'post') return 'post';
+    if ('${w['t']}' == 'p') return 'post';
+    return 'video';
+  }
+
+  static String _typeLabel(String type) {
+    switch (type) {
+      case 'post':
+        return '图文';
+      case 'collection':
+        return '合集';
+      default:
+        return '视频';
+    }
+  }
+
+  /// 本地过滤后的作品列表；筛选为空时即全部作品。
+  List<dynamic> get filtered {
+    if (_typeFilter.isEmpty) return works;
+    return works.where((w) => _typeFilter.contains(_workType(w))).toList();
+  }
+
+  int _countOf(String type) => works.where((w) => _workType(w) == type).length;
+
+  void _toggleType(String type) {
+    setState(() {
+      if (!_typeFilter.add(type)) _typeFilter.remove(type);
+    });
+  }
+
+  void _clearTypeFilter() {
+    if (_typeFilter.isEmpty) return;
+    setState(_typeFilter.clear);
+  }
+
+  Widget _typeFilterBar() {
+    return SizedBox(
+      height: 46,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        children: [
+          Center(
+            child: FilterChip(
+              key: const ValueKey('basic-type-all'),
+              label: Text('全部 ${works.length}',
+                  style: const TextStyle(fontSize: 12)),
+              selected: _typeFilter.isEmpty,
+              showCheckmark: false,
+              onSelected: (_) => _clearTypeFilter(),
+            ),
+          ),
+          for (final type in _typeOrder)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Center(
+                child: FilterChip(
+                  key: ValueKey('basic-type-$type'),
+                  label: Text('${_typeLabel(type)} ${_countOf(type)}',
+                      style: const TextStyle(fontSize: 12)),
+                  selected: _typeFilter.contains(type),
+                  showCheckmark: false,
+                  onSelected: _countOf(type) == 0 && !_typeFilter.contains(type)
+                      ? null
+                      : (_) => _toggleType(type),
+                ),
+              ),
+            ),
+          if (_typeFilter.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Center(
+                child: TextButton(
+                    onPressed: _clearTypeFilter,
+                    child: const Text('清除', style: TextStyle(fontSize: 12))),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

@@ -5781,81 +5781,105 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     // I7：头像按实际显示尺寸 × 像素比解码，避免整张大图进内存
     final avatarPx =
         avatarDecodeWidth(displaySize: 58, devicePixelRatio: devicePixelRatio);
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: () => _open(e.key),
-      child: Stack(children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(6, 22, 6, 8),
-          decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12)),
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            ClipOval(
-              child: SizedBox(
-                width: 58,
-                height: 58,
-                child: av.isEmpty
-                    ? Container(
-                        color: Colors.blueGrey,
-                        alignment: Alignment.center,
-                        child: Text(e.key.isEmpty ? '?' : e.key[0],
-                            style: const TextStyle(fontSize: 24)))
-                    : CachedNetworkImage(
-                        imageUrl: cfg.mediaUrl(av, lib: lib),
-                        httpHeaders: cfg.headersFor(lib),
-                        fit: BoxFit.cover,
-                        memCacheWidth: avatarPx,
-                        fadeInDuration: Duration.zero,
-                        errorWidget: (_, __, ___) => Container(
-                            color: Colors.blueGrey,
-                            alignment: Alignment.center,
-                            child: Text(e.key.isEmpty ? '?' : e.key[0],
-                                style: const TextStyle(fontSize: 24)))),
+    // 卡片尺寸固定：网格给定 170 高 / ≤150 宽，内部一律用固定高度，
+    // 文字只做单行省略，绝不因内容多少改变卡片大小。
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox.expand(
+      child: MediaQuery.withClampedTextScaling(
+        maxScaleFactor: 1.2,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _open(e.key),
+          child: Stack(fit: StackFit.expand, children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(6, 22, 6, 8),
+              decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: ClipOval(
+                      child: SizedBox(
+                        width: 58,
+                        height: 58,
+                        child: av.isEmpty
+                            ? Container(
+                                color: Colors.blueGrey,
+                                alignment: Alignment.center,
+                                child: Text(e.key.isEmpty ? '?' : e.key[0],
+                                    style: const TextStyle(fontSize: 24)))
+                            : CachedNetworkImage(
+                                imageUrl: cfg.mediaUrl(av, lib: lib),
+                                httpHeaders: cfg.headersFor(lib),
+                                fit: BoxFit.cover,
+                                memCacheWidth: avatarPx,
+                                fadeInDuration: Duration.zero,
+                                errorWidget: (_, __, ___) => Container(
+                                    color: Colors.blueGrey,
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                        e.key.isEmpty ? '?' : e.key[0],
+                                        style: const TextStyle(fontSize: 24)))),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 16,
+                    child: Text(e.key,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(height: 2),
+                  SizedBox(
+                    height: 13,
+                    child: Text(_sub(e),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 10, color: scheme.onSurfaceVariant)),
+                  ),
+                  SizedBox(
+                    height: 12,
+                    child: Text('${_num(e.value['n'])} 作品',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 9,
+                            color: scheme.onSurfaceVariant
+                                .withValues(alpha: 0.7))),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 6),
-            Text(e.key,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 2),
-            Text(_sub(e),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            Text('${_num(e.value['n'])} 作品',
-                maxLines: 1,
-                style: TextStyle(
-                    fontSize: 9,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurfaceVariant
-                        .withValues(alpha: 0.7))),
+            Positioned(
+              top: 5,
+              left: 5,
+              right: 4,
+              child: LibBadges(
+                libIds: ids,
+                order: libs.map((e) => '${e['id']}').toList(),
+                grade: AuthorGrade.gradeFor(
+                  plays: _num(_s(e.key)['p']),
+                  drops: _num(_s(e.key)['dr']),
+                  works: _num(e.value['n']),
+                ),
+                names: {
+                  for (final id in {...ids, ...order}) id: libLabel(id)
+                },
+              ),
+            ),
           ]),
         ),
-        Positioned(
-          top: 5,
-          left: 5,
-          right: 4,
-          child: LibBadges(
-            libIds: ids,
-            order: libs.map((e) => '${e['id']}').toList(),
-            grade: AuthorGrade.gradeFor(
-              plays: _num(_s(e.key)['p']),
-              drops: _num(_s(e.key)['dr']),
-              works: _num(e.value['n']),
-            ),
-            names: {
-              for (final id in {...ids, ...order}) id: libLabel(id)
-            },
-          ),
-        ),
-      ]),
+      ),
     );
   }
 

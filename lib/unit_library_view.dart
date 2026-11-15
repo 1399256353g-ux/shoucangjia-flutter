@@ -16,6 +16,7 @@ class _CoverThumb extends StatelessWidget {
   final Color fallbackColor;
 
   const _CoverThumb({
+    super.key,
     required this.url,
     required this.size,
     required this.fallbackIcon,
@@ -205,48 +206,77 @@ class StarredUnitsPage extends StatelessWidget {
   }
 }
 
-/// 单元库卡片（大）：名称、层级摘要、来源连接。
+/// 单元库卡片（大）：与基础库卡片同一形状/排版（圆角 12、封面缩略、标题、
+/// 作者/作品数），但整体面积略大（高 132、封面 72）。
 class UnitLibraryCard extends StatelessWidget {
+  /// 卡片高度（略大于基础库卡片）。
+  static const double height = 132;
+
+  /// 封面缩略尺寸（略大于基础库卡片）。
+  static const double coverSize = 72;
+
+  /// 与基础库卡片统一的圆角。
+  static const double radius = 12;
+
   final UnitLibrary unit;
-  final VoidCallback onTap;
+
+  /// 为空表示纯展示卡片（单元库详情页顶部的自身卡片），不显示进入箭头。
+  final VoidCallback? onTap;
   final String coverUrl;
+
   /// 星标标记的是「单元库」，不是基础库。
   final bool starred;
   final VoidCallback? onToggleStar;
 
+  /// 右上角爬虫配置入口：只有非顶级单元库才显示。
+  final VoidCallback? onConfigure;
+
   const UnitLibraryCard({
     super.key,
     required this.unit,
-    required this.onTap,
+    this.onTap,
     this.coverUrl = '',
     this.starred = false,
     this.onToggleStar,
+    this.onConfigure,
   });
+
+  /// 顶级单元库（SECRET，rel 为空）没有独立爬虫配置；只有下级单元库才有。
+  static bool canConfigure(UnitLibrary unit) => unit.rel.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final server = unit.node.serverLabel;
+    final showCrawler = onConfigure != null && canConfigure(unit);
+    final meta = [
+      '${unit.basicCount} 个基础库',
+      if (server.isNotEmpty) server,
+    ].join(' · ');
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Material(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(14),
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(radius),
         child: SizedBox(
-          height: 116,
+          key: ValueKey('unit-card-${unit.id}'),
+          height: height,
           child: Row(children: [
             // 卡片主体：点这里进入单元库
             Expanded(
               child: InkWell(
-                key: ValueKey('unit-${unit.id}'),
+                key: onTap == null
+                    ? ValueKey('unit-head-${unit.id}')
+                    : ValueKey('unit-${unit.id}'),
                 borderRadius: const BorderRadius.horizontal(
-                    left: Radius.circular(14)),
+                    left: Radius.circular(radius)),
                 onTap: onTap,
                 child: Row(children: [
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 10),
                   _CoverThumb(
+                    key: ValueKey('unit-cover-${unit.id}'),
                     url: coverUrl,
-                    size: 64,
+                    size: coverSize,
                     fallbackIcon: Icons.folder_copy_outlined,
                     fallbackColor: scheme.primary,
                   ),
@@ -260,42 +290,69 @@ class UnitLibraryCard extends StatelessWidget {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w600)),
+                                fontSize: 14.5,
+                                height: 1.25,
+                                fontWeight: FontWeight.w600)),
                         const SizedBox(height: 6),
-                        Text(unit.subtitle,
+                        Text(
+                            '${formatCount(unit.authors)} 作者 · '
+                            '${formatCount(unit.works)} 作品',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                                fontSize: 11, color: Colors.grey)),
-                        if (server.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(server,
-                              style: const TextStyle(
-                                  fontSize: 10, color: Colors.grey)),
-                        ],
+                                fontSize: 10.5, color: Colors.grey)),
+                        const SizedBox(height: 4),
+                        Text(meta,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.grey)),
                       ],
                     ),
                   ),
-                  const Icon(Icons.chevron_right, color: Colors.grey),
-                  const SizedBox(width: 6),
                 ]),
               ),
             ),
-            // 星标独立在卡片点击区之外，避免点星标误进单元库
-            if (onToggleStar != null)
-              InkResponse(
-                key: ValueKey('unit-star-${unit.id}'),
-                onTap: onToggleStar,
-                radius: 22,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Icon(
-                    starred ? Icons.star : Icons.star_border,
-                    size: 22,
-                    color: starred ? Colors.amber : Colors.grey,
-                  ),
-                ),
+            // 右侧操作列：右上角＝爬虫配置（仅非顶级单元库），
+            // 右下角＝星标；两者都在卡片点击区之外，避免误触。
+            SizedBox(
+              width: 36,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  if (showCrawler)
+                    IconButton(
+                      key: ValueKey('unit-crawler-${unit.id}'),
+                      tooltip: '爬虫配置',
+                      iconSize: 17,
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints:
+                          const BoxConstraints.tightFor(width: 32, height: 32),
+                      icon: const Icon(Icons.settings_ethernet),
+                      onPressed: onConfigure,
+                    )
+                  else
+                    const SizedBox(height: 32),
+                  if (onToggleStar != null)
+                    InkResponse(
+                      key: ValueKey('unit-star-${unit.id}'),
+                      onTap: onToggleStar,
+                      radius: 18,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Icon(
+                          starred ? Icons.star : Icons.star_border,
+                          size: 20,
+                          color: starred ? Colors.amber : Colors.grey,
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox(height: 32),
+                ],
               ),
+            ),
             const SizedBox(width: 6),
           ]),
         ),
@@ -347,25 +404,19 @@ class UnitLibraryPage extends StatelessWidget {
 
     walkOwners(unit);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(unit.name),
-        actions: [
-          if (onConfigureUnit != null && unit.rel.trim().isNotEmpty)
-            IconButton(
-              key: ValueKey('unit-crawler-${unit.id}'),
-              tooltip: '爬虫配置',
-              icon: const Icon(Icons.settings_ethernet),
-              onPressed: () => onConfigureUnit!(unit),
-            ),
-        ],
-      ),
+      appBar: AppBar(title: Text(unit.name)),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-            child: Text(unit.subtitle,
-                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          // 当前单元库自身也是一张卡片（不可点进），爬虫配置入口在它的右上角。
+          UnitLibraryCard(
+            unit: unit,
+            coverUrl: unitCoverOf?.call(unit) ?? '',
+            starred: stars.contains(unit.id),
+            onToggleStar: () => onToggleUnitStar(unit),
+            onConfigure: onConfigureUnit == null
+                ? null
+                : () => onConfigureUnit!(unit),
           ),
           if (unit.children.isNotEmpty) ...[
             const Padding(
@@ -380,6 +431,9 @@ class UnitLibraryPage extends StatelessWidget {
                 starred: stars.contains(c.id),
                 onToggleStar: () => onToggleUnitStar(c),
                 onTap: () => onOpenUnit(c),
+                onConfigure: onConfigureUnit == null
+                    ? null
+                    : () => onConfigureUnit!(c),
               ),
           ],
           if (sorted.isNotEmpty) ...[
