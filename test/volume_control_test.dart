@@ -28,5 +28,11 @@ void main() {
       expect(volumeIconLevel(30), 'down');
       expect(volumeIconLevel(80), 'up');
     });
+
+    test('I1 音量 UI 仅桌面端开启', () {
+      expect(volumeUiEnabled(isDesktop: true), isTrue);
+      expect(volumeUiEnabled(isDesktop: false), isFalse);
+      expect(volumeUiEnabled(isDesktop: true, isWeb: true), isFalse);
+    });
   });
 }

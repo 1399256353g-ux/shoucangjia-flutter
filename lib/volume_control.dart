@@ -6,6 +6,10 @@ library;
 
 const double kVolumeDragWidth = 200.0;
 
+/// I1：iOS/Android 改用系统音量键，不再提供应用内音量调节 UI；仅桌面端保留。
+bool volumeUiEnabled({required bool isDesktop, bool isWeb = false}) =>
+    !isWeb && isDesktop;
+
 /// 以 [start] 为按下时的音量，手指横向移动 [dx] 像素后的新音量。
 double volumeFromDrag(double start, double dx,
     {double width = kVolumeDragWidth}) {
