@@ -7,6 +7,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 class LibraryBadge {
   static const String prefsKey = 'lib_colors_v1';
 
+  /// 顶级单元库（SECRET）与无归属词条的固定灰色。
+  static const int gray = 0xFF6B7280;
+
   /// 自动配色调色板：按库注册顺序依次分配，保证同屏库颜色区分明显。
   static const List<int> palette = <int>[
     0xFF2563EB, // 蓝
@@ -36,7 +39,7 @@ class LibraryBadge {
   static int colorFor(String libId, {List<String> order = const []}) {
     final c = custom[libId];
     if (c != null) return c;
-    if (libId.isEmpty) return 0xFF6B7280;
+    if (libId.isEmpty) return gray;
     final i = order.indexOf(libId);
     if (i >= 0) return autoColorAt(i);
     var h = 0;
@@ -44,6 +47,12 @@ class LibraryBadge {
       h = (h * 31 + u) & 0x7fffffff;
     }
     return autoColorAt(h);
+  }
+
+  /// 单元库词条颜色：顶级 SECRET / 空 id 固定灰色，其余按库配色。
+  static int unitColor(String unitId, {List<String> order = const []}) {
+    if (unitId.isEmpty || unitId == 'secret') return gray;
+    return colorFor(unitId, order: order);
   }
 
   /// 根据底色亮度选择黑/白文字，保证对比度。

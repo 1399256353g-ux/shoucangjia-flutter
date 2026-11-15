@@ -177,10 +177,20 @@ class LibMeta {
   /// J10：大库 id → 名称，用于作者筛选里的「大库」多选。
   final Map<String, String> bigNames;
 
+  /// L5：单元库树（作者筛选与词条来源）。为空表示服务端未提供节点信息。
+  final UnitLibrary? unitTree;
+  /// 含基础库的单元库（深度优先，SECRET 最后）。
+  final List<UnitLibrary> units;
+  /// 基础库 id → 所属单元库 id。
+  final Map<String, String> basicToUnit;
+
   const LibMeta({
     required this.basics,
     required this.stats,
     this.bigNames = const {},
+    this.unitTree,
+    this.units = const [],
+    this.basicToUnit = const {},
   });
 
   static final Map<String, LibMeta> cache = <String, LibMeta>{};
@@ -194,6 +204,9 @@ class LibMeta {
       var basics = const <BasicLibRef>[];
       var stats = <String, dynamic>{};
       var bigNames = <String, String>{};
+      UnitLibrary? unitTree;
+      var units = const <UnitLibrary>[];
+      var basicToUnit = const <String, String>{};
       try {
         final rs = await Future.wait([
           http.get(cfg.u('/api/libraries.json', lib: lib),
@@ -201,6 +214,7 @@ class LibMeta {
           http.get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers),
           http.get(cfg.u('/api/author_stats.json', lib: lib),
               headers: cfg.headers),
+          http.get(cfg.u('/api/nodes', lib: lib), headers: cfg.headers),
         ]).timeout(const Duration(seconds: 10));
         if (rs[0].statusCode == 200 && rs[1].statusCode == 200) {
           final lj = jsonDecode(rs[0].body);
@@ -215,14 +229,55 @@ class LibMeta {
             }
           }
           if (lj is Map && base.isNotEmpty) {
-            basics = basicsUnderBase(Map<String, dynamic>.from(lj), base);
-            final bigs = Map<String, dynamic>.from(lj)['bigLibraries'];
+            final ljm = Map<String, dynamic>.from(lj);
+            basics = basicsUnderBase(ljm, base);
+            final bigs = ljm['bigLibraries'];
             if (bigs is List) {
               for (final e in bigs) {
                 if (e is! Map) continue;
                 final id = '${e['id'] ?? ''}';
                 if (id.isEmpty) continue;
                 bigNames[id] = '${e['name'] ?? id}';
+              }
+            }
+            if (basics.isNotEmpty) {
+              final basicList = <BasicLib>[
+                for (final b in basics)
+                  BasicLib(
+                      id: b.id,
+                      name: b.name,
+                      rel: b.rel,
+                      bigId: b.bigId,
+                      authors: 0,
+                      works: 0),
+              ];
+              final manual =
+                  '${ljm['nodesMode'] ?? ''}'.trim().toLowerCase() == 'manual';
+              List<LibNode> nodes;
+              if (manual) {
+                final marks = <String>[];
+                if (rs[3].statusCode == 200) {
+                  try {
+                    final nj = jsonDecode(utf8.decode(rs[3].bodyBytes));
+                    final list = nj is Map ? nj['nodes'] : null;
+                    if (list is List) {
+                      for (final e in list) {
+                        final s = '$e'.trim();
+                        if (s.isNotEmpty) marks.add(s);
+                      }
+                    }
+                  } catch (_) {}
+                }
+                nodes = nodesFromMarks(marks);
+              } else {
+                nodes = nodesFromV2(ljm, root: base);
+              }
+              final tree =
+                  buildUnitTree(nodes: nodes, basics: basicList);
+              if (tree != null) {
+                unitTree = tree;
+                units = flattenUnits(tree);
+                basicToUnit = unitOfBasics(tree);
               }
             }
           }
@@ -234,7 +289,13 @@ class LibMeta {
           }
         }
       } catch (_) {}
-      final meta = LibMeta(basics: basics, stats: stats, bigNames: bigNames);
+      final meta = LibMeta(
+          basics: basics,
+          stats: stats,
+          bigNames: bigNames,
+          unitTree: unitTree,
+          units: units,
+          basicToUnit: basicToUnit);
       cache[lib] = meta;
       _loading.remove(lib);
       return meta;
@@ -255,6 +316,30 @@ class LibMeta {
   /// 作者所属基础库 id（用于配色）；未命中返回空。
   String idFor(String mediaPath) =>
       basicLibForMedia(basics, mediaPath)?.id ?? '';
+
+  /// L5：作者所属单元库 id；无法匹配基础库时为空。
+  /// 有基础库但没有节点归属时回落到顶级 `secret`。
+  String unitIdFor(String mediaPath) {
+    final b = idFor(mediaPath);
+    if (b.isEmpty) return '';
+    return basicToUnit[b] ?? 'secret';
+  }
+
+  String unitNameOf(String id) {
+    if (id.isEmpty) return '';
+    if (id == 'secret') return 'SECRET';
+    for (final u in units) {
+      if (u.id == id) return u.name;
+    }
+    return id;
+  }
+
+  /// 单元库配色顺序（不含顶级 SECRET）。
+  List<String> get unitOrder =>
+      [for (final u in units) if (u.id != 'secret') u.id];
+
+  Map<String, String> get unitNames =>
+      {for (final u in units) u.id: unitNameOf(u.id)};
 
   /// J10：作者所属大库 id；无法匹配基础库时为空。
   String bigIdFor(String mediaPath) {
@@ -1205,6 +1290,8 @@ class LibBadges extends StatelessWidget {
   final List<String> libIds;
   final List<String> order;
   final Map<String, String> names;
+  /// 固定使用灰色的词条 id（顶级 SECRET / 无归属库名）。
+  final Set<String> grayIds;
   // 等级词条（D–S），空串表示不显示
   final String grade;
   const LibBadges({
@@ -1212,6 +1299,7 @@ class LibBadges extends StatelessWidget {
     required this.libIds,
     this.order = const [],
     this.names = const {},
+    this.grayIds = const {},
     this.grade = '',
   });
 
@@ -1227,8 +1315,9 @@ class LibBadges extends StatelessWidget {
         for (var i = 0; i < labels.length; i++)
           LibBadgeChip(
             label: labels[i],
-            color: labels[i].startsWith('+')
-                ? const Color(0xFF6B7280).toARGB32()
+            color: (labels[i].startsWith('+') ||
+                    (i < shown.length && grayIds.contains(shown[i])))
+                ? LibraryBadge.gray
                 : LibraryBadge.colorFor(i < shown.length ? shown[i] : '',
                     order: order),
           ),
@@ -1238,6 +1327,45 @@ class LibBadges extends StatelessWidget {
             color: AuthorGrade.colorForGrade(grade),
           ),
       ],
+    );
+  }
+}
+
+/// T2：单元库词条。
+///
+/// 作者/作品能归到单元库 → 显示单元库名并按库配色；
+/// 顶级 SECRET 或无归属 → 固定灰色（无归属时显示库名兜底）。
+class UnitBadges extends StatelessWidget {
+  final LibMeta? meta;
+  final String mediaPath;
+  /// 没有单元库归属时显示的库 id / 库名。
+  final String fallbackId;
+  final String fallbackName;
+  final String grade;
+  const UnitBadges({
+    super.key,
+    required this.meta,
+    required this.mediaPath,
+    required this.fallbackId,
+    required this.fallbackName,
+    this.grade = '',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final unitId = meta?.unitIdFor(mediaPath) ?? '';
+    final id = unitId.isEmpty ? fallbackId : unitId;
+    final names = <String, String>{...?meta?.unitNames};
+    if (unitId.isEmpty && id.isNotEmpty) {
+      names[id] = fallbackName.isEmpty ? id : fallbackName;
+    }
+    final gray = unitId.isEmpty || unitId == 'secret';
+    return LibBadges(
+      libIds: id.isEmpty ? const [] : <String>[id],
+      order: meta?.unitOrder ?? const [],
+      names: names,
+      grayIds: gray ? <String>{id} : const {},
+      grade: grade,
     );
   }
 }
@@ -4074,6 +4202,7 @@ class _CollectionPageState extends State<CollectionPage> {
     return f.matches(
       basicId: meta?.idFor(av) ?? '',
       bigId: meta?.bigIdFor(av) ?? '',
+      unitId: meta?.unitIdFor(av) ?? '',
       grade: meta?.gradeFor(author, _authorWorks[author] ?? 0) ?? '',
       workTypes: types,
     );
@@ -4276,6 +4405,20 @@ class _CollectionPageState extends State<CollectionPage> {
   Map<String, String> get _filterBigNames =>
       {for (final b in _filterBigs) b.id: b.name};
 
+  /// T2：单元库筛选选项（含顶级 SECRET）。
+  List<AuthorLibNode> get _filterUnits {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final u in meta?.units ?? const <UnitLibrary>[]) {
+      if (!seen.add(u.id)) continue;
+      out.add(AuthorLibNode(id: u.id, name: meta!.unitNameOf(u.id)));
+    }
+    return authorLibNodes(out);
+  }
+
+  Map<String, String> get _filterUnitNames =>
+      {for (final u in _filterUnits) u.id: u.name};
+
   Future<void> _openFilter() async {
     if (meta == null) await _loadMeta();
     if (!mounted) return;
@@ -4284,6 +4427,7 @@ class _CollectionPageState extends State<CollectionPage> {
       initial: authorFilter.value,
       basics: _filterBasics,
       bigs: _filterBigs,
+      units: _filterUnits,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => works.where((w) => w is Map && _matchAuthor(w, f)).length,
     );
@@ -4463,7 +4607,7 @@ class _CollectionPageState extends State<CollectionPage> {
                 onOpen: _openFilter,
                 onClear: authorFilter.clearAll,
                 summary: authorFilter.value.isActive
-                    ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${list.length}/${works.length}'
+                    ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames)} · 命中 ${list.length}/${works.length}'
                     : null,
               ),
               Padding(
@@ -4679,6 +4823,7 @@ class _RankPageState extends State<RankPage> {
     return f.matches(
       basicId: meta?.idFor(av) ?? '',
       bigId: meta?.bigIdFor(av) ?? '',
+      unitId: meta?.unitIdFor(av) ?? '',
       grade: meta?.gradeFor(name, _n(e['works'])) ?? '',
       workTypes: authorTypes[name] ?? const <String>{},
     );
@@ -4727,6 +4872,22 @@ class _RankPageState extends State<RankPage> {
   Map<String, String> get _filterBigNames =>
       {for (final b in _filterBigs) b.id: b.name};
 
+  /// T2：单元库筛选选项（含顶级 SECRET）。
+  List<AuthorLibNode> get _filterUnits {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final m in metas.values) {
+      for (final u in m.units) {
+        if (!seen.add(u.id)) continue;
+        out.add(AuthorLibNode(id: u.id, name: m.unitNameOf(u.id)));
+      }
+    }
+    return authorLibNodes(out);
+  }
+
+  Map<String, String> get _filterUnitNames =>
+      {for (final u in _filterUnits) u.id: u.name};
+
   int _filterCount(AuthorFilterState f) =>
       rows.where((e) => _rowMatches(_rowMap(e), f)).length;
 
@@ -4753,6 +4914,7 @@ class _RankPageState extends State<RankPage> {
       initial: filter,
       basics: _filterBasics,
       bigs: _filterBigs,
+      units: _filterUnits,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: _filterCount,
     );
@@ -4904,7 +5066,7 @@ class _RankPageState extends State<RankPage> {
           onOpen: _openFilter,
           onClear: authorFilter.clearAll,
           summary: filter.isActive
-              ? '${filter.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${visible.length}/${rows.length}'
+              ? '${filter.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames)} · 命中 ${visible.length}/${rows.length}'
               : null,
         ),
         Expanded(
@@ -4944,15 +5106,14 @@ class _RankPageState extends State<RankPage> {
                                 ? '${e['lib'] ?? cfg.lib}'
                                 : (sel.isEmpty ? cfg.lib : sel);
                             final meta = metas[rowLib];
-                            final basicId = meta?.idFor(av) ?? '';
-                            final badgeIds = <String>[
-                              basicId.isEmpty ? rowLib : basicId
-                            ];
-                            final badgeNames = <String, String>{
-                              ...?meta?.names,
-                              for (final l in libs)
-                                '${l['id']}': '${l['name'] ?? l['id']}',
-                            };
+                            String libName(String id) {
+                              for (final l in libs) {
+                                if ('${l['id']}' == id) {
+                                  return '${l['name'] ?? l['id']}';
+                                }
+                              }
+                              return id;
+                            }
                             return ListTile(
                               contentPadding:
                                   const EdgeInsets.symmetric(horizontal: 4),
@@ -5011,13 +5172,12 @@ class _RankPageState extends State<RankPage> {
                               subtitle: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    LibBadges(
-                                      libIds: badgeIds,
-                                      order: <String>[
-                                        ...?meta?.order,
-                                        ...libs.map((e) => '${e['id']}'),
-                                      ],
-                                      names: badgeNames,
+                                    // T2：词条改为单元库（SECRET / 无归属灰色）
+                                    UnitBadges(
+                                      meta: meta,
+                                      mediaPath: av,
+                                      fallbackId: rowLib,
+                                      fallbackName: libName(rowLib),
                                       grade: meta == null
                                           ? ''
                                           : meta.gradeFor(name, _n(e['works'])),
@@ -5583,6 +5743,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   String _bigIdOf(MapEntry<String, Map<String, dynamic>> e) =>
       _metaOf(e)?.bigIdFor('${e.value['av'] ?? ''}') ?? '';
 
+  // T2：作者所属单元库 id（顶级 SECRET / 无归属为空）。
+  String _unitIdOf(MapEntry<String, Map<String, dynamic>> e) =>
+      _metaOf(e)?.unitIdFor('${e.value['av'] ?? ''}') ?? '';
+
   String _gradeOf(MapEntry<String, Map<String, dynamic>> e) =>
       AuthorGrade.gradeFor(
         plays: _num(_s(e.key)['p']),
@@ -5636,11 +5800,30 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Map<String, String> get _filterBigNames =>
       {for (final b in _filterBigs) b.id: b.name};
 
+  /// T2：单元库筛选选项（含顶级 SECRET）。
+  List<AuthorLibNode> get _filterUnits {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final l in libs) {
+      final m = metas['${l['id']}'];
+      if (m == null) continue;
+      for (final u in m.units) {
+        if (!seen.add(u.id)) continue;
+        out.add(AuthorLibNode(id: u.id, name: m.unitNameOf(u.id)));
+      }
+    }
+    return authorLibNodes(out);
+  }
+
+  Map<String, String> get _filterUnitNames =>
+      {for (final u in _filterUnits) u.id: u.name};
+
   int _filterCount(AuthorFilterState f) => countMatchingAuthors(
         authors,
         f,
         basicIdOf: (e) => _basicIdOf(MapEntry('', e)),
         bigIdOf: (e) => _bigIdOf(MapEntry('', e)),
+        unitIdOf: (e) => _unitIdOf(MapEntry('', e)),
         gradeOf: (name, e) => _gradeOf(MapEntry(name, e)),
         typesOf: _typesOf,
       );
@@ -5675,6 +5858,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       initial: filter,
       basics: _filterBasics,
       bigs: _filterBigs,
+      units: _filterUnits,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: _filterCount,
     );
@@ -5709,6 +5893,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
             .where((e) => filter.matches(
                   basicId: _basicIdOf(e),
                   bigId: _bigIdOf(e),
+                  unitId: _unitIdOf(e),
                   grade: _gradeOf(e),
                   workTypes: _typesOf(e.key),
                 ))
@@ -5787,8 +5972,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final av = '${e.value['av'] ?? ''}';
     final lib = '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}';
     final meta = metas[lib] ?? metas[sel];
-    final basicId = meta?.idFor(av) ?? '';
-    final ids = <String>[basicId.isEmpty ? lib : basicId];
     String libLabel(String id) {
       final fromMeta = meta?.names[id];
       if (fromMeta != null && fromMeta.isNotEmpty) return fromMeta;
@@ -5798,10 +5981,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       return id;
     }
 
-    final order = <String>[
-      ...?meta?.order,
-      ...libs.map((e) => '${e['id']}'),
-    ];
     // I7：头像按实际显示尺寸 × 像素比解码，避免整张大图进内存
     final avatarPx =
         avatarDecodeWidth(displaySize: 58, devicePixelRatio: devicePixelRatio);
@@ -5899,17 +6078,17 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
               top: 5,
               left: 5,
               right: 4,
-              child: LibBadges(
-                libIds: ids,
-                order: libs.map((e) => '${e['id']}').toList(),
+              // T2：词条改为单元库（SECRET / 无归属灰色）
+              child: UnitBadges(
+                meta: meta,
+                mediaPath: av,
+                fallbackId: lib,
+                fallbackName: libLabel(lib),
                 grade: AuthorGrade.gradeFor(
                   plays: _num(_s(e.key)['p']),
                   drops: _num(_s(e.key)['dr']),
                   works: _num(e.value['n']),
                 ),
-                names: {
-                  for (final id in {...ids, ...order}) id: libLabel(id)
-                },
               ),
             ),
           ]),
@@ -6025,7 +6204,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                     summary: filter.isActive
                         ? filter.summary(
                             basicNames: _filterLibNames,
-                            bigNames: _filterBigNames)
+                            bigNames: _filterBigNames,
+                            unitNames: _filterUnitNames)
                         : null,
                   ),
                   Padding(
@@ -9523,6 +9703,20 @@ class _RecommendPageState extends State<RecommendPage> {
   Map<String, String> get _filterBigNames =>
       {for (final b in _filterBigs) b.id: b.name};
 
+  /// T2：单元库筛选选项（含顶级 SECRET）。
+  List<AuthorLibNode> get _filterUnits {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final u in meta?.units ?? const <UnitLibrary>[]) {
+      if (!seen.add(u.id)) continue;
+      out.add(AuthorLibNode(id: u.id, name: meta!.unitNameOf(u.id)));
+    }
+    return authorLibNodes(out);
+  }
+
+  Map<String, String> get _filterUnitNames =>
+      {for (final u in _filterUnits) u.id: u.name};
+
   bool _matches(dynamic raw, AuthorFilterState f) {
     if (raw is! Map) return false;
     final w = Map<String, dynamic>.from(raw);
@@ -9534,6 +9728,7 @@ class _RecommendPageState extends State<RecommendPage> {
     return f.matches(
       basicId: meta?.idFor(av) ?? '',
       bigId: meta?.bigIdFor(av) ?? '',
+      unitId: meta?.unitIdFor(av) ?? '',
       grade: meta?.gradeFor(a, _authorCount[a] ?? 0) ?? '',
       workTypes: types,
     );
@@ -9556,6 +9751,7 @@ class _RecommendPageState extends State<RecommendPage> {
       initial: authorFilter.value,
       basics: _filterBasics,
       bigs: _filterBigs,
+      units: _filterUnits,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => works.where((w) => _matches(w, f)).length,
     );
@@ -9592,7 +9788,7 @@ class _RecommendPageState extends State<RecommendPage> {
                     onOpen: _openFilter,
                     onClear: authorFilter.clearAll,
                     summary: authorFilter.value.isActive
-                        ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${visible.length}/${works.length}'
+                        ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames)} · 命中 ${visible.length}/${works.length}'
                         : null,
                   ),
                   Expanded(
@@ -9838,6 +10034,22 @@ class _SearchPageState extends State<SearchPage> {
   Map<String, String> get _filterBigNames =>
       {for (final b in _filterBigs) b.id: b.name};
 
+  /// T2：单元库筛选选项（含顶级 SECRET）。
+  List<AuthorLibNode> get _filterUnits {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final m in metas.values) {
+      for (final u in m.units) {
+        if (!seen.add(u.id)) continue;
+        out.add(AuthorLibNode(id: u.id, name: m.unitNameOf(u.id)));
+      }
+    }
+    return authorLibNodes(out);
+  }
+
+  Map<String, String> get _filterUnitNames =>
+      {for (final u in _filterUnits) u.id: u.name};
+
   bool _matchesFilter(Map<String, dynamic> e, AuthorFilterState f) {
     final w = e['w'];
     if (w is! Map) return false;
@@ -9851,6 +10063,7 @@ class _SearchPageState extends State<SearchPage> {
     return f.matches(
       basicId: meta?.idFor(av) ?? '',
       bigId: meta?.bigIdFor(av) ?? '',
+      unitId: meta?.unitIdFor(av) ?? '',
       grade: meta?.gradeFor(author, authorWorkCount['$lib|$author'] ?? 0) ?? '',
       workTypes: types,
     );
@@ -9881,6 +10094,7 @@ class _SearchPageState extends State<SearchPage> {
       initial: authorFilter.value,
       basics: _filterBasics,
       bigs: _filterBigs,
+      units: _filterUnits,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => all.where((e) => _matchesFilter(e, f)).length,
     );
@@ -9944,7 +10158,7 @@ class _SearchPageState extends State<SearchPage> {
           onOpen: _openFilter,
           onClear: authorFilter.clearAll,
           summary: authorFilter.value.isActive
-              ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${res.length}/${all.length}'
+              ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames)} · 命中 ${res.length}/${all.length}'
               : null,
         ),
         if (loading) const LinearProgressIndicator(),
@@ -9983,22 +10197,16 @@ class _SearchPageState extends State<SearchPage> {
                             final lib = '${e['_lib']}';
                             final meta = metas[lib];
                             final av = '${w['av'] ?? ''}';
-                            final basicId = meta?.idFor(av) ?? '';
                             final author = '${w['a'] ?? ''}';
                             return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  LibBadges(
-                                    libIds: [basicId.isEmpty ? lib : basicId],
-                                    order: <String>[
-                                      ...?meta?.order,
-                                      ...libs.map((e) => '${e['id']}'),
-                                    ],
-                                    names: {
-                                      ...?meta?.names,
-                                      for (final l in libs)
-                                        '${l['id']}': '${l['name'] ?? l['id']}',
-                                    },
+                                  // T2：词条改为单元库（SECRET / 无归属灰色）
+                                  UnitBadges(
+                                    meta: meta,
+                                    mediaPath: av,
+                                    fallbackId: lib,
+                                    fallbackName: _libName(lib),
                                     grade: meta == null
                                         ? ''
                                         : meta.gradeFor(

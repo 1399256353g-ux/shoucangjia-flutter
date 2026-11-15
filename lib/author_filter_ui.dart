@@ -15,6 +15,7 @@ Future<AuthorFilterState?> showAuthorFilterSheet({
   required AuthorFilterState initial,
   required List<AuthorLibNode> basics,
   required List<AuthorBigNode> bigs,
+  List<AuthorLibNode> units = const [],
   required List<String> grades,
   required int Function(AuthorFilterState) count,
 }) {
@@ -26,6 +27,7 @@ Future<AuthorFilterState?> showAuthorFilterSheet({
       initial: initial.copy(),
       basics: basics,
       bigs: bigs,
+      units: units,
       grades: grades,
       count: count,
     ),
@@ -36,6 +38,7 @@ class _AuthorFilterSheet extends StatefulWidget {
   final AuthorFilterState initial;
   final List<AuthorLibNode> basics;
   final List<AuthorBigNode> bigs;
+  final List<AuthorLibNode> units;
   final List<String> grades;
   final int Function(AuthorFilterState) count;
 
@@ -43,6 +46,7 @@ class _AuthorFilterSheet extends StatefulWidget {
     required this.initial,
     required this.basics,
     required this.bigs,
+    required this.units,
     required this.grades,
     required this.count,
   });
@@ -90,6 +94,10 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
     final maxH = MediaQuery.of(context).size.height * 0.82;
     final matched = widget.count(f);
 
+    final unitChips = [
+      for (final u in widget.units)
+        _chip(u.name, f.units.contains(u.id), () => f.toggleUnit(u.id)),
+    ];
     final bigChips = [
       for (final b in widget.bigs)
         _chip(b.name, f.bigs.contains(b.id), () => f.toggleBig(b.id)),
@@ -134,11 +142,14 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _section('单元库', unitChips),
                   _section('大库', bigChips),
                   _section('基础库', basicChips),
                   _section('作者等级', gradeChips),
                   _section('作品类型', typeChips),
-                  if (widget.basics.isEmpty && widget.bigs.isEmpty)
+                  if (widget.basics.isEmpty &&
+                      widget.bigs.isEmpty &&
+                      widget.units.isEmpty)
                     Text('暂无可筛选的库信息',
                         style: TextStyle(
                             fontSize: 12, color: cs.onSurfaceVariant)),
