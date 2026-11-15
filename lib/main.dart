@@ -20,6 +20,7 @@ import 'author_filter_bar.dart';
 import 'author_filter_ui.dart';
 import 'author_grid.dart';
 import 'author_grade.dart';
+import 'basic_lib_page.dart';
 import 'background_pause.dart';
 import 'collection_sync.dart';
 import 'continue_watching.dart';
@@ -2534,44 +2535,20 @@ class _LibraryPageState extends State<LibraryPage> {
       setState(() => expanded = toggleExpanded(expanded, id));
 
   void _showBasic(BasicLib b) {
-    final pinned = stars.contains(b.id);
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (c) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(b.name,
-                style: Theme.of(c).textTheme.titleMedium,
-                textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            Text('${b.authors} 位作者 · ${b.works} 个作品',
-                style: const TextStyle(color: Colors.grey)),
-            if (b.serverLabel.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text('连接：${b.serverLabel}',
-                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
-            ],
-            if (b.rel.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(b.rel,
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                  textAlign: TextAlign.center),
-            ],
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              onPressed: () {
-                Navigator.pop(c);
-                _toggleStar(b);
-              },
-              icon: Icon(pinned ? Icons.star : Icons.star_border),
-              label: Text(pinned ? '取消星标' : '设为基础库星标（置顶）'),
-            ),
-          ]),
-        ),
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => BasicLibPage(
+        basic: b,
+        urlOf: (path, {lib}) => cfg.u(path, lib: lib ?? b.id),
+        headersOf: ([lib]) => cfg.headersFor(lib ?? b.id),
+        mediaUrlOf: (path, {lib}) => cfg.mediaUrl(path, lib: lib ?? b.id),
+        onOpenAuthor: (name) => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => AuthorPage(name: name))),
+        onPlay: (works, index) => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+                builder: (_) =>
+                    PlayerPage(works: works, start: index, lib: b.id))),
       ),
-    );
+    ));
   }
 
   Future<void> _switchTo(Map<String, dynamic> l) async {
