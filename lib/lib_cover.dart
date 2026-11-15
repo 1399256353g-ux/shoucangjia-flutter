@@ -24,6 +24,8 @@ const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
 String normalizeCoverVersion(String raw) {
   var s = raw.trim();
   if (s.isEmpty) return '';
+  // 上级目录穿越一律拒绝（指针只允许是纯版本名）
+  if (s.contains('..')) return '';
   // 兼容「_cover/xxx.jpg」这种带目录与扩展名的写法
   s = s.replaceAll('\\', '/');
   final slash = s.lastIndexOf('/');
@@ -32,7 +34,7 @@ String normalizeCoverVersion(String raw) {
   if (dot > 0 && kCoverExts.contains(s.substring(dot + 1).toLowerCase())) {
     s = s.substring(0, dot);
   }
-  if (s.isEmpty || s == '.' || s == '..' || s.contains('..')) return '';
+  if (s.isEmpty || s == '.') return '';
   if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(s)) return '';
   return s.length > 40 ? s.substring(0, 40) : s;
 }
