@@ -2486,8 +2486,24 @@ class _LibraryPageState extends State<LibraryPage> {
         onToggleStar: _toggleStar,
         onTapBasic: _showBasic,
         coverOf: _coverUrlFor,
+        unitOf: _unitOf,
       ),
     ));
+  }
+
+  /// 位置词条只由单元库生成：找出基础库所属的单元库（见 unit_library.dart 收敛规则）。
+  UnitLibrary? _unitOf(BasicLib b) {
+    UnitLibrary? walk(UnitLibrary u) {
+      if (u.basics.any((x) => x.id == b.id)) return u;
+      for (final c in u.children) {
+        final hit = walk(c);
+        if (hit != null) return hit;
+      }
+      return null;
+    }
+
+    final root = unitTree;
+    return root == null ? null : walk(root);
   }
 
   /// 鉴权头（拆分拼接，避免与既有写法混用）。

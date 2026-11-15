@@ -162,6 +162,8 @@ class StarredLibrariesPage extends StatelessWidget {
   final void Function(BasicLib b) onToggleStar;
   final void Function(BasicLib b) onTapBasic;
   final CoverOf? coverOf;
+  /// 所属单元库（节点文件夹）：只有单元库有资格生成位置词条。
+  final UnitLibrary? Function(BasicLib b)? unitOf;
 
   const StarredLibrariesPage({
     super.key,
@@ -169,6 +171,7 @@ class StarredLibrariesPage extends StatelessWidget {
     required this.onToggleStar,
     required this.onTapBasic,
     this.coverOf,
+    this.unitOf,
   });
 
   @override
@@ -199,6 +202,8 @@ class StarredLibrariesPage extends StatelessWidget {
                 basic: basics[i],
                 starred: true,
                 coverUrl: coverOf?.call(basics[i]) ?? '',
+                unitLabel: unitOf?.call(basics[i])?.name ?? '',
+                unitKey: unitOf?.call(basics[i])?.id ?? '',
                 onToggleStar: () => onToggleStar(basics[i]),
                 onTap: () => onTapBasic(basics[i]),
               ),
@@ -379,6 +384,8 @@ class UnitLibraryPage extends StatelessWidget {
                 basic: sorted[i],
                 starred: stars.contains(sorted[i].id),
                 coverUrl: coverOf?.call(sorted[i]) ?? '',
+                unitLabel: unit.name,
+                unitKey: unit.id,
                 onToggleStar: () => onToggleStar(sorted[i]),
                 onTap: () => onTapBasic(sorted[i]),
               ),
