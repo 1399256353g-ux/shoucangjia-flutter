@@ -7881,7 +7881,7 @@ class _PlayerPageState extends State<PlayerPage>
                       onHorizontalDragEnd: (d) {
                         // 右划快速进入作者主页
                         final v = d.primaryVelocity ?? 0;
-                        if (v.abs() > 200) openAuthor(); // 左右划均可进入作者页，避免方向判断反了
+                        if (v < -200) openAuthor(); // 向左划拉出作者页（抖音式待 M9 改为跟手拖拽）
                       },
                       onLongPressStart: (_) => player.setRate(2.0),
                       onLongPressEnd: (_) => player.setRate(speed),
