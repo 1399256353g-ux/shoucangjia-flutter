@@ -30,6 +30,7 @@ import 'emoji_text.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
+import 'lib_cover.dart';
 import 'library_selector_view.dart';
 import 'loop_link.dart';
 import 'library_tree.dart';
@@ -55,6 +56,7 @@ import 'start_fade.dart';
 import 'source_lib.dart';
 import 'watch_progress.dart';
 import 'work_forms.dart';
+import 'work_plays.dart';
 import 'work_safety.dart';
 
 Future<void> main() async {
@@ -67,6 +69,8 @@ Future<void> main() async {
   await WatchProgressStore.ensureLoaded();
   // G17：载入「继续观看」，主页首帧直接显示
   await ContinueWatchingStore.ensureLoaded();
+  // L5-C：载入本机播放量，基础库自动封面首帧即可用
+  await WorkPlaysStore.ensureLoaded();
   runApp(const App());
 }
 
@@ -2255,7 +2259,32 @@ class _LibraryPageState extends State<LibraryPage> {
   @override
   void initState() {
     super.initState();
+    WorkPlaysStore.revision.addListener(_onPlaysChanged);
     load();
+  }
+
+  @override
+  void dispose() {
+    WorkPlaysStore.revision.removeListener(_onPlaysChanged);
+    super.dispose();
+  }
+
+  // L5-C：有新的本机播放记录时刷新封面
+  void _onPlaysChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// L5-C：基础库封面 URL。自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图。
+  String _basicCoverUrl(BasicLib b) {
+    final top = topPlayed(WorkPlaysStore.countsFor(b.id));
+    final pick = pickBasicCover(
+      rel: b.rel,
+      version: b.coverVersion,
+      ext: b.coverExt,
+      bestThumb: top?.thumb ?? '',
+    );
+    if (pick.isEmpty) return '';
+    return cfg.mediaUrl(pick.path, lib: b.id);
   }
 
   Uri _u(String path, [String? lib, String? atBase]) {
@@ -2422,6 +2451,16 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (_) {}
   }
 
+  /// L5-C：基础库封面（自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图）。
+  String _coverUrlFor(BasicLib b) => _basicCoverUrl(b);
+
+  /// L5-C：单元库封面（仅自定义 `_cover/`，否则默认图）。
+  String _unitCoverUrl(UnitLibrary u) {
+    final pick = pickUnitCover(
+        rel: u.rel, version: u.node.coverVersion, ext: u.node.coverExt);
+    return pick.isEmpty ? '' : cfg.mediaUrl(pick.path);
+  }
+
   void _openStars() {
     final starred = stars
         .map((id) => tree?.basicById(id))
@@ -2432,6 +2471,7 @@ class _LibraryPageState extends State<LibraryPage> {
         basics: starred,
         onToggleStar: _toggleStar,
         onTapBasic: _showBasic,
+        coverOf: _coverUrlFor,
       ),
     ));
   }
@@ -2448,10 +2488,14 @@ class _LibraryPageState extends State<LibraryPage> {
             onOpenUnit: (s2) => _openUnit(s2),
             onToggleStar: _toggleStar,
             onTapBasic: (b) => _showBasicOn(c, b),
+            coverOf: _coverUrlFor,
+            unitCoverOf: _unitCoverUrl,
           ),
         )),
         onToggleStar: _toggleStar,
         onTapBasic: (b) => _showBasicOn(c, b),
+        coverOf: _coverUrlFor,
+        unitCoverOf: _unitCoverUrl,
       ),
     ));
   }
@@ -2725,6 +2769,7 @@ class _LibraryPageState extends State<LibraryPage> {
                           onToggleStar: _toggleStar,
                           onTapBasic: _showBasic,
                           onOpenStars: _openStars,
+                          unitCoverOf: (u) => _unitCoverUrl(u),
                         )
                       else if (tree != null)
                         LibrarySelectorView(
@@ -6698,6 +6743,9 @@ class _PlayerPageState extends State<PlayerPage>
     if (my != _openToken) return;
     _refreshDrop('${w['id'] ?? ''}', my, wl);
     postStat('play', '${w['a'] ?? ''}', lib: wl);
+    // L5-C：本机播放量（基础库自动封面取播放量最高的作品），顺手记住缩略图
+    WorkPlaysStore.bump(wl, _watchIdFor(w),
+        thumb: '${w['th'] ?? ''}'.trim());
     if (!canUsePreload) {
       try {
         if (w['t'] == 'v') {

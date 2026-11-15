@@ -4,6 +4,58 @@ import 'library_badge.dart';
 import 'library_tree.dart';
 import 'unit_library.dart';
 
+/// L5-C：卡片封面（空串表示用默认图）。由调用方解析 `_cover/` 与播放量。
+typedef CoverOf = String Function(BasicLib basic);
+typedef UnitCoverOf = String Function(UnitLibrary unit);
+
+/// 封面缩略图：有图显示图片，无图显示默认图标。
+class _CoverThumb extends StatelessWidget {
+  final String url;
+  final double size;
+  final IconData fallbackIcon;
+  final Color fallbackColor;
+
+  const _CoverThumb({
+    required this.url,
+    required this.size,
+    required this.fallbackIcon,
+    required this.fallbackColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final box = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: fallbackColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: url.isEmpty
+          ? Icon(fallbackIcon, color: fallbackColor, size: size * 0.44)
+          : Image.network(
+              url,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Icon(fallbackIcon,
+                  color: fallbackColor, size: size * 0.44),
+            ),
+    );
+    return Semantics(
+      label: url.isEmpty ? '默认封面' : '封面',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.5), width: 0.6),
+        ),
+        child: box,
+      ),
+    );
+  }
+}
+
 /// L5 卡片体系：单元库卡片 > 基础库卡片 > 作品卡片（尺寸递减）。
 ///
 /// 主页只铺「单元库」卡片 + 一个「星标基础库」入口；
@@ -15,6 +67,7 @@ class UnitLibraryHomeView extends StatelessWidget {
   final void Function(BasicLib b) onToggleStar;
   final void Function(BasicLib b) onTapBasic;
   final VoidCallback onOpenStars;
+  final UnitCoverOf? unitCoverOf;
 
   const UnitLibraryHomeView({
     super.key,
@@ -24,6 +77,7 @@ class UnitLibraryHomeView extends StatelessWidget {
     required this.onToggleStar,
     required this.onTapBasic,
     required this.onOpenStars,
+    this.unitCoverOf,
   });
 
   @override
@@ -52,7 +106,11 @@ class UnitLibraryHomeView extends StatelessWidget {
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
           ),
         for (final u in units)
-          UnitLibraryCard(unit: u, onTap: () => onOpenUnit(u)),
+          UnitLibraryCard(
+            unit: u,
+            coverUrl: unitCoverOf?.call(u) ?? '',
+            onTap: () => onOpenUnit(u),
+          ),
       ],
     );
   }
@@ -103,12 +161,14 @@ class StarredLibrariesPage extends StatelessWidget {
   final List<BasicLib> basics;
   final void Function(BasicLib b) onToggleStar;
   final void Function(BasicLib b) onTapBasic;
+  final CoverOf? coverOf;
 
   const StarredLibrariesPage({
     super.key,
     required this.basics,
     required this.onToggleStar,
     required this.onTapBasic,
+    this.coverOf,
   });
 
   @override
@@ -138,6 +198,7 @@ class StarredLibrariesPage extends StatelessWidget {
               itemBuilder: (c, i) => BasicLibCard(
                 basic: basics[i],
                 starred: true,
+                coverUrl: coverOf?.call(basics[i]) ?? '',
                 onToggleStar: () => onToggleStar(basics[i]),
                 onTap: () => onTapBasic(basics[i]),
               ),
@@ -150,8 +211,14 @@ class StarredLibrariesPage extends StatelessWidget {
 class UnitLibraryCard extends StatelessWidget {
   final UnitLibrary unit;
   final VoidCallback onTap;
+  final String coverUrl;
 
-  const UnitLibraryCard({super.key, required this.unit, required this.onTap});
+  const UnitLibraryCard({
+    super.key,
+    required this.unit,
+    required this.onTap,
+    this.coverUrl = '',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -170,15 +237,11 @@ class UnitLibraryCard extends StatelessWidget {
             height: 116,
             child: Row(children: [
               const SizedBox(width: 14),
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: scheme.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(Icons.folder_copy_outlined,
-                    color: scheme.primary, size: 28),
+              _CoverThumb(
+                url: coverUrl,
+                size: 64,
+                fallbackIcon: Icons.folder_copy_outlined,
+                fallbackColor: scheme.primary,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -223,6 +286,8 @@ class UnitLibraryPage extends StatelessWidget {
   final void Function(UnitLibrary unit) onOpenUnit;
   final void Function(BasicLib b) onToggleStar;
   final void Function(BasicLib b) onTapBasic;
+  final CoverOf? coverOf;
+  final UnitCoverOf? unitCoverOf;
 
   const UnitLibraryPage({
     super.key,
@@ -231,6 +296,8 @@ class UnitLibraryPage extends StatelessWidget {
     required this.onOpenUnit,
     required this.onToggleStar,
     required this.onTapBasic,
+    this.coverOf,
+    this.unitCoverOf,
   });
 
   @override
@@ -257,7 +324,11 @@ class UnitLibraryPage extends StatelessWidget {
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
             ),
             for (final c in unit.children)
-              UnitLibraryCard(unit: c, onTap: () => onOpenUnit(c)),
+              UnitLibraryCard(
+                unit: c,
+                coverUrl: unitCoverOf?.call(c) ?? '',
+                onTap: () => onOpenUnit(c),
+              ),
           ],
           if (sorted.isNotEmpty) ...[
             const Padding(
@@ -279,6 +350,7 @@ class UnitLibraryPage extends StatelessWidget {
               itemBuilder: (c, i) => BasicLibCard(
                 basic: sorted[i],
                 starred: stars.contains(sorted[i].id),
+                coverUrl: coverOf?.call(sorted[i]) ?? '',
                 onToggleStar: () => onToggleStar(sorted[i]),
                 onTap: () => onTapBasic(sorted[i]),
               ),
@@ -296,6 +368,7 @@ class BasicLibCard extends StatelessWidget {
   final bool starred;
   final VoidCallback onToggleStar;
   final VoidCallback onTap;
+  final String coverUrl;
 
   const BasicLibCard({
     super.key,
@@ -303,6 +376,7 @@ class BasicLibCard extends StatelessWidget {
     required this.starred,
     required this.onToggleStar,
     required this.onTap,
+    this.coverUrl = '',
   });
 
   /// 词条文本：基础库名去掉「(序号) 」前缀。
@@ -349,7 +423,12 @@ class BasicLibCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                Icon(Icons.folder_outlined, size: 15, color: scheme.primary),
+                _CoverThumb(
+                  url: coverUrl,
+                  size: 26,
+                  fallbackIcon: Icons.folder_outlined,
+                  fallbackColor: scheme.primary,
+                ),
                 const Spacer(),
                 InkResponse(
                   key: ValueKey('star-card-${basic.id}'),

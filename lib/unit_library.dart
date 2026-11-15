@@ -15,12 +15,16 @@
 // basicLibraries（基础库，带 rel 相对路径）。
 
 import 'library_tree.dart';
+import 'lib_cover.dart';
 
 /// 一个节点文件夹（单元库候选）。
 class LibNode {
   final String id;
   final String rel;
   final String name;
+  /// L5-C：自定义封面版本（`_cover/<version>.<ext>`）；空串表示无自定义封面。
+  final String coverVersion;
+  final String coverExt;
   final String serverId;
   final String serverBase;
   final String serverLabel;
@@ -29,6 +33,8 @@ class LibNode {
     required this.id,
     required this.rel,
     required this.name,
+    this.coverVersion = '',
+    this.coverExt = 'jpg',
     this.serverId = '',
     this.serverBase = '',
     this.serverLabel = '',
@@ -267,6 +273,8 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
       id: '${raw['id'] ?? rel}'.trim(),
       rel: rel,
       name: name.isEmpty ? splitRel(rel).last : name,
+      coverVersion: coverPointerOf(raw['cover']).version,
+      coverExt: coverPointerOf(raw['cover']).ext,
       serverId: '${raw['_serverId'] ?? ''}'.trim(),
       serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
       serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
