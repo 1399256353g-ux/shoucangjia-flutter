@@ -5,12 +5,94 @@ import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'home_action.dart';
+import 'star_store.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
 
 /// L5-C：卡片封面（空串表示用默认图）。由调用方解析 `_cover/` 与播放量。
 typedef CoverOf = String Function(BasicLib basic);
 typedef UnitCoverOf = String Function(UnitLibrary unit);
+
+// ---------------------------------------------------------------------------
+// 库卡片统一规格（单元库卡片 / 基础库卡片共用）
+//
+// 两类卡片只允许在「面积」上不同：圆角、底部渐变、信息层级（名称 → 作者/
+// 作品 → 服务器）与文字比例必须一致。外层间距由调用方网格
+// （padding 12 / spacing 10）统一控制，卡片本身不再自带外边距。
+// ---------------------------------------------------------------------------
+
+/// 库卡片圆角（单元库与基础库必须一致）。
+const double kLibCardRadius = 12;
+
+/// 库卡片网格外边距与卡片间距（主页 / 单元库页 / 星标页统一）。
+const EdgeInsets kLibGridPadding = EdgeInsets.symmetric(horizontal: 12);
+const double kLibGridSpacing = 10;
+
+/// 库卡片底部信息层的统一渐变。
+const LinearGradient kLibCardGradient = LinearGradient(
+  begin: Alignment.topCenter,
+  end: Alignment.bottomCenter,
+  colors: [Color(0x00000000), Color(0xC7000000)],
+);
+
+/// 库卡片底部信息层：词条（基础库才有）→ 名称 → 统计 → 服务器。
+///
+/// [dense] 用于网格更小的基础库卡片（字号/内边距各缩一档），层级与
+/// 相对字重保持一致，避免两套卡片各写一份排版。
+class LibCardInfo extends StatelessWidget {
+  final Widget? badge;
+  final String title;
+  final String stats;
+  final String server;
+  final bool dense;
+
+  const LibCardInfo({
+    super.key,
+    this.badge,
+    required this.title,
+    required this.stats,
+    this.server = '',
+    this.dense = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: dense
+          ? const EdgeInsets.fromLTRB(10, 22, 10, 8)
+          : const EdgeInsets.fromLTRB(12, 26, 12, 10),
+      decoration: const BoxDecoration(gradient: kLibCardGradient),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (badge != null) ...[
+            badge!,
+            const SizedBox(height: 4),
+          ],
+          Text(title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: dense ? 13 : 15,
+                  height: 1.2,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(stats,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10.5, color: Colors.white70)),
+          if (server.isNotEmpty)
+            Text(server,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10, color: Colors.white54)),
+        ],
+      ),
+    );
+  }
+}
 
 /// 单元库子树里「本机播放量最高且有缩略图」的作品：所属基础库 + 次数 + 缩略图。
 /// 同分按缩略图路径升序，结果稳定；没有则 null。
@@ -89,65 +171,6 @@ String basicCoverUrl(BasicLib basic, {String preset = ''}) {
   return absoluteMediaUrl(basic.serverBase, lib: basic.id, path: pick.path);
 }
 
-/// 封面缩略图：有图显示图片（带鉴权头、按显示尺寸解码），无图显示默认图标。
-class _CoverThumb extends StatelessWidget {
-  final String url;
-  final double size;
-  final IconData fallbackIcon;
-  final Color fallbackColor;
-  final Map<String, String> headers;
-
-  const _CoverThumb({
-    super.key,
-    required this.url,
-    required this.size,
-    required this.fallbackIcon,
-    required this.fallbackColor,
-    this.headers = const <String, String>{},
-  });
-
-  Widget _fallback() => Icon(fallbackIcon,
-      color: fallbackColor, size: size * 0.44);
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    // 缩略图按「显示尺寸 × 像素比」解码，避免整张大图进内存。
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    final px = (size * (dpr <= 0 ? 1.0 : dpr)).round();
-    final box = Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: fallbackColor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: url.isEmpty
-          ? _fallback()
-          : CachedNetworkImage(
-              imageUrl: url,
-              httpHeaders: headers,
-              fit: BoxFit.cover,
-              memCacheWidth: px < 1 ? 1 : px,
-              fadeInDuration: Duration.zero,
-              errorWidget: (_, __, ___) => _fallback(),
-            ),
-    );
-    return Semantics(
-      label: url.isEmpty ? '默认封面' : '封面',
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.5), width: 0.6),
-        ),
-        child: box,
-      ),
-    );
-  }
-}
-
 /// L5 卡片体系：单元库卡片 > 基础库卡片 > 作品卡片（尺寸递减）。
 ///
 /// 主页只铺「单元库」卡片 + 一个「星标基础库」入口；
@@ -160,6 +183,7 @@ class UnitLibraryHomeView extends StatelessWidget {
   final void Function(BasicLib b) onTapBasic;
   final VoidCallback onOpenStars;
   final UnitCoverOf? unitCoverOf;
+
   /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
   final Map<String, String> Function([String? lib])? headersOf;
 
@@ -177,6 +201,15 @@ class UnitLibraryHomeView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 0.9.6：星标数量/点亮状态与 StarStore 保持一致。
+    return AnimatedBuilder(
+      animation: StarStore.instance,
+      builder: (context, _) => _buildView(context),
+    );
+  }
+
+  Widget _buildView(BuildContext context) {
+    final liveStars = StarStore.instance.ready ? StarStore.instance.ids : stars;
     final units = tree.children;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -193,7 +226,7 @@ class UnitLibraryHomeView extends StatelessWidget {
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ]),
         ),
-        StarredEntryCard(count: stars.length, onTap: onOpenStars),
+        StarredEntryCard(count: liveStars.length, onTap: onOpenStars),
         if (units.isEmpty)
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 24, 16, 24),
@@ -205,11 +238,11 @@ class UnitLibraryHomeView extends StatelessWidget {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: kLibGridPadding,
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 260,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
+              mainAxisSpacing: kLibGridSpacing,
+              crossAxisSpacing: kLibGridSpacing,
               childAspectRatio: 1.02,
             ),
             itemCount: units.length,
@@ -219,7 +252,7 @@ class UnitLibraryHomeView extends StatelessWidget {
                 unit: u,
                 coverUrl: unitCoverOf?.call(u) ?? '',
                 headers: unitHeadersOf(u, headersOf),
-                starred: stars.contains(u.id),
+                starred: liveStars.contains(u.id),
                 onToggleStar: () => onToggleUnitStar(u),
                 onTap: () => onOpenUnit(u),
               );
@@ -235,8 +268,7 @@ class StarredEntryCard extends StatelessWidget {
   final int count;
   final VoidCallback onTap;
 
-  const StarredEntryCard(
-      {super.key, required this.count, required this.onTap});
+  const StarredEntryCard({super.key, required this.count, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -276,6 +308,7 @@ class StarredUnitsPage extends StatefulWidget {
   final void Function(UnitLibrary unit) onOpenUnit;
   final void Function(UnitLibrary unit) onToggleUnitStar;
   final UnitCoverOf? unitCoverOf;
+
   /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
   final Map<String, String> Function([String? lib])? headersOf;
 
@@ -303,8 +336,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-          title: const Text('星标单元库'), actions: const [HomeAction()]),
+      appBar: AppBar(title: const Text('星标单元库'), actions: const [HomeAction()]),
       body: units.isEmpty
           ? const Center(
               child: Padding(
@@ -320,8 +352,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 260,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
+                mainAxisSpacing: kLibGridSpacing,
+                crossAxisSpacing: kLibGridSpacing,
                 childAspectRatio: 1.02,
               ),
               itemCount: units.length,
@@ -341,8 +373,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
   }
 }
 
-/// 单元库卡片（大）：与基础库卡片同一形状/排版（圆角 12、封面缩略、标题、
-/// 作者/作品数），但整体面积略大（高 132、封面 72）。
+/// 单元库卡片（大）：与基础库卡片同一形状/排版（圆角 [kLibCardRadius]、
+/// 满幅封面 + 底部渐变信息层），只比基础库卡片面积更大。
 class UnitLibraryCard extends StatelessWidget {
   /// 卡片高度（略大于基础库卡片）。
   static const double height = 150;
@@ -351,13 +383,14 @@ class UnitLibraryCard extends StatelessWidget {
   static const double coverSize = 72;
 
   /// 与基础库卡片统一的圆角。
-  static const double radius = 12;
+  static const double radius = kLibCardRadius;
 
   final UnitLibrary unit;
 
   /// 为空表示纯展示卡片（单元库详情页顶部的自身卡片），不显示进入箭头。
   final VoidCallback? onTap;
   final String coverUrl;
+
   /// 封面请求的鉴权头（媒体接口需要 Basic 认证）。
   final Map<String, String> headers;
 
@@ -387,104 +420,68 @@ class UnitLibraryCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final server = unit.node.serverLabel;
     final showCrawler = onConfigure != null && canConfigure(unit);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-      child: Material(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(radius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: ValueKey(
+            onTap == null ? 'unit-head-${unit.id}' : 'unit-${unit.id}'),
         borderRadius: BorderRadius.circular(radius),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          key: ValueKey(onTap == null
-              ? 'unit-head-${unit.id}'
-              : 'unit-${unit.id}'),
-          borderRadius: BorderRadius.circular(radius),
-          onTap: onTap,
-          // 封面铺满整张卡片；不贴来源词条；名称与统计压在底部渐变上。
-          child: SizedBox.expand(
-            key: ValueKey('unit-card-${unit.id}'),
-            child: Stack(children: [
-              // 封面铺满（自定义封面优先，其次自动获取）。
-              ValueListenableBuilder<int>(
-                valueListenable: WorkPlaysStore.revision,
-                builder: (_, __, ___) => _UnitCoverFill(
-                  key: ValueKey('unit-cover-${unit.id}'),
-                  url: unitCoverUrl(unit, customUrl: coverUrl),
-                  headers: headers,
-                  fallbackIcon: Icons.folder_copy_outlined,
-                ),
+        onTap: onTap,
+        // 封面铺满整张卡片；不贴来源词条；名称与统计压在底部渐变上。
+        child: SizedBox.expand(
+          key: ValueKey('unit-card-${unit.id}'),
+          child: Stack(children: [
+            // 封面铺满（自定义封面优先，其次自动获取）。
+            ValueListenableBuilder<int>(
+              valueListenable: WorkPlaysStore.revision,
+              builder: (_, __, ___) => _UnitCoverFill(
+                key: ValueKey('unit-cover-${unit.id}'),
+                url: unitCoverUrl(unit, customUrl: coverUrl),
+                headers: headers,
+                fallbackIcon: Icons.folder_copy_outlined,
               ),
-              // 底部渐变：名称 + 作者/作品 + 基础库描述。
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(12, 26, 12, 10),
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Color(0x00000000), Color(0xC7000000)],
-                    ),
+            ),
+            // 底部渐变：与基础库卡片共用同一信息层排版。
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: LibCardInfo(
+                title: unit.name,
+                stats: '${formatCount(unit.authors)} 作者 · '
+                    '${formatCount(unit.works)} 作品 · '
+                    '${unit.basicCount} 个基础库',
+                server: server,
+              ),
+            ),
+            // 与基础库卡片一致的右上角操作区（爬虫配置 / 星标）。
+            Positioned(
+              top: 6,
+              right: 6,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (showCrawler)
+                  IconButton(
+                    key: ValueKey('unit-crawler-${unit.id}'),
+                    tooltip: '爬虫配置',
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 30, height: 30),
+                    icon: const Icon(Icons.settings_ethernet),
+                    onPressed: onConfigure,
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(unit.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 15,
-                              height: 1.2,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 4),
-                      Text(
-                          '${formatCount(unit.authors)} 作者 · '
-                          '${formatCount(unit.works)} 作品 · '
-                          '${unit.basicCount} 个基础库',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 10.5, color: Colors.white70)),
-                      if (server.isNotEmpty)
-                        Text(server,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.white54)),
-                    ],
+                if (onToggleStar != null)
+                  _StarButton(
+                    key: ValueKey('unit-star-${unit.id}'),
+                    starred: starred,
+                    onTap: onToggleStar!,
                   ),
-                ),
-              ),
-              // 与基础库卡片一致的右上角操作区（爬虫配置 / 星标）。
-              Positioned(
-                top: 6,
-                right: 6,
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  if (showCrawler)
-                    IconButton(
-                      key: ValueKey('unit-crawler-${unit.id}'),
-                      tooltip: '爬虫配置',
-                      iconSize: 18,
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints.tightFor(width: 30, height: 30),
-                      icon: const Icon(Icons.settings_ethernet),
-                      onPressed: onConfigure,
-                    ),
-                  if (onToggleStar != null)
-                    _StarButton(
-                      key: ValueKey('unit-star-${unit.id}'),
-                      starred: starred,
-                      onTap: onToggleStar!,
-                    ),
-                ]),
-              ),
-            ]),
-          ),
+              ]),
+            ),
+          ]),
         ),
       ),
     );
@@ -573,8 +570,10 @@ class UnitLibraryPage extends StatelessWidget {
   final void Function(BasicLib b) onTapBasic;
   final CoverOf? coverOf;
   final UnitCoverOf? unitCoverOf;
+
   /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
   final Map<String, String> Function([String? lib])? headersOf;
+
   /// L5-D：非顶级单元库可配置独立爬虫（SECRET 顶级不显示入口）。
   final void Function(UnitLibrary unit)? onConfigureUnit;
 
@@ -593,6 +592,15 @@ class UnitLibraryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 0.9.6：星标走 StarStore，入栈后其它页面改动也能即时反映。
+    return AnimatedBuilder(
+      animation: StarStore.instance,
+      builder: (context, _) => _buildPage(context),
+    );
+  }
+
+  Widget _buildPage(BuildContext context) {
+    final liveStars = StarStore.instance.ready ? StarStore.instance.ids : stars;
     // 只列直属基础库；下级基础库跟随各自的单元库，避免 SECRET 直通全部。
     final sorted = unit.basics;
     // 每张基础库卡片的词条来自「直接上级单元库」。
@@ -633,11 +641,11 @@ class UnitLibraryPage extends StatelessWidget {
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: kLibGridPadding,
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 260,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
+                mainAxisSpacing: kLibGridSpacing,
+                crossAxisSpacing: kLibGridSpacing,
                 childAspectRatio: 1.02,
               ),
               itemCount: unit.children.length,
@@ -647,7 +655,7 @@ class UnitLibraryPage extends StatelessWidget {
                   unit: sub,
                   coverUrl: unitCoverOf?.call(sub) ?? '',
                   headers: unitHeadersOf(sub, headersOf),
-                  starred: stars.contains(sub.id),
+                  starred: liveStars.contains(sub.id),
                   onToggleStar: () => onToggleUnitStar(sub),
                   onTap: () => onOpenUnit(sub),
                   onConfigure: onConfigureUnit == null
@@ -666,11 +674,11 @@ class UnitLibraryPage extends StatelessWidget {
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: kLibGridPadding,
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 220,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
+                mainAxisSpacing: kLibGridSpacing,
+                crossAxisSpacing: kLibGridSpacing,
                 childAspectRatio: 0.92,
               ),
               itemCount: sorted.length,
@@ -695,8 +703,10 @@ class BasicLibCard extends StatelessWidget {
   final BasicLib basic;
   final VoidCallback onTap;
   final String coverUrl;
+
   /// 封面请求的鉴权头（媒体接口需要 Basic 认证）。
   final Map<String, String> headers;
+
   /// 所属单元库（节点文件夹）。只有单元库有资格生成位置词条；
   /// 为空表示该卡片不在单元库语境下，不显示词条。
   final String unitLabel;
@@ -749,56 +759,38 @@ class BasicLibCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      borderRadius: BorderRadius.circular(12),
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(kLibCardRadius),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: ValueKey('basic-card-${basic.id}'),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(kLibCardRadius),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 6, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                ValueListenableBuilder<int>(
-                  valueListenable: WorkPlaysStore.revision,
-                  builder: (_, __, ___) => _CoverThumb(
-                    key: ValueKey('basic-cover-${basic.id}'),
-                    url: basicCoverUrl(basic, preset: coverUrl),
-                    headers: headers,
-                    size: 26,
-                    fallbackIcon: Icons.folder_outlined,
-                    fallbackColor: scheme.primary,
-                  ),
-                ),
-                const Spacer(),
-              ]),
-              const SizedBox(height: 5),
-              Align(alignment: Alignment.centerLeft, child: _badge()),
-              const SizedBox(height: 4),
-              Expanded(
-                child: Text(basic.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 12.5, fontWeight: FontWeight.w600)),
-              ),
-              const SizedBox(height: 4),
-              Text('${basic.authors} 作者 · ${basic.works} 作品',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10, color: Colors.grey)),
-              if (basic.serverLabel.isNotEmpty)
-                Text(basic.serverLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10, color: Colors.grey)),
-            ],
+        // 与单元库卡片一致：封面铺满整张卡片，信息压在底部渐变上。
+        child: Stack(fit: StackFit.expand, children: [
+          ValueListenableBuilder<int>(
+            valueListenable: WorkPlaysStore.revision,
+            builder: (_, __, ___) => _UnitCoverFill(
+              key: ValueKey('basic-cover-${basic.id}'),
+              url: basicCoverUrl(basic, preset: coverUrl),
+              headers: headers,
+              fallbackIcon: Icons.folder_outlined,
+            ),
           ),
-        ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: LibCardInfo(
+              badge: _badge(),
+              title: basic.name,
+              stats: '${basic.authors} 作者 · ${basic.works} 作品',
+              server: basic.serverLabel,
+              dense: true,
+            ),
+          ),
+        ]),
       ),
     );
   }

@@ -63,6 +63,15 @@ class AuthorGrade {
   static String gradeFor({int plays = 0, int drops = 0, int works = 0}) =>
       grades[indexForScore(score(plays: plays, drops: drops, works: works))];
 
+  /// 作者统计 → 等级：全 App 唯一入口（作者总览、排行榜、推荐、搜索、作者主页）。
+  /// [stats] 为 `/api/author_stats.json` 里的单作者条目（含 `p`/`dr`），
+  /// 缺失或不是 Map 时按 0 统计，只保留作品数权重。
+  static String fromStats(dynamic stats, {int works = 0}) {
+    final m = stats is Map ? stats : const {};
+    int n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+    return gradeFor(plays: n(m['p']), drops: n(m['dr']), works: works);
+  }
+
   static int colorForGrade(String grade) {
     final i = grades.indexOf(grade.toUpperCase());
     return colors[i < 0 ? 0 : i];

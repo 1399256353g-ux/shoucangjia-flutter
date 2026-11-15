@@ -85,6 +85,27 @@ void main() {
     expect(BasicLibCard.badgeText('(8) 🦶'), '🦶');
   });
 
+  testWidgets('基础库卡片封面铺满整卡（非缩略图）', (t) async {
+    await t.pumpWidget(host(UnitLibraryPage(
+      unit: tree.children.first,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (_) {},
+      onTapBasic: (_) {},
+    )));
+
+    final card = find.byKey(const ValueKey('basic-card-l1'));
+    final cover = find.byKey(const ValueKey('basic-cover-l1'));
+    expect(card, findsOneWidget);
+    expect(cover, findsOneWidget);
+    final cardSize = t.getSize(card);
+    final coverSize = t.getSize(cover);
+    // 封面与整卡同尺寸：铺满，不再是小缩略图。
+    expect(coverSize.width, cardSize.width);
+    expect(coverSize.height, cardSize.height);
+    expect(coverSize.width, greaterThan(100));
+  });
+
   testWidgets('下级单元库卡片可星标', (t) async {
     // 造一个带下级单元库的层级
     final nested = buildUnitTree(

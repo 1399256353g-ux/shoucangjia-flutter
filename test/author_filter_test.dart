@@ -139,27 +139,11 @@ void main() {
       expect(m['B'], {workFilterPicture});
     });
 
-    test('aggregates types from collection work lists', () {
-      final m = authorTypesFromCollections([
-        {
-          'works': [
-            {'a': 'A', 't': 'v', 'm': ['x.mp4']},
-            {'a': 'A', 't': 'p', 'm': ['1.jpg', '2.jpg']},
-            {'a': 'B', 't': 'p', 'm': ['1.jpg']},
-            {'a': 'C', 't': 'x'},
-            'bad',
-          ]
-        },
-        {
-          'works': [
-            {'a': 'A', 't': 'p', 'm': ['1.jpg', '2.jpg', '3.jpg']},
-          ]
-        },
-        'bad',
-      ]);
-      expect(m['A'], {workFilterVideo, workFilterPost});
-      expect(m['B'], {workFilterPicture});
-      expect(m.containsKey('C'), isFalse);
+    test('ignores non-index payloads instead of throwing', () {
+      // T3：旧「收藏夹」工作列表汇总已移除，类型索引只剩基础库 index.json 一条路径。
+      expect(authorTypesFromIndex(null), isEmpty);
+      expect(authorTypesFromIndex('bad'), isEmpty);
+      expect(authorTypesFromIndex({'authors': 'bad'}), isEmpty);
     });
   });
 

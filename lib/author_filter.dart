@@ -237,28 +237,6 @@ Map<String, Set<String>> mergeAuthorTypes(
   return out;
 }
 
-/// 从收藏夹作品列表（`/api/c/<idx>.json`）汇总作者作品类型。
-/// 收藏夹数据没有 `kind`，由 [workFilterType] 按 `t` 与媒体数量推断；
-/// 无法归类的作品跳过（other）。
-Map<String, Set<String>> authorTypesFromCollections(
-    Iterable<dynamic> collections) {
-  final out = <String, Set<String>>{};
-  for (final c in collections) {
-    if (c is! Map) continue;
-    final works = c['works'];
-    if (works is! List) continue;
-    for (final w in works) {
-      if (w is! Map) continue;
-      final author = '${w['a'] ?? ''}'.trim();
-      if (author.isEmpty) continue;
-      final t = workFilterType(w);
-      if (t == 'other') continue;
-      (out[author] ??= <String>{}).add(t);
-    }
-  }
-  return out;
-}
-
 /// 按筛选状态统计命中数量。
 int countMatchingAuthors(
   Iterable<MapEntry<String, Map<String, dynamic>>> authors,

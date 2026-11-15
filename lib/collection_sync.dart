@@ -1,9 +1,9 @@
 import 'emoji_text.dart';
 
-/// H11：收藏夹同步选择的纯逻辑。
+/// H11：同步源选择的纯逻辑。
 ///
 /// 名称一律使用账号返回的名称（服务端已按账号名下发），不在客户端追加序号；
-/// 未勾选（sync=false）的收藏夹不参与同步，也不应在主页/库选择页出现。
+/// 未勾选（sync=false）的同步源不参与同步，也不应在主页/库选择页出现。
 class CollectionSyncInfo {
   final int idx;
   final String name;
@@ -29,7 +29,7 @@ class CollectionSyncInfo {
         '${j['name'] ?? ''}'.replaceAll(RegExp(r'[\x00-\x1f]'), ''));
     return CollectionSyncInfo(
       idx: (j['idx'] as num?)?.toInt() ?? 0,
-      name: rawName.isEmpty ? '收藏夹' : rawName,
+      name: rawName.isEmpty ? '同步源' : rawName,
       count: (j['count'] as num?)?.toInt() ?? 0,
       sync: j['sync'] != false,
       inIndex: j['inIndex'] == true,
