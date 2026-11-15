@@ -1,0 +1,31 @@
+/// M5：非全屏上下滑动切换作品时，功能区整体淡化。
+///
+/// 背景：滑动切条时任务栏、返回键、作者信息行、图文圆点会一直压在高亮画面上，
+/// 观感割裂。做成纯策略便于回归测试：
+/// - 全屏继续沿用 M4 的「显示/隐藏」逻辑，不做淡化；
+/// - 非全屏且正在拖拽翻页时统一降到 [dimmedOpacity]；
+/// - 松手（滚动结束）后恢复为 1；
+/// - 功能区本身已隐藏（ui=false）时保持 0，不因滑动被重新点亮。
+class ChromeFade {
+  const ChromeFade._();
+
+  /// 滑动过程中的不透明度（保留轮廓、不抢画面）。
+  static const double dimmedOpacity = 0.22;
+
+  /// 淡化/恢复动画时长（毫秒）：按下即淡出要快，松手恢复稍缓。
+  static const int fadeOutMs = 90;
+  static const int fadeInMs = 160;
+
+  static double opacity({
+    required bool uiVisible,
+    required bool fullscreen,
+    required bool swiping,
+  }) {
+    if (!uiVisible) return 0;
+    if (fullscreen || !swiping) return 1;
+    return dimmedOpacity;
+  }
+
+  static int durationMs({required bool swiping}) =>
+      swiping ? fadeOutMs : fadeInMs;
+}
