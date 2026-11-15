@@ -162,4 +162,31 @@ void main() {
       expect(m.containsKey('C'), isFalse);
     });
   });
+
+  group('applyAuthorFilter', () {
+    final items = <Map<String, dynamic>>[
+      {'n': 'A', 'g': 'S', 't': workFilterVideo},
+      {'n': 'B', 'g': 'B', 't': workFilterPost},
+      {'n': 'C', 'g': 'B', 't': workFilterVideo},
+    ];
+    bool match(Map<String, dynamic> e, AuthorFilterState f) =>
+        f.matches(
+            basicId: 'lib-1', bigId: '', grade: e['g'] as String,
+            workTypes: {e['t'] as String});
+
+    test('returns a copy when filter inactive', () {
+      final out = applyAuthorFilter(items, AuthorFilterState(), match);
+      expect(out.length, 3);
+      expect(identical(out, items), isFalse);
+    });
+
+    test('filters by grade and type across lists', () {
+      final out = applyAuthorFilter(
+          items, AuthorFilterState(grades: {'B'}), match);
+      expect(out.map((e) => e['n']), ['B', 'C']);
+      final v = applyAuthorFilter(items,
+          AuthorFilterState(grades: {'B'}, types: {workFilterVideo}), match);
+      expect(v.map((e) => e['n']), ['C']);
+    });
+  });
 }

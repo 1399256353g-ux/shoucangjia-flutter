@@ -2437,6 +2437,25 @@ class _LibraryPageState extends State<LibraryPage> {
                   textAlign: TextAlign.center),
             ],
             const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () {
+                final i = cols.indexWhere((c) => '${c['name']}' == b.name);
+                Navigator.pop(c);
+                if (i < 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('该基础库尚未同步索引，请先执行一次同步')));
+                  return;
+                }
+                final col = cols[i];
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => CollectionPage(
+                        name: '${col['name']}',
+                        idx: (col['idx'] as num).toInt())));
+              },
+              icon: const Icon(Icons.folder_open),
+              label: const Text('打开作品'),
+            ),
+            const SizedBox(height: 8),
             FilledButton.tonalIcon(
               onPressed: () {
                 Navigator.pop(c);
@@ -3754,6 +3773,10 @@ class _CollectionPageState extends State<CollectionPage> {
   bool searching = false;
   String kw = '';
   final TextEditingController _q = TextEditingController();
+  // J11：收藏夹作品列表同样混合展示作者，复用同一套筛选与共享状态
+  LibMeta? meta;
+  Map<String, Set<String>> authorTypes = {};
+  bool typesLoading = false;
 
   bool _match(Map w) {
     if (kw.isEmpty) return true;
@@ -3762,8 +3785,35 @@ class _CollectionPageState extends State<CollectionPage> {
         '${w['a'] ?? ''}'.toLowerCase().contains(k);
   }
 
+  Map<String, int> get _authorWorkCount {
+    final out = <String, int>{};
+    for (final w in works) {
+      if (w is! Map) continue;
+      final a = '${w['a'] ?? ''}';
+      if (a.isEmpty) continue;
+      out[a] = (out[a] ?? 0) + 1;
+    }
+    return out;
+  }
+
+  bool _matchAuthor(Map w, AuthorFilterState f) {
+    final av = '${w['av'] ?? ''}';
+    final author = '${w['a'] ?? ''}';
+    final type = workFilterType(w);
+    final types = authorTypes[author] ??
+        (type == 'other' ? const <String>{} : <String>{type});
+    return f.matches(
+      basicId: meta?.idFor(av) ?? '',
+      bigId: meta?.bigIdFor(av) ?? '',
+      grade: meta?.gradeFor(author, _authorWorkCount[author] ?? 0) ?? '',
+      workTypes: types,
+    );
+  }
+
   List get view {
     var v = List.from(works.where((w) => _match(w as Map)));
+    v = applyAuthorFilter(
+        v, authorFilter.value, (w, f) => _matchAuthor(w as Map, f));
     if (filter == 'v') v = v.where((w) => w['t'] == 'v').toList();
     if (filter == 'p') v = v.where((w) => w['t'] == 'p').toList();
     if (sort == 'old') {
@@ -3909,9 +3959,67 @@ class _CollectionPageState extends State<CollectionPage> {
 
   @override
   void dispose() {
+    authorFilter.removeListener(_onSharedFilter);
     syncTimer?.cancel();
     _q.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadMeta() async {
+    setState(() => typesLoading = true);
+    LibMeta? m;
+    try {
+      m = await LibMeta.load(cfg.lib);
+    } catch (_) {}
+    final types = await loadAuthorTypes([cfg.lib]);
+    if (!mounted) return;
+    setState(() {
+      meta = m;
+      authorTypes = types;
+      typesLoading = false;
+    });
+  }
+
+  List<AuthorLibNode> get _filterBasics {
+    final out = <AuthorLibNode>[];
+    for (final b in meta?.basics ?? const <BasicLibRef>[]) {
+      out.add(AuthorLibNode(
+          id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
+    }
+    return authorLibNodes(out);
+  }
+
+  List<AuthorBigNode> get _filterBigs {
+    final out = <AuthorBigNode>[];
+    final seen = <String>{};
+    for (final b in _filterBasics) {
+      if (b.bigId.isEmpty || !seen.add(b.bigId)) continue;
+      out.add(
+          AuthorBigNode(id: b.bigId, name: meta?.bigNames[b.bigId] ?? b.bigId));
+    }
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  Map<String, String> get _filterLibNames =>
+      {for (final b in _filterBasics) b.id: b.name};
+
+  Map<String, String> get _filterBigNames =>
+      {for (final b in _filterBigs) b.id: b.name};
+
+  Future<void> _openFilter() async {
+    if (meta == null) await _loadMeta();
+    if (!mounted) return;
+    final res = await showAuthorFilterSheet(
+      context: context,
+      initial: authorFilter.value,
+      basics: _filterBasics,
+      bigs: _filterBigs,
+      grades: const ['S', 'A', 'B', 'C', 'D'],
+      count: (f) => works.where((w) => w is Map && _matchAuthor(w, f)).length,
+    );
+    if (res == null || !mounted) return;
+    authorFilter.apply(res);
   }
 
   void _toggleSearch() {
@@ -3927,10 +4035,16 @@ class _CollectionPageState extends State<CollectionPage> {
   @override
   void initState() {
     super.initState();
+    authorFilter.addListener(_onSharedFilter);
     load();
   }
 
+  void _onSharedFilter() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> load() async {
+    _loadMeta();
     try {
       final r = await http.get(cfg.u('/api/c/${widget.idx}.json'),
           headers: cfg.headers);
@@ -4072,6 +4186,16 @@ class _CollectionPageState extends State<CollectionPage> {
       body: !_loaded
           ? const WorkGridSkeleton(count: 18)
           : Column(children: [
+              // J11：与作者总览/排行/搜索/推荐共用筛选状态
+              AuthorFilterBar(
+                filter: authorFilter.value,
+                loading: typesLoading,
+                onOpen: _openFilter,
+                onClear: authorFilter.clearAll,
+                summary: authorFilter.value.isActive
+                    ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${list.length}/${works.length}'
+                    : null,
+              ),
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -4135,9 +4259,12 @@ class _CollectionPageState extends State<CollectionPage> {
                               ),
                             ),
                           ]))
-                    : (list.isEmpty && kw.isNotEmpty
+                    : (list.isEmpty && (kw.isNotEmpty || authorFilter.value.isActive)
                         ? Center(
-                            child: Text('无匹配作品：$kw',
+                            child: Text(
+                                authorFilter.value.isActive
+                                    ? '没有符合筛选条件的作品'
+                                    : '无匹配作品：$kw',
                                 style: const TextStyle(color: Colors.grey)))
                         : WorkGrid(
                             works: list,
@@ -8943,6 +9070,7 @@ class _RecommendPageState extends State<RecommendPage> {
   }
 
   Future<void> _loadMeta() async {
+    typesLoading = true;
     LibMeta? m;
     try {
       m = await LibMeta.load(cfg.lib);
@@ -9000,9 +9128,15 @@ class _RecommendPageState extends State<RecommendPage> {
     );
   }
 
+  /// 统一筛选后的可见作品；筛选未激活时原样返回。
+  List get _visibleWorks => applyAuthorFilter(
+        works,
+        authorFilter.value,
+        (w, f) => _matches(w, f),
+      );
+
   Future<void> _openFilter() async {
     if (meta == null) {
-      setState(() => typesLoading = true);
       await _loadMeta();
     }
     if (!mounted) return;
@@ -9020,6 +9154,7 @@ class _RecommendPageState extends State<RecommendPage> {
 
   @override
   Widget build(BuildContext context) {
+    final visible = _visibleWorks;
     return Scaffold(
       appBar: AppBar(title: const Text('推荐'), actions: [
         IconButton(
@@ -9038,29 +9173,57 @@ class _RecommendPageState extends State<RecommendPage> {
                       onPressed: () => load(refresh: false),
                       child: const Text('重试')),
                 ]))
-              : works.isEmpty
-                  ? const Center(
-                      child: Text('暂无推荐', style: TextStyle(color: Colors.grey)))
-                  : RefreshIndicator(
-                      onRefresh: () => load(refresh: true),
-                      child: GridView.builder(
-                        padding: const EdgeInsets.all(2),
-                        gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 180,
-                                childAspectRatio: 3 / 4,
-                                mainAxisSpacing: 2,
-                                crossAxisSpacing: 2),
-                        itemCount: works.length,
-                        itemBuilder: (_, i) {
-                          final w = works[i];
-                          return GestureDetector(
-                            onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        PlayerPage(works: works, start: i))),
-                            child: Stack(fit: StackFit.expand, children: [
-                              (w['th'] ?? '').toString().isEmpty
+              : Column(children: [
+                  // J11：推荐与总览/排行/搜索共用同一套作者筛选与状态
+                  AuthorFilterBar(
+                    filter: authorFilter.value,
+                    loading: typesLoading,
+                    onOpen: _openFilter,
+                    onClear: authorFilter.clearAll,
+                    summary: authorFilter.value.isActive
+                        ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${visible.length}/${works.length}'
+                        : null,
+                  ),
+                  Expanded(
+                    child: works.isEmpty
+                        ? const Center(
+                            child: Text('暂无推荐',
+                                style: TextStyle(color: Colors.grey)))
+                        : visible.isEmpty
+                            ? const Center(
+                                child: Text('没有符合筛选条件的作品',
+                                    style: TextStyle(color: Colors.grey)))
+                            : RefreshIndicator(
+                                onRefresh: () => load(refresh: true),
+                                child: GridView.builder(
+                                  padding: const EdgeInsets.all(2),
+                                  gridDelegate:
+                                      const SliverGridDelegateWithMaxCrossAxisExtent(
+                                          maxCrossAxisExtent: 180,
+                                          childAspectRatio: 3 / 4,
+                                          mainAxisSpacing: 2,
+                                          crossAxisSpacing: 2),
+                                  itemCount: visible.length,
+                                  itemBuilder: (_, i) {
+                                    final w = visible[i];
+                                    return GestureDetector(
+                                      onTap: () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                              builder: (_) => PlayerPage(
+                                                  works: visible, start: i))),
+                                      child: _tile(w),
+                                    );
+                                  },
+                                ),
+                              ),
+                  ),
+                ]),
+    );
+  }
+
+  Widget _tile(dynamic w) {
+    return Stack(fit: StackFit.expand, children: [
+      (w['th'] ?? '').toString().isEmpty
                                   ? Container(color: Colors.black26)
                                   : CachedNetworkImage(
                                       imageUrl:
@@ -9069,43 +9232,30 @@ class _RecommendPageState extends State<RecommendPage> {
                                       fit: BoxFit.cover,
                                       errorWidget: (_, __, ___) =>
                                           Container(color: Colors.black26)),
-                              Positioned(
-                                  left: 4,
-                                  top: 4,
-                                  child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 4, vertical: 2),
-                                      color: Colors.black54,
-                                      child: Text(w['t'] == 'v' ? '视频' : '图文',
-                                          style:
-                                              const TextStyle(fontSize: 10)))),
-                              Positioned(
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  child: Container(
-                                      padding: const EdgeInsets.fromLTRB(
-                                          6, 10, 6, 5),
-                                      decoration: const BoxDecoration(
-                                          gradient: LinearGradient(
-                                              begin: Alignment.topCenter,
-                                              end: Alignment.bottomCenter,
-                                              colors: [
-                                            Colors.transparent,
-                                            Colors.black87
-                                          ])),
-                                      child: Text(
-                                          '@${w['a'] ?? ''} · ${w['d'] ?? ''}',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style:
-                                              const TextStyle(fontSize: 10)))),
-                            ]),
-                          );
-                        },
-                      ),
-                    ),
-    );
+      Positioned(
+          left: 4,
+          top: 4,
+          child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              color: Colors.black54,
+              child: Text(w['t'] == 'v' ? '视频' : '图文',
+                  style: const TextStyle(fontSize: 10)))),
+      Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+              padding: const EdgeInsets.fromLTRB(6, 10, 6, 5),
+              decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black87])),
+              child: Text('@${w['a'] ?? ''} · ${w['d'] ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10)))),
+    ]);
   }
 }
 
