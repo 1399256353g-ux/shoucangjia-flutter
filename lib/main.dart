@@ -2421,6 +2421,20 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (_) {}
   }
 
+  void _openStars() {
+    final starred = stars
+        .map((id) => tree?.basicById(id))
+        .whereType<BasicLib>()
+        .toList(growable: false);
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => StarredLibrariesPage(
+        basics: starred,
+        onToggleStar: _toggleStar,
+        onTapBasic: _showBasic,
+      ),
+    ));
+  }
+
   void _openUnit(UnitLibrary u) {
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (c) => UnitLibraryPage(
@@ -2709,6 +2723,7 @@ class _LibraryPageState extends State<LibraryPage> {
                           onOpenUnit: _openUnit,
                           onToggleStar: _toggleStar,
                           onTapBasic: _showBasic,
+                          onOpenStars: _openStars,
                         )
                       else if (tree != null)
                         LibrarySelectorView(
