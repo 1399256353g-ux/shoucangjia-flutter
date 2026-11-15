@@ -10564,15 +10564,48 @@ class _WorkGridState extends State<WorkGrid> {
                         const SkeletonBlock(radius: BorderRadius.zero),
                     errorWidget: (_, __, ___) =>
                         Container(color: Colors.black26)),
+            // 统一卡片样式：标题 + 类型都压在封面底部，不额外占位
             Positioned(
-                right: 4,
-                top: 4,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
                 child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    color: Colors.black54,
-                    child: Text(workTypeLabel(w),
-                        style: const TextStyle(fontSize: 10)))),
+                  padding: const EdgeInsets.fromLTRB(6, 18, 6, 5),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x00000000), Color(0xB3000000)],
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${(w is Map ? (w['ti'] ?? '') : '')}'.trim().isEmpty
+                            ? '未命名'
+                            : '${w['ti']}'.trim(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11.5,
+                            height: 1.25,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(workTypeLabel(w),
+                          maxLines: 1,
+                          style: TextStyle(
+                              fontSize: 9.5,
+                              color: Colors.white.withValues(alpha: 0.85))),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             if (coverBadge != null)
               Positioned(
                   right: 4,
