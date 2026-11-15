@@ -281,6 +281,20 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     ));
   }
 
+  // J14：优先用服务端扫出的「通用分类节点」（任意层级上级目录）。
+  final rawNodes = json['nodes'];
+  if (rawNodes is List && rawNodes.isNotEmpty) {
+    var used = false;
+    for (final x in rawNodes) {
+      if (x is! Map) continue;
+      final rel = '${x['rel'] ?? ''}'.trim().replaceAll('\\', '/');
+      if (rel.isEmpty) continue;
+      add(x);
+      used = true;
+    }
+    if (used) return out;
+  }
+
   for (final x in (json['bigLibraries'] as List? ?? const [])) {
     add(x);
   }

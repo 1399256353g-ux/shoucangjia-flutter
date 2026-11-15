@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'category_tree_page.dart';
 import 'library_tree.dart';
 
 /// M10：基础库页面「作者视图 / 作品视图」双视图。
@@ -173,6 +174,21 @@ class _BasicLibPageState extends State<BasicLibPage>
     return Scaffold(
       appBar: AppBar(
         title: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        actions: [
+          IconButton(
+            key: const ValueKey('basic-categories'),
+            tooltip: '分类树',
+            icon: const Icon(Icons.account_tree_outlined),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => CategoryTreePage(
+                basic: b,
+                urlOf: widget.urlOf,
+                headersOf: widget.headersOf,
+                onOpenAuthor: widget.onOpenAuthor,
+              ),
+            )),
+          ),
+        ],
         bottom: TabBar(
           controller: _tabs,
           tabs: [
