@@ -247,7 +247,20 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     if (raw is! Map) return;
     final path = '${raw['path'] ?? ''}'.trim();
     final relRaw = '${raw['rel'] ?? ''}'.trim();
-    final rel = relRaw.isNotEmpty ? relRaw : relFromPath(path, root);
+    var rel = relRaw;
+    if (rel.isEmpty) {
+      rel = relFromPath(path, root);
+      // 未给 root 或 root 不匹配时，退化为「最后一个库根段之后」：
+      // /vol1/.../Secret/(1) A → (1) A，保证与基础库的 rel 同一坐标系。
+      if (splitRel(path).length == splitRel(rel).length) {
+        final segs = splitRel(path);
+        final at = segs.lastIndexWhere(
+            (s) => s.toLowerCase() == 'secret');
+        if (at >= 0 && at + 1 < segs.length) {
+          rel = segs.skip(at + 1).join('/');
+        }
+      }
+    }
     if (rel.isEmpty) return;
     final name = '${raw['name'] ?? ''}'.trim();
     out.add(LibNode(

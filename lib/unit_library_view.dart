@@ -1,0 +1,391 @@
+import 'package:flutter/material.dart';
+
+import 'library_badge.dart';
+import 'library_tree.dart';
+import 'unit_library.dart';
+
+/// L5 卡片体系：单元库卡片 > 基础库卡片 > 作品卡片（尺寸递减）。
+///
+/// 主页只铺「单元库」卡片 + 一个「星标基础库」入口；
+/// 点进单元库才看到它的下级单元库与基础库卡片。
+class UnitLibraryHomeView extends StatelessWidget {
+  final UnitLibrary tree;
+  final Set<String> stars;
+  final void Function(UnitLibrary unit) onOpenUnit;
+  final void Function(BasicLib b) onToggleStar;
+  final void Function(BasicLib b) onTapBasic;
+  final VoidCallback onOpenStars;
+
+  const UnitLibraryHomeView({
+    super.key,
+    required this.tree,
+    required this.stars,
+    required this.onOpenUnit,
+    required this.onToggleStar,
+    required this.onTapBasic,
+    required this.onOpenStars,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final units = tree.children;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+          child: Row(children: [
+            const Icon(Icons.layers_outlined, size: 18),
+            const SizedBox(width: 6),
+            const Text('单元库',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Text('${units.length} 个 · ${tree.basicCount} 基础库',
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ]),
+        ),
+        StarredEntryCard(count: stars.length, onTap: onOpenStars),
+        if (units.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 24, 16, 24),
+            child: Text('当前连接下没有可显示的单元库',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ),
+        for (final u in units)
+          UnitLibraryCard(unit: u, onTap: () => onOpenUnit(u)),
+      ],
+    );
+  }
+}
+
+/// 「星标基础库」入口（原「默认收藏夹」）：点进单独的选择页。
+class StarredEntryCard extends StatelessWidget {
+  final int count;
+  final VoidCallback onTap;
+
+  const StarredEntryCard(
+      {super.key, required this.count, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+      child: Material(
+        color: Colors.amber.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          key: const ValueKey('starred-entry'),
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+            child: Row(children: [
+              const Icon(Icons.star, color: Colors.amber, size: 20),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('星标基础库',
+                    style:
+                        TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              ),
+              Text(count == 0 ? '未标记' : '$count 个',
+                  style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 星标基础库选择页：只列出被星标的基础库卡片。
+class StarredLibrariesPage extends StatelessWidget {
+  final List<BasicLib> basics;
+  final void Function(BasicLib b) onToggleStar;
+  final void Function(BasicLib b) onTapBasic;
+
+  const StarredLibrariesPage({
+    super.key,
+    required this.basics,
+    required this.onToggleStar,
+    required this.onTapBasic,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('星标基础库')),
+      body: basics.isEmpty
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  '还没有星标的基础库\n在单元库内点基础库卡片右上角的星标即可加入',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+            )
+          : GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 220,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.92,
+              ),
+              itemCount: basics.length,
+              itemBuilder: (c, i) => BasicLibCard(
+                basic: basics[i],
+                starred: true,
+                onToggleStar: () => onToggleStar(basics[i]),
+                onTap: () => onTapBasic(basics[i]),
+              ),
+            ),
+    );
+  }
+}
+
+/// 单元库卡片（大）：名称、层级摘要、来源连接。
+class UnitLibraryCard extends StatelessWidget {
+  final UnitLibrary unit;
+  final VoidCallback onTap;
+
+  const UnitLibraryCard({super.key, required this.unit, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final server = unit.node.serverLabel;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: Material(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          key: ValueKey('unit-${unit.id}'),
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: SizedBox(
+            height: 116,
+            child: Row(children: [
+              const SizedBox(width: 14),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.folder_copy_outlined,
+                    color: scheme.primary, size: 28),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(unit.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    Text(unit.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.grey)),
+                    if (server.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(server,
+                          style:
+                              const TextStyle(fontSize: 10, color: Colors.grey)),
+                    ],
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.grey),
+              const SizedBox(width: 10),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 单元库详情：下级单元库卡片 + 基础库卡片网格。
+class UnitLibraryPage extends StatelessWidget {
+  final UnitLibrary unit;
+  final Set<String> stars;
+  final void Function(UnitLibrary unit) onOpenUnit;
+  final void Function(BasicLib b) onToggleStar;
+  final void Function(BasicLib b) onTapBasic;
+
+  const UnitLibraryPage({
+    super.key,
+    required this.unit,
+    required this.stars,
+    required this.onOpenUnit,
+    required this.onToggleStar,
+    required this.onTapBasic,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final basics = unit.allBasics;
+    final sorted = [
+      ...basics.where((b) => stars.contains(b.id)),
+      ...basics.where((b) => !stars.contains(b.id)),
+    ];
+    return Scaffold(
+      appBar: AppBar(title: Text(unit.name)),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 24),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+            child: Text(unit.subtitle,
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          ),
+          if (unit.children.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 12, 16, 2),
+              child: Text('下级单元库',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+            for (final c in unit.children)
+              UnitLibraryCard(unit: c, onTap: () => onOpenUnit(c)),
+          ],
+          if (sorted.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Text('基础库',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 220,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childAspectRatio: 0.92,
+              ),
+              itemCount: sorted.length,
+              itemBuilder: (c, i) => BasicLibCard(
+                basic: sorted[i],
+                starred: stars.contains(sorted[i].id),
+                onToggleStar: () => onToggleStar(sorted[i]),
+                onTap: () => onTapBasic(sorted[i]),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 基础库卡片（中）：来源词条、名称、作者/作品数、星标。
+class BasicLibCard extends StatelessWidget {
+  final BasicLib basic;
+  final bool starred;
+  final VoidCallback onToggleStar;
+  final VoidCallback onTap;
+
+  const BasicLibCard({
+    super.key,
+    required this.basic,
+    required this.starred,
+    required this.onToggleStar,
+    required this.onTap,
+  });
+
+  /// 词条文本：基础库名去掉「(序号) 」前缀。
+  static String badgeText(String name) {
+    final raw = name.replaceFirst(RegExp(r'^\(\d+\)\s*'), '').trim();
+    return raw.isEmpty ? name : raw;
+  }
+
+  Widget _badge() {
+    final text = badgeText(basic.name);
+    final color = Color(LibraryBadge.colorFor(basic.id));
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text.length > 10 ? '${text.substring(0, 10)}…' : text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 9.5,
+          color: Color(LibraryBadge.textColorOn(color.toARGB32())),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        key: ValueKey('basic-card-${basic.id}'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 6, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(Icons.folder_outlined, size: 15, color: scheme.primary),
+                const Spacer(),
+                InkResponse(
+                  key: ValueKey('star-card-${basic.id}'),
+                  onTap: onToggleStar,
+                  radius: 16,
+                  child: Icon(
+                    starred ? Icons.star : Icons.star_border,
+                    size: 18,
+                    color: starred ? Colors.amber : Colors.grey,
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 5),
+              Align(alignment: Alignment.centerLeft, child: _badge()),
+              const SizedBox(height: 4),
+              Expanded(
+                child: Text(basic.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12.5, fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 4),
+              Text('${basic.authors} 作者 · ${basic.works} 作品',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              if (basic.serverLabel.isNotEmpty)
+                Text(basic.serverLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
