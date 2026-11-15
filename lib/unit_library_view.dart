@@ -441,9 +441,11 @@ class BasicLibCard extends StatelessWidget {
 
   Widget _badge() {
     // 位置词条只由「单元库」生成：取所属单元库名称与配色，不再用基础库自身。
-    final text = badgeText(unitLabel);
+    // K17：有单元库就用单元库词条；没有则回退到「库名」灰色词条。
+    final hasUnit = unitLabel.isNotEmpty;
+    final text = badgeText(hasUnit ? unitLabel : basic.name);
     // 顶级节点库（SECRET）下发的词条固定灰色；其余按单元库配色。
-    final isTop = unitKey == 'secret';
+    final isTop = !hasUnit || unitKey == 'secret';
     final color = isTop
         ? const Color(0xFF6B7280)
         : Color(LibraryBadge.colorFor(unitKey.isEmpty ? unitLabel : unitKey));
@@ -491,8 +493,7 @@ class BasicLibCard extends StatelessWidget {
                 const Spacer(),
               ]),
               const SizedBox(height: 5),
-              if (unitLabel.isNotEmpty)
-                Align(alignment: Alignment.centerLeft, child: _badge()),
+              Align(alignment: Alignment.centerLeft, child: _badge()),
               const SizedBox(height: 4),
               Expanded(
                 child: Text(basic.name,
