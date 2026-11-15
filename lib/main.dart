@@ -32,6 +32,8 @@ import 'library_badge.dart';
 import 'library_rank.dart';
 import 'library_selector_view.dart';
 import 'library_tree.dart';
+import 'unit_library.dart';
+import 'unit_library_view.dart';
 import 'likes.dart';
 import 'multi_server.dart';
 import 'playback_flow.dart';
@@ -2240,6 +2242,9 @@ class _LibraryPageState extends State<LibraryPage> {
 
   /// J2：大库/基础库两级选择。v1 服务端没有 bigLibraries 时为 null，走原列表。
   LibraryTree? tree;
+
+  /// L5：单元库树（节点文件夹＝单元库，SECRET 顶级）。
+  UnitLibrary? unitTree;
   Set<String> expanded = <String>{};
   List<String> stars = <String>[];
 
@@ -2389,10 +2394,17 @@ class _LibraryPageState extends State<LibraryPage> {
         return;
       }
       final t = LibraryTree.parse(merged, stars: saved);
+      final nodes = nodesFromV2(merged, root: '${merged['root'] ?? ''}');
+      final units = buildUnitTree(
+        nodes: nodes,
+        basics: t?.allBasics ?? const <BasicLib>[],
+        topName: '${merged['root'] ?? ''}'.trim().isEmpty ? 'SECRET' : 'SECRET',
+      );
       if (!mounted) return;
       setState(() {
         stars = saved;
         tree = t;
+        unitTree = units;
       });
     } catch (_) {}
   }
@@ -2407,6 +2419,31 @@ class _LibraryPageState extends State<LibraryPage> {
       final sp = await SharedPreferences.getInstance();
       await sp.setStringList(_starKey, next);
     } catch (_) {}
+  }
+
+  void _openUnit(UnitLibrary u) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (c) => UnitLibraryPage(
+        unit: u,
+        stars: stars.toSet(),
+        onOpenUnit: (sub) => Navigator.of(c).push(MaterialPageRoute<void>(
+          builder: (_) => UnitLibraryPage(
+            unit: sub,
+            stars: stars.toSet(),
+            onOpenUnit: (s2) => _openUnit(s2),
+            onToggleStar: _toggleStar,
+            onTapBasic: (b) => _showBasicOn(c, b),
+          ),
+        )),
+        onToggleStar: _toggleStar,
+        onTapBasic: (b) => _showBasicOn(c, b),
+      ),
+    ));
+  }
+
+  void _showBasicOn(BuildContext c, BasicLib b) {
+    Navigator.of(c).pop();
+    _showBasic(b);
   }
 
   void _toggleSection(String id) =>
@@ -2665,7 +2702,15 @@ class _LibraryPageState extends State<LibraryPage> {
                             style: const TextStyle(
                                 fontSize: 11, color: Colors.grey)),
                       ),
-                      if (tree != null)
+                      if (unitTree != null)
+                        UnitLibraryHomeView(
+                          tree: unitTree!,
+                          stars: stars.toSet(),
+                          onOpenUnit: _openUnit,
+                          onToggleStar: _toggleStar,
+                          onTapBasic: _showBasic,
+                        )
+                      else if (tree != null)
                         LibrarySelectorView(
                           tree: tree!,
                           expanded: expanded,
