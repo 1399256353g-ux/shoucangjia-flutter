@@ -34,7 +34,7 @@ void main() {
 
     final rect = t.getRect(find.byKey(ValueKey('unit-card-${unit.id}')));
     expect(rect.height, UnitLibraryCard.height);
-    expect(UnitLibraryCard.height, 132);
+    expect(UnitLibraryCard.height, 150);
 
     final cover = t.getSize(find.byKey(ValueKey('unit-cover-${unit.id}')));
     expect(cover.width, 72);
@@ -51,7 +51,8 @@ void main() {
 
   testWidgets('单元库卡片：标题 + 作者/作品数', (t) async {
     await t.pumpWidget(host(UnitLibraryCard(unit: unit, onTap: () {})));
-    expect(find.text('(1) A'), findsOneWidget);
+    // 词条与标题都显示单元库名（与基础库卡片一致）。
+    expect(find.text('(1) A'), findsNWidgets(2));
     expect(find.text('3 作者 · 30 作品'), findsOneWidget);
   });
 
@@ -92,7 +93,7 @@ void main() {
     expect(UnitLibraryCard.canConfigure(unit), isTrue);
   });
 
-  testWidgets('同级单元库卡片也带爬虫入口；纯展示卡片不进入', (t) async {
+  testWidgets('进入单元库后不再显示自身卡片，爬虫入口在标题栏', (t) async {
     String? opened;
     await t.pumpWidget(host(UnitLibraryPage(
       unit: unit,
@@ -102,9 +103,8 @@ void main() {
       onTapBasic: (_) {},
       onConfigureUnit: (u) => opened = u.id,
     )));
-    // 详情页自身的卡片：不可点进，但右上角有爬虫配置
-    expect(find.byKey(ValueKey('unit-head-${unit.id}')), findsOneWidget);
-    expect(find.byKey(ValueKey('unit-${unit.id}')), findsNothing);
+    // 自身卡片不再重复显示；爬虫配置改到 AppBar 右上角。
+    expect(find.byKey(ValueKey('unit-card-${unit.id}')), findsNothing);
     await t.tap(find.byKey(ValueKey('unit-crawler-${unit.id}')));
     expect(opened, unit.id);
   });

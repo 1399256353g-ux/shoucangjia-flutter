@@ -308,7 +308,7 @@ class StarredUnitsPage extends StatelessWidget {
 /// 作者/作品数），但整体面积略大（高 132、封面 72）。
 class UnitLibraryCard extends StatelessWidget {
   /// 卡片高度（略大于基础库卡片）。
-  static const double height = 132;
+  static const double height = 150;
 
   /// 封面缩略尺寸（略大于基础库卡片）。
   static const double coverSize = 72;
@@ -350,116 +350,130 @@ class UnitLibraryCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final server = unit.node.serverLabel;
     final showCrawler = onConfigure != null && canConfigure(unit);
-    final meta = [
-      '${unit.basicCount} 个基础库',
-      if (server.isNotEmpty) server,
-    ].join(' · ');
+    final top = unit.rel.trim().isEmpty || unit.id == 'secret';
+    final badgeColor =
+        top ? const Color(0xFF6B7280) : Color(LibraryBadge.colorFor(unit.id));
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       child: Material(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
         borderRadius: BorderRadius.circular(radius),
-        child: SizedBox(
-          key: ValueKey('unit-card-${unit.id}'),
-          height: height,
-          child: Row(children: [
-            // 卡片主体：点这里进入单元库
-            Expanded(
-              child: InkWell(
-                key: onTap == null
-                    ? ValueKey('unit-head-${unit.id}')
-                    : ValueKey('unit-${unit.id}'),
-                borderRadius: const BorderRadius.horizontal(
-                    left: Radius.circular(radius)),
-                onTap: onTap,
-                child: Row(children: [
-                  const SizedBox(width: 10),
-                  ValueListenableBuilder<int>(
-                    valueListenable: WorkPlaysStore.revision,
-                    builder: (_, __, ___) => _CoverThumb(
-                      key: ValueKey('unit-cover-${unit.id}'),
-                      url: unitCoverUrl(unit, customUrl: coverUrl),
-                      headers: headers,
-                      size: coverSize,
-                      fallbackIcon: Icons.folder_copy_outlined,
-                      fallbackColor: scheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(unit.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 14.5,
-                                height: 1.25,
-                                fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        Text(
-                            '${formatCount(unit.authors)} 作者 · '
-                            '${formatCount(unit.works)} 作品',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 10.5, color: Colors.grey)),
-                        const SizedBox(height: 4),
-                        Text(meta,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                ]),
-              ),
-            ),
-            // 右侧操作列：右上角＝爬虫配置（仅非顶级单元库），
-            // 右下角＝星标；两者都在卡片点击区之外，避免误触。
-            SizedBox(
-              width: 36,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: InkWell(
+          key: ValueKey(onTap == null
+              ? 'unit-head-${unit.id}'
+              : 'unit-${unit.id}'),
+          borderRadius: BorderRadius.circular(radius),
+          onTap: onTap,
+          child: SizedBox(
+            key: ValueKey('unit-card-${unit.id}'),
+            height: height,
+            child: Stack(children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 44, 8),
+                child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (showCrawler)
-                    IconButton(
-                      key: ValueKey('unit-crawler-${unit.id}'),
-                      tooltip: '爬虫配置',
-                      iconSize: 17,
-                      visualDensity: VisualDensity.compact,
-                      padding: EdgeInsets.zero,
-                      constraints:
-                          const BoxConstraints.tightFor(width: 32, height: 32),
-                      icon: const Icon(Icons.settings_ethernet),
-                      onPressed: onConfigure,
-                    )
-                  else
-                    const SizedBox(height: 32),
-                  if (onToggleStar != null)
-                    InkResponse(
-                      key: ValueKey('unit-star-${unit.id}'),
-                      onTap: onToggleStar,
-                      radius: 18,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Icon(
-                          starred ? Icons.star : Icons.star_border,
-                          size: 20,
-                          color: starred ? Colors.amber : Colors.grey,
-                        ),
+                  Row(children: [
+                    ValueListenableBuilder<int>(
+                      valueListenable: WorkPlaysStore.revision,
+                      builder: (_, __, ___) => _CoverThumb(
+                        key: ValueKey('unit-cover-${unit.id}'),
+                        url: unitCoverUrl(unit, customUrl: coverUrl),
+                        headers: headers,
+                        size: coverSize,
+                        fallbackIcon: Icons.folder_copy_outlined,
+                        fallbackColor: scheme.primary,
                       ),
-                    )
-                  else
-                    const SizedBox(height: 32),
+                    ),
+                  ]),
+                  const SizedBox(height: 6),
+                  // 与基础库卡片一致的词条 → 名称 → 统计排版。
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: badgeColor.withValues(alpha: 0.9),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      unit.name.length > 10
+                          ? '${unit.name.substring(0, 10)}…'
+                          : unit.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        color:
+                            Color(LibraryBadge.textColorOn(badgeColor.toARGB32())),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Expanded(
+                    child: Text(unit.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 15,
+                            height: 1.2,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('${formatCount(unit.authors)} 作者 · '
+                      '${formatCount(unit.works)} 作品',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          const TextStyle(fontSize: 10.5, color: Colors.grey)),
+                  if (server.isNotEmpty)
+                    Text(server,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            const TextStyle(fontSize: 10, color: Colors.grey)),
                 ],
               ),
-            ),
-            const SizedBox(width: 6),
-          ]),
+              ),
+              // 右上角：爬虫配置（仅非顶级单元库）
+              if (showCrawler)
+                Positioned(
+                  top: 2,
+                  right: 6,
+                  child: IconButton(
+                    key: ValueKey('unit-crawler-${unit.id}'),
+                    tooltip: '爬虫配置',
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 32, height: 32),
+                    icon: const Icon(Icons.settings_ethernet),
+                    onPressed: onConfigure,
+                  ),
+                ),
+              // 右下角：星标
+              if (onToggleStar != null)
+                Positioned(
+                  bottom: 6,
+                  right: 6,
+                  child: IconButton(
+                    key: ValueKey('unit-star-${unit.id}'),
+                    tooltip: starred ? '取消星标' : '星标单元库',
+                    iconSize: 20,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 32, height: 32),
+                    icon: Icon(
+                      starred ? Icons.star : Icons.star_border,
+                      color: starred ? Colors.amber : Colors.grey,
+                    ),
+                    onPressed: onToggleStar,
+                  ),
+                ),
+            ]),
+          ),
         ),
       ),
     );
@@ -512,21 +526,19 @@ class UnitLibraryPage extends StatelessWidget {
 
     walkOwners(unit);
     return Scaffold(
-      appBar: AppBar(title: Text(unit.name)),
+      appBar: AppBar(title: Text(unit.name), actions: [
+        if (onConfigureUnit != null && UnitLibraryCard.canConfigure(unit))
+          IconButton(
+            key: ValueKey('unit-crawler-${unit.id}'),
+            tooltip: '爬虫配置',
+            icon: const Icon(Icons.settings_ethernet),
+            onPressed: () => onConfigureUnit!(unit),
+          ),
+      ]),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
-          // 当前单元库自身也是一张卡片（不可点进），爬虫配置入口在它的右上角。
-          UnitLibraryCard(
-            unit: unit,
-            coverUrl: unitCoverOf?.call(unit) ?? '',
-            headers: unitHeadersOf(unit, headersOf),
-            starred: stars.contains(unit.id),
-            onToggleStar: () => onToggleUnitStar(unit),
-            onConfigure: onConfigureUnit == null
-                ? null
-                : () => onConfigureUnit!(unit),
-          ),
+          // 进入单元库后不再重复显示自身卡片，直接从下级单元库/基础库开始。
           if (unit.children.isNotEmpty) ...[
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 12, 16, 2),

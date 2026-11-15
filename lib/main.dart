@@ -251,27 +251,24 @@ class LibMeta {
                       authors: 0,
                       works: 0),
               ];
-              final manual =
-                  '${ljm['nodesMode'] ?? ''}'.trim().toLowerCase() == 'manual';
-              List<LibNode> nodes;
-              if (manual) {
-                final marks = <String>[];
-                if (rs[3].statusCode == 200) {
-                  try {
-                    final nj = jsonDecode(utf8.decode(rs[3].bodyBytes));
-                    final list = nj is Map ? nj['nodes'] : null;
-                    if (list is List) {
-                      for (final e in list) {
-                        final s = '$e'.trim();
-                        if (s.isNotEmpty) marks.add(s);
-                      }
+              // 单元库＝owner 在「文件结构」里勾选的节点文件夹（/api/nodes），
+              // 与主页使用同一份来源；只有节点为空时才退回 v2 分组。
+              final marks = <String>[];
+              if (rs[3].statusCode == 200) {
+                try {
+                  final nj = jsonDecode(utf8.decode(rs[3].bodyBytes));
+                  final list = nj is Map ? nj['nodes'] : null;
+                  if (list is List) {
+                    for (final e in list) {
+                      final s = '$e'.trim();
+                      if (s.isNotEmpty) marks.add(s);
                     }
-                  } catch (_) {}
-                }
-                nodes = nodesFromMarks(marks);
-              } else {
-                nodes = nodesFromV2(ljm, root: base);
+                  }
+                } catch (_) {}
               }
+              final nodes = marks.isEmpty
+                  ? nodesFromV2(ljm, root: base)
+                  : nodesFromMarks(marks);
               final tree =
                   buildUnitTree(nodes: nodes, basics: basicList);
               if (tree != null) {
@@ -1366,6 +1363,20 @@ class UnitBadges extends StatelessWidget {
       names: names,
       grayIds: gray ? <String>{id} : const {},
       grade: grade,
+    );
+  }
+}
+
+/// 深页面统一「返回主页」按钮：直接回到根路由（主页）。
+class HomeAction extends StatelessWidget {
+  const HomeAction({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: '返回主页',
+      icon: const Icon(Icons.home_outlined),
+      onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
     );
   }
 }
@@ -2600,7 +2611,14 @@ class _LibraryPageState extends State<LibraryPage> {
   String _unitCoverUrl(UnitLibrary u) {
     final pick = pickUnitCover(
         rel: u.rel, version: u.node.coverVersion, ext: u.node.coverExt);
-    return pick.isEmpty ? '' : cfg.mediaUrl(pick.path);
+    if (!pick.isEmpty) return cfg.mediaUrl(pick.path);
+    // 没有自定义封面时，用该单元库下第一个基础库的封面兜底，
+    // 避免单元库卡片大面积空白。
+    if (u.basics.isNotEmpty) {
+      final fallback = _basicCoverUrl(u.basics.first);
+      if (fallback.isNotEmpty) return fallback;
+    }
+    return '';
   }
 
   void _openStars() {
@@ -2662,7 +2680,11 @@ class _LibraryPageState extends State<LibraryPage> {
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
             ),
             Expanded(
-              child: ListView(children: [for (final l in libs) _libTile(l)]),
+              // 抖音收藏已废弃：不再出现在文件库管理列表里。
+              child: ListView(children: [
+                for (final l in libs)
+                  if ('${l['id']}' != 'douyin') _libTile(l)
+              ]),
             ),
           ]),
         ),
@@ -3639,6 +3661,7 @@ class _CollectionsPageState extends State<CollectionsPage> {
             ),
           ),
           actions: [
+            const HomeAction(),
             IconButton(
                 icon: const Icon(Icons.refresh),
                 tooltip: '刷新收藏夹',
@@ -3827,6 +3850,7 @@ class _HomePageState extends State<HomePage> {
         titleSpacing: 12,
         title: const Text('媒体库'),
         actions: [
+          const HomeAction(),
           IconButton(
               key: const ValueKey('open-folder-structure-home'),
               icon: const Icon(Icons.account_tree_outlined),
@@ -4710,6 +4734,8 @@ class _RankPageState extends State<RankPage> {
   String metric = 'play';
   List<Map<String, dynamic>> libs = [];
   String sel = '';
+  // 排行榜改为按单元库筛选（与作者总览同一套单元库树）。
+  String unitSel = '';
   List rows = [];
   final Map<String, LibMeta> metas = {};
   bool loading = true;
@@ -4724,7 +4750,7 @@ class _RankPageState extends State<RankPage> {
   void initState() {
     super.initState();
     authorFilter.addListener(_onSharedFilter);
-    sel = widget.initialLib ?? cfg.lib;
+    sel = widget.initialLib ?? 'all';
     loadLibs();
     load();
   }
@@ -4816,6 +4842,9 @@ class _RankPageState extends State<RankPage> {
 
   LibMeta? _rowMeta(Map<String, dynamic> e) => metas[_rowLibId(e)];
 
+  String _rowUnitId(Map<String, dynamic> e) =>
+      _rowMeta(e)?.unitIdFor('${e['avatar'] ?? ''}') ?? '';
+
   bool _rowMatches(Map<String, dynamic> e, AuthorFilterState f) {
     final meta = _rowMeta(e);
     final av = '${e['avatar'] ?? ''}';
@@ -4831,8 +4860,23 @@ class _RankPageState extends State<RankPage> {
 
   List<Map<String, dynamic>> get _visibleRows => [
         for (final e in rows)
-          if (!filter.isActive || _rowMatches(_rowMap(e), filter)) _rowMap(e)
+          if ((unitSel.isEmpty || _rowUnitId(_rowMap(e)) == unitSel) &&
+              (!filter.isActive || _rowMatches(_rowMap(e), filter)))
+            _rowMap(e)
       ];
+
+  /// 排行榜可选的单元库（来自各库的单元库树）。
+  List<AuthorLibNode> get _allUnits {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final m in metas.values) {
+      for (final u in m.units) {
+        if (!seen.add(u.id)) continue;
+        out.add(AuthorLibNode(id: u.id, name: m.unitNameOf(u.id)));
+      }
+    }
+    return authorLibNodes(out);
+  }
 
   List<AuthorLibNode> get _filterBasics {
     final out = <AuthorLibNode>[];
@@ -4952,6 +4996,7 @@ class _RankPageState extends State<RankPage> {
       appBar: AppBar(title: const Text('排行榜'), actions: [
         IconButton(
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+        const HomeAction(),
       ]),
       body: Column(children: [
         SizedBox(
@@ -4963,31 +5008,23 @@ class _RankPageState extends State<RankPage> {
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ChoiceChip(
-                  label: const Text('全部库'),
-                  selected: sel == 'all',
+                  label: const Text('全部单元库'),
+                  selected: unitSel.isEmpty,
                   onSelected: (_) {
-                    if (sel == 'all') return;
-                    setState(() {
-                      sel = 'all';
-                      loading = true;
-                    });
-                    load();
+                    if (unitSel.isEmpty) return;
+                    setState(() => unitSel = '');
                   },
                 ),
               ),
-              for (final l in libs)
+              for (final u in _allUnits)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    label: Text('${l['name'] ?? l['id']}'),
-                    selected: sel == '${l['id']}',
+                    label: Text(u.name),
+                    selected: unitSel == u.id,
                     onSelected: (_) {
-                      if (sel == '${l['id']}') return;
-                      setState(() {
-                        sel = '${l['id']}';
-                        loading = true;
-                      });
-                      load();
+                      if (unitSel == u.id) return;
+                      setState(() => unitSel = u.id);
                     },
                   ),
                 ),
@@ -5298,6 +5335,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
       appBar: AppBar(title: const Text('各库排行'), actions: [
         IconButton(
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+        const HomeAction(),
       ]),
       body: Column(children: [
         SizedBox(
@@ -6101,6 +6139,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('作者'), actions: [
+        const HomeAction(),
         IconButton(
             tooltip: '各库排行',
             onPressed: () => Navigator.of(context).push(
@@ -8961,25 +9000,19 @@ class _PlayerPageState extends State<PlayerPage>
                                   ),
                                 ],
                               ]),
-                              // J9：来源词条（基础库）+ 等级词条，半透明不遮画面
+                              // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
                               if (_meta != null)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 2),
                                   child: Opacity(
                                     opacity: 0.7,
-                                    child: LibBadges(
-                                      libIds: [
-                                        _meta!.idFor('${w['av'] ?? ''}').isEmpty
-                                            ? _curLib
-                                            : _meta!.idFor('${w['av'] ?? ''}')
-                                      ],
-                                      order: _meta!.order,
-                                      names: {
-                                        ..._meta!.names,
-                                        _curLib: cfg.libName.isEmpty
-                                            ? _curLib
-                                            : cfg.libName,
-                                      },
+                                    child: UnitBadges(
+                                      meta: _meta,
+                                      mediaPath: '${w['av'] ?? ''}',
+                                      fallbackId: _curLib,
+                                      fallbackName: cfg.libName.isEmpty
+                                          ? _curLib
+                                          : cfg.libName,
                                       grade: _meta!.gradeFor(
                                           '${w['a'] ?? ''}',
                                           widget.works
@@ -9599,6 +9632,8 @@ class RecommendPage extends StatefulWidget {
 
 class _RecommendPageState extends State<RecommendPage> {
   List works = [];
+  List<Map<String, dynamic>> libs = [];
+  final Map<String, LibMeta> metas = {};
   bool loading = true;
   String? err;
   int batch = 0;
@@ -9633,13 +9668,65 @@ class _RecommendPageState extends State<RecommendPage> {
       err = null;
     });
     try {
-      final r = await http.get(cfg.u('/api/recommend?n=40&seed=$seed'),
-          headers: cfg.headers);
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(r.body);
+      // 推荐改为跨全部已注册库：每个库取一批，按库轮转合并，
+      // 避免默认库（抖音收藏）独占整个页面。
+      if (libs.isEmpty) {
+        try {
+          final lr = await http
+              .get(cfg.u('/api/libraries'), headers: cfg.headers)
+              .timeout(const Duration(seconds: 8));
+          if (lr.statusCode == 200) {
+            final lj = jsonDecode(lr.body);
+            if (lj is Map && lj['libraries'] is List) {
+              libs = (lj['libraries'] as List)
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .where((e) => '${e['id'] ?? ''}'.isNotEmpty)
+                  .toList();
+            }
+          }
+        } catch (_) {}
+      }
+      final targets =
+          libs.map((e) => '${e['id']}').toList(growable: false);
+      final picks = <List>[];
+      for (var i = 0; i < targets.length; i++) {
+        final lib = targets[i];
+        try {
+          final r = await http.get(
+              cfg.u('/api/recommend?n=30&seed=${seed + i * 137}', lib: lib),
+              headers: cfg.headers);
+          if (r.statusCode != 200) {
+            picks.add(const []);
+            continue;
+          }
+          final j = jsonDecode(r.body);
+          final list =
+              (j is Map && j['works'] is List) ? (j['works'] as List) : const [];
+          picks.add([
+            for (final w in list)
+              if (w is Map) {...Map<String, dynamic>.from(w), '_lib': lib}
+          ]);
+        } catch (_) {
+          picks.add(const []);
+        }
+      }
+      final merged = <Map<String, dynamic>>[];
+      final seen = <String>{};
+      final most = picks.fold<int>(0, (m, e) => e.length > m ? e.length : m);
+      for (var i = 0; i < most && merged.length < 40; i++) {
+        for (final p in picks) {
+          if (i >= p.length) continue;
+          final w = Map<String, dynamic>.from(p[i] as Map);
+          final key = '${w['_lib']}|${w['id'] ?? w['ti'] ?? ''}';
+          if (!seen.add(key)) continue;
+          merged.add(w);
+          if (merged.length >= 40) break;
+        }
+      }
       if (!mounted) return;
       setState(() {
-        works = (j is Map && j['works'] is List) ? j['works'] as List : [];
+        works = merged;
         _authorCount.clear();
         for (final w in works) {
           if (w is! Map) continue;
@@ -9662,11 +9749,18 @@ class _RecommendPageState extends State<RecommendPage> {
 
   Future<void> _loadMeta() async {
     typesLoading = true;
+    final ids = libs.isEmpty
+        ? [cfg.lib]
+        : libs.map((e) => '${e['id']}').toList(growable: false);
     LibMeta? m;
-    try {
-      m = await LibMeta.load(cfg.lib);
-    } catch (_) {}
-    final types = await loadAuthorTypes([cfg.lib]);
+    for (final id in ids) {
+      try {
+        final loaded = await LibMeta.load(id);
+        metas[id] = loaded;
+        m ??= loaded;
+      } catch (_) {}
+    }
+    final types = await loadAuthorTypes(ids);
     if (!mounted) return;
     setState(() {
       meta = m;
@@ -9764,6 +9858,7 @@ class _RecommendPageState extends State<RecommendPage> {
     final visible = _visibleWorks;
     return Scaffold(
       appBar: AppBar(title: const Text('推荐'), actions: [
+        const HomeAction(),
         IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: '换一批',
@@ -10114,7 +10209,7 @@ class _SearchPageState extends State<SearchPage> {
             return '${w['ti']}'.contains(kw) || '${w['a']}'.contains(kw);
           }).toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('搜索')),
+      appBar: AppBar(title: const Text('搜索'), actions: const [HomeAction()]),
       body: Column(children: [
         SizedBox(
           height: 42,
@@ -10456,6 +10551,7 @@ class _AuthorPageState extends State<AuthorPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text('@${widget.name}'), actions: [
+        const HomeAction(),
         if (_canSync)
           IconButton(
               tooltip: syncing ? '同步中…' : '同步该作者',
@@ -10524,22 +10620,15 @@ class _AuthorPageState extends State<AuthorPage> {
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                            LibBadges(
-                              libIds: [
-                                (meta?.idFor(displayAv) ?? '').isEmpty
-                                    ? (primaryLib.isEmpty
-                                        ? cfg.lib
-                                        : primaryLib)
-                                    : meta!.idFor(displayAv)
-                              ],
-                              order: meta?.order ?? const [],
-                              names: {
-                                ...?meta?.names,
-                                if (primaryLib.isNotEmpty)
-                                  primaryLib: cfg.libName.isEmpty
-                                      ? primaryLib
-                                      : cfg.libName,
-                              },
+                            // T2：作者主页词条改为单元库（SECRET / 无归属灰色）
+                            UnitBadges(
+                              meta: meta,
+                              mediaPath: displayAv,
+                              fallbackId:
+                                  primaryLib.isEmpty ? cfg.lib : primaryLib,
+                              fallbackName: cfg.libName.isEmpty
+                                  ? (primaryLib.isEmpty ? cfg.lib : primaryLib)
+                                  : cfg.libName,
                               grade:
                                   meta?.gradeFor(widget.name, works.length) ??
                                       '',
