@@ -15,6 +15,7 @@ import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_filter.dart';
 import 'author_drag.dart';
+import 'author_avatar.dart';
 import 'author_filter_bar.dart';
 import 'author_filter_ui.dart';
 import 'author_grid.dart';
@@ -9684,6 +9685,8 @@ class AuthorPage extends StatefulWidget {
 class _AuthorPageState extends State<AuthorPage> {
   String bio = '';
   String av = '';
+  // J12：没有现成头像时，从作品图里自动挑一张兜底（中心裁剪）。
+  String fallbackAv = '';
   List works = [];
   // J6：按作品类型筛选（可多选，空集合=全部）
   final Set<String> typeFilter = <String>{};
@@ -9698,6 +9701,8 @@ class _AuthorPageState extends State<AuthorPage> {
 
   List<String> get _libs =>
       (widget.libs == null || widget.libs!.isEmpty) ? [cfg.lib] : widget.libs!;
+
+  String get displayAv => av.isNotEmpty ? av : fallbackAv;
 
   @override
   void initState() {
@@ -9794,6 +9799,7 @@ class _AuthorPageState extends State<AuthorPage> {
     works = [];
     bio = '';
     av = '';
+    fallbackAv = '';
     primaryLib = '';
     for (final lib in _libs) {
       try {
@@ -9823,6 +9829,9 @@ class _AuthorPageState extends State<AuthorPage> {
         meta = await LibMeta.load(primaryLib);
       } catch (_) {}
     }
+    fallbackAv = pickFallbackAvatar(
+            avatarCandidatesFromWorks(works.whereType<Map>())) ??
+        '';
     if (mounted) {
       setState(() {
         loading = false;
@@ -9854,7 +9863,8 @@ class _AuthorPageState extends State<AuthorPage> {
 
   // 点击头像放大查看（可双指缩放，点任意处关闭）
   void _showAvatar(BuildContext context) {
-    if (av.isEmpty) return;
+    final src = displayAv;
+    if (src.isEmpty) return;
     showDialog(
       context: context,
       barrierColor: Colors.black87,
@@ -9865,8 +9875,8 @@ class _AuthorPageState extends State<AuthorPage> {
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
-              imageUrl:
-                  cfg.mediaUrl(av, lib: primaryLib.isEmpty ? null : primaryLib),
+              imageUrl: cfg.mediaUrl(src,
+                  lib: primaryLib.isEmpty ? null : primaryLib),
               httpHeaders:
                   cfg.headersFor(primaryLib.isEmpty ? null : primaryLib),
               fit: BoxFit.contain,
@@ -9905,7 +9915,7 @@ class _AuthorPageState extends State<AuthorPage> {
                       GestureDetector(
                         onTap: () => _showAvatar(context),
                         child: ClipOval(
-                            child: av.isEmpty
+                            child: displayAv.isEmpty
                                 ? Container(
                                     width: 64,
                                     height: 64,
@@ -9918,7 +9928,7 @@ class _AuthorPageState extends State<AuthorPage> {
                                             style:
                                                 const TextStyle(fontSize: 26))))
                                 : CachedNetworkImage(
-                                    imageUrl: cfg.mediaUrl(av,
+                                    imageUrl: cfg.mediaUrl(displayAv,
                                         lib: primaryLib.isEmpty
                                             ? null
                                             : primaryLib),
@@ -9935,11 +9945,11 @@ class _AuthorPageState extends State<AuthorPage> {
                               children: [
                             LibBadges(
                               libIds: [
-                                (meta?.idFor(av) ?? '').isEmpty
+                                (meta?.idFor(displayAv) ?? '').isEmpty
                                     ? (primaryLib.isEmpty
                                         ? cfg.lib
                                         : primaryLib)
-                                    : meta!.idFor(av)
+                                    : meta!.idFor(displayAv)
                               ],
                               order: meta?.order ?? const [],
                               names: {
