@@ -442,10 +442,10 @@ class BasicLibCard extends StatelessWidget {
   Widget _badge() {
     // 位置词条只由「单元库」生成：取所属单元库名称与配色，不再用基础库自身。
     final text = badgeText(unitLabel);
-    // 顶级节点库（SECRET）下发的词条固定黑色；其余按单元库配色。
+    // 顶级节点库（SECRET）下发的词条固定灰色；其余按单元库配色。
     final isTop = unitKey == 'secret';
     final color = isTop
-        ? const Color(0xFF000000)
+        ? const Color(0xFF6B7280)
         : Color(LibraryBadge.colorFor(unitKey.isEmpty ? unitLabel : unitKey));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
