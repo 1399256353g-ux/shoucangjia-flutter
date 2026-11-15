@@ -13,6 +13,10 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_settings.dart';
 import 'app_theme.dart';
+import 'author_filter.dart';
+import 'author_drag.dart';
+import 'author_filter_bar.dart';
+import 'author_filter_ui.dart';
 import 'author_grid.dart';
 import 'author_grade.dart';
 import 'background_pause.dart';
@@ -34,8 +38,11 @@ import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'text_fit.dart';
 import 'ui_auto_hide.dart';
+import 'ui_fade.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
+import 'player_controls.dart';
+import 'preload_policy.dart';
 import 'preload_plan.dart';
 import 'swipe_control.dart';
 import 'swipe_physics.dart';
@@ -156,10 +163,18 @@ class LibMeta {
   final List<BasicLibRef> basics;
   final Map<String, dynamic> stats;
 
-  const LibMeta({required this.basics, required this.stats});
+  /// J10：大库 id → 名称，用于作者筛选里的「大库」多选。
+  final Map<String, String> bigNames;
+
+  const LibMeta({
+    required this.basics,
+    required this.stats,
+    this.bigNames = const {},
+  });
 
   static final Map<String, LibMeta> cache = <String, LibMeta>{};
-  static final Map<String, Future<LibMeta>> _loading = <String, Future<LibMeta>>{};
+  static final Map<String, Future<LibMeta>> _loading =
+      <String, Future<LibMeta>>{};
 
   static Future<LibMeta> load(String lib) {
     final hit = cache[lib];
@@ -167,9 +182,11 @@ class LibMeta {
     return _loading.putIfAbsent(lib, () async {
       var basics = const <BasicLibRef>[];
       var stats = <String, dynamic>{};
+      var bigNames = <String, String>{};
       try {
         final rs = await Future.wait([
-          http.get(cfg.u('/api/libraries.json', lib: lib), headers: cfg.headers),
+          http.get(cfg.u('/api/libraries.json', lib: lib),
+              headers: cfg.headers),
           http.get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers),
           http.get(cfg.u('/api/author_stats.json', lib: lib),
               headers: cfg.headers),
@@ -188,6 +205,15 @@ class LibMeta {
           }
           if (lj is Map && base.isNotEmpty) {
             basics = basicsUnderBase(Map<String, dynamic>.from(lj), base);
+            final bigs = Map<String, dynamic>.from(lj)['bigLibraries'];
+            if (bigs is List) {
+              for (final e in bigs) {
+                if (e is! Map) continue;
+                final id = '${e['id'] ?? ''}';
+                if (id.isEmpty) continue;
+                bigNames[id] = '${e['name'] ?? id}';
+              }
+            }
           }
         }
         if (rs[2].statusCode == 200) {
@@ -197,7 +223,7 @@ class LibMeta {
           }
         }
       } catch (_) {}
-      final meta = LibMeta(basics: basics, stats: stats);
+      final meta = LibMeta(basics: basics, stats: stats, bigNames: bigNames);
       cache[lib] = meta;
       _loading.remove(lib);
       return meta;
@@ -219,6 +245,19 @@ class LibMeta {
   String idFor(String mediaPath) =>
       basicLibForMedia(basics, mediaPath)?.id ?? '';
 
+  /// J10：作者所属大库 id；无法匹配基础库时为空。
+  String bigIdFor(String mediaPath) {
+    final b = basicLibForMedia(basics, mediaPath);
+    if (b == null) return '';
+    if (b.bigId.isNotEmpty) return b.bigId;
+    // 旧数据缺少 big_id 时按路径前缀回退到名称中含该前缀的大库。
+    return '';
+  }
+
+  /// 作者作品类型集合（由外部类型索引提供作者名后取用）。
+  Set<String> typesFor(Map<String, Set<String>> types, String author) =>
+      types[author] ?? const <String>{};
+
   List<String> get order => basics.map((e) => e.id).toList();
 
   Map<String, String> get names => {
@@ -236,6 +275,97 @@ class LibMeta {
       works: works,
     );
   }
+}
+
+/// J10：作者作品类型索引。当前收藏库优先用 `/api/c/<idx>.json` 汇总
+/// （覆盖全部作品，无需逐作者请求）；没有收藏夹数据的通用库再回退到
+/// `/api/lib/<id>/index.json` 的 kinds。按注册库缓存，失败不阻断筛选。
+final Map<String, Future<Map<String, Set<String>>>> _authorTypeCache = {};
+
+Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
+  return _authorTypeCache.putIfAbsent(lib, () async {
+    try {
+      final r = await http
+          .get(cfg.u('/api/index.json', lib: lib), headers: cfg.headers)
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode == 200) {
+        final j = jsonDecode(utf8.decode(r.bodyBytes));
+        final cols = (j is Map && j['collections'] is List)
+            ? j['collections'] as List
+            : const [];
+        if (cols.isNotEmpty) {
+          final parts = await Future.wait([
+            for (final c in cols)
+              if (c is Map && c['idx'] != null)
+                _collectionForType(lib, '${c['idx']}')
+          ]);
+          return authorTypesFromCollections(parts.whereType<dynamic>());
+        }
+      }
+    } catch (_) {}
+    // 回退：基础库索引的 kinds（仅部分通用库生成）
+    try {
+      final reg = await http
+          .get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers)
+          .timeout(const Duration(seconds: 12));
+      if (reg.statusCode != 200) return <String, Set<String>>{};
+      final lj = await http
+          .get(cfg.u('/api/libraries.json', lib: lib), headers: cfg.headers)
+          .timeout(const Duration(seconds: 12));
+      if (lj.statusCode != 200) return <String, Set<String>>{};
+      final regJson = jsonDecode(utf8.decode(reg.bodyBytes));
+      var base = '';
+      if (regJson is Map && regJson['libraries'] is List) {
+        for (final e in regJson['libraries'] as List) {
+          if (e is Map && '${e['id']}' == lib) {
+            base = '${e['base'] ?? ''}';
+            break;
+          }
+        }
+      }
+      final libJson = jsonDecode(utf8.decode(lj.bodyBytes));
+      if (base.isEmpty || libJson is! Map) return <String, Set<String>>{};
+      final basics = basicsUnderBase(Map<String, dynamic>.from(libJson), base);
+      final parts = await Future.wait(
+          [for (final b in basics) _typesFromLibIndex(lib, b.id)]);
+      return mergeAuthorTypes(parts);
+    } catch (_) {
+      return <String, Set<String>>{};
+    }
+  });
+}
+
+Future<dynamic> _collectionForType(String lib, String idx) async {
+  try {
+    final r = await http
+        .get(cfg.u('/api/c/$idx.json', lib: lib), headers: cfg.headers)
+        .timeout(const Duration(seconds: 12));
+    if (r.statusCode != 200) return null;
+    return jsonDecode(utf8.decode(r.bodyBytes));
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<Map<String, Set<String>>> _typesFromLibIndex(
+    String lib, String basicId) async {
+  try {
+    final r = await http
+        .get(cfg.u('/api/lib/$basicId/index.json', lib: lib),
+            headers: cfg.headers)
+        .timeout(const Duration(seconds: 12));
+    if (r.statusCode != 200) return <String, Set<String>>{};
+    return authorTypesFromIndex(jsonDecode(utf8.decode(r.bodyBytes)));
+  } catch (_) {
+    return <String, Set<String>>{};
+  }
+}
+
+/// 汇总多个注册库的作者类型。
+Future<Map<String, Set<String>>> loadAuthorTypes(Iterable<String> libs) async {
+  final parts =
+      await Future.wait([for (final l in libs.toSet()) _authorTypesForLib(l)]);
+  return mergeAuthorTypes(parts);
 }
 
 // 作者统计上报（播放/访问），失败静默，不影响播放
@@ -1596,6 +1726,45 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         ),
         const Text('全屏播放时无操作多久后自动隐藏进度条与控制栏；点击屏幕可再次呼出。',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const Divider(height: 32),
+        Row(children: [
+          const Expanded(
+              child: Text('滑动预加载条数',
+                  style: TextStyle(fontWeight: FontWeight.bold))),
+          Text(AppSettings.preloadPerSide == 0
+              ? '关闭'
+              : '前后各 ${AppSettings.preloadPerSide} 条',
+              style: const TextStyle(color: Colors.amber)),
+        ]),
+        Slider(
+          value: AppSettings.preloadPerSide.toDouble(),
+          min: 0,
+          max: preloadMaxPerSide.toDouble(),
+          divisions: preloadMaxPerSide,
+          label: '${AppSettings.preloadPerSide}',
+          onChanged: (v) => setState(
+              () => AppSettings.preloadPerSide = clampPreloadPerSide(v.round())),
+          onChangeEnd: (_) => _persist(),
+        ),
+        const Text('按滑动方向提前打开前后各 N 条媒体，切条时首帧已就绪；0 为关闭。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 12),
+        const Text('预加载内存上限', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, children: [
+          for (final mb in preloadMemoryOptions)
+            ChoiceChip(
+              label: Text('$mb MB'),
+              selected: AppSettings.preloadMemoryMb == mb,
+              onSelected: (_) {
+                setState(() => AppSettings.preloadMemoryMb =
+                    clampPreloadMemoryMb(mb));
+                _persist();
+              },
+            ),
+        ]),
+        const Text('超出上限时优先淘汰离当前条目最远的缓存，正在播放的条目不受影响。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
       ]),
     );
   }
@@ -2072,6 +2241,7 @@ class _LibraryPageState extends State<LibraryPage> {
   LibraryTree? tree;
   Set<String> expanded = <String>{};
   List<String> stars = <String>[];
+
   /// J3：旧注册表默认收起，只在需要管理时展开。
   bool legacyOpen = false;
 
@@ -2144,8 +2314,8 @@ class _LibraryPageState extends State<LibraryPage> {
             if (j is Map) treeJson = Map<String, dynamic>.from(j);
           }
           if (def.isNotEmpty && defaultId == null) defaultId = def;
-          snaps.add(ServerLibraries(
-              server: s, libraries: list, tree: treeJson));
+          snaps
+              .add(ServerLibraries(server: s, libraries: list, tree: treeJson));
         } catch (e) {
           snaps.add(ServerLibraries(server: s, error: '$e'));
         }
@@ -2459,8 +2629,8 @@ class _LibraryPageState extends State<LibraryPage> {
               icon: const Icon(Icons.dns_outlined),
               tooltip: '多网络连接',
               onPressed: () async {
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const SettingsPage()));
+                await Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsPage()));
                 await load();
               }),
           IconButton(
@@ -2557,9 +2727,8 @@ class _LibraryPageState extends State<LibraryPage> {
               '爬虫：${cr['enabled'] == true ? '已启用' : '未启用'} · ${cr['schedule'] ?? '04:10'} · 脚本 ${scripts.length} 个 · ${(l['indexOk'] == true) ? '索引正常' : '索引缺失'}',
               style: TextStyle(
                   fontSize: 11,
-                  color: l['indexOk'] == true
-                      ? Colors.grey
-                      : Colors.redAccent)),
+                  color:
+                      l['indexOk'] == true ? Colors.grey : Colors.redAccent)),
         ],
       ),
       isThreeLine: true,
@@ -2573,8 +2742,8 @@ class _LibraryPageState extends State<LibraryPage> {
                 .then((_) => load());
           }
           if (v == 'maint') {
-            Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => MaintenancePage(lib: l)));
+            Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => MaintenancePage(lib: l)));
           }
           if (v == 'delete') _delete(l);
         },
@@ -2612,8 +2781,8 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
 
   String get libId => '${widget.lib['id']}';
 
-  Uri _u(String path) =>
-      Uri.parse('${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
+  Uri _u(String path) => Uri.parse(
+      '${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
 
   @override
   void initState() {
@@ -2764,8 +2933,8 @@ class _MaintenancePageState extends State<MaintenancePage> {
   bool deepScan = false;
 
   String get libId => '${widget.lib['id']}';
-  Uri _u(String path) =>
-      Uri.parse('${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
+  Uri _u(String path) => Uri.parse(
+      '${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
 
   @override
   void initState() {
@@ -3335,9 +3504,8 @@ class _ContinueTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cover = item.thumb.isEmpty
-        ? null
-        : cfg.mediaUrl(item.thumb, lib: item.lib);
+    final cover =
+        item.thumb.isEmpty ? null : cfg.mediaUrl(item.thumb, lib: item.lib);
     return SizedBox(
       width: 172,
       child: Material(
@@ -3587,6 +3755,11 @@ class _CollectionPageState extends State<CollectionPage> {
   bool searching = false;
   String kw = '';
   final TextEditingController _q = TextEditingController();
+  // J11：收藏夹作品列表同样混合展示作者，复用同一套筛选与共享状态
+  LibMeta? meta;
+  Map<String, Set<String>> authorTypes = {};
+  bool typesLoading = false;
+  final Map<String, int> _authorWorks = {};
 
   bool _match(Map w) {
     if (kw.isEmpty) return true;
@@ -3595,8 +3768,34 @@ class _CollectionPageState extends State<CollectionPage> {
         '${w['a'] ?? ''}'.toLowerCase().contains(k);
   }
 
+  void _countAuthorWorks() {
+    _authorWorks.clear();
+    for (final w in works) {
+      if (w is! Map) continue;
+      final a = '${w['a'] ?? ''}';
+      if (a.isEmpty) continue;
+      _authorWorks[a] = (_authorWorks[a] ?? 0) + 1;
+    }
+  }
+
+  bool _matchAuthor(Map w, AuthorFilterState f) {
+    final av = '${w['av'] ?? ''}';
+    final author = '${w['a'] ?? ''}';
+    final type = workFilterType(w);
+    final types = authorTypes[author] ??
+        (type == 'other' ? const <String>{} : <String>{type});
+    return f.matches(
+      basicId: meta?.idFor(av) ?? '',
+      bigId: meta?.bigIdFor(av) ?? '',
+      grade: meta?.gradeFor(author, _authorWorks[author] ?? 0) ?? '',
+      workTypes: types,
+    );
+  }
+
   List get view {
     var v = List.from(works.where((w) => _match(w as Map)));
+    v = applyAuthorFilter(
+        v, authorFilter.value, (w, f) => _matchAuthor(w as Map, f));
     if (filter == 'v') v = v.where((w) => w['t'] == 'v').toList();
     if (filter == 'p') v = v.where((w) => w['t'] == 'p').toList();
     if (sort == 'old') {
@@ -3604,7 +3803,13 @@ class _CollectionPageState extends State<CollectionPage> {
     } else if (sort == 'title') {
       v.sort((a, b) => '${a['ti']}'.compareTo('${b['ti']}'));
     } else {
-      v.sort((a, b) => '${b['d']}'.compareTo('${a['d']}'));
+      // 按入库时间（目录 mtime）倒序，缺失时退回发布日期
+      v.sort((a, b) {
+        final ax = (a['at'] is num) ? (a['at'] as num).toInt() : 0;
+        final bx = (b['at'] is num) ? (b['at'] as num).toInt() : 0;
+        if (ax != bx) return bx.compareTo(ax);
+        return '${b['d']}'.compareTo('${a['d']}');
+      });
     }
     return v;
   }
@@ -3736,9 +3941,67 @@ class _CollectionPageState extends State<CollectionPage> {
 
   @override
   void dispose() {
+    authorFilter.removeListener(_onSharedFilter);
     syncTimer?.cancel();
     _q.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadMeta() async {
+    setState(() => typesLoading = true);
+    LibMeta? m;
+    try {
+      m = await LibMeta.load(cfg.lib);
+    } catch (_) {}
+    final types = await loadAuthorTypes([cfg.lib]);
+    if (!mounted) return;
+    setState(() {
+      meta = m;
+      authorTypes = types;
+      typesLoading = false;
+    });
+  }
+
+  List<AuthorLibNode> get _filterBasics {
+    final out = <AuthorLibNode>[];
+    for (final b in meta?.basics ?? const <BasicLibRef>[]) {
+      out.add(AuthorLibNode(
+          id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
+    }
+    return authorLibNodes(out);
+  }
+
+  List<AuthorBigNode> get _filterBigs {
+    final out = <AuthorBigNode>[];
+    final seen = <String>{};
+    for (final b in _filterBasics) {
+      if (b.bigId.isEmpty || !seen.add(b.bigId)) continue;
+      out.add(
+          AuthorBigNode(id: b.bigId, name: meta?.bigNames[b.bigId] ?? b.bigId));
+    }
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  Map<String, String> get _filterLibNames =>
+      {for (final b in _filterBasics) b.id: b.name};
+
+  Map<String, String> get _filterBigNames =>
+      {for (final b in _filterBigs) b.id: b.name};
+
+  Future<void> _openFilter() async {
+    if (meta == null) await _loadMeta();
+    if (!mounted) return;
+    final res = await showAuthorFilterSheet(
+      context: context,
+      initial: authorFilter.value,
+      basics: _filterBasics,
+      bigs: _filterBigs,
+      grades: const ['S', 'A', 'B', 'C', 'D'],
+      count: (f) => works.where((w) => w is Map && _matchAuthor(w, f)).length,
+    );
+    if (res == null || !mounted) return;
+    authorFilter.apply(res);
   }
 
   void _toggleSearch() {
@@ -3754,10 +4017,16 @@ class _CollectionPageState extends State<CollectionPage> {
   @override
   void initState() {
     super.initState();
+    authorFilter.addListener(_onSharedFilter);
     load();
   }
 
+  void _onSharedFilter() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> load() async {
+    _loadMeta();
     try {
       final r = await http.get(cfg.u('/api/c/${widget.idx}.json'),
           headers: cfg.headers);
@@ -3767,6 +4036,7 @@ class _CollectionPageState extends State<CollectionPage> {
         setState(() {
           works = (m['works'] as List);
           deleted = (m['deleted'] as List?) ?? [];
+          _countAuthorWorks();
           _loaded = true;
         });
       } else if (mounted) {
@@ -3899,6 +4169,16 @@ class _CollectionPageState extends State<CollectionPage> {
       body: !_loaded
           ? const WorkGridSkeleton(count: 18)
           : Column(children: [
+              // J11：与作者总览/排行/搜索/推荐共用筛选状态
+              AuthorFilterBar(
+                filter: authorFilter.value,
+                loading: typesLoading,
+                onOpen: _openFilter,
+                onClear: authorFilter.clearAll,
+                summary: authorFilter.value.isActive
+                    ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${list.length}/${works.length}'
+                    : null,
+              ),
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -3962,9 +4242,12 @@ class _CollectionPageState extends State<CollectionPage> {
                               ),
                             ),
                           ]))
-                    : (list.isEmpty && kw.isNotEmpty
+                    : (list.isEmpty && (kw.isNotEmpty || authorFilter.value.isActive)
                         ? Center(
-                            child: Text('无匹配作品：$kw',
+                            child: Text(
+                                authorFilter.value.isActive
+                                    ? '没有符合筛选条件的作品'
+                                    : '无匹配作品：$kw',
                                 style: const TextStyle(color: Colors.grey)))
                         : WorkGrid(
                             works: list,
@@ -4000,13 +4283,29 @@ class _RankPageState extends State<RankPage> {
   final Map<String, LibMeta> metas = {};
   bool loading = true;
   String? err;
+  // J11：筛选状态全 App 共享（总览/排行/搜索/推荐同一份）
+  AuthorFilterState get filter => authorFilter.value;
+  Map<String, Set<String>> authorTypes = {};
+  bool typesLoading = false;
+  String _typesForSel = '';
 
   @override
   void initState() {
     super.initState();
+    authorFilter.addListener(_onSharedFilter);
     sel = widget.initialLib ?? cfg.lib;
     loadLibs();
     load();
+  }
+
+  void _onSharedFilter() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    authorFilter.removeListener(_onSharedFilter);
+    super.dispose();
   }
 
   Future<void> loadLibs() async {
@@ -4048,7 +4347,8 @@ class _RankPageState extends State<RankPage> {
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(r.body);
       if (!mounted) return;
-      final list = (j is Map && j['authors'] is List) ? j['authors'] as List : [];
+      final list =
+          (j is Map && j['authors'] is List) ? j['authors'] as List : [];
       final need = <String>{
         if (sel != 'all' && sel.isNotEmpty) sel,
         for (final e in list)
@@ -4077,6 +4377,102 @@ class _RankPageState extends State<RankPage> {
 
   int _n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
 
+  Map<String, dynamic> _rowMap(dynamic e) =>
+      e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{};
+
+  String _rowLibId(Map<String, dynamic> e) =>
+      sel == 'all' ? '${e['lib'] ?? cfg.lib}' : (sel.isEmpty ? cfg.lib : sel);
+
+  LibMeta? _rowMeta(Map<String, dynamic> e) => metas[_rowLibId(e)];
+
+  bool _rowMatches(Map<String, dynamic> e, AuthorFilterState f) {
+    final meta = _rowMeta(e);
+    final av = '${e['avatar'] ?? ''}';
+    final name = '${e['name'] ?? ''}';
+    return f.matches(
+      basicId: meta?.idFor(av) ?? '',
+      bigId: meta?.bigIdFor(av) ?? '',
+      grade: meta?.gradeFor(name, _n(e['works'])) ?? '',
+      workTypes: authorTypes[name] ?? const <String>{},
+    );
+  }
+
+  List<Map<String, dynamic>> get _visibleRows => [
+        for (final e in rows)
+          if (!filter.isActive || _rowMatches(_rowMap(e), filter)) _rowMap(e)
+      ];
+
+  List<AuthorLibNode> get _filterBasics {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final m in metas.values) {
+      for (final b in m.basics) {
+        if (!seen.add(b.id)) continue;
+        out.add(AuthorLibNode(
+            id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
+      }
+    }
+    return authorLibNodes(out);
+  }
+
+  List<AuthorBigNode> get _filterBigs {
+    final out = <AuthorBigNode>[];
+    final seen = <String>{};
+    for (final b in _filterBasics) {
+      if (b.bigId.isEmpty || !seen.add(b.bigId)) continue;
+      var name = b.bigId;
+      for (final m in metas.values) {
+        final n = m.bigNames[b.bigId];
+        if (n != null && n.isNotEmpty) {
+          name = n;
+          break;
+        }
+      }
+      out.add(AuthorBigNode(id: b.bigId, name: name));
+    }
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  Map<String, String> get _filterLibNames =>
+      {for (final b in _filterBasics) b.id: b.name};
+
+  Map<String, String> get _filterBigNames =>
+      {for (final b in _filterBigs) b.id: b.name};
+
+  int _filterCount(AuthorFilterState f) =>
+      rows.where((e) => _rowMatches(_rowMap(e), f)).length;
+
+  Future<void> _ensureTypes() async {
+    if (typesLoading) return;
+    if (_typesForSel == sel && authorTypes.isNotEmpty) return;
+    final targets = metas.keys.toList();
+    if (targets.isEmpty) return;
+    setState(() => typesLoading = true);
+    final map = await loadAuthorTypes(targets);
+    if (!mounted) return;
+    setState(() {
+      authorTypes = map;
+      _typesForSel = sel;
+      typesLoading = false;
+    });
+  }
+
+  Future<void> _openFilter() async {
+    await _ensureTypes();
+    if (!mounted) return;
+    final res = await showAuthorFilterSheet(
+      context: context,
+      initial: filter,
+      basics: _filterBasics,
+      bigs: _filterBigs,
+      grades: const ['S', 'A', 'B', 'C', 'D'],
+      count: _filterCount,
+    );
+    if (res == null || !mounted) return;
+    authorFilter.apply(res);
+  }
+
   Future<void> _open(String name) async {
     dynamic row;
     for (final e in rows) {
@@ -4102,6 +4498,7 @@ class _RankPageState extends State<RankPage> {
 
   @override
   Widget build(BuildContext context) {
+    final visible = _visibleRows;
     return Scaffold(
       appBar: AppBar(title: const Text('排行榜'), actions: [
         IconButton(
@@ -4213,6 +4610,16 @@ class _RankPageState extends State<RankPage> {
                     style: const TextStyle(fontSize: 11, color: Colors.grey))),
           ]),
         ),
+        // J10/J11：排行榜复用同一套作者筛选（状态与其他页面共享）
+        AuthorFilterBar(
+          filter: filter,
+          loading: typesLoading,
+          onOpen: _openFilter,
+          onClear: authorFilter.clearAll,
+          summary: filter.isActive
+              ? '${filter.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${visible.length}/${rows.length}'
+              : null,
+        ),
         Expanded(
           child: loading
               ? const Center(child: CircularProgressIndicator())
@@ -4227,22 +4634,22 @@ class _RankPageState extends State<RankPage> {
                       const SizedBox(height: 12),
                       FilledButton(onPressed: load, child: const Text('重试')),
                     ]))
-                  : rows.isEmpty
+                  : visible.isEmpty
                       ? Center(
                           child: Text(
-                              metric == 'drop'
-                                  ? '本期还没有小水滴，去播放页送一颗吧'
-                                  : '本期还没有播放记录',
+                              filter.isActive
+                                  ? '没有符合筛选条件的作者'
+                                  : (metric == 'drop'
+                                      ? '本期还没有小水滴，去播放页送一颗吧'
+                                      : '本期还没有播放记录'),
                               style: const TextStyle(
                                   color: Colors.grey, fontSize: 12)))
                       : ListView.separated(
                           padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-                          itemCount: rows.length,
+                          itemCount: visible.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (_, i) {
-                            final e = rows[i] is Map
-                                ? Map<String, dynamic>.from(rows[i] as Map)
-                                : <String, dynamic>{};
+                            final e = visible[i];
                             final name = '${e['name'] ?? ''}';
                             final av = '${e['avatar'] ?? ''}';
                             final score = _n(e['score']);
@@ -4282,15 +4689,17 @@ class _RankPageState extends State<RankPage> {
                                             ? Container(
                                                 color: Colors.blueGrey,
                                                 alignment: Alignment.center,
-                                                child:
-                                                    Text(name.isEmpty ? '?' : name[0],
-                                                        style: const TextStyle(
-                                                            fontSize: 18)))
+                                                child: Text(
+                                                    name.isEmpty
+                                                        ? '?'
+                                                        : name[0],
+                                                    style: const TextStyle(
+                                                        fontSize: 18)))
                                             : CachedNetworkImage(
                                                 imageUrl: cfg.mediaUrl(av,
-                                                        lib: sel == 'all'
-                                                            ? '${e['lib'] ?? cfg.lib}'
-                                                            : sel),
+                                                    lib: sel == 'all'
+                                                        ? '${e['lib'] ?? cfg.lib}'
+                                                        : sel),
                                                 httpHeaders: cfg.headers,
                                                 fit: BoxFit.cover,
                                                 memCacheWidth: 126,
@@ -4324,8 +4733,7 @@ class _RankPageState extends State<RankPage> {
                                       names: badgeNames,
                                       grade: meta == null
                                           ? ''
-                                          : meta.gradeFor(
-                                              name, _n(e['works'])),
+                                          : meta.gradeFor(name, _n(e['works'])),
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
@@ -4608,10 +5016,16 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   List<MapEntry<String, Map<String, dynamic>>> _ordered = const [];
   final ScrollController _scroll = ScrollController();
   String _sig = '';
+  // J11：作者筛选状态全 App 共享（总览/排行/搜索/推荐同一份）
+  AuthorFilterState get filter => authorFilter.value;
+  Map<String, Set<String>> authorTypes = {};
+  bool typesLoading = false;
+  String _typesForSel = '';
 
   @override
   void initState() {
     super.initState();
+    authorFilter.addListener(_onSharedFilter);
     sel = cfg.lib;
     _scroll.addListener(_maybeLoadMore);
     loadLibs();
@@ -4626,9 +5040,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   @override
   void dispose() {
+    authorFilter.removeListener(_onSharedFilter);
     syncTimer?.cancel();
     _scroll.dispose();
     super.dispose();
+  }
+
+  void _onSharedFilter() {
+    if (!mounted) return;
+    setState(() => _applyOrder());
   }
 
   Future<void> _syncAuthors() async {
@@ -4862,6 +5282,116 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       ? Map<String, dynamic>.from(stats[name] as Map)
       : const {};
 
+  LibMeta? _metaOf(MapEntry<String, Map<String, dynamic>> e) {
+    final lib = '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}';
+    return metas[lib] ?? metas[sel];
+  }
+
+  String _basicIdOf(MapEntry<String, Map<String, dynamic>> e) =>
+      _metaOf(e)?.idFor('${e.value['av'] ?? ''}') ?? '';
+
+  String _bigIdOf(MapEntry<String, Map<String, dynamic>> e) =>
+      _metaOf(e)?.bigIdFor('${e.value['av'] ?? ''}') ?? '';
+
+  String _gradeOf(MapEntry<String, Map<String, dynamic>> e) =>
+      AuthorGrade.gradeFor(
+        plays: _num(_s(e.key)['p']),
+        drops: _num(_s(e.key)['dr']),
+        works: _num(e.value['n']),
+      );
+
+  Set<String> _typesOf(String name) => authorTypes[name] ?? const <String>{};
+
+  /// J10：把当前可见的 meta 汇总成筛选面板需要的节点。
+  List<AuthorLibNode> get _filterBasics {
+    final nodes = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final l in libs) {
+      final m = metas['${l['id']}'];
+      if (m == null) continue;
+      for (final b in m.basics) {
+        if (!seen.add(b.id)) continue;
+        nodes.add(AuthorLibNode(
+          id: b.id,
+          name: basicLibLabel(b, b.name),
+          bigId: b.bigId,
+        ));
+      }
+    }
+    return authorLibNodes(nodes);
+  }
+
+  List<AuthorBigNode> get _filterBigs {
+    final out = <AuthorBigNode>[];
+    final seen = <String>{};
+    for (final b in _filterBasics) {
+      if (b.bigId.isEmpty || !seen.add(b.bigId)) continue;
+      var name = b.bigId;
+      for (final m in metas.values) {
+        final n = m.bigNames[b.bigId];
+        if (n != null && n.isNotEmpty) {
+          name = n;
+          break;
+        }
+      }
+      out.add(AuthorBigNode(id: b.bigId, name: name));
+    }
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  Map<String, String> get _filterLibNames =>
+      {for (final b in _filterBasics) b.id: b.name};
+
+  Map<String, String> get _filterBigNames =>
+      {for (final b in _filterBigs) b.id: b.name};
+
+  int _filterCount(AuthorFilterState f) => countMatchingAuthors(
+        authors,
+        f,
+        basicIdOf: (e) => _basicIdOf(MapEntry('', e)),
+        bigIdOf: (e) => _bigIdOf(MapEntry('', e)),
+        gradeOf: (name, e) => _gradeOf(MapEntry(name, e)),
+        typesOf: _typesOf,
+      );
+
+  Future<void> _ensureTypes() async {
+    if (typesLoading) return;
+    if (_typesForSel == sel && authorTypes.isNotEmpty) return;
+    final targets = <String>[];
+    for (final l in libs) {
+      final lib = '${l['id']}';
+      final m = metas[lib];
+      if (m == null) continue;
+      targets.add(lib);
+    }
+    if (targets.isEmpty) return;
+    setState(() => typesLoading = true);
+    final map = await loadAuthorTypes(targets);
+    if (!mounted) return;
+    setState(() {
+      authorTypes = map;
+      _typesForSel = sel;
+      typesLoading = false;
+      _applyOrder();
+    });
+  }
+
+  Future<void> _openFilter() async {
+    await _ensureTypes();
+    if (!mounted) return;
+    final res = await showAuthorFilterSheet(
+      context: context,
+      initial: filter,
+      basics: _filterBasics,
+      bigs: _filterBigs,
+      grades: const ['S', 'A', 'B', 'C', 'D'],
+      count: _filterCount,
+    );
+    if (res == null || !mounted) return;
+    authorFilter.apply(res);
+  }
+
   int _num(dynamic v) =>
       v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
 
@@ -4884,7 +5414,17 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// I7：排序只在数据/排序方式变化时执行一次，结果缓存在 [_ordered]，
   /// build 与滚动回调都只读缓存，避免上千作者反复排序。
   void _applyOrder({bool resetShown = true}) {
-    _ordered = sortAuthorEntries(authors,
+    final base = filter.isActive
+        ? authors
+            .where((e) => filter.matches(
+                  basicId: _basicIdOf(e),
+                  bigId: _bigIdOf(e),
+                  grade: _gradeOf(e),
+                  workTypes: _typesOf(e.key),
+                ))
+            .toList()
+        : authors;
+    _ordered = sortAuthorEntries(base,
         metric: _metric, works: (e) => _num(e.value['n']), name: (e) => e.key);
     if (resetShown) {
       _shown = initialGridCount(_ordered.length);
@@ -4959,6 +5499,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       }
       return id;
     }
+
     final order = <String>[
       ...?meta?.order,
       ...libs.map((e) => '${e['id']}'),
@@ -5035,7 +5576,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
               drops: _num(_s(e.key)['dr']),
               works: _num(e.value['n']),
             ),
-            names: {for (final id in {...ids, ...order}) id: libLabel(id)},
+            names: {
+              for (final id in {...ids, ...order}) id: libLabel(id)
+            },
           ),
         ),
       ]),
@@ -5140,6 +5683,18 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                       ],
                     ),
                   ),
+                  // J10/J11：筛选工具入口；状态与其他页面共享
+                  AuthorFilterBar(
+                    filter: filter,
+                    loading: typesLoading,
+                    onOpen: _openFilter,
+                    onClear: authorFilter.clearAll,
+                    summary: filter.isActive
+                        ? filter.summary(
+                            basicNames: _filterLibNames,
+                            bigNames: _filterBigNames)
+                        : null,
+                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 0, 8, 6),
                     child: Row(children: [
@@ -5148,7 +5703,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(
-                              '${authors.length} 位作者 · ${_selLabel()} · 播放/访问/水滴为本机统计',
+                              '${_ordered.length}${filter.isActive ? '/${authors.length}' : ''} 位作者 · ${_selLabel()} · 播放/访问/水滴为本机统计',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.grey))),
                     ]),
@@ -5262,10 +5817,14 @@ class PlayerPage extends StatefulWidget {
 /// 切条时交换槽位，预缓冲好的媒体无需重新打开即可起播。
 class _PlaybackSlot {
   final String tag;
+  final int sid;
+  /// 每次换媒体/取消预加载时递增，迟到的异步任务据此放弃。
+  int epoch = 0;
   late final Player player;
   late final VideoController vc;
 
-  _PlaybackSlot(this.tag, {DecodeMode mode = DecodeMode.hardware}) {
+  _PlaybackSlot(this.tag,
+      {this.sid = 0, DecodeMode mode = DecodeMode.hardware}) {
     player = Player(
       configuration: const PlayerConfiguration(
         title: 'Dizi',
@@ -5284,25 +5843,28 @@ class _PlayerPageState extends State<PlayerPage>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late final PageController pc = PageController(initialPage: widget.start);
   // F34：解码失败时可整体切换到软件解码，槽位因此不是 final
-  _PlaybackSlot _slotA = _PlaybackSlot('a');
-  _PlaybackSlot _slotB = _PlaybackSlot('b');
+  // M6：播放器槽位池。A 为当前播放器，其余槽位用于按滑动方向预加载，
+  // 命中缓存时直接切换为活动槽位，避免切条重新打开媒体。
+  late final List<_PlaybackSlot> _slots = <_PlaybackSlot>[_PlaybackSlot('a')];
+  int _slotActive = 0;
+  int _slotSeq = 1;
   DecodeMode _decodeMode = DecodeMode.hardware;
   bool _softwareDecodeRetried = false;
   // 槽位重建后强制重建 Video，避免沿用旧控制器的纹理
   int _videoGen = 0;
-  bool _slotAActive = true;
-  _PlaybackSlot get _active => _slotAActive ? _slotA : _slotB;
-  _PlaybackSlot get _idle => _slotAActive ? _slotB : _slotA;
+  _PlaybackSlot get _active => _slots[_slotActive];
   // 对播放页其余代码保持原有 player / vc 接口，内部指向当前活动槽位
   Player get player => _active.player;
   VideoController get vc => _active.vc;
-  // G18：下一条预缓冲状态
+  // M6：预加载账本 + 运行状态
+  final PreloadCache _preloadCache =
+      PreloadCache(maxEntries: preloadMaxPerSide * 2);
+  final Map<int, String> _preloadBusy = <int, String>{};
   Timer? _preloadTimer;
-  int? _preloadIndex;
-  String? _preloadKey;
-  bool _preloadReady = false;
-  bool _preloadFailed = false;
   int _preloadGen = 0;
+  bool _preloadRunning = false;
+  // 最近一次滑动/切条方向：1 向下，-1 向上，0 未知
+  int _preloadDir = 0;
   final List<StreamSubscription> _playerSubs = <StreamSubscription>[];
   final FocusNode focus = FocusNode();
   int cur = 0;
@@ -5355,6 +5917,10 @@ class _PlayerPageState extends State<PlayerPage>
   bool get _mobileStageTap => Platform.isAndroid || Platform.isIOS;
   bool ui = true;
   bool fs = false;
+  // M5：非全屏上下拖拽切条期间，功能区整体淡化（松手恢复）。
+  bool _pageSwiping = false;
+  // M2：是否由播放页主动锁定过屏幕方向（退出时需恢复系统默认）。
+  bool _orientationForced = false;
   bool dragging = false;
   // H13：简介在任务栏内展开（不再弹独立窗口）
   bool captionOpen = false;
@@ -5678,8 +6244,7 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   // J5：合集按章节记录观看位置，避免章节之间互相覆盖。
-  String _watchIdFor(dynamic w) =>
-      workWatchKeyFor(w, _chapter);
+  String _watchIdFor(dynamic w) => workWatchKeyFor(w, _chapter);
 
   /// G10：把当前视频的播放位置写入本地记录（强制写，用于切条/退出/切后台）。
   void _saveWatchProgress({bool force = false}) {
@@ -5754,21 +6319,23 @@ class _PlayerPageState extends State<PlayerPage>
         tokenAlive: mounted,
       );
 
-  /// F34：重建两个播放器槽位为软件解码，并重开当前作品。
+  /// F34：重建播放器槽位为软件解码，并重开当前作品。
   /// 只在硬件解码报解码错误时触发一次，坏文件不会反复重建播放器。
   Future<void> _retryWithSoftwareDecode() async {
     if (_softwareDecodeRetried || _decodeMode == DecodeMode.software) return;
     _softwareDecodeRetried = true;
     _decodeMode = DecodeMode.software;
-    final old = <_PlaybackSlot>[_slotA, _slotB];
+    final old = List<_PlaybackSlot>.from(_slots);
     _cancelPreload();
     for (final s in _playerSubs) {
       s.cancel();
     }
     _playerSubs.clear();
-    _slotA = _PlaybackSlot('a', mode: _decodeMode);
-    _slotB = _PlaybackSlot('b', mode: _decodeMode);
-    _slotAActive = true;
+    _slots
+      ..clear()
+      ..add(_PlaybackSlot('a', mode: _decodeMode));
+    _slotSeq = 1;
+    _slotActive = 0;
     _videoGen++;
     _bindPlayer();
     for (final s in old) {
@@ -5800,76 +6367,158 @@ class _PlayerPageState extends State<PlayerPage>
     open(cur);
   }
 
-  /// G18：作废当前预缓冲（例如用户跳到别的作品）。默认顺手停掉空闲槽位，
-  /// 避免它在后台继续占带宽。
-  void _cancelPreload({bool stopIdle = true}) {
+  /// M6：作废正在进行的预加载计划（保留已就绪缓存）。
+  void _invalidatePreload() {
     _preloadTimer?.cancel();
     _preloadTimer = null;
     _preloadGen++;
-    _preloadReady = false;
-    _preloadFailed = false;
-    _preloadIndex = null;
-    _preloadKey = null;
-    if (stopIdle) {
+  }
+
+  /// 清空预加载缓存并停掉所有非活动槽位（关闭连播/单条循环等场景）。
+  void _cancelPreload({bool stopIdle = true}) {
+    _invalidatePreload();
+    if (!stopIdle) return;
+    for (final s in _slots) {
+      if (s.sid == _active.sid) continue;
+      _preloadCache.removeSlot(s.sid);
       try {
-        _idle.player.stop();
+        s.player.stop();
       } catch (_) {}
     }
   }
 
-  /// G18：当前条起播后，延迟一点在空闲槽位静音打开下一条。
-  void _schedulePreload() {
-    _preloadTimer?.cancel();
-    _preloadTimer = null;
-    final next = cur + 1;
-    if (next >= widget.works.length) return;
-    final nw = _workAt(next);
-    final path = preloadMediaPath(nw);
-    if (!shouldPreloadNext(
-        autoplay: autoplay,
-        loopOne: loopOne,
-        index: next,
-        count: widget.works.length,
-        hasMedia: path != null)) {
-      return;
+  _PlaybackSlot? _slotBySid(int sid) {
+    for (final s in _slots) {
+      if (s.sid == sid) return s;
     }
-    _preloadTimer = Timer(const Duration(milliseconds: 800), () {
-      _startPreload(next, path!);
+    return null;
+  }
+
+  /// 命中缓存的槽位：键与序号都必须一致。
+  _PlaybackSlot? _cachedSlotFor(String key, int index) {
+    for (final s in _slots) {
+      if (s.sid == _active.sid) continue;
+      final e = _preloadCache.entryOfSlot(s.sid);
+      if (e != null && e.key == key && e.index == index) return s;
+    }
+    return null;
+  }
+
+  /// M6：当前条起播后，按滑动方向预载前后各 N 条。
+  void _schedulePreload() {
+    _invalidatePreload();
+    if (AppSettings.preloadPerSide <= 0) return;
+    if (widget.works.length <= 1) return;
+    final gen = _preloadGen;
+    _preloadTimer = Timer(const Duration(milliseconds: 600), () {
+      if (gen == _preloadGen) _runPreloads();
     });
   }
 
-  Future<void> _startPreload(int idx, String path) async {
-    if (!mounted || idx != cur + 1 || !autoplay || loopOne) return;
-    final gen = ++_preloadGen;
-    final nw = _workAt(idx);
-    final nlib = _libFor(nw);
-    final key = preloadKeyFor(nw, nlib);
-    final slot = _idle;
-    _preloadIndex = idx;
-    _preloadKey = key;
-    _preloadReady = false;
-    _preloadFailed = false;
-    StreamSubscription? err;
-    err = slot.player.stream.error.listen((_) {
-      if (gen == _preloadGen) _preloadFailed = true;
-    });
+  int get _preloadByteLimit => AppSettings.preloadMemoryMb * 1024 * 1024;
+
+  /// 为预加载挑一个槽位：优先淘汰最远的缓存条目并复用其槽位，
+  /// 否则在预算内新建，最后复用空闲槽位。
+  _PlaybackSlot? _slotForPreload() {
+    final victim = _preloadCache.evictionSlot(
+      current: cur,
+      direction: _preloadDir,
+      protectedSlots: <int>{_active.sid},
+      protectedKeys: _preloadBusy.values.toSet(),
+    );
+    if (victim != null) {
+      final slot = _slotBySid(victim);
+      _preloadCache.removeSlot(victim);
+      if (slot != null) return slot;
+    }
+    final maxSlots = preloadSlotBudget(AppSettings.preloadMemoryMb);
+    if (_slots.length < maxSlots &&
+        _preloadCache.canFit(preloadEntryBytes, byteLimit: _preloadByteLimit)) {
+      final sid = _slotSeq++;
+      final s = _PlaybackSlot('s$sid', sid: sid, mode: _decodeMode);
+      _slots.add(s);
+      return s;
+    }
+    // 预算已满但也没有可淘汰条目：复用空闲的非活动槽位。
+    for (final s in _slots) {
+      if (s.sid == _active.sid) continue;
+      if (_preloadBusy.containsKey(s.sid)) continue;
+      _preloadCache.removeSlot(s.sid);
+      return s;
+    }
+    return null;
+  }
+
+  /// 在槽位中静音打开目标媒体，等到解封装/首帧就绪后登记缓存。
+  Future<bool> _preloadInto(
+      _PlaybackSlot slot, int idx, String key, int gen, String path) async {
+    final lib = _libFor(_workAt(idx));
+    _preloadBusy[slot.sid] = key;
+    final epoch = ++slot.epoch;
     try {
       await slot.player.stop();
-      // 预缓冲槽位保持静音、暂停；切条时再恢复音量并 play
       await slot.player.setVolume(0);
       await slot.player.open(
-        Media(cfg.mediaUrl(path, lib: nlib), httpHeaders: cfg.headersFor(nlib)),
+        Media(cfg.mediaUrl(path, lib: lib), httpHeaders: cfg.headersFor(lib)),
         play: false,
       );
-      if (gen != _preloadGen) return;
-      _preloadReady = !_preloadFailed;
+      var ready = false;
+      for (var i = 0; i < preloadReadyAttempts; i++) {
+        if (!mounted || gen != _preloadGen || slot.epoch != epoch) return false;
+        var d = Duration.zero;
+        try {
+          d = slot.player.state.duration;
+        } catch (_) {}
+        if (d.inMilliseconds > 0) {
+          ready = true;
+          break;
+        }
+        await Future<void>.delayed(preloadReadyInterval);
+      }
+      if (!ready) return false;
+      // 再给解码器一点时间铺好首帧，命中时直接出画面。
+      await Future<void>.delayed(preloadFirstFrameDelay);
+      if (!mounted || gen != _preloadGen || slot.epoch != epoch) return false;
+      _preloadCache.put(PreloadEntry(slot: slot.sid, index: idx, key: key));
+      return true;
     } catch (_) {
-      if (gen == _preloadGen) {
-        _preloadReady = false;
-        _preloadFailed = true;
+      try {
+        await slot.player.stop();
+      } catch (_) {}
+      return false;
+    } finally {
+      _preloadBusy.remove(slot.sid);
+    }
+  }
+
+  Future<void> _runPreloads() async {
+    if (!mounted || _preloadRunning) return;
+    if (AppSettings.preloadPerSide <= 0) return;
+    _preloadRunning = true;
+    final gen = ++_preloadGen;
+    try {
+      final targets = preloadCandidates(
+        index: cur,
+        count: widget.works.length,
+        perSide: AppSettings.preloadPerSide,
+        direction: _preloadDir,
+      );
+      for (final idx in targets) {
+        if (!mounted || gen != _preloadGen) return;
+        if (idx == cur || idx < 0 || idx >= widget.works.length) continue;
+        final w = _workAt(idx);
+        if (!workPlayable(w)) continue;
+        final path = preloadMediaPath(w);
+        if (path == null) continue;
+        final key = preloadKeyFor(w, _libFor(w));
+        if (_preloadCache.containsKey(key)) continue;
+        if (_preloadBusy.containsValue(key)) continue;
+        final slot = _slotForPreload();
+        if (slot == null) return;
+        await _preloadInto(slot, idx, key, gen, path);
       }
     } finally {
-      await err.cancel();
+      _preloadRunning = false;
     }
   }
 
@@ -5917,15 +6566,12 @@ class _PlayerPageState extends State<PlayerPage>
       return;
     }
     final key = preloadKeyFor(w, wl);
-    // 命中预缓冲：直接使用空闲槽位，跳过 player.open 的等待
-    final canUsePreload = _preloadReady &&
-        !_preloadFailed &&
-        preloadMatches(
-            preloadedIndex: _preloadIndex,
-            preloadedKey: _preloadKey,
-            index: i,
-            key: key);
-    if (!canUsePreload) _cancelPreload();
+    // 记录滑动方向，供后续预加载排序
+    if (i != cur) _preloadDir = i > cur ? 1 : -1;
+    // M6：命中预加载缓存时直接换槽位，跳过 player.open 与转圈。
+    final cachedSlot = _cachedSlotFor(key, i);
+    final canUsePreload = cachedSlot != null;
+    _invalidatePreload();
     final my = ++_openToken;
     _pausedByBackground = false;
     autoTimer?.cancel();
@@ -5943,7 +6589,8 @@ class _PlayerPageState extends State<PlayerPage>
       cur = i;
       _setPicIndex(0);
       captionOpen = false;
-      loading = true;
+      // 缓存命中说明首帧已就绪，直接显示画面，不闪加载圈
+      loading = !canUsePreload;
       paused = false;
       _failure = null;
       _buffering = false;
@@ -5965,18 +6612,14 @@ class _PlayerPageState extends State<PlayerPage>
     });
     if (canUsePreload) {
       final old = _active;
-      final target = _idle;
-      _slotAActive = target == _slotA;
+      final target = cachedSlot;
+      _slotActive = _slots.indexOf(target);
+      _preloadCache.removeSlot(target.sid);
       _bindPlayer();
       try {
         await old.player.stop();
       } catch (_) {}
       _mediaToken = my;
-      _preloadReady = false;
-      _preloadFailed = false;
-      _preloadIndex = null;
-      _preloadKey = null;
-      _preloadGen++;
       setState(() {
         pos = Duration.zero;
         final d0 = player.state.duration;
@@ -5997,8 +6640,7 @@ class _PlayerPageState extends State<PlayerPage>
               cfg.mediaUrl(workMediaPaths(w).first, lib: wl),
               httpHeaders: cfg.headersFor(wl)));
         } else if ((w['au'] ?? '').toString().isNotEmpty) {
-          await player.open(Media(
-              cfg.mediaUrl(w['au'].toString(), lib: wl),
+          await player.open(Media(cfg.mediaUrl(w['au'].toString(), lib: wl),
               httpHeaders: cfg.headersFor(wl)));
         }
         if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
@@ -6110,8 +6752,7 @@ class _PlayerPageState extends State<PlayerPage>
           !paused &&
           w['t'] == 'v' &&
           dur.inMilliseconds == 0) {
-        player.open(Media(
-            cfg.mediaUrl(workMediaPaths(w).first, lib: wl),
+        player.open(Media(cfg.mediaUrl(workMediaPaths(w).first, lib: wl),
             httpHeaders: cfg.headersFor(wl)));
         player.play();
         _mediaToken = my;
@@ -6378,6 +7019,73 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  // M9：作者页跟手拖拽。拖动开始时透明路由即入栈（进度 0），位移由手指驱动。
+  AuthorDragController? _authorDrag;
+  double _authorDragDx = 0;
+  bool _authorDragResume = false;
+  bool _authorDragClosing = false;
+
+  void _authorDragStart() {
+    if (_authorDrag != null) return;
+    final name = '${_workAt(cur)['a'] ?? ''}';
+    if (name.isEmpty) return;
+    _authorDragDx = 0;
+    _authorDragClosing = false;
+    _authorDragResume = !paused;
+    try {
+      player.pause();
+    } catch (_) {}
+    final c = AuthorDragController(vsync: this);
+    final route = AuthorDragRoute(
+      drag: c,
+      builder: (_) => AuthorPage(name: name, libs: [_curLib]),
+    );
+    _authorDrag = c;
+    Navigator.of(context).push(route).whenComplete(() {
+      final ac = _authorDrag;
+      _authorDrag = null;
+      ac?.dispose();
+      if (_authorDragResume && mounted && !fs) {
+        try {
+          player.play();
+        } catch (_) {}
+      }
+    });
+  }
+
+  void _authorDragUpdate(double dx, double width) {
+    final c = _authorDrag;
+    if (c == null || _authorDragClosing) return;
+    _authorDragDx += dx;
+    c.progress = AuthorDrag.progress(dx: _authorDragDx, width: width);
+  }
+
+  void _authorDragEnd(double velocity) {
+    final c = _authorDrag;
+    if (c == null || _authorDragClosing) return;
+    if (AuthorDrag.completes(progress: c.progress, velocity: velocity)) {
+      c.settleTo(1, opening: true);
+    } else {
+      _authorDragCancel();
+    }
+  }
+
+  void _authorDragCancel() {
+    final c = _authorDrag;
+    if (c == null || _authorDragClosing) return;
+    _authorDragClosing = true;
+    c.settleTo(0, opening: false).then((_) {
+      if (!mounted) return;
+      final nav = Navigator.of(context);
+      final route = ModalRoute.of(context);
+      if (nav.canPop()) {
+        nav.pop();
+      } else if (route != null) {
+        nav.removeRoute(route);
+      }
+    });
+  }
+
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
     final name = '${_workAt(cur)['a'] ?? ''}';
@@ -6393,6 +7101,17 @@ class _PlayerPageState extends State<PlayerPage>
         player.play();
       } catch (_) {}
     }
+  }
+
+  // M2：任务栏横竖屏切换（仅移动端）。以当前实际方向为准反转到另一侧，
+  // 旋转后 MediaQuery 会更新，按钮图标随之变化。
+  Future<void> toggleOrientation() async {
+    final target = toggledMode(screenModeOf(MediaQuery.sizeOf(context)));
+    _orientationForced = true;
+    try {
+      await SystemChrome.setPreferredOrientations(orientationsFor(target));
+    } catch (_) {}
+    if (mounted) showUi();
   }
 
   void togglePause() {
@@ -6712,17 +7431,24 @@ class _PlayerPageState extends State<PlayerPage>
     hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
       hideTimer = null;
       // M4：任何时刻都已退出全屏就不再隐藏；拖动/悬停则重新计时。
+      // L15：全屏下鼠标静止也隐藏；仅拖动进度条时保持显示（不再因悬停而不隐藏）
       if (!UiAutoHidePolicy.shouldHide(
         fullscreen: fs,
         mounted: mounted,
         dragging: dragging,
-        barHover: barHover,
+        barHover: false,
       )) {
         if (mounted && fs) showUi();
         return;
       }
       setState(() => ui = false);
     });
+  }
+
+  /// M5：只在状态真正变化时重建，避免滚动通知每帧触发 setState。
+  void _setPageSwiping(bool value) {
+    if (!mounted || _pageSwiping == value) return;
+    setState(() => _pageSwiping = value);
   }
 
   void onWheel(PointerSignalEvent e) {
@@ -6870,6 +7596,15 @@ class _PlayerPageState extends State<PlayerPage>
     _swipeHintTimer?.cancel();
     _preloadTimer?.cancel();
     _preloadGen++;
+    // M9：播放页退出时清掉未完成的作者页拖拽控制器
+    _authorDrag?.dispose();
+    _authorDrag = null;
+    // M2：曾主动锁定方向时恢复系统默认（全部方向），避免影响后续页面。
+    if (_orientationForced) {
+      try {
+        SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+      } catch (_) {}
+    }
     // 退出播放页时确保恢复系统 UI 与 Windows 窗口，避免全屏残留
     if (fs) {
       try {
@@ -6888,8 +7623,10 @@ class _PlayerPageState extends State<PlayerPage>
       s.cancel();
     }
     _playerSubs.clear();
-    _slotA.player.dispose();
-    _slotB.player.dispose();
+    for (final s in _slots) {
+      s.player.dispose();
+    }
+    _preloadCache.clear();
     pc.dispose();
     focus.dispose();
     super.dispose();
@@ -7245,15 +7982,13 @@ class _PlayerPageState extends State<PlayerPage>
                         selected
                             ? Icons.play_circle_fill
                             : Icons.play_circle_outline,
-                        color:
-                            selected ? cs.primary : cs.onSurfaceVariant),
+                        color: selected ? cs.primary : cs.onSurfaceVariant),
                     title: Text(chapterLabel(chs[i], i),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             color: selected ? cs.primary : null,
-                            fontWeight:
-                                selected ? FontWeight.w600 : null)),
+                            fontWeight: selected ? FontWeight.w600 : null)),
                     subtitle: dur.isEmpty ? null : Text(dur),
                     onTap: () {
                       Navigator.of(ctx).pop();
@@ -7268,6 +8003,7 @@ class _PlayerPageState extends State<PlayerPage>
       },
     );
   }
+
   String fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -7344,6 +8080,16 @@ class _PlayerPageState extends State<PlayerPage>
   Widget build(BuildContext context) {
     final w = _workAt(cur);
     final broken = !workPlayable(w);
+    // M3：任务栏平台策略——桌面端无横竖屏按钮，播放/暂停常驻。
+    final taskbar =
+        taskbarPolicyFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
+    // M5：非全屏拖动切条时功能区整体淡化，松手恢复；全屏沿用隐藏逻辑。
+    final chromeOpacity = ChromeFade.opacity(
+        uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
+    final chromeMs = ChromeFade.durationMs(swiping: _pageSwiping);
+    // 圆点历史上不受 ui 控制（清屏时仍显示），M5 只叠加滑动淡化，避免改变全屏行为。
+    final dotsOpacity = ChromeFade.opacity(
+        uiVisible: true, fullscreen: fs, swiping: _pageSwiping);
     final isV = w['t'] == 'v';
     final pics = isV ? <String>[] : workMediaPaths(w);
     final idx = pics.isEmpty ? 0 : img.clamp(0, pics.length - 1);
@@ -7424,124 +8170,145 @@ class _PlayerPageState extends State<PlayerPage>
               if (d > 1.5) showUi();
             },
             child: Stack(children: [
-              PageView.builder(
-                controller: pc,
-                // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
-                // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
-                // G14：图片缩放/捏合期间也禁止翻页，避免缩放时误切作品。
-                physics: (_picZoom.isZoomed ||
-                        _pinching ||
-                        Platform.isWindows ||
-                        Platform.isLinux ||
-                        Platform.isMacOS)
-                    ? const NeverScrollableScrollPhysics()
-                    : const DiziPageScrollPhysics(
-                        parent: ClampingScrollPhysics()),
-                // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
-                dragStartBehavior: DragStartBehavior.down,
-                scrollDirection: Axis.vertical,
-                itemCount: widget.works.length,
-                onPageChanged: open,
-                itemBuilder: (_, i) {
-                  final it = _workAt(i);
-                  if (!workPlayable(it)) return _brokenWorkView(it);
-                  if (i != cur) {
-                    return (it['th'] ?? '').toString().isEmpty
-                        ? Container(color: Colors.black)
-                        : CachedNetworkImage(
-                            imageUrl: cfg.mediaUrl(it['th'].toString(),
-                                    lib: _libFor(it)),
-                            httpHeaders: cfg.headersFor(_libFor(it)),
-                            fit: BoxFit.contain);
+              // M5：捕获垂直翻页（同一条视频列表）的拖拽生命周期，
+              // 只在「真实拖拽开始 → 滚动结束」之间淡化功能区。
+              NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (n.depth != 0) return false;
+                  if (n is ScrollStartNotification && n.dragDetails != null) {
+                    _setPageSwiping(true);
+                  } else if (n is ScrollEndNotification) {
+                    _setPageSwiping(false);
                   }
-                  if (it['t'] == 'v') {
+                  return false;
+                },
+                child: PageView.builder(
+                  controller: pc,
+                  // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
+                  // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
+                  // G14：图片缩放/捏合期间也禁止翻页，避免缩放时误切作品。
+                  physics: (_picZoom.isZoomed ||
+                          _pinching ||
+                          Platform.isWindows ||
+                          Platform.isLinux ||
+                          Platform.isMacOS)
+                      ? const NeverScrollableScrollPhysics()
+                      : const DiziPageScrollPhysics(
+                          parent: ClampingScrollPhysics()),
+                  // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
+                  dragStartBehavior: DragStartBehavior.down,
+                  scrollDirection: Axis.vertical,
+                  itemCount: widget.works.length,
+                  onPageChanged: open,
+                  itemBuilder: (_, i) {
+                    final it = _workAt(i);
+                    if (!workPlayable(it)) return _brokenWorkView(it);
+                    if (i != cur) {
+                      return (it['th'] ?? '').toString().isEmpty
+                          ? Container(color: Colors.black)
+                          : CachedNetworkImage(
+                              imageUrl: cfg.mediaUrl(it['th'].toString(),
+                                  lib: _libFor(it)),
+                              httpHeaders: cfg.headersFor(_libFor(it)),
+                              fit: BoxFit.contain);
+                    }
+                    if (it['t'] == 'v') {
+                      return GestureDetector(
+                        onTapUp: (d) => onStageTap(d.localPosition),
+                        // M9：抖音式跟手拖拽——向左拖作者页随手指从右侧滑入，
+                        // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
+                        onHorizontalDragStart: (_) => _authorDragStart(),
+                        onHorizontalDragUpdate: (d) =>
+                            _authorDragUpdate(d.delta.dx, MediaQuery.sizeOf(context).width),
+                        onHorizontalDragEnd: (d) =>
+                            _authorDragEnd(d.primaryVelocity ?? 0),
+                        onHorizontalDragCancel: _authorDragCancel,
+                        onLongPressStart: (_) => player.setRate(2.0),
+                        onLongPressEnd: (_) => player.setRate(speed),
+                        child: Stack(fit: StackFit.expand, children: [
+                          if ((it['th'] ?? '').toString().isNotEmpty)
+                            CachedNetworkImage(
+                                imageUrl: cfg.mediaUrl(it['th'].toString(),
+                                    lib: _libFor(it)),
+                                httpHeaders: cfg.headersFor(_libFor(it)),
+                                fit: BoxFit.contain),
+                          videoView(),
+                          if (loading)
+                            const Center(
+                                child: CircularProgressIndicator(
+                                    color: Colors.white38)),
+                        ]),
+                      );
+                    }
                     return GestureDetector(
                       onTapUp: (d) => onStageTap(d.localPosition),
+                      // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
+                      // G14：放大查看时禁用长按菜单，避免平移误触
+                      onLongPress: _picZoom.isZoomed ? null : _showWorkMenu,
                       onHorizontalDragEnd: (d) {
-                        // 右划快速进入作者主页
+                        // G14：放大后横向拖动是平移图片，不换图
+                        if (_picZoom.isZoomed) return;
+                        stopAuto();
                         final v = d.primaryVelocity ?? 0;
-                        if (v > 280) openAuthor();
+                        setState(() {
+                          if (v < -100) {
+                            _setPicIndex((idx + 1).clamp(0, pics.length - 1));
+                          } else if (v > 100) {
+                            _setPicIndex((idx - 1).clamp(0, pics.length - 1));
+                          }
+                        });
                       },
-                      onLongPressStart: (_) => player.setRate(2.0),
-                      onLongPressEnd: (_) => player.setRate(speed),
                       child: Stack(fit: StackFit.expand, children: [
-                        if ((it['th'] ?? '').toString().isNotEmpty)
-                          CachedNetworkImage(
-                              imageUrl: cfg.mediaUrl(it['th'].toString(),
-                                      lib: _libFor(it)),
-                              httpHeaders: cfg.headersFor(_libFor(it)),
-                              fit: BoxFit.contain),
-                        videoView(),
-                        if (loading)
-                          const Center(
-                              child: CircularProgressIndicator(
-                                  color: Colors.white38)),
-                      ]),
-                    );
-                  }
-                  return GestureDetector(
-                    onTapUp: (d) => onStageTap(d.localPosition),
-                    // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
-                    // G14：放大查看时禁用长按菜单，避免平移误触
-                    onLongPress: _picZoom.isZoomed ? null : _showWorkMenu,
-                    onHorizontalDragEnd: (d) {
-                      // G14：放大后横向拖动是平移图片，不换图
-                      if (_picZoom.isZoomed) return;
-                      stopAuto();
-                      final v = d.primaryVelocity ?? 0;
-                      setState(() {
-                        if (v < -100) {
-                          _setPicIndex((idx + 1).clamp(0, pics.length - 1));
-                        } else if (v > 100) {
-                          _setPicIndex((idx - 1).clamp(0, pics.length - 1));
-                        }
-                      });
-                    },
-                    child: Stack(fit: StackFit.expand, children: [
-                      // G14：双指缩放 + 放大后单指拖动查看；单击恢复原大小
-                      LayoutBuilder(builder: (_, cons) {
-                        _stageSize = cons.biggest;
-                        return Listener(
-                          behavior: HitTestBehavior.opaque,
-                          onPointerDown: _zoomDown,
-                          onPointerMove: _zoomMove,
-                          onPointerUp: _zoomUp,
-                          onPointerCancel: _zoomUp,
-                          child: ClipRect(
-                            child: Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.diagonal3Values(
-                                  _picZoom.scale, _picZoom.scale, 1)
-                                ..setTranslationRaw(
-                                    _picZoom.offset.dx, _picZoom.offset.dy, 0),
-                              child: picView(pics[idx], lib: _curLib),
+                        // G14：双指缩放 + 放大后单指拖动查看；单击恢复原大小
+                        LayoutBuilder(builder: (_, cons) {
+                          _stageSize = cons.biggest;
+                          return Listener(
+                            behavior: HitTestBehavior.opaque,
+                            onPointerDown: _zoomDown,
+                            onPointerMove: _zoomMove,
+                            onPointerUp: _zoomUp,
+                            onPointerCancel: _zoomUp,
+                            child: ClipRect(
+                              child: Transform(
+                                alignment: Alignment.center,
+                                transform: Matrix4.diagonal3Values(
+                                    _picZoom.scale, _picZoom.scale, 1)
+                                  ..setTranslationRaw(_picZoom.offset.dx,
+                                      _picZoom.offset.dy, 0),
+                                child: picView(pics[idx], lib: _curLib),
+                              ),
+                            ),
+                          );
+                        }),
+                        if (pics.length > 1)
+                          Positioned(
+                            top: pad.top + 2,
+                            right: pad.right + 4,
+                            child: AnimatedOpacity(
+                              opacity: dotsOpacity,
+                              duration: Duration(milliseconds: chromeMs),
+                              curve: Curves.easeOut,
+                              child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: List.generate(
+                                      pics.length,
+                                      (k) => Container(
+                                            width: 4,
+                                            height: 4,
+                                            margin: const EdgeInsets.symmetric(
+                                                horizontal: 1.5),
+                                            decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                color: k == idx
+                                                    ? Colors.white
+                                                    : Colors.white24),
+                                          ))),
                             ),
                           ),
-                        );
-                      }),
-                      if (pics.length > 1)
-                        Positioned(
-                          top: pad.top + 2,
-                          right: pad.right + 4,
-                          child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: List.generate(
-                                  pics.length,
-                                  (k) => Container(
-                                        width: 4,
-                                        height: 4,
-                                        margin: const EdgeInsets.symmetric(
-                                            horizontal: 1.5),
-                                        decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: k == idx
-                                                ? Colors.white
-                                                : Colors.white24),
-                                      ))),
-                        ),
-                    ]),
-                  );
-                },
+                      ]),
+                    );
+                  },
+                ),
               ),
               // G12：弱网缓冲提示（延迟出现，避免正常起播闪烁）
               if (_slowBuffer && _failure == null && !loading)
@@ -7624,8 +8391,9 @@ class _PlayerPageState extends State<PlayerPage>
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
-                    opacity: ui ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
+                    opacity: chromeOpacity,
+                    duration: Duration(milliseconds: chromeMs),
+                    curve: Curves.easeOut,
                     child: IconButton(
                         onPressed: () => Navigator.of(context).maybePop(),
                         icon:
@@ -7649,8 +8417,9 @@ class _PlayerPageState extends State<PlayerPage>
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
-                    opacity: ui ? 1 : 0,
-                    duration: const Duration(milliseconds: 200),
+                    opacity: chromeOpacity,
+                    duration: Duration(milliseconds: chromeMs),
+                    curve: Curves.easeOut,
                     child: GestureDetector(
                       onTap: openAuthor,
                       // G11：长按信息区弹出播放菜单（视频区长按仍是 2 倍速）
@@ -7660,7 +8429,7 @@ class _PlayerPageState extends State<PlayerPage>
                           ClipOval(
                               child: CachedNetworkImage(
                                   imageUrl: cfg.mediaUrl(w['av'].toString(),
-                                          lib: _curLib),
+                                      lib: _curLib),
                                   httpHeaders: cfg.headersFor(_curLib),
                                   width: 38,
                                   height: 38,
@@ -7706,12 +8475,9 @@ class _PlayerPageState extends State<PlayerPage>
                                     opacity: 0.7,
                                     child: LibBadges(
                                       libIds: [
-                                        _meta!
-                                                .idFor('${w['av'] ?? ''}')
-                                                .isEmpty
+                                        _meta!.idFor('${w['av'] ?? ''}').isEmpty
                                             ? _curLib
-                                            : _meta!
-                                                .idFor('${w['av'] ?? ''}')
+                                            : _meta!.idFor('${w['av'] ?? ''}')
                                       ],
                                       order: _meta!.order,
                                       names: {
@@ -7724,8 +8490,7 @@ class _PlayerPageState extends State<PlayerPage>
                                           '${w['a'] ?? ''}',
                                           widget.works
                                               .where((e) =>
-                                                  e is Map &&
-                                                  e['a'] == w['a'])
+                                                  e is Map && e['a'] == w['a'])
                                               .length),
                                     ),
                                   ),
@@ -7899,8 +8664,9 @@ class _PlayerPageState extends State<PlayerPage>
                   child: IgnorePointer(
                     ignoring: !ui,
                     child: AnimatedOpacity(
-                      opacity: ui ? 1 : 0,
-                      duration: const Duration(milliseconds: 200),
+                      opacity: chromeOpacity,
+                      duration: Duration(milliseconds: chromeMs),
+                      curve: Curves.easeOut,
                       child: Container(
                         decoration: const BoxDecoration(
                             gradient: LinearGradient(
@@ -8098,136 +8864,176 @@ class _PlayerPageState extends State<PlayerPage>
                                     fontSize: 10, color: Colors.white54)),
                           ]),
                           Row(children: [
-                            // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
-                            // I1：移动端隐藏音量按钮，音量由系统音量键控制
-                            if (_volumeUi)
-                              GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: toggleMute,
-                                onLongPressStart: _volLongPressStart,
-                                onLongPressMoveUpdate: _volLongPressMove,
-                                onLongPressEnd: (_) => _volDragEnd(),
-                                onHorizontalDragStart: _volDragStart,
-                                onHorizontalDragUpdate: _volDragUpdate,
-                                onHorizontalDragEnd: _volDragEnd,
-                                child: Tooltip(
-                                  message: '点击静音 / 长按拖动调音量',
-                                  child: SizedBox(
-                                    width: 48,
-                                    height: 48,
-                                    child: Icon(
-                                        muted || volume == 0
-                                            ? Icons.volume_off
-                                            : (volume < 50
-                                                ? Icons.volume_down
-                                                : Icons.volume_up),
-                                        color: Colors.white70),
-                                  ),
-                                ),
-                              ),
-                            // J5：视频合集章节选择（按「选集」图标 + 当前集数）
-                            if (workChapterCount(w) > 1)
-                              GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: _showChapters,
-                                child: Tooltip(
-                                  message: '选集',
-                                  child: SizedBox(
-                                    width: 46,
-                                    height: 48,
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(Icons.video_library_outlined,
-                                            size: 19, color: Colors.white70),
-                                        const SizedBox(height: 1),
-                                        Text(
-                                            '${_chapter + 1}/${workChapterCount(w)}',
-                                            style: const TextStyle(
-                                                fontSize: 9,
-                                                height: 1.0,
-                                                color: Colors.white54)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            IconButton(
-                                onPressed: cycleSpeed,
-                                icon: Text('${speed}x',
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.white70))),
-                            IconButton(
-                                onPressed: toggleAutoplay,
-                                tooltip: '自动连播',
-                                icon: Icon(Icons.skip_next,
-                                    color: autoplay
-                                        ? Colors.white70
-                                        : Colors.white24)),
-                            IconButton(
-                                onPressed: toggleLoop,
-                                tooltip: '单条循环',
-                                icon: Icon(Icons.repeat_one,
-                                    color: loopOne
-                                        ? Colors.white70
-                                        : Colors.white24)),
-                            // H15：水滴图标下方常驻当前水滴数；默认灰、点击后变蓝并 +1 弹跳
-                            Tooltip(
-                              message:
-                                  '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: (dropBusy ||
-                                        dropDayLeft <= 0 ||
-                                        dropWeekLeft <= 0)
-                                    ? null
-                                    : _sendDrop,
-                                child: SizedBox(
-                                  width: 46,
-                                  height: 48,
-                                  child: ScaleTransition(
-                                    scale: _dropScale,
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        if (dropBusy)
-                                          const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  color: Colors.white54))
-                                        else
-                                          Icon(Icons.water_drop,
-                                              size: 20,
-                                              color:
-                                                  dropGlow && dropDayLeft >= 0
-                                                      ? Colors.lightBlueAccent
-                                                      : (dropDayLeft > 0 &&
-                                                              dropWeekLeft > 0
-                                                          ? Colors.white38
-                                                          : Colors.white24)),
-                                        const SizedBox(height: 1),
-                                        Text('$dropTotal',
-                                            style: TextStyle(
-                                                fontSize: 9,
-                                                height: 1.0,
-                                                fontWeight: FontWeight.w600,
-                                                color: dropGlow
-                                                    ? Colors.lightBlueAccent
-                                                    : (dropDayLeft > 0 &&
-                                                            dropWeekLeft > 0
-                                                        ? Colors.white54
-                                                        : Colors.white24))),
-                                      ],
-                                    ),
-                                  ),
-                                ),
+                            // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
+                            // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
+                            Expanded(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
+                                      // I1：移动端隐藏音量按钮，音量由系统音量键控制
+                                      if (_volumeUi)
+                                        GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: toggleMute,
+                                          onLongPressStart: _volLongPressStart,
+                                          onLongPressMoveUpdate:
+                                              _volLongPressMove,
+                                          onLongPressEnd: (_) => _volDragEnd(),
+                                          onHorizontalDragStart: _volDragStart,
+                                          onHorizontalDragUpdate:
+                                              _volDragUpdate,
+                                          onHorizontalDragEnd: _volDragEnd,
+                                          child: Tooltip(
+                                            message: '点击静音 / 长按拖动调音量',
+                                            child: SizedBox(
+                                              width: 48,
+                                              height: 48,
+                                              child: Icon(
+                                                  muted || volume == 0
+                                                      ? Icons.volume_off
+                                                      : (volume < 50
+                                                          ? Icons.volume_down
+                                                          : Icons.volume_up),
+                                                  color: Colors.white70),
+                                            ),
+                                          ),
+                                        ),
+                                      // J5：视频合集章节选择（按「选集」图标 + 当前集数）
+                                      if (workChapterCount(w) > 1)
+                                        GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: _showChapters,
+                                          child: Tooltip(
+                                            message: '选集',
+                                            child: SizedBox(
+                                              width: 46,
+                                              height: 48,
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  const Icon(
+                                                      Icons
+                                                          .video_library_outlined,
+                                                      size: 19,
+                                                      color: Colors.white70),
+                                                  const SizedBox(height: 1),
+                                                  Text(
+                                                      '${_chapter + 1}/${workChapterCount(w)}',
+                                                      style: const TextStyle(
+                                                          fontSize: 9,
+                                                          height: 1.0,
+                                                          color:
+                                                              Colors.white54)),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      // M2/M3：播放/暂停常驻任务栏，图标随播放器状态同步。
+                                      TaskbarPlayButton(
+                                          paused: paused,
+                                          onPressed: togglePause),
+                                      IconButton(
+                                          onPressed: cycleSpeed,
+                                          icon: Text('${speed}x',
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.white70))),
+                                      IconButton(
+                                          onPressed: toggleAutoplay,
+                                          tooltip: '自动连播',
+                                          icon: Icon(Icons.skip_next,
+                                              color: autoplay
+                                                  ? Colors.white70
+                                                  : Colors.white24)),
+                                      IconButton(
+                                          onPressed: toggleLoop,
+                                          tooltip: '单条循环',
+                                          icon: Icon(Icons.repeat_one,
+                                              color: loopOne
+                                                  ? Colors.white70
+                                                  : Colors.white24)),
+                                      // H15：水滴图标下方常驻当前水滴数；默认灰、点击后变蓝并 +1 弹跳
+                                      Tooltip(
+                                        message:
+                                            '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: (dropBusy ||
+                                                  dropDayLeft <= 0 ||
+                                                  dropWeekLeft <= 0)
+                                              ? null
+                                              : _sendDrop,
+                                          child: SizedBox(
+                                            width: 46,
+                                            height: 48,
+                                            child: ScaleTransition(
+                                              scale: _dropScale,
+                                              child: Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  if (dropBusy)
+                                                    const SizedBox(
+                                                        width: 18,
+                                                        height: 18,
+                                                        child:
+                                                            CircularProgressIndicator(
+                                                                strokeWidth: 2,
+                                                                color: Colors
+                                                                    .white54))
+                                                  else
+                                                    Icon(Icons.water_drop,
+                                                        size: 20,
+                                                        color: dropGlow &&
+                                                                dropDayLeft >= 0
+                                                            ? Colors
+                                                                .lightBlueAccent
+                                                            : (dropDayLeft >
+                                                                        0 &&
+                                                                    dropWeekLeft >
+                                                                        0
+                                                                ? Colors.white38
+                                                                : Colors
+                                                                    .white24)),
+                                                  const SizedBox(height: 1),
+                                                  Text('$dropTotal',
+                                                      style: TextStyle(
+                                                          fontSize: 9,
+                                                          height: 1.0,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                          color: dropGlow
+                                                              ? Colors
+                                                                  .lightBlueAccent
+                                                              : (dropDayLeft >
+                                                                          0 &&
+                                                                      dropWeekLeft >
+                                                                          0
+                                                                  ? Colors
+                                                                      .white54
+                                                                  : Colors
+                                                                      .white24))),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      if (taskbar.showRotate)
+                                        TaskbarRotateButton(
+                                          mode: screenModeOf(
+                                              MediaQuery.sizeOf(context)),
+                                          onPressed: toggleOrientation,
+                                        ),
+                                    ]),
                               ),
                             ),
-                            const Spacer(),
                             IconButton(
                                 onPressed: toggleFs,
                                 icon: Icon(
@@ -8260,11 +9066,27 @@ class _RecommendPageState extends State<RecommendPage> {
   bool loading = true;
   String? err;
   int batch = 0;
+  // J11：推荐页支持作者筛选（与总览/排行/搜索共享状态）
+  LibMeta? meta;
+  Map<String, Set<String>> authorTypes = {};
+  bool typesLoading = false;
+  final Map<String, int> _authorCount = {};
 
   @override
   void initState() {
     super.initState();
+    authorFilter.addListener(_onSharedFilter);
     load(refresh: false);
+  }
+
+  @override
+  void dispose() {
+    authorFilter.removeListener(_onSharedFilter);
+    super.dispose();
+  }
+
+  void _onSharedFilter() {
+    if (mounted) setState(() {});
   }
 
   Future<void> load({required bool refresh}) async {
@@ -8282,8 +9104,16 @@ class _RecommendPageState extends State<RecommendPage> {
       if (!mounted) return;
       setState(() {
         works = (j is Map && j['works'] is List) ? j['works'] as List : [];
+        _authorCount.clear();
+        for (final w in works) {
+          if (w is! Map) continue;
+          final a = '${w['a'] ?? ''}';
+          if (a.isEmpty) continue;
+          _authorCount[a] = (_authorCount[a] ?? 0) + 1;
+        }
         loading = false;
       });
+      _loadMeta();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -8294,8 +9124,92 @@ class _RecommendPageState extends State<RecommendPage> {
     }
   }
 
+  Future<void> _loadMeta() async {
+    typesLoading = true;
+    LibMeta? m;
+    try {
+      m = await LibMeta.load(cfg.lib);
+    } catch (_) {}
+    final types = await loadAuthorTypes([cfg.lib]);
+    if (!mounted) return;
+    setState(() {
+      meta = m;
+      authorTypes = types;
+      typesLoading = false;
+    });
+  }
+
+  List<AuthorLibNode> get _filterBasics {
+    final out = <AuthorLibNode>[];
+    for (final b in meta?.basics ?? const <BasicLibRef>[]) {
+      out.add(AuthorLibNode(
+          id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
+    }
+    return authorLibNodes(out);
+  }
+
+  List<AuthorBigNode> get _filterBigs {
+    final out = <AuthorBigNode>[];
+    for (final b in _filterBasics) {
+      if (b.bigId.isEmpty) continue;
+      out.add(
+          AuthorBigNode(id: b.bigId, name: meta?.bigNames[b.bigId] ?? b.bigId));
+    }
+    final seen = <String>{};
+    out.removeWhere((e) => !seen.add(e.id));
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  Map<String, String> get _filterLibNames =>
+      {for (final b in _filterBasics) b.id: b.name};
+
+  Map<String, String> get _filterBigNames =>
+      {for (final b in _filterBigs) b.id: b.name};
+
+  bool _matches(dynamic raw, AuthorFilterState f) {
+    if (raw is! Map) return false;
+    final w = Map<String, dynamic>.from(raw);
+    final av = '${w['av'] ?? ''}';
+    final a = '${w['a'] ?? ''}';
+    final type = workFilterType(w);
+    final types =
+        authorTypes[a] ?? (type == 'other' ? const <String>{} : <String>{type});
+    return f.matches(
+      basicId: meta?.idFor(av) ?? '',
+      bigId: meta?.bigIdFor(av) ?? '',
+      grade: meta?.gradeFor(a, _authorCount[a] ?? 0) ?? '',
+      workTypes: types,
+    );
+  }
+
+  /// 统一筛选后的可见作品；筛选未激活时原样返回。
+  List get _visibleWorks => applyAuthorFilter(
+        works,
+        authorFilter.value,
+        (w, f) => _matches(w, f),
+      );
+
+  Future<void> _openFilter() async {
+    if (meta == null) {
+      await _loadMeta();
+    }
+    if (!mounted) return;
+    final res = await showAuthorFilterSheet(
+      context: context,
+      initial: authorFilter.value,
+      basics: _filterBasics,
+      bigs: _filterBigs,
+      grades: const ['S', 'A', 'B', 'C', 'D'],
+      count: (f) => works.where((w) => _matches(w, f)).length,
+    );
+    if (res == null || !mounted) return;
+    authorFilter.apply(res);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final visible = _visibleWorks;
     return Scaffold(
       appBar: AppBar(title: const Text('推荐'), actions: [
         IconButton(
@@ -8314,73 +9228,89 @@ class _RecommendPageState extends State<RecommendPage> {
                       onPressed: () => load(refresh: false),
                       child: const Text('重试')),
                 ]))
-              : works.isEmpty
-                  ? const Center(
-                      child: Text('暂无推荐', style: TextStyle(color: Colors.grey)))
-                  : RefreshIndicator(
-                      onRefresh: () => load(refresh: true),
-                      child: GridView.builder(
-                        padding: const EdgeInsets.all(2),
-                        gridDelegate:
-                            const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 180,
-                                childAspectRatio: 3 / 4,
-                                mainAxisSpacing: 2,
-                                crossAxisSpacing: 2),
-                        itemCount: works.length,
-                        itemBuilder: (_, i) {
-                          final w = works[i];
-                          return GestureDetector(
-                            onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) =>
-                                        PlayerPage(works: works, start: i))),
-                            child: Stack(fit: StackFit.expand, children: [
-                              (w['th'] ?? '').toString().isEmpty
+              : Column(children: [
+                  // J11：推荐与总览/排行/搜索共用同一套作者筛选与状态
+                  AuthorFilterBar(
+                    filter: authorFilter.value,
+                    loading: typesLoading,
+                    onOpen: _openFilter,
+                    onClear: authorFilter.clearAll,
+                    summary: authorFilter.value.isActive
+                        ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${visible.length}/${works.length}'
+                        : null,
+                  ),
+                  Expanded(
+                    child: works.isEmpty
+                        ? const Center(
+                            child: Text('暂无推荐',
+                                style: TextStyle(color: Colors.grey)))
+                        : visible.isEmpty
+                            ? const Center(
+                                child: Text('没有符合筛选条件的作品',
+                                    style: TextStyle(color: Colors.grey)))
+                            : RefreshIndicator(
+                                onRefresh: () => load(refresh: true),
+                                child: GridView.builder(
+                                  padding: const EdgeInsets.all(2),
+                                  gridDelegate:
+                                      const SliverGridDelegateWithMaxCrossAxisExtent(
+                                          maxCrossAxisExtent: 180,
+                                          childAspectRatio: 3 / 4,
+                                          mainAxisSpacing: 2,
+                                          crossAxisSpacing: 2),
+                                  itemCount: visible.length,
+                                  itemBuilder: (_, i) {
+                                    final w = visible[i];
+                                    return GestureDetector(
+                                      onTap: () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                              builder: (_) => PlayerPage(
+                                                  works: visible, start: i))),
+                                      child: _tile(w),
+                                    );
+                                  },
+                                ),
+                              ),
+                  ),
+                ]),
+    );
+  }
+
+  Widget _tile(dynamic w) {
+    return Stack(fit: StackFit.expand, children: [
+      (w['th'] ?? '').toString().isEmpty
                                   ? Container(color: Colors.black26)
                                   : CachedNetworkImage(
-                                      imageUrl: cfg.mediaUrl(w['th'].toString()),
+                                      imageUrl:
+                                          cfg.mediaUrl(w['th'].toString()),
                                       httpHeaders: cfg.headers,
                                       fit: BoxFit.cover,
                                       errorWidget: (_, __, ___) =>
                                           Container(color: Colors.black26)),
-                              Positioned(
-                                  left: 4,
-                                  top: 4,
-                                  child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 4, vertical: 2),
-                                      color: Colors.black54,
-                                      child: Text(w['t'] == 'v' ? '视频' : '图文',
-                                          style:
-                                              const TextStyle(fontSize: 10)))),
-                              Positioned(
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  child: Container(
-                                      padding: const EdgeInsets.fromLTRB(
-                                          6, 10, 6, 5),
-                                      decoration: const BoxDecoration(
-                                          gradient: LinearGradient(
-                                              begin: Alignment.topCenter,
-                                              end: Alignment.bottomCenter,
-                                              colors: [
-                                            Colors.transparent,
-                                            Colors.black87
-                                          ])),
-                                      child: Text(
-                                          '@${w['a'] ?? ''} · ${w['d'] ?? ''}',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style:
-                                              const TextStyle(fontSize: 10)))),
-                            ]),
-                          );
-                        },
-                      ),
-                    ),
-    );
+      Positioned(
+          left: 4,
+          top: 4,
+          child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              color: Colors.black54,
+              child: Text(w['t'] == 'v' ? '视频' : '图文',
+                  style: const TextStyle(fontSize: 10)))),
+      Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+              padding: const EdgeInsets.fromLTRB(6, 10, 6, 5),
+              decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Colors.transparent, Colors.black87])),
+              child: Text('@${w['a'] ?? ''} · ${w['d'] ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10)))),
+    ]);
   }
 }
 
@@ -8400,12 +9330,27 @@ class _SearchPageState extends State<SearchPage> {
   bool loading = true;
   String kw = '';
   int _loadToken = 0;
+  // J11：搜索页同样支持作者筛选（与总览/排行/推荐共享同一份状态）
+  Map<String, Set<String>> authorTypes = {};
+  bool typesLoading = false;
+  String _typesForSel = '';
 
   @override
   void initState() {
     super.initState();
+    authorFilter.addListener(_onSharedFilter);
     sel = cfg.lib;
     _init();
+  }
+
+  @override
+  void dispose() {
+    authorFilter.removeListener(_onSharedFilter);
+    super.dispose();
+  }
+
+  void _onSharedFilter() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _init() async {
@@ -8496,13 +9441,105 @@ class _SearchPageState extends State<SearchPage> {
       all = out;
       loading = false;
     });
+    _ensureTypes();
+  }
+
+  // ---- J11：作者筛选（与总览/排行/推荐同一状态与组件） ----
+
+  List<AuthorLibNode> get _filterBasics {
+    final out = <AuthorLibNode>[];
+    for (final m in metas.values) {
+      for (final b in m.basics) {
+        out.add(AuthorLibNode(
+            id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
+      }
+    }
+    return authorLibNodes(out);
+  }
+
+  List<AuthorBigNode> get _filterBigs {
+    final out = <AuthorBigNode>[];
+    final seen = <String>{};
+    for (final b in _filterBasics) {
+      if (b.bigId.isEmpty || !seen.add(b.bigId)) continue;
+      var name = b.bigId;
+      for (final m in metas.values) {
+        final n = m.bigNames[b.bigId];
+        if (n != null && n.isNotEmpty) {
+          name = n;
+          break;
+        }
+      }
+      out.add(AuthorBigNode(id: b.bigId, name: name));
+    }
+    out.sort((a, b) => a.name.compareTo(b.name));
+    return out;
+  }
+
+  Map<String, String> get _filterLibNames =>
+      {for (final b in _filterBasics) b.id: b.name};
+
+  Map<String, String> get _filterBigNames =>
+      {for (final b in _filterBigs) b.id: b.name};
+
+  bool _matchesFilter(Map<String, dynamic> e, AuthorFilterState f) {
+    final w = e['w'];
+    if (w is! Map) return false;
+    final lib = '${e['_lib']}';
+    final meta = metas[lib];
+    final av = '${w['av'] ?? ''}';
+    final author = '${w['a'] ?? ''}';
+    final type = workFilterType(Map<String, dynamic>.from(w));
+    final types = authorTypes[author] ??
+        (type == 'other' ? const <String>{} : <String>{type});
+    return f.matches(
+      basicId: meta?.idFor(av) ?? '',
+      bigId: meta?.bigIdFor(av) ?? '',
+      grade: meta?.gradeFor(author, authorWorkCount['$lib|$author'] ?? 0) ?? '',
+      workTypes: types,
+    );
+  }
+
+  Future<void> _ensureTypes() async {
+    if (typesLoading) return;
+    if (_typesForSel == sel && authorTypes.isNotEmpty) return;
+    final targets = sel == 'all'
+        ? libs.map((e) => '${e['id']}').toList()
+        : [sel.isEmpty ? cfg.lib : sel];
+    if (targets.isEmpty) return;
+    setState(() => typesLoading = true);
+    final map = await loadAuthorTypes(targets);
+    if (!mounted) return;
+    setState(() {
+      authorTypes = map;
+      _typesForSel = sel;
+      typesLoading = false;
+    });
+  }
+
+  Future<void> _openFilter() async {
+    await _ensureTypes();
+    if (!mounted) return;
+    final res = await showAuthorFilterSheet(
+      context: context,
+      initial: authorFilter.value,
+      basics: _filterBasics,
+      bigs: _filterBigs,
+      grades: const ['S', 'A', 'B', 'C', 'D'],
+      count: (f) => all.where((e) => _matchesFilter(e, f)).length,
+    );
+    if (res == null || !mounted) return;
+    authorFilter.apply(res);
   }
 
   @override
   Widget build(BuildContext context) {
+    final base = authorFilter.value.isActive
+        ? all.where((e) => _matchesFilter(e, authorFilter.value)).toList()
+        : all;
     final res = kw.isEmpty
         ? const []
-        : all.where((e) {
+        : base.where((e) {
             final w = e['w'];
             return '${w['ti']}'.contains(kw) || '${w['a']}'.contains(kw);
           }).toList();
@@ -8545,72 +9582,90 @@ class _SearchPageState extends State<SearchPage> {
             onChanged: (v) => setState(() => kw = v.trim()),
           ),
         ),
+        AuthorFilterBar(
+          filter: authorFilter.value,
+          loading: typesLoading,
+          onOpen: _openFilter,
+          onClear: authorFilter.clearAll,
+          summary: authorFilter.value.isActive
+              ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames)} · 命中 ${res.length}/${all.length}'
+              : null,
+        ),
         if (loading) const LinearProgressIndicator(),
         Expanded(
           child: kw.isEmpty
               ? const Center(
                   child: Text('输入关键词，在所选库内搜索',
                       style: TextStyle(color: Colors.grey)))
-              : ListView.builder(
-                  itemCount: res.length,
-                  itemBuilder: (_, i) {
-                    final e = res[i];
-                    final w = e['w'];
-                    return ListTile(
-                      leading: SizedBox(
-                          width: 40,
-                          height: 54,
-                          child: (w['th'] ?? '').toString().isEmpty
-                              ? Container(color: Colors.black26)
-                              : CachedNetworkImage(
-                                  imageUrl: cfg.mediaUrl(w['th'].toString(),
+              : res.isEmpty
+                  ? Center(
+                      child: Text(
+                          authorFilter.value.isActive
+                              ? '没有符合筛选条件的结果'
+                              : '没有找到相关作品',
+                          style: const TextStyle(color: Colors.grey)))
+                  : ListView.builder(
+                      itemCount: res.length,
+                      itemBuilder: (_, i) {
+                        final e = res[i];
+                        final w = e['w'];
+                        return ListTile(
+                          leading: SizedBox(
+                              width: 40,
+                              height: 54,
+                              child: (w['th'] ?? '').toString().isEmpty
+                                  ? Container(color: Colors.black26)
+                                  : CachedNetworkImage(
+                                      imageUrl: cfg.mediaUrl(w['th'].toString(),
                                           lib: '${e['_lib']}'),
-                                  httpHeaders:
-                                      cfg.headersFor('${e['_lib']}'),
-                                  fit: BoxFit.cover)),
-                      title: Text('${w['ti']}',
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: Builder(builder: (_) {
-                        final lib = '${e['_lib']}';
-                        final meta = metas[lib];
-                        final av = '${w['av'] ?? ''}';
-                        final basicId = meta?.idFor(av) ?? '';
-                        final author = '${w['a'] ?? ''}';
-                        return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              LibBadges(
-                                libIds: [basicId.isEmpty ? lib : basicId],
-                                order: <String>[
-                                  ...?meta?.order,
-                                  ...libs.map((e) => '${e['id']}'),
-                                ],
-                                names: {
-                                  ...?meta?.names,
-                                  for (final l in libs)
-                                    '${l['id']}': '${l['name'] ?? l['id']}',
-                                },
-                                grade: meta == null
-                                    ? ''
-                                    : meta.gradeFor(
-                                        author,
-                                        authorWorkCount['$lib|$author'] ?? 0),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                  '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis),
-                            ]);
-                      }),
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => PlayerPage(
-                              works: e['works'],
-                              start: e['i'],
-                              lib: '${e['_lib']}'))),
-                    );
-                  },
-                ),
+                                      httpHeaders:
+                                          cfg.headersFor('${e['_lib']}'),
+                                      fit: BoxFit.cover)),
+                          title: Text('${w['ti']}',
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: Builder(builder: (_) {
+                            final lib = '${e['_lib']}';
+                            final meta = metas[lib];
+                            final av = '${w['av'] ?? ''}';
+                            final basicId = meta?.idFor(av) ?? '';
+                            final author = '${w['a'] ?? ''}';
+                            return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  LibBadges(
+                                    libIds: [basicId.isEmpty ? lib : basicId],
+                                    order: <String>[
+                                      ...?meta?.order,
+                                      ...libs.map((e) => '${e['id']}'),
+                                    ],
+                                    names: {
+                                      ...?meta?.names,
+                                      for (final l in libs)
+                                        '${l['id']}': '${l['name'] ?? l['id']}',
+                                    },
+                                    grade: meta == null
+                                        ? ''
+                                        : meta.gradeFor(
+                                            author,
+                                            authorWorkCount['$lib|$author'] ??
+                                                0),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                      '@${w['a']} · ${e['col']}${sel == 'all' ? ' · ${_libName('${e['_lib']}')}' : ''}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                ]);
+                          }),
+                          onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                  builder: (_) => PlayerPage(
+                                      works: e['works'],
+                                      start: e['i'],
+                                      lib: '${e['_lib']}'))),
+                        );
+                      },
+                    ),
         ),
       ]),
     );
@@ -8810,9 +9865,10 @@ class _AuthorPageState extends State<AuthorPage> {
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
-              imageUrl: cfg.mediaUrl(av, lib: primaryLib.isEmpty ? null : primaryLib),
-              httpHeaders: cfg.headersFor(
-                  primaryLib.isEmpty ? null : primaryLib),
+              imageUrl:
+                  cfg.mediaUrl(av, lib: primaryLib.isEmpty ? null : primaryLib),
+              httpHeaders:
+                  cfg.headersFor(primaryLib.isEmpty ? null : primaryLib),
               fit: BoxFit.contain,
               placeholder: (_, __) =>
                   const CircularProgressIndicator(color: Colors.white38),
@@ -8863,9 +9919,9 @@ class _AuthorPageState extends State<AuthorPage> {
                                                 const TextStyle(fontSize: 26))))
                                 : CachedNetworkImage(
                                     imageUrl: cfg.mediaUrl(av,
-                                            lib: primaryLib.isEmpty
-                                                ? null
-                                                : primaryLib),
+                                        lib: primaryLib.isEmpty
+                                            ? null
+                                            : primaryLib),
                                     httpHeaders: cfg.headersFor(
                                         primaryLib.isEmpty ? null : primaryLib),
                                     width: 64,
@@ -8893,8 +9949,9 @@ class _AuthorPageState extends State<AuthorPage> {
                                       ? primaryLib
                                       : cfg.libName,
                               },
-                              grade: meta?.gradeFor(widget.name, works.length) ??
-                                  '',
+                              grade:
+                                  meta?.gradeFor(widget.name, works.length) ??
+                                      '',
                             ),
                             const SizedBox(height: 6),
                             const Text('作者简介',

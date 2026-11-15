@@ -6,8 +6,15 @@ class BasicLibRef {
   final String id;
   final String name;
   final String rel;
+  /// 所属大库 id（J10 作者筛选用）；旧数据/缺失时为空。
+  final String bigId;
 
-  const BasicLibRef({required this.id, required this.name, required this.rel});
+  const BasicLibRef({
+    required this.id,
+    required this.name,
+    required this.rel,
+    this.bigId = '',
+  });
 
   @override
   String toString() => 'BasicLibRef($id,$name,$rel)';
@@ -67,10 +74,11 @@ List<BasicLibRef> basicsUnderBase(
     final id = '${e['id'] ?? ''}';
     final name = '${e['name'] ?? ''}';
     final path = '${e['path'] ?? ''}';
+    final bigId = '${e['big_id'] ?? ''}';
     if (id.isEmpty || name.isEmpty) continue;
     final rel = relUnderBase(basePath, path);
     if (rel.isEmpty) continue;
-    out.add(BasicLibRef(id: id, name: name, rel: rel));
+    out.add(BasicLibRef(id: id, name: name, rel: rel, bigId: bigId));
   }
   out.sort((a, b) => a.rel.compareTo(b.rel));
   return out;
