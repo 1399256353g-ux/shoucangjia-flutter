@@ -34,6 +34,7 @@ import 'lib_cover.dart';
 import 'library_selector_view.dart';
 import 'loop_link.dart';
 import 'library_tree.dart';
+import 'unit_crawler_page.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
 import 'likes.dart';
@@ -2490,13 +2491,37 @@ class _LibraryPageState extends State<LibraryPage> {
             onTapBasic: (b) => _showBasicOn(c, b),
             coverOf: _coverUrlFor,
             unitCoverOf: _unitCoverUrl,
+            onConfigureUnit: _openUnitCrawler,
           ),
         )),
         onToggleStar: _toggleStar,
         onTapBasic: (b) => _showBasicOn(c, b),
         coverOf: _coverUrlFor,
         unitCoverOf: _unitCoverUrl,
+        onConfigureUnit: _openUnitCrawler,
       ),
+    ));
+  }
+
+  /// L5-D：打开单元库级爬虫配置（顶级 SECRET 不提供）。
+  void _openUnitCrawler(UnitLibrary u) {
+    if (u.rel.trim().isEmpty) return;
+    final base = u.node.serverBase.isNotEmpty
+        ? u.node.serverBase
+        : cfg.baseFor(u.basics.isNotEmpty ? u.basics.first.id : null);
+    var headers = cfg.headersFor(u.basics.isNotEmpty ? u.basics.first.id : null);
+    for (final s in servers) {
+      if (s.base == base) {
+        headers = {
+          'Authorization':
+              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+        };
+        break;
+      }
+    }
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) =>
+          UnitCrawlerPage(unit: u, base: base, headers: headers),
     ));
   }
 

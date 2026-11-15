@@ -67,6 +67,34 @@ void main() {
     expect(BasicLibCard.badgeText('(8) 🦶'), '🦶');
   });
 
+  testWidgets('非顶级单元库显示爬虫配置入口并可打开', (t) async {
+    String? opened;
+    await t.pumpWidget(host(UnitLibraryPage(
+      unit: tree.children.first,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleStar: (_) {},
+      onTapBasic: (_) {},
+      onConfigureUnit: (u) => opened = u.id,
+    )));
+    final btn = find.byKey(const ValueKey('unit-crawler-big-01'));
+    expect(btn, findsOneWidget);
+    await t.tap(btn);
+    expect(opened, 'big-01');
+  });
+
+  testWidgets('顶级单元库不显示爬虫配置入口', (t) async {
+    await t.pumpWidget(host(UnitLibraryPage(
+      unit: tree,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleStar: (_) {},
+      onTapBasic: (_) {},
+      onConfigureUnit: (_) {},
+    )));
+    expect(find.byKey(const ValueKey('unit-crawler-secret')), findsNothing);
+  });
+
   testWidgets('星标页空态有引导文案', (t) async {
     await t.pumpWidget(host(StarredLibrariesPage(
       basics: const [],

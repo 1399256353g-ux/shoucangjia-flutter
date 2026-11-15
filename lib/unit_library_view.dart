@@ -288,6 +288,8 @@ class UnitLibraryPage extends StatelessWidget {
   final void Function(BasicLib b) onTapBasic;
   final CoverOf? coverOf;
   final UnitCoverOf? unitCoverOf;
+  /// L5-D：非顶级单元库可配置独立爬虫（SECRET 顶级不显示入口）。
+  final void Function(UnitLibrary unit)? onConfigureUnit;
 
   const UnitLibraryPage({
     super.key,
@@ -298,6 +300,7 @@ class UnitLibraryPage extends StatelessWidget {
     required this.onTapBasic,
     this.coverOf,
     this.unitCoverOf,
+    this.onConfigureUnit,
   });
 
   @override
@@ -308,7 +311,18 @@ class UnitLibraryPage extends StatelessWidget {
       ...basics.where((b) => !stars.contains(b.id)),
     ];
     return Scaffold(
-      appBar: AppBar(title: Text(unit.name)),
+      appBar: AppBar(
+        title: Text(unit.name),
+        actions: [
+          if (onConfigureUnit != null && unit.rel.trim().isNotEmpty)
+            IconButton(
+              key: ValueKey('unit-crawler-${unit.id}'),
+              tooltip: '爬虫配置',
+              icon: const Icon(Icons.settings_ethernet),
+              onPressed: () => onConfigureUnit!(unit),
+            ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
