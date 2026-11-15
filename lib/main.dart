@@ -31,6 +31,7 @@ import 'infinite.dart';
 import 'library_badge.dart';
 import 'library_rank.dart';
 import 'library_selector_view.dart';
+import 'loop_link.dart';
 import 'library_tree.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
@@ -6019,8 +6020,11 @@ class _PlayerPageState extends State<PlayerPage>
   String get _curLib => _libFor(_workAt(cur));
   double _hoverDx = -1;
   double _hoverDy = -1;
-  bool autoplay = true;
-  bool loopOne = false;
+  // L6：单条循环与自动连播的联动集中到 LoopLink（打开循环自动关连播，
+  // 关闭循环恢复打开前的连播状态）。
+  LoopLink _link = const LoopLink();
+  bool get autoplay => _link.autoplay;
+  bool get loopOne => _link.loopOne;
   // 当前页面实际已载入的媒体所属 open token；图文无音频时为 -1。
   // 用于忽略 player.stop()/切条时上一段媒体迟到的 completed 事件，
   // 避免刚打开图文就被上一次播放的完成事件带去下一条。
@@ -7419,22 +7423,21 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void toggleLoop() {
-    // F32：单条循环与连播是完全独立的两组状态。
-    // 不再使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
-    // completed 事件），统一由 completed 回调在 Dart 层重播，
-    // 这样关闭循环后连播判定立刻恢复，不会偶发停在片尾。
-    setState(() => loopOne = !loopOne);
-    if (loopOne) {
-      _cancelPreload();
-    } else {
+    // L6：打开循环时自动关闭连播并记住原状态；关闭循环时恢复到打开前的连播。
+    // 不使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
+    // completed 事件），统一由 completed 回调在 Dart 层重播。
+    setState(() => _link = _link.toggleLoop());
+    if (_link.nextEnabled) {
       _schedulePreload();
+    } else {
+      _cancelPreload();
     }
   }
 
   void toggleAutoplay() {
-    // F32：只切连播，不再连带改动单条循环
-    setState(() => autoplay = !autoplay);
-    if (autoplay) {
+    // L6：循环开启期间也允许手动切连播，但退出循环仍回到记忆值。
+    setState(() => _link = _link.toggleAutoplay());
+    if (_link.nextEnabled) {
       _schedulePreload();
     } else {
       _cancelPreload();
@@ -8962,6 +8965,48 @@ class _PlayerPageState extends State<PlayerPage>
                                                   color: Colors.white70),
                                             ),
                                           ),
+                                        ),
+                                      // L6：桌面端音量模块常驻任务栏（声音按钮右侧）：
+                                      // 细滑杆即时改音量，单击左侧声音按钮仍然是静音切换。
+                                      if (_volumeUi)
+                                        SizedBox(
+                                          key: const ValueKey('volume-module'),
+                                          width: 104,
+                                          height: 48,
+                                          child: Row(children: [
+                                            Expanded(
+                                              child: SliderTheme(
+                                                data: const SliderThemeData(
+                                                  trackHeight: 2.5,
+                                                  thumbShape:
+                                                      RoundSliderThumbShape(
+                                                          enabledThumbRadius: 5),
+                                                  overlayShape:
+                                                      RoundSliderOverlayShape(
+                                                          overlayRadius: 10),
+                                                  activeTrackColor: Colors.white70,
+                                                  inactiveTrackColor:
+                                                      Colors.white24,
+                                                  thumbColor: Colors.white,
+                                                ),
+                                                child: Slider(
+                                                  value: (muted ? 0.0 : volume)
+                                                      .clamp(0.0, 100.0),
+                                                  max: 100,
+                                                  onChanged: _setVolume,
+                                                ),
+                                              ),
+                                            ),
+                                            SizedBox(
+                                              width: 30,
+                                              child: Text(
+                                                  '${volume.round()}',
+                                                  textAlign: TextAlign.right,
+                                                  style: const TextStyle(
+                                                      fontSize: 10,
+                                                      color: Colors.white54)),
+                                            ),
+                                          ]),
                                         ),
                                       // J5：视频合集章节选择（按「选集」图标 + 当前集数）
                                       if (workChapterCount(w) > 1)
