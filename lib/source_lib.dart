@@ -8,12 +8,15 @@ class BasicLibRef {
   final String rel;
   /// 所属大库 id（J10 作者筛选用）；旧数据/缺失时为空。
   final String bigId;
+  /// 基础库绝对路径；用于换算到其它坐标系（如库根 rel）。
+  final String path;
 
   const BasicLibRef({
     required this.id,
     required this.name,
     required this.rel,
     this.bigId = '',
+    this.path = '',
   });
 
   @override
@@ -78,7 +81,8 @@ List<BasicLibRef> basicsUnderBase(
     if (id.isEmpty || name.isEmpty) continue;
     final rel = relUnderBase(basePath, path);
     if (rel.isEmpty) continue;
-    out.add(BasicLibRef(id: id, name: name, rel: rel, bigId: bigId));
+    out.add(
+        BasicLibRef(id: id, name: name, rel: rel, bigId: bigId, path: path));
   }
   out.sort((a, b) => a.rel.compareTo(b.rel));
   return out;
@@ -103,6 +107,25 @@ BasicLibRef? basicLibForMedia(
     }
   }
   return best;
+}
+
+/// 从媒体路径反查基础库 id。
+///
+/// 基础库作者列表的 `av` 有两种写法：
+///  1. 库内相对路径：`/media/(1)%20其他/@作者/_avatar/x.jpg`
+///  2. 库作用域路径：`/media/lib-015/@作者/_avatar/x.jpg`
+/// 第二种无法按目录前缀匹配，直接取前缀里的基础库 id（且该库确实存在）。
+String basicIdForMedia(List<BasicLibRef> basics, String mediaPath) {
+  if (basics.isEmpty || mediaPath.trim().isEmpty) return '';
+  final rel = decodeMediaRel(mediaPath);
+  final m = RegExp(r'^(lib-\d+)(?:/|$)').firstMatch(rel);
+  if (m != null) {
+    final id = m.group(1)!;
+    for (final b in basics) {
+      if (b.id == id) return id;
+    }
+  }
+  return basicLibForMedia(basics, mediaPath)?.id ?? '';
 }
 
 /// 词条显示名：基础库名去掉编号前缀，例如「(8) 🦶」→「🦶」。

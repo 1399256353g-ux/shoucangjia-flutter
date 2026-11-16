@@ -42,8 +42,9 @@ void main() {
     expect(t.bigs[1].basics.map((b) => b.id), ['lib-3']);
     expect(t.unassigned.map((b) => b.id), ['lib-9']);
     expect(t.totalBasics, 4);
-    expect(t.bigs[0].subtitle, contains('2 个基础库'));
-    expect(t.bigs[0].subtitle, contains('217'));
+    // 旧「大库描述」不再由模型生成（避免各页面再贴回该文案）。
+    expect(t.bigs[0].basics.length, 2);
+    expect(t.bigs[0].works, 217);
   });
 
   test('星标按标记顺序置顶，无效 id 忽略，不重复', () {

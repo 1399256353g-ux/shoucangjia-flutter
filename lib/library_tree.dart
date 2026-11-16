@@ -60,6 +60,7 @@ class BigLib {
   final String id;
   final String name;
   final String path;
+  /// 服务端 v2 索引里的统计字段。仅保留结构，不再生成旧「大库描述」。
   final int authors;
   final int works;
   final List<BasicLib> basics;
@@ -78,9 +79,6 @@ class BigLib {
     this.serverBase = '',
     this.serverLabel = '',
   });
-
-  String get subtitle =>
-      '${basics.length} 个基础库 · ${_fmt(works)} 作品 · ${_fmt(authors)} 作者';
 }
 
 class LibraryTree {
@@ -219,13 +217,3 @@ Set<String> toggleExpanded(Set<String> expanded, String id) {
 }
 
 int _num(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
-
-String _fmt(int n) {
-  if (n < 1000) return '$n';
-  if (n < 10000) {
-    final s = (n / 1000).toStringAsFixed(1);
-    return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}k';
-  }
-  final s = (n / 10000).toStringAsFixed(1);
-  return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}万';
-}

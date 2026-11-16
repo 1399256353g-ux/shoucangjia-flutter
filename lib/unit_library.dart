@@ -75,9 +75,6 @@ class UnitLibrary {
 
   bool get isEmpty => basicCount == 0;
 
-  String get subtitle =>
-      '${basicCount} 个基础库 · ${formatCount(works)} 作品 · ${formatCount(authors)} 作者';
-
   /// 深度优先展开全部基础库（保持层级顺序）。
   List<BasicLib> get allBasics => [
         ...basics,
@@ -380,4 +377,27 @@ List<UnitLibrary> flattenUnits(UnitLibrary root) {
     out.addAll(secret);
   }
   return out;
+}
+
+/// 基础库所属的单元库节点；没有归属时返回 null。
+///
+/// 作者来源词条＝作者所属基础库的单元库名/配色，用它反查。
+UnitLibrary? unitForBasic(UnitLibrary root, String basicId) {
+  if (basicId.isEmpty) return null;
+  UnitLibrary? hit;
+  void walk(UnitLibrary u) {
+    if (hit != null) return;
+    for (final b in u.basics) {
+      if (b.id == basicId) {
+        hit = u;
+        return;
+      }
+    }
+    for (final c in u.children) {
+      walk(c);
+    }
+  }
+
+  walk(root);
+  return hit;
 }

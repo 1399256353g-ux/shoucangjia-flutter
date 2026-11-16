@@ -231,6 +231,20 @@ class LibMeta {
               }
             }
           }
+          // `lib` 本身是基础库 id（基础库页/基础库作者页）时注册表里没有它，
+          // 用库根作坐标系即可建出完整单元库树（只需基础库→单元库映射）。
+          if (base.isEmpty && lj is Map) {
+            final rootPath = '${lj['root'] ?? ''}'.trim();
+            final raw = lj['basicLibraries'];
+            if (rootPath.isNotEmpty && raw is List) {
+              for (final e in raw) {
+                if (e is Map && '${e['id']}' == lib) {
+                  base = rootPath;
+                  break;
+                }
+              }
+            }
+          }
           if (lj is Map && base.isNotEmpty) {
             final ljm = Map<String, dynamic>.from(lj);
             basics = basicsUnderBase(ljm, base);
@@ -244,6 +258,11 @@ class LibMeta {
               }
             }
             if (basics.isNotEmpty) {
+              // 单元库节点的 rel 以库根（libraries.json `root`）为坐标系，
+              // 而基础库默认按注册库 base 换算；两者不同源时按前缀永远匹配
+              // 不上，词条会全部落到 SECRET。这里额外用库根坐标建一份
+              // 「单元库归属」用的基础库列表。
+              final root = '${ljm['root'] ?? ''}'.trim();
               final basicList = <BasicLib>[
                 for (final b in basics)
                   BasicLib(
@@ -254,6 +273,22 @@ class LibMeta {
                       authors: 0,
                       works: 0),
               ];
+              var unitBasics = basicList;
+              if (root.isNotEmpty) {
+                final full = <BasicLib>[];
+                for (final b in basics) {
+                  final rel = relUnderBase(root, b.path);
+                  if (rel.isEmpty) continue;
+                  full.add(BasicLib(
+                      id: b.id,
+                      name: b.name,
+                      rel: rel,
+                      bigId: b.bigId,
+                      authors: 0,
+                      works: 0));
+                }
+                if (full.isNotEmpty) unitBasics = full;
+              }
               // 单元库＝owner 在「文件结构」里勾选的节点文件夹（/api/nodes），
               // 与主页使用同一份来源；只有节点为空时才退回 v2 分组。
               final marks = <String>[];
@@ -276,7 +311,7 @@ class LibMeta {
               final nodes = marks.isEmpty
                   ? nodesFromV2(ljm, root: base)
                   : nodesFromMarks(marks);
-              final tree = buildUnitTree(nodes: nodes, basics: basicList);
+              final tree = buildUnitTree(nodes: nodes, basics: unitBasics);
               if (tree != null) {
                 unitTree = tree;
                 units = flattenUnits(tree);
@@ -320,6 +355,9 @@ class LibMeta {
   String idFor(String mediaPath) =>
       basicLibForMedia(basics, mediaPath)?.id ?? '';
 
+  /// 作者所属基础库 id：兼容库作用域路径（`/media/lib-015/...`）。
+  String basicIdForPath(String mediaPath) => basicIdForMedia(basics, mediaPath);
+
   /// 按基础库 id 取词条（搜索结果直接带 `_bid`，无需按路径反查）。
   BasicLibRef? basicById(String id) {
     for (final b in basics) {
@@ -331,8 +369,14 @@ class LibMeta {
   /// L5：作者所属单元库 id；无法匹配基础库时为空。
   /// 有基础库但没有节点归属时回落到顶级 `secret`。
   String unitIdFor(String mediaPath) {
-    // 先按节点文件夹（单元库）路径匹配：作者头像/作品通常放在单元库目录下，
-    // 而不是某一个基础库的深层目录里。
+    // 作者来源词条＝作者所属基础库的单元库：先由基础库反查单元库，
+    // 这样 lib-001…lib-039 与 douyin 的基础库都走同一套口径。
+    final basic = basicIdForPath(mediaPath);
+    if (basic.isNotEmpty) {
+      final unit = basicToUnit[basic];
+      if (unit != null && unit.isNotEmpty) return unit;
+    }
+    // 兜底：按节点文件夹（单元库）路径匹配（旧数据、非基础库媒体）。
     final rel = decodeMediaRel(mediaPath);
     if (rel.isNotEmpty) {
       String bestRel = '';
@@ -347,8 +391,7 @@ class LibMeta {
       }
       if (bestId.isNotEmpty) return bestId;
     }
-    final b = idFor(mediaPath);
-    if (b.isNotEmpty) return basicToUnit[b] ?? 'secret';
+    if (basic.isNotEmpty) return basicToUnit[basic] ?? 'secret';
     return rel.isEmpty ? '' : 'secret';
   }
 
@@ -1455,12 +1498,26 @@ class AuthorBadges extends StatelessWidget {
     return s is Map ? Map<String, dynamic>.from(s) : null;
   }
 
+  /// 作者所属基础库 id，决定来源词条（单元库名/配色）。
+  /// 顺序：显式基础库 → 头像/媒体路径 → 当前库本身是基础库（基础库页）。
+  String get _basicId {
+    if (basicId.isNotEmpty) return basicId;
+    final m = meta;
+    if (m == null) return '';
+    final byPath = m.basicIdForPath(mediaPath);
+    if (byPath.isNotEmpty) return byPath;
+    if (fallbackId.isNotEmpty && m.basicById(fallbackId) != null) {
+      return fallbackId;
+    }
+    return '';
+  }
+
   @override
   Widget build(BuildContext context) {
     return UnitBadges(
       meta: meta,
       mediaPath: mediaPath,
-      basicId: basicId,
+      basicId: _basicId,
       fallbackId: fallbackId,
       fallbackName: fallbackName,
       grade: AuthorGrade.fromStats(_stats, works: works),
@@ -2859,16 +2916,28 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   void _showBasic(BasicLib b) {
+    // 作者来源词条：本基础库所属单元库（与作者卡/作者页同一口径）。
+    final root = unitTree;
+    final unit = root == null ? null : unitForBasic(root, b.id);
+    final unitOrder = root == null
+        ? const <String>[]
+        : [
+            for (final u in flattenUnits(root))
+              if (u.id != root.id) u.id
+          ];
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => BasicLibPage(
         basic: b,
         urlOf: (path, {lib}) => cfg.u(path, lib: lib ?? b.id),
         headersOf: ([lib]) => cfg.headersFor(lib ?? b.id),
         mediaUrlOf: (path, {lib}) => cfg.mediaUrl(path, lib: lib ?? b.id),
+        sourceLabel: unit?.name ?? '',
+        sourceColor: unit == null
+            ? LibraryBadge.gray
+            : LibraryBadge.colorFor(unit.id, order: unitOrder),
         onOpenAuthor: (name) => Navigator.of(context).push(
             MaterialPageRoute<void>(
-                builder: (_) =>
-                    AuthorPage(name: name, libs: [b.id]))),
+                builder: (_) => AuthorPage(name: name, libs: [b.id]))),
         onPlay: (works, index) => Navigator.of(context).push(
             MaterialPageRoute<void>(
                 builder: (_) =>
@@ -3683,58 +3752,32 @@ class _RankPageState extends State<RankPage> {
 
   Future<void> loadLibs() async {
     try {
-      final r = await http
-          .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) return;
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
-      final list = librariesWithDisplayNames(
-          ((j['libraries'] as List?) ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList());
-      if (!mounted || list.isEmpty) return;
-      var next = sel;
-      var changed = false;
-      if (next.isEmpty ||
-          (next != 'all' && !list.any((e) => e['id'] == next))) {
-        next = '${j['default'] ?? list.first['id']}';
-        changed = next != sel;
-      }
+      final meta = await LibMeta.load(cfg.lib);
+      if (!mounted) return;
+      final list = [
+        for (final e in meta.bigNames.entries) {'id': e.key, 'name': e.value}
+      ]..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
       setState(() {
         libs = list;
-        if (changed) {
-          sel = next;
-          loading = true;
-        }
+        metas[cfg.lib] = meta;
       });
-      if (changed) load();
     } catch (_) {}
   }
 
   Future<void> load() async {
     if (mounted) setState(() => err = null);
     try {
+      // 0.9.8：排行榜数据源改为全部基础库；大库筛选在本地按作者所属基础库收敛。
       final r = await http.get(
-          cfg.u('/api/rank?period=$period&metric=$metric',
-              lib: sel.isEmpty ? null : sel),
+          cfg.u('/api/rank?period=$period&metric=$metric', lib: 'all'),
           headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(r.body);
+      final meta = await LibMeta.load(cfg.lib);
       if (!mounted) return;
+      metas[cfg.lib] = meta;
       final list =
           (j is Map && j['authors'] is List) ? j['authors'] as List : [];
-      final need = <String>{
-        if (sel != 'all' && sel.isNotEmpty) sel,
-        for (final e in list)
-          if (e is Map && '${e['lib'] ?? ''}'.isNotEmpty) '${e['lib']}',
-        if (sel == 'all') ...libs.map((e) => '${e['id']}'),
-      };
-      for (final lib in need) {
-        try {
-          metas[lib] = await LibMeta.load(lib);
-        } catch (_) {}
-      }
-      if (!mounted) return;
       setState(() {
         rows = list;
         loading = false;
@@ -3754,10 +3797,8 @@ class _RankPageState extends State<RankPage> {
   Map<String, dynamic> _rowMap(dynamic e) =>
       e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{};
 
-  String _rowLibId(Map<String, dynamic> e) =>
-      sel == 'all' ? '${e['lib'] ?? cfg.lib}' : (sel.isEmpty ? cfg.lib : sel);
-
-  LibMeta? _rowMeta(Map<String, dynamic> e) => metas[_rowLibId(e)];
+  LibMeta? _rowMeta(Map<String, dynamic> e) =>
+      metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
 
   String _rowUnitId(Map<String, dynamic> e) =>
       _rowMeta(e)?.unitIdFor('${e['avatar'] ?? ''}') ?? '';
@@ -3777,7 +3818,11 @@ class _RankPageState extends State<RankPage> {
 
   List<Map<String, dynamic>> get _visibleRows => [
         for (final e in rows)
-          if ((unitSel.isEmpty || _rowUnitId(_rowMap(e)) == unitSel) &&
+          if ((sel == 'all' ||
+                  _rowMeta(_rowMap(e))
+                          ?.bigIdFor('${_rowMap(e)['avatar'] ?? ''}') ==
+                      sel) &&
+              (unitSel.isEmpty || _rowUnitId(_rowMap(e)) == unitSel) &&
               (!filter.isActive || _rowMatches(_rowMap(e), filter)))
             _rowMap(e)
       ];
@@ -4525,8 +4570,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   List<MapEntry<String, Map<String, dynamic>>> authors = [];
   Map<String, dynamic> stats = {};
+  // 0.9.8：作者数据源改为全部基础库（`/api/authors.json?lib=all`）。
+  // libs 仅保留大库筛选项（全部基础库 / big-01…），basics 用于筛选面板。
   List<Map<String, dynamic>> libs = [];
-  String sel = '';
+  List<BasicLibRef> basics = const [];
+  String sel = 'all';
   final Map<String, List<String>> authorLibs = {};
   // J9：库 -> 基础库/统计映射，用于显示基础库来源词条
   final Map<String, LibMeta> metas = {};
@@ -4555,7 +4603,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   void initState() {
     super.initState();
     authorFilter.addListener(_onSharedFilter);
-    sel = cfg.lib;
+    sel = 'all';
     loadLibs();
     LibraryBadge.load().then((_) {
       if (mounted) setState(() {});
@@ -4641,31 +4689,16 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   Future<void> loadLibs() async {
     try {
-      final r = await http
-          .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) return;
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
-      final list = librariesWithDisplayNames(
-          ((j['libraries'] as List?) ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList());
-      if (!mounted || list.isEmpty) return;
-      var next = sel;
-      var changed = false;
-      if (next.isEmpty ||
-          (next != 'all' && !list.any((e) => e['id'] == next))) {
-        next = '${j['default'] ?? list.first['id']}';
-        changed = next != sel;
-      }
+      final meta = await LibMeta.load(cfg.lib);
+      if (!mounted) return;
+      final list = [
+        for (final e in meta.bigNames.entries) {'id': e.key, 'name': e.value}
+      ]..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
       setState(() {
+        basics = meta.basics;
         libs = list;
-        if (changed) {
-          sel = next;
-          loading = true;
-        }
+        metas[cfg.lib] = meta;
       });
-      if (changed) load();
     } catch (_) {}
   }
 
@@ -4683,66 +4716,44 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         setState(() => err = null);
       }
     }
-    final targets = sel == 'all'
-        ? libs.map((e) => '${e['id']}').toList()
-        : [(sel.isEmpty ? cfg.lib : sel)];
-    if (targets.isEmpty) targets.add(cfg.lib);
     final auMap = <String, Map<String, dynamic>>{};
     final stMap = <String, Map<String, dynamic>>{};
     final auLibs = <String, List<String>>{};
     try {
-      for (final lib in targets) {
-        final rs = await Future.wait([
-          http.get(cfg.u('/api/authors.json', lib: lib), headers: cfg.headers),
-          http.get(cfg.u('/api/author_stats.json', lib: lib),
-              headers: cfg.headers),
-        ]);
-        if (rs[0].statusCode != 200) continue;
-        final m = jsonDecode(rs[0].body) as Map<String, dynamic>;
-        dynamic sj;
-        if (rs[1].statusCode == 200) {
-          try {
-            sj = jsonDecode(rs[1].body);
-          } catch (_) {}
-        }
-        for (final e in m.entries) {
-          if (e.value is! Map) continue;
-          final v = Map<String, dynamic>.from(e.value as Map);
-          final old = auMap[e.key];
-          if (old == null) {
-            auMap[e.key] = {...v, '_lib': lib};
-          } else {
-            old['n'] = _num(old['n']) + _num(v['n']);
-            if ('${old['av'] ?? ''}'.isEmpty && '${v['av'] ?? ''}'.isNotEmpty) {
-              old['av'] = v['av'];
-            }
-            if ('${old['bio'] ?? ''}'.isEmpty &&
-                '${v['bio'] ?? ''}'.isNotEmpty) {
-              old['bio'] = v['bio'];
-            }
-          }
-          (auLibs[e.key] ??= []).add(lib);
-        }
-        if (sj is Map && sj['authors'] is Map) {
-          for (final e in (sj['authors'] as Map).entries) {
-            if (e.value is! Map) continue;
-            final v = Map<String, dynamic>.from(e.value as Map);
-            final o = stMap['${e.key}'] ?? <String, dynamic>{};
-            for (final f in ['p', 'v', 'dr']) {
-              o[f] = _num(o[f]) + _num(v[f]);
-            }
-            o['lv'] =
-                _num(o['lv']) > _num(v['lv']) ? _num(o['lv']) : _num(v['lv']);
-            stMap['${e.key}'] = o;
-          }
-        }
+      // 全部基础库合并索引（服务端 lib=all：同名作者作品数相加，libs 带出处）。
+      final ar = await http
+          .get(cfg.u('/api/authors.json', lib: 'all'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 20));
+      final sr = await http
+          .get(cfg.u('/api/author_stats.json', lib: cfg.lib),
+              headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      if (ar.statusCode != 200) throw Exception('HTTP ${ar.statusCode}');
+      final m = jsonDecode(utf8.decode(ar.bodyBytes)) as Map<String, dynamic>;
+      for (final e in m.entries) {
+        if (e.value is! Map) continue;
+        final v = Map<String, dynamic>.from(e.value as Map);
+        final ls = (v['libs'] as List?)?.whereType<String>().toList() ??
+            const <String>[];
+        auMap[e.key] = {...v, '_lib': ls.isNotEmpty ? ls.first : cfg.lib};
+        if (ls.isNotEmpty) auLibs[e.key] = ls;
       }
-      if (!mounted) return;
-      for (final lib in targets) {
+      dynamic sj;
+      if (sr.statusCode == 200) {
         try {
-          metas[lib] = await LibMeta.load(lib);
+          sj = jsonDecode(sr.body);
         } catch (_) {}
       }
+      if (sj is Map && sj['authors'] is Map) {
+        for (final e in (sj['authors'] as Map).entries) {
+          if (e.value is! Map) continue;
+          stMap['${e.key}'] = Map<String, dynamic>.from(e.value as Map);
+        }
+      }
+      final meta = await LibMeta.load(cfg.lib);
+      if (!mounted) return;
+      metas[cfg.lib] = meta;
+      basics = meta.basics;
       if (!mounted) return;
       final entries =
           auMap.entries.map((e) => MapEntry(e.key, e.value)).toList();
@@ -4811,20 +4822,34 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       ? Map<String, dynamic>.from(stats[name] as Map)
       : const {};
 
-  LibMeta? _metaOf(MapEntry<String, Map<String, dynamic>> e) {
-    final lib = '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}';
-    return metas[lib] ?? metas[sel];
+  LibMeta? _metaOf(MapEntry<String, Map<String, dynamic>> e) =>
+      metas[cfg.lib] ?? (basics.isEmpty ? null : metas.values.first);
+
+  String _basicIdOf(MapEntry<String, Map<String, dynamic>> e) {
+    final m = _metaOf(e);
+    final byAv = m?.basicIdForPath('${e.value['av'] ?? ''}') ?? '';
+    if (byAv.isNotEmpty) return byAv;
+    // 合并索引已给出作者出处；无头像时也能筛选到所属基础库。
+    final l = '${e.value['_lib'] ?? ''}';
+    return l.startsWith('lib-') && m?.basicById(l) != null ? l : '';
   }
 
-  String _basicIdOf(MapEntry<String, Map<String, dynamic>> e) =>
-      _metaOf(e)?.idFor('${e.value['av'] ?? ''}') ?? '';
-
-  String _bigIdOf(MapEntry<String, Map<String, dynamic>> e) =>
-      _metaOf(e)?.bigIdFor('${e.value['av'] ?? ''}') ?? '';
+  String _bigIdOf(MapEntry<String, Map<String, dynamic>> e) {
+    final m = _metaOf(e);
+    final byAv = m?.bigIdFor('${e.value['av'] ?? ''}') ?? '';
+    if (byAv.isNotEmpty) return byAv;
+    final b = m?.basicById(_basicIdOf(e));
+    return b?.bigId ?? '';
+  }
 
   // T2：作者所属单元库 id（顶级 SECRET / 无归属为空）。
-  String _unitIdOf(MapEntry<String, Map<String, dynamic>> e) =>
-      _metaOf(e)?.unitIdFor('${e.value['av'] ?? ''}') ?? '';
+  String _unitIdOf(MapEntry<String, Map<String, dynamic>> e) {
+    final m = _metaOf(e);
+    final byAv = m?.unitIdFor('${e.value['av'] ?? ''}') ?? '';
+    if (byAv.isNotEmpty) return byAv;
+    final b = _basicIdOf(e);
+    return b.isEmpty ? '' : (m?.basicToUnit[b] ?? '');
+  }
 
   String _gradeOf(MapEntry<String, Map<String, dynamic>> e) =>
       AuthorGrade.gradeFor(
@@ -4837,20 +4862,13 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   /// J10：把当前可见的 meta 汇总成筛选面板需要的节点。
   List<AuthorLibNode> get _filterBasics {
-    final nodes = <AuthorLibNode>[];
-    final seen = <String>{};
-    for (final l in libs) {
-      final m = metas['${l['id']}'];
-      if (m == null) continue;
-      for (final b in m.basics) {
-        if (!seen.add(b.id)) continue;
-        nodes.add(AuthorLibNode(
-          id: b.id,
-          name: basicLibLabel(b, b.name),
-          bigId: b.bigId,
-        ));
-      }
-    }
+    final meta = metas[cfg.lib];
+    final nodes = <AuthorLibNode>[
+      if (meta != null)
+        for (final b in meta.basics)
+          AuthorLibNode(
+              id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId)
+    ];
     return authorLibNodes(nodes);
   }
 
@@ -4883,9 +4901,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   List<AuthorLibNode> get _filterUnits {
     final out = <AuthorLibNode>[];
     final seen = <String>{};
-    for (final l in libs) {
-      final m = metas['${l['id']}'];
-      if (m == null) continue;
+    for (final m in metas.values) {
       for (final u in m.units) {
         if (!seen.add(u.id)) continue;
         out.add(AuthorLibNode(id: u.id, name: m.unitNameOf(u.id)));
@@ -4910,16 +4926,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Future<void> _ensureTypes() async {
     if (typesLoading) return;
     if (_typesForSel == sel && authorTypes.isNotEmpty) return;
-    final targets = <String>[];
-    for (final l in libs) {
-      final lib = '${l['id']}';
-      final m = metas[lib];
-      if (m == null) continue;
-      targets.add(lib);
-    }
-    if (targets.isEmpty) return;
     setState(() => typesLoading = true);
-    final map = await loadAuthorTypes(targets);
+    // 类型索引一次扫全部基础库（服务端 /api/lib/<id>/index.json）。
+    final map = await loadAuthorTypes([cfg.lib]);
     if (!mounted) return;
     setState(() {
       authorTypes = map;
@@ -4967,17 +4976,17 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// I7：排序只在数据/排序方式变化时执行一次，结果缓存在 [_ordered]，
   /// build 与滚动回调都只读缓存，避免上千作者反复排序。
   void _applyOrder({bool resetShown = true}) {
-    final base = filter.isActive
-        ? authors
-            .where((e) => filter.matches(
-                  basicId: _basicIdOf(e),
-                  bigId: _bigIdOf(e),
-                  unitId: _unitIdOf(e),
-                  grade: _gradeOf(e),
-                  workTypes: _typesOf(e.key),
-                ))
-            .toList()
-        : authors;
+    final base = authors.where((e) {
+      if (sel != 'all' && _bigIdOf(e) != sel) return false;
+      if (!filter.isActive) return true;
+      return filter.matches(
+        basicId: _basicIdOf(e),
+        bigId: _bigIdOf(e),
+        unitId: _unitIdOf(e),
+        grade: _gradeOf(e),
+        workTypes: _typesOf(e.key),
+      );
+    }).toList();
     _ordered = sortAuthorEntries(base,
         metric: _metric, works: (e) => _num(e.value['n']), name: (e) => e.key);
     if (resetShown) {
@@ -4995,11 +5004,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   }
 
   String _selLabel() {
-    if (sel == 'all') return '全部库';
+    if (sel == 'all') return '全部基础库';
     for (final l in libs) {
       if ('${l['id']}' == sel) return '${l['name'] ?? l['id']}';
     }
-    return '当前库';
+    return '全部基础库';
   }
 
   String _sub(MapEntry<String, Map<String, dynamic>> e) {
@@ -5038,7 +5047,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   }
 
   Future<void> _open(String name) async {
-    final ls = authorLibs[name] ?? [sel == 'all' ? cfg.lib : sel];
+    final ls =
+        (authorLibs[name]?.isNotEmpty ?? false) ? authorLibs[name]! : [cfg.lib];
     await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => AuthorPage(name: name, libs: List<String>.from(ls))));
     // I7：返回时静默刷新统计；数据未变化则完全不 setState，网格不重建
@@ -5048,7 +5058,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Widget _authorCell(MapEntry<String, Map<String, dynamic>> e) {
     final av = '${e.value['av'] ?? ''}';
     final lib = '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}';
-    final meta = metas[lib] ?? metas[sel];
+    final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
 
     // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位
     final fallbackKey = '$lib|${e.key}';
@@ -5118,7 +5128,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: ChoiceChip(
-                            label: const Text('全部库'),
+                            label: const Text('全部基础库'),
                             selected: sel == 'all',
                             onSelected: (_) {
                               if (sel == 'all') return;
@@ -8618,42 +8628,21 @@ class _RecommendPageState extends State<RecommendPage> {
           }
         } catch (_) {}
       }
-      final targets = libs.map((e) => '${e['id']}').toList(growable: false);
-      final picks = <List>[];
-      for (var i = 0; i < targets.length; i++) {
-        final lib = targets[i];
-        try {
-          final r = await http.get(
-              cfg.u('/api/recommend?n=30&seed=${seed + i * 137}', lib: lib),
-              headers: cfg.headers);
-          if (r.statusCode != 200) {
-            picks.add(const []);
-            continue;
-          }
-          final j = jsonDecode(r.body);
-          final list = (j is Map && j['works'] is List)
-              ? (j['works'] as List)
-              : const [];
-          picks.add([
-            for (final w in list)
-              if (w is Map) {...Map<String, dynamic>.from(w), '_lib': lib}
-          ]);
-        } catch (_) {
-          picks.add(const []);
-        }
-      }
+      // 0.9.8：推荐改为全部基础库池（服务端 lib=all，约 1.1 万作品，60s 缓存）。
+      // 每条作品带 `_lib`（所属基础库），播放/词条按基础库路由。
+      final r = await http.get(
+          cfg.u('/api/recommend?n=40&seed=$seed', lib: 'all'),
+          headers: cfg.headers);
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
       final merged = <Map<String, dynamic>>[];
-      final seen = <String>{};
-      final most = picks.fold<int>(0, (m, e) => e.length > m ? e.length : m);
-      for (var i = 0; i < most && merged.length < 40; i++) {
-        for (final p in picks) {
-          if (i >= p.length) continue;
-          final w = Map<String, dynamic>.from(p[i] as Map);
-          final key = '${w['_lib']}|${w['id'] ?? w['ti'] ?? ''}';
-          if (!seen.add(key)) continue;
-          merged.add(w);
-          if (merged.length >= 40) break;
-        }
+      for (final w in (j is Map && j['works'] is List)
+          ? (j['works'] as List)
+          : const []) {
+        if (w is! Map) continue;
+        final m = Map<String, dynamic>.from(w);
+        merged.add({...m, '_lib': '${m['_lib'] ?? cfg.lib}'});
+        if (merged.length >= 40) break;
       }
       if (!mounted) return;
       setState(() {
@@ -8680,9 +8669,8 @@ class _RecommendPageState extends State<RecommendPage> {
 
   Future<void> _loadMeta() async {
     typesLoading = true;
-    final ids = libs.isEmpty
-        ? [cfg.lib]
-        : libs.map((e) => '${e['id']}').toList(growable: false);
+    // 全部基础库的作者类型只需扫一遍默认注册库（服务端按 libid 逐基础库索引）。
+    final ids = [cfg.lib];
     LibMeta? m;
     for (final id in ids) {
       try {
@@ -9345,10 +9333,8 @@ class _AuthorPageState extends State<AuthorPage> {
     await sp.setBool('sync_full_author', v);
   }
 
-  // 单作者同步：仅 douyin 库配置了抓取脚本
-  bool get _canSync =>
-      primaryLib == 'douyin' ||
-      (primaryLib.isEmpty && (cfg.lib.isEmpty || cfg.lib == 'douyin'));
+  // 单作者同步：服务端按作者名解析抖音主页标识并立即抓取全部作品
+  bool get _canSync => cfg.base.isNotEmpty;
 
   Future<void> _syncAuthor() async {
     if (syncing || !_canSync) return;
@@ -9357,8 +9343,8 @@ class _AuthorPageState extends State<AuthorPage> {
       builder: (ctx) => AlertDialog(
         title: Text('同步作者 @${widget.name}'),
         content: Text(fullSync
-            ? '将重新抓取该作者在同步源内的全部作品信息（头像、简介、封面），耗时较长。\n\n同步在 NAS 后台运行。'
-            : '只补抓该作者缺少头像/简介的作品信息，速度较快。\n\n同步在 NAS 后台运行。'),
+            ? '将立即抓取该作者在抖音的全部作品（已入库的跳过），并补全头像、简介、封面。\n\n同步在 NAS 后台运行，作品多时耗时较长。'
+            : '只补抓该作者缺失的头像/简介/封面，不抓取新作品。\n\n同步在 NAS 后台运行。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),

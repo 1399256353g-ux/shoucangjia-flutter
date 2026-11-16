@@ -117,11 +117,9 @@ class LibrarySelectorView extends StatelessWidget {
           open ? Icons.folder_open : Icons.folder_outlined,
           color: Theme.of(context).colorScheme.primary),
       title: Text(big.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-          big.serverLabel.isEmpty
-              ? big.subtitle
-              : '${big.subtitle} · ${big.serverLabel}',
-          style: const TextStyle(fontSize: 11)),
+      subtitle: big.serverLabel.isEmpty
+          ? null
+          : Text(big.serverLabel, style: const TextStyle(fontSize: 11)),
       trailing: AnimatedRotation(
         turns: open ? 0.25 : 0,
         duration: const Duration(milliseconds: 150),

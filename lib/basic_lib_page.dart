@@ -9,6 +9,7 @@ import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_tree.dart';
 import 'work_card.dart';
+import 'library_badge.dart';
 
 /// 作者卡片头像：优先用服务端下发的 `av`；为空时用兜底图（该作者作品首图）。
 /// 两者都为空时由调用方回退到「首字」占位。
@@ -34,6 +35,10 @@ class BasicLibPage extends StatefulWidget {
   final void Function(String authorName) onOpenAuthor;
   final void Function(List<dynamic> works, int index)? onPlay;
 
+  /// 作者来源词条：本基础库所属单元库的名称与配色（由调用方按单元库树算出）。
+  final String sourceLabel;
+  final int sourceColor;
+
   const BasicLibPage({
     super.key,
     required this.basic,
@@ -42,6 +47,8 @@ class BasicLibPage extends StatefulWidget {
     required this.mediaUrlOf,
     required this.onOpenAuthor,
     this.onPlay,
+    this.sourceLabel = '',
+    this.sourceColor = LibraryBadge.gray,
   });
 
   @override
@@ -307,6 +314,30 @@ class _BasicLibPageState extends State<BasicLibPage>
                     name: name,
                   ),
                   const SizedBox(height: 8),
+                  if (widget.sourceLabel.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Container(
+                        key: const ValueKey('basic-author-source'),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Color(widget.sourceColor),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          widget.sourceLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 9,
+                            height: 1.3,
+                            color: Color(
+                                LibraryBadge.textColorOn(widget.sourceColor)),
+                          ),
+                        ),
+                      ),
+                    ),
                   Expanded(
                     child: Text(name,
                         maxLines: 2,

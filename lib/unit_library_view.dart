@@ -222,7 +222,7 @@ class UnitLibraryHomeView extends StatelessWidget {
             const Text('单元库',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
             const Spacer(),
-            Text('${units.length} 个 · ${tree.basicCount} 基础库',
+            Text('${units.length} 个单元库',
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ]),
         ),
@@ -453,8 +453,7 @@ class UnitLibraryCard extends StatelessWidget {
               child: LibCardInfo(
                 title: unit.name,
                 stats: '${formatCount(unit.authors)} 作者 · '
-                    '${formatCount(unit.works)} 作品 · '
-                    '${unit.basicCount} 个基础库',
+                    '${formatCount(unit.works)} 作品',
                 server: server,
               ),
             ),
