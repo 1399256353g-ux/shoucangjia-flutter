@@ -4140,8 +4140,7 @@ class _RankPageState extends State<RankPage> {
   String metric = 'play';
   List<Map<String, dynamic>> libs = [];
   String sel = '';
-  // 排行榜改为按单元库筛选（与作者总览同一套单元库树）。
-  String unitSel = '';
+  // 快捷条与筛选面板共用同一份共享筛选状态（filter.units）。
   List rows = [];
   final Map<String, LibMeta> metas = {};
   bool loading = true;
@@ -4221,9 +4220,6 @@ class _RankPageState extends State<RankPage> {
   LibMeta? _rowMeta(Map<String, dynamic> e) =>
       metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
 
-  String _rowUnitId(Map<String, dynamic> e) =>
-      _rowMeta(e)?.unitIdFor('${e['avatar'] ?? ''}') ?? '';
-
   bool _rowMatches(Map<String, dynamic> e, AuthorFilterState f) {
     final meta = _rowMeta(e);
     final av = '${e['avatar'] ?? ''}';
@@ -4243,7 +4239,6 @@ class _RankPageState extends State<RankPage> {
                   _rowMeta(_rowMap(e))
                           ?.bigIdFor('${_rowMap(e)['avatar'] ?? ''}') ==
                       sel) &&
-              (unitSel.isEmpty || _rowUnitId(_rowMap(e)) == unitSel) &&
               (!filter.isActive || _rowMatches(_rowMap(e), filter)))
             _rowMap(e)
       ];
@@ -4382,34 +4377,16 @@ class _RankPageState extends State<RankPage> {
         const HomeAction(),
       ]),
       body: Column(children: [
-        HorizontalChipBar(
-          height: 42,
-          padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: const Text('全部单元库'),
-                selected: unitSel.isEmpty,
-                onSelected: (_) {
-                  if (unitSel.isEmpty) return;
-                  setState(() => unitSel = '');
-                },
-              ),
-            ),
-            for (final u in _allUnits)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(LibraryBadge.stripIndex(u.name)),
-                  selected: unitSel == u.id,
-                  onSelected: (_) {
-                    if (unitSel == u.id) return;
-                    setState(() => unitSel = u.id);
-                  },
-                ),
-              ),
-          ],
+        // 与作者总览共用同一个快捷条组件；状态即 filter.units。
+        AuthorQuickChips(
+          allLabel: '全部单元库',
+          items: _allUnits,
+          selected: filter.units,
+          onPick: (id) {
+            final next = filter.copy();
+            pickOnlyIn(next.units, id);
+            authorFilter.apply(next);
+          },
         ),
         HorizontalChipBar(
           children: [
@@ -4984,7 +4961,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   // libs 仅保留大库筛选项（全部基础库 / big-01…），basics 用于筛选面板。
   List<Map<String, dynamic>> libs = [];
   List<BasicLibRef> basics = const [];
-  String sel = 'all';
   final Map<String, List<String>> authorLibs = {};
   // J9：库 -> 基础库/统计映射，用于显示基础库来源词条
   final Map<String, LibMeta> metas = {};
@@ -5007,6 +4983,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   final Set<String> _avLookup = {};
   // J11：作者筛选状态全 App 共享（总览/排行/搜索/推荐同一份）
   AuthorFilterState get filter => authorFilter.value;
+  /// 快捷条当前唯一选中大库（'' / 多个 → all），用于文案与作者页兜底库。
+  String get _quickBig =>
+      filter.bigs.length == 1 ? filter.bigs.first : 'all';
   Map<String, Set<String>> authorTypes = {};
   bool typesLoading = false;
   String _typesForSel = '';
@@ -5015,7 +4994,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   void initState() {
     super.initState();
     authorFilter.addListener(_onSharedFilter);
-    sel = 'all';
     loadLibs();
     LibraryBadge.load().then((_) {
       if (mounted) setState(() {});
@@ -5216,7 +5194,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// 仅用于判断「返回后数据是否真的变了」：作者数、头像、作品数与三项统计。
   String _dataSignature(List<MapEntry<String, Map<String, dynamic>>> entries,
       Map<String, dynamic> stMap) {
-    final b = StringBuffer(sel)
+    final b = StringBuffer(_quickBig)
       ..write('|')
       ..write(entries.length);
     for (final e in entries) {
@@ -5352,14 +5330,14 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   Future<void> _ensureTypes() async {
     if (typesLoading) return;
-    if (_typesForSel == sel && authorTypes.isNotEmpty) return;
+    if (_typesForSel == _quickBig && authorTypes.isNotEmpty) return;
     setState(() => typesLoading = true);
     // 类型索引一次扫全部基础库（服务端 /api/lib/<id>/index.json）。
     final map = await loadAuthorTypes([cfg.lib]);
     if (!mounted) return;
     setState(() {
       authorTypes = map;
-      _typesForSel = sel;
+      _typesForSel = _quickBig;
       typesLoading = false;
       _applyOrder();
     });
@@ -5404,7 +5382,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// build 与滚动回调都只读缓存，避免上千作者反复排序。
   void _applyOrder({bool resetShown = true}) {
     final base = authors.where((e) {
-      if (sel != 'all' && _bigIdOf(e) != sel) return false;
       if (!filter.isActive) return true;
       return filter.matches(
         basicId: _basicIdOf(e),
@@ -5431,9 +5408,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   }
 
   String _selLabel() {
-    if (sel == 'all') return '全部基础库';
+    if (filter.bigs.isEmpty) return '全部基础库';
+    if (filter.bigs.length > 1) return '已选 ${filter.bigs.length} 个基础库';
+    final id = filter.bigs.first;
     for (final l in libs) {
-      if ('${l['id']}' == sel) return '${l['name'] ?? l['id']}';
+      if ('${l['id']}' == id) return '${l['name'] ?? l['id']}';
     }
     return '全部基础库';
   }
@@ -5484,7 +5463,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   Widget _authorCell(MapEntry<String, Map<String, dynamic>> e) {
     final av = '${e.value['av'] ?? ''}';
-    final lib = '${e.value['_lib'] ?? (sel == 'all' ? cfg.lib : sel)}';
+    final lib = '${e.value['_lib'] ?? (_quickBig == 'all' ? cfg.lib : _quickBig)}';
     final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
 
     // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位
@@ -5546,47 +5525,19 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                   FilledButton(onPressed: load, child: const Text('重试')),
                 ]))
               : Column(children: [
-                  SizedBox(
-                    height: 42,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: const Text('全部基础库'),
-                            selected: sel == 'all',
-                            onSelected: (_) {
-                              if (sel == 'all') return;
-                              setState(() {
-                                sel = 'all';
-                                loading = true;
-                                _shown = 0;
-                              });
-                              load();
-                            },
-                          ),
-                        ),
-                        for (final l in libs)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text('${l['name'] ?? l['id']}'),
-                              selected: sel == '${l['id']}',
-                              onSelected: (_) {
-                                if (sel == '${l['id']}') return;
-                                setState(() {
-                                  sel = '${l['id']}';
-                                  loading = true;
-                                  _shown = 0;
-                                });
-                                load();
-                              },
-                            ),
-                          ),
-                      ],
-                    ),
+                  // 与排行榜共用同一个快捷条组件；状态即 filter.bigs。
+                  AuthorQuickChips(
+                    allLabel: '全部基础库',
+                    items: [
+                      for (final b in _filterBigs)
+                        AuthorLibNode(id: b.id, name: b.name)
+                    ],
+                    selected: filter.bigs,
+                    onPick: (id) {
+                      final next = filter.copy();
+                      pickOnlyIn(next.bigs, id);
+                      authorFilter.apply(next);
+                    },
                   ),
                   SizedBox(
                     height: 46,

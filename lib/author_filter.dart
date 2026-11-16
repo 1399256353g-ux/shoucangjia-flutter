@@ -29,6 +29,15 @@ class AuthorLibNode {
   });
 }
 
+/// 快捷筛选条的单选语义：把某个维度收敛为 [id]（空串 = 全部）。
+///
+/// 快捷条与筛选面板共用同一份 [AuthorFilterState]，这里只改一个维度，
+/// 其他维度（等级/作品类型）保持不变。
+void pickOnlyIn(Set<String> target, String id) {
+  target.clear();
+  if (id.isNotEmpty) target.add(id);
+}
+
 /// 作者筛选状态；全部为空即“未筛选”。
 class AuthorFilterState {
   /// J10 旧维度：基础库/大库（保留以兼容历史数据与测试）。

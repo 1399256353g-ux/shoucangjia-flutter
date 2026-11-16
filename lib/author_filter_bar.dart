@@ -7,6 +7,69 @@ library;
 import 'package:flutter/material.dart';
 
 import 'author_filter.dart';
+import 'horizontal_chip_bar.dart';
+import 'library_badge.dart';
+
+/// 作者总览 / 排行榜共用的库快捷条。
+///
+/// 只做「单选收敛」：点某个库 = 只筛这个库，点「全部」= 清空该维度。
+/// 状态直接读写共享的 [AuthorFilterState]，因此与筛选面板永远一致，
+/// 不再各页维护 sel / unitSel 这样的第二份真相。
+class AuthorQuickChips extends StatelessWidget {
+  /// 「全部 …」按钮文案，例如「全部基础库」「全部单元库」。
+  final String allLabel;
+  final List<AuthorLibNode> items;
+  /// 当前该维度的选中集合（通常来自 filter.bigs / filter.units）。
+  final Set<String> selected;
+  /// 传入库 id；空串表示清空该维度。
+  final ValueChanged<String> onPick;
+  final double height;
+
+  const AuthorQuickChips({
+    super.key,
+    required this.allLabel,
+    required this.items,
+    required this.selected,
+    required this.onPick,
+    this.height = 42,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final only = selected.length == 1 ? selected.first : '';
+    return HorizontalChipBar(
+      height: height,
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: ChoiceChip(
+            key: const ValueKey('quick-chip-all'),
+            label: Text(allLabel),
+            selected: selected.isEmpty,
+            onSelected: (_) {
+              if (selected.isEmpty) return;
+              onPick('');
+            },
+          ),
+        ),
+        for (final n in items)
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              key: ValueKey('quick-chip-${n.id}'),
+              label: Text(LibraryBadge.stripIndex(n.name)),
+              selected: only == n.id,
+              onSelected: (_) {
+                if (only == n.id) return;
+                onPick(n.id);
+              },
+            ),
+          ),
+      ],
+    );
+  }
+}
 
 class AuthorFilterBar extends StatelessWidget {
   final AuthorFilterState filter;
