@@ -173,6 +173,11 @@ final navKey = GlobalKey<NavigatorState>();
 /// 一次加载后按库缓存，词条显示「基础库」名称（如「🦶」），不是大库名。
 class LibMeta {
   final List<BasicLibRef> basics;
+
+  /// 0.9.9：库根坐标系下的**全部**基础库（含其它单元库下的）。
+  /// `basics` 只覆盖当前注册库目录，作者总览/排行榜/推荐/搜索的筛选与词条
+  /// 需要跨全部基础库，否则非当前库的作者会落到 SECRET 或无法被筛到。
+  final List<BasicLibRef> allBasics;
   final Map<String, dynamic> stats;
 
   /// J10：大库 id → 名称，用于作者筛选里的「大库」多选。
@@ -190,11 +195,16 @@ class LibMeta {
   const LibMeta({
     required this.basics,
     required this.stats,
+    this.allBasics = const [],
     this.bigNames = const {},
     this.unitTree,
     this.units = const [],
     this.basicToUnit = const {},
   });
+
+  /// 跨库口径的基础库列表（全量优先，缺失时回落到当前库）。
+  List<BasicLibRef> get filterBasics =>
+      allBasics.isNotEmpty ? allBasics : basics;
 
   static final Map<String, LibMeta> cache = <String, LibMeta>{};
   static final Map<String, Future<LibMeta>> _loading =
@@ -205,6 +215,7 @@ class LibMeta {
     if (hit != null) return Future.value(hit);
     return _loading.putIfAbsent(lib, () async {
       var basics = const <BasicLibRef>[];
+      var allBasics = const <BasicLibRef>[];
       var stats = <String, dynamic>{};
       var bigNames = <String, String>{};
       UnitLibrary? unitTree;
@@ -274,21 +285,25 @@ class LibMeta {
                       works: 0),
               ];
               var unitBasics = basicList;
+              var rootBasics = const <BasicLibRef>[];
               if (root.isNotEmpty) {
-                final full = <BasicLib>[];
-                for (final b in basics) {
-                  final rel = relUnderBase(root, b.path);
-                  if (rel.isEmpty) continue;
-                  full.add(BasicLib(
-                      id: b.id,
-                      name: b.name,
-                      rel: rel,
-                      bigId: b.bigId,
-                      authors: 0,
-                      works: 0));
+                // 以库根为坐标系取**全部**基础库（39 个），既给单元库归属，
+                // 也给作者筛选/词条用。
+                rootBasics = basicsUnderBase(ljm, root);
+                if (rootBasics.isNotEmpty) {
+                  unitBasics = <BasicLib>[
+                    for (final b in rootBasics)
+                      BasicLib(
+                          id: b.id,
+                          name: b.name,
+                          rel: b.rel,
+                          bigId: b.bigId,
+                          authors: 0,
+                          works: 0),
+                  ];
                 }
-                if (full.isNotEmpty) unitBasics = full;
               }
+              allBasics = rootBasics.isNotEmpty ? rootBasics : basics;
               // 单元库＝owner 在「文件结构」里勾选的节点文件夹（/api/nodes），
               // 与主页使用同一份来源；只有节点为空时才退回 v2 分组。
               final marks = <String>[];
@@ -329,6 +344,7 @@ class LibMeta {
       } catch (_) {}
       final meta = LibMeta(
           basics: basics,
+          allBasics: allBasics,
           stats: stats,
           bigNames: bigNames,
           unitTree: unitTree,
@@ -346,21 +362,28 @@ class LibMeta {
 
   /// 基础库词条显示名：路径命中基础库时用其名称，否则回落到传入的库名。
   String labelFor(String mediaPath, String fallback) {
-    final b = basicLibForMedia(basics, mediaPath);
+    final b = basicLibForMedia(basics, mediaPath) ??
+        basicLibForMedia(allBasics, mediaPath);
     if (b == null) return '';
     return basicLibLabel(b, fallback);
   }
 
   /// 作者所属基础库 id（用于配色）；未命中返回空。
   String idFor(String mediaPath) =>
-      basicLibForMedia(basics, mediaPath)?.id ?? '';
+      basicLibForMedia(basics, mediaPath)?.id ??
+      basicLibForMedia(allBasics, mediaPath)?.id ??
+      '';
 
   /// 作者所属基础库 id：兼容库作用域路径（`/media/lib-015/...`）。
-  String basicIdForPath(String mediaPath) => basicIdForMedia(basics, mediaPath);
+  String basicIdForPath(String mediaPath) {
+    final id = basicIdForMedia(basics, mediaPath);
+    if (id.isNotEmpty) return id;
+    return basicIdForMedia(allBasics, mediaPath);
+  }
 
   /// 按基础库 id 取词条（搜索结果直接带 `_bid`，无需按路径反查）。
   BasicLibRef? basicById(String id) {
-    for (final b in basics) {
+    for (final b in [...basics, ...allBasics]) {
       if (b.id == id) return b;
     }
     return null;
@@ -426,10 +449,10 @@ class LibMeta {
   Set<String> typesFor(Map<String, Set<String>> types, String author) =>
       types[author] ?? const <String>{};
 
-  List<String> get order => basics.map((e) => e.id).toList();
+  List<String> get order => filterBasics.map((e) => e.id).toList();
 
   Map<String, String> get names => {
-        for (final b in basics) b.id: basicLibLabel(b, b.name),
+        for (final b in filterBasics) b.id: basicLibLabel(b, b.name),
       };
 
   String gradeFor(String author, int works) =>
@@ -1116,7 +1139,9 @@ class LibraryBadgeColorsPage extends StatefulWidget {
 }
 
 class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
-  List<Map<String, dynamic>> libs = [];
+  /// 0.9.9：词条配色按**单元库**（作者来源词条）配置，不再按旧注册库。
+  List<UnitLibrary> units = const [];
+  LibMeta? meta;
   bool loading = true;
   String? err;
 
@@ -1134,18 +1159,12 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   Future<void> _loadLibs() async {
     if (mounted) setState(() => err = null);
     try {
-      final r = await http
-          .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
-      final list = librariesWithDisplayNames(
-          ((j['libraries'] as List?) ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList());
+      final m = await LibMeta.load(cfg.lib);
       if (!mounted) return;
       setState(() {
-        libs = list;
+        meta = m;
+        // 顶级 SECRET 固定灰色（无归属时兜底），不参与自定义。
+        units = [for (final u in m.units) if (u.id != 'secret') u];
         loading = false;
       });
     } catch (e) {
@@ -1158,7 +1177,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     }
   }
 
-  List<String> get _order => libs.map((e) => '${e['id']}').toList();
+  List<String> get _order =>
+      meta?.unitOrder ?? [for (final u in units) u.id];
 
   @override
   Widget build(BuildContext context) {
@@ -1185,17 +1205,24 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
               : ListView(children: [
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-                    child: Text('作者卡片左上角的库词条颜色。默认按库注册顺序自动配色，也可逐库指定。',
+                    child: Text('作者/作品左上角「单元库词条」的颜色。默认按单元库顺序自动配色，也可逐个指定；SECRET 固定灰色。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
-                  for (final l in libs) _libTile(l),
+                  if (units.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('未发现单元库：请先在「文件结构」里勾选节点文件夹。',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    ),
+                  for (final u in units) _libTile(u),
                 ]),
     );
   }
 
-  Widget _libTile(Map<String, dynamic> l) {
-    final id = '${l['id']}';
-    final name = displayLibraryName(id, '${l['name'] ?? ''}');
+  Widget _libTile(UnitLibrary u) {
+    final id = u.id;
+    final name = u.name.isEmpty ? id : u.name;
     final color = LibraryBadge.colorFor(id, order: _order);
     return ListTile(
       leading: Container(
@@ -1209,7 +1236,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         const SizedBox(width: 8),
         LibBadgeChip(label: name, color: color),
       ]),
-      subtitle: Text(id, style: const TextStyle(fontSize: 11)),
+      subtitle: Text('${u.basicCount} 个基础库 · $id',
+          style: const TextStyle(fontSize: 11)),
       trailing: Text(
         LibraryBadge.custom[id] == null ? '自动' : '自定义',
         style: TextStyle(
@@ -1722,8 +1750,8 @@ class SettingsHubPage extends StatelessWidget {
           leading: const Icon(Icons.library_books_outlined),
           title: const Text('媒体库与爬虫'),
           subtitle: const Text('选择 / 添加 / 删除库 · 库根爬虫 · 维护检查'),
-          onTap: () => Navigator.of(context)
-              .push(MaterialPageRoute(builder: (_) => const LibraryPage())),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const MediaCrawlerSettingsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.folder_special),
@@ -3262,6 +3290,149 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 }
 
+/// 设置 → 媒体库与爬虫：独立管理页，不再打开主页（避免套叠重复）。
+class MediaCrawlerSettingsPage extends StatefulWidget {
+  const MediaCrawlerSettingsPage({super.key});
+  @override
+  State<MediaCrawlerSettingsPage> createState() =>
+      _MediaCrawlerSettingsPageState();
+}
+
+class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
+  List<Map<String, dynamic>> libs = [];
+  final Map<String, Map<String, dynamic>> crawlers = {};
+  bool loading = true;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      err = null;
+    });
+    try {
+      final r = await http
+          .get(Uri.parse('${cfg.base}/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 10));
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final list = ((j['libraries'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      crawlers.clear();
+      for (final l in list) {
+        final id = '${l['id']}';
+        try {
+          final cr = await http
+              .get(
+                  Uri.parse('${cfg.base}/api/crawler'
+                      '?lib=${Uri.encodeQueryComponent(id)}'),
+                  headers: cfg.headersFor(id))
+              .timeout(const Duration(seconds: 8));
+          if (cr.statusCode == 200) {
+            final cj = jsonDecode(cr.body);
+            if (cj is Map) {
+              crawlers[id] = Map<String, dynamic>.from(cj);
+            }
+          }
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() {
+        libs = list;
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          err = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  Map _cfgOf(Map<String, dynamic>? j) =>
+      (j != null && j['crawler'] is Map) ? j['crawler'] as Map : const {};
+
+  int _scriptCount(Map<String, dynamic>? j) {
+    final s = j == null ? null : j['scripts'];
+    return s is List ? s.length : 0;
+  }
+
+  String _freqText(Map<String, dynamic>? j) {
+    final iv = (_cfgOf(j)['intervalMin'] as num?)?.toInt() ?? 0;
+    if (iv <= 0) return '不自动抓取';
+    return iv >= 60 ? '每 ${iv ~/ 60} 小时' : '每 $iv 分钟';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final withScripts =
+        crawlers.values.where((c) => _scriptCount(c) > 0).length;
+    return Scaffold(
+      appBar: AppBar(title: const Text('媒体库与爬虫'), actions: [
+        IconButton(
+            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+        const HomeAction(),
+      ]),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : err != null
+              ? Center(child: Text('加载失败：$err'))
+              : ListView(children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                    child: Text(
+                        '${libs.length} 个库 · $withScripts 个已配置爬虫脚本',
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.grey)),
+                  ),
+                  for (final l in libs)
+                    ListTile(
+                      leading: const Icon(Icons.library_books_outlined),
+                      title: Text(
+                          displayLibraryName(
+                              '${l['id']}', '${l['name'] ?? l['id']}'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      subtitle: Text(
+                          '${l['id']} · ${_freqText(crawlers['${l['id']}'])}'
+                          ' · 脚本 ${_scriptCount(crawlers['${l['id']}'])} 个',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11)),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (v) async {
+                          if (v == 'crawler') {
+                            await Navigator.of(context).push(MaterialPageRoute(
+                                builder: (_) => CrawlerConfigPage(lib: l)));
+                            load();
+                          } else if (v == 'maint') {
+                            await Navigator.of(context).push(MaterialPageRoute(
+                                builder: (_) => MaintenancePage(lib: l)));
+                            load();
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                              value: 'crawler', child: Text('爬虫配置')),
+                          PopupMenuItem(
+                              value: 'maint', child: Text('维护检查')),
+                        ],
+                      ),
+                    ),
+                ]),
+    );
+  }
+}
+
 class CrawlerConfigPage extends StatefulWidget {
   final Map<String, dynamic> lib;
   const CrawlerConfigPage({super.key, required this.lib});
@@ -3854,7 +4025,7 @@ class _RankPageState extends State<RankPage> {
     final out = <AuthorLibNode>[];
     final seen = <String>{};
     for (final m in metas.values) {
-      for (final b in m.basics) {
+      for (final b in m.filterBasics) {
         if (!seen.add(b.id)) continue;
         out.add(AuthorLibNode(
             id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
@@ -4707,7 +4878,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         for (final e in meta.bigNames.entries) {'id': e.key, 'name': e.value}
       ]..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
       setState(() {
-        basics = meta.basics;
+        basics = meta.filterBasics;
         libs = list;
         metas[cfg.lib] = meta;
       });
@@ -4778,7 +4949,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       final meta = await LibMeta.load(cfg.lib);
       if (!mounted) return;
       metas[cfg.lib] = meta;
-      basics = meta.basics;
+      basics = meta.filterBasics;
       if (!mounted) return;
       final entries =
           auMap.entries.map((e) => MapEntry(e.key, e.value)).toList();
@@ -4890,7 +5061,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final meta = metas[cfg.lib];
     final nodes = <AuthorLibNode>[
       if (meta != null)
-        for (final b in meta.basics)
+        for (final b in meta.filterBasics)
           AuthorLibNode(
               id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId)
     ];
@@ -8717,7 +8888,7 @@ class _RecommendPageState extends State<RecommendPage> {
 
   List<AuthorLibNode> get _filterBasics {
     final out = <AuthorLibNode>[];
-    for (final b in meta?.basics ?? const <BasicLibRef>[]) {
+    for (final b in meta?.filterBasics ?? const <BasicLibRef>[]) {
       out.add(AuthorLibNode(
           id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
     }
@@ -8992,9 +9163,9 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> loadAll() async {
     final token = ++_loadToken;
-    final targets = sel == 'all'
-        ? libs.map((e) => '${e['id']}').toList()
-        : [(sel.isEmpty ? cfg.lib : sel)];
+    // 0.9.9：默认搜索全部基础库（39 个），不再只扫注册库目录；
+    // 选定某个注册库时仍只扫该库目录。
+    final targets = [sel.isEmpty ? cfg.lib : (sel == 'all' ? cfg.lib : sel)];
     final out = <Map<String, dynamic>>[];
     try {
       for (final lib in targets) {
@@ -9002,7 +9173,9 @@ class _SearchPageState extends State<SearchPage> {
           metas[lib] = await LibMeta.load(lib);
         } catch (_) {}
         // T3：作品来源改为基础库 `works.json`（旧 `/api/c/` 收藏夹通道已移除）
-        final basics = metas[lib]?.basics ?? const [];
+        final basics = (sel == 'all' || sel.isEmpty)
+            ? (metas[lib]?.filterBasics ?? const <BasicLibRef>[])
+            : (metas[lib]?.basics ?? const <BasicLibRef>[]);
         for (final b in basics) {
           final ws = await _libWorks(lib, b.id);
           for (var i = 0; i < ws.length; i++) {
@@ -9069,7 +9242,7 @@ class _SearchPageState extends State<SearchPage> {
   List<AuthorLibNode> get _filterBasics {
     final out = <AuthorLibNode>[];
     for (final m in metas.values) {
-      for (final b in m.basics) {
+      for (final b in m.filterBasics) {
         out.add(AuthorLibNode(
             id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
       }
