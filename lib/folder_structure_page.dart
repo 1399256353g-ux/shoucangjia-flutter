@@ -476,7 +476,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                     const Padding(
                       padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
                       child: Text(
-                          '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）；默认只有顶级 SECRET。'
+                          '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级节点是当前媒体库的根节点，默认名称为 SECRET；接入多个媒体库时，每个库各有自己的顶级节点。'
                           '「基础库」目录固定排除，不能设为节点。',
                           style: TextStyle(fontSize: 11, color: Colors.grey)),
                     ),

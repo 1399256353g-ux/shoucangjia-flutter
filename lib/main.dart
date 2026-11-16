@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'cover_cache.dart';
+import 'recommend_grid.dart';
 import 'horizontal_chip_bar.dart';
 import 'cache_settings.dart';
 import 'app_settings.dart';
@@ -1805,6 +1806,29 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
       );
 }
 
+/// 设置：是否自动省略库名/词条前的序号（`(1) 名称` → `名称`）。
+class _StripIndexTile extends StatefulWidget {
+  const _StripIndexTile();
+  @override
+  State<_StripIndexTile> createState() => _StripIndexTileState();
+}
+
+class _StripIndexTileState extends State<_StripIndexTile> {
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      secondary: const Icon(Icons.format_list_numbered),
+      title: const Text('词条省略序号'),
+      subtitle: const Text('显示单元库/基础库词条时自动去掉名称前的「(1) 」编号'),
+      value: AppSettings.stripLibIndex,
+      onChanged: (v) async {
+        setState(() => AppSettings.stripLibIndex = v);
+        await AppSettings.save();
+      },
+    );
+  }
+}
+
 class SettingsHubPage extends StatelessWidget {
   const SettingsHubPage({super.key});
 
@@ -1871,6 +1895,7 @@ class SettingsHubPage extends StatelessWidget {
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CacheSettingsPage())),
         ),
+        const _StripIndexTile(),
         ListTile(
           leading: const Icon(Icons.keyboard),
           title: const Text('按键绑定'),
@@ -6632,7 +6657,11 @@ class _PlayerPageState extends State<PlayerPage>
       final n = (w['m'] as List).length;
       final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
       switch (slideshowAction(
-          index: img, count: n, loopOne: loopOne, hasAudio: hasAudio)) {
+          index: img,
+          count: n,
+          loopOne: loopOne,
+          hasAudio: hasAudio,
+          autoplay: autoplay)) {
         case SlideshowAction.nextImage:
           setState(() => _setPicIndex(img + 1));
           break;
@@ -6642,6 +6671,9 @@ class _PlayerPageState extends State<PlayerPage>
           break;
         case SlideshowAction.nextWork:
           next();
+          break;
+        case SlideshowAction.stop:
+          pauseAuto();
           break;
       }
     });
@@ -8801,8 +8833,13 @@ class _PlayerPageState extends State<PlayerPage>
                                                   fontSize: 11,
                                                   color: Colors.white70))),
                                       IconButton(
-                                          onPressed: toggleAutoplay,
-                                          tooltip: '自动连播',
+                                          // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
+                                          onPressed: loopOne
+                                              ? null
+                                              : toggleAutoplay,
+                                          tooltip: loopOne
+                                              ? '单条循环开启时自动连播不可用'
+                                              : '自动连播',
                                           icon: Icon(Icons.skip_next,
                                               color: autoplay
                                                   ? Colors.white70
@@ -9084,10 +9121,19 @@ class _RecommendPageState extends State<RecommendPage> {
     final type = workFilterType(w);
     final types =
         authorTypes[a] ?? (type == 'other' ? const <String>{} : <String>{type});
+    // 作品条目直接带 `_bid`（基础库 id）时优先用它，否则按路径反查；
+    // 再不行用条目自带的 `_lib`（基础库页/单库数据源）。
+    var basic = '${w['_bid'] ?? ''}';
+    final libId = '${w['_lib'] ?? ''}';
+    if (basic.isEmpty) basic = meta?.basicIdForPath(av) ?? '';
+    if (basic.isEmpty && meta?.basicById(libId) != null) basic = libId;
+    final unit = basic.isEmpty
+        ? (meta?.unitIdFor(av) ?? '')
+        : (meta?.basicToUnit[basic] ?? '');
     return f.matches(
-      basicId: meta?.idFor(av) ?? '',
+      basicId: basic,
       bigId: meta?.bigIdFor(av) ?? '',
-      unitId: meta?.unitIdFor(av) ?? '',
+      unitId: unit,
       grade: meta?.gradeFor(a, _authorCount[a] ?? 0) ?? '',
       workTypes: types,
     );
@@ -9162,8 +9208,15 @@ class _RecommendPageState extends State<RecommendPage> {
                                     style: TextStyle(color: Colors.grey)))
                             : RefreshIndicator(
                                 onRefresh: () => load(refresh: true),
-                                // 与作者页/基础库页/搜索页共用同一个作品卡组件
-                                child: WorkGrid(works: visible, lib: cfg.lib),
+                                // 与作者页/基础库页/搜索页共用同一个作品卡组件；
+                                // 显示数量随窗口自适应铺满一屏，最少 40 个。
+                                child: WorkGrid(
+                                  works: visible
+                                      .take(recommendVisibleCount(
+                                          MediaQuery.sizeOf(context)))
+                                      .toList(growable: false),
+                                  lib: cfg.lib,
+                                ),
                               ),
                   ),
                 ]),

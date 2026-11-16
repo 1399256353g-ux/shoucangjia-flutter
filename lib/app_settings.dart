@@ -41,6 +41,9 @@ class AppSettings {
   /// M6：预加载缓存内存上限（MB）。
   static int preloadMemoryMb = preloadDefaultMemoryMb;
 
+  /// 词条是否自动省略库名前的序号（`(1) 名称` → `名称`）。
+  static bool stripLibIndex = true;
+
   static final Map<PlayerAction, int> keyIds =
       Map<PlayerAction, int>.from(_defaultKeyIds);
 
@@ -50,6 +53,7 @@ class AppSettings {
         'hideUi': hideUiSec,
         'preloadPerSide': preloadPerSide,
         'preloadMemory': preloadMemoryMb,
+        'stripIndex': stripLibIndex,
         'keys': {
           for (final e in keyIds.entries) e.key.name: e.value,
         },
@@ -68,6 +72,8 @@ class AppSettings {
     if (pp != null) preloadPerSide = clampPreloadPerSide(pp);
     final pm = (j['preloadMemory'] as num?)?.toInt();
     if (pm != null) preloadMemoryMb = clampPreloadMemoryMb(pm);
+    final si = j['stripIndex'];
+    if (si is bool) stripLibIndex = si;
     final keys = j['keys'];
     if (keys is Map) {
       for (final a in PlayerAction.values) {
@@ -83,6 +89,7 @@ class AppSettings {
     hideUiSec = 3;
     preloadPerSide = preloadDefaultPerSide;
     preloadMemoryMb = preloadDefaultMemoryMb;
+    stripLibIndex = true;
     keyIds
       ..clear()
       ..addAll(_defaultKeyIds);

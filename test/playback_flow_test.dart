@@ -130,4 +130,15 @@ void main() {
       expect(picIndexAtFraction(0.7, 0), 0);
     });
   });
+
+  test('自动连播关闭时图文放完不切下一条', () {
+    expect(
+        slideshowAction(
+            index: 4, count: 5, loopOne: false, hasAudio: false, autoplay: false),
+        SlideshowAction.stop);
+    expect(
+        slideshowAction(
+            index: 4, count: 5, loopOne: false, hasAudio: false, autoplay: true),
+        SlideshowAction.nextWork);
+  });
 }

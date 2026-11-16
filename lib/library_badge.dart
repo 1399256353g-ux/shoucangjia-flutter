@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_settings.dart';
+
 /// 库词条（作者卡片左上角）的配色与标签逻辑。
 /// 纯函数部分不依赖 UI，便于单元测试；颜色统一用 ARGB int 表示。
 class LibraryBadge {
@@ -83,6 +85,7 @@ class LibraryBadge {
   /// `(1) 名称` / `（1）名称` / `[1] 名称` / `01. 名称` / `01、名称` → `名称`。
   /// 目录名里的序号只是排序用，不应出现在作者/作品词条上。
   static String stripIndex(String name) {
+    if (!AppSettings.stripLibIndex) return name.trim();
     var s = name.trim();
     if (s.isEmpty) return s;
     final bracket = RegExp(r'^[(（\[【]\s*\d{1,4}\s*[)）\]】]\s*[._\-·]?\s*');
