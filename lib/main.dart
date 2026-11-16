@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'cover_cache.dart';
+import 'horizontal_chip_bar.dart';
 import 'cache_settings.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
@@ -4235,12 +4236,10 @@ class _RankPageState extends State<RankPage> {
         const HomeAction(),
       ]),
       body: Column(children: [
-        SizedBox(
+        HorizontalChipBar(
           height: 42,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
-            children: [
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+          children: [
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ChoiceChip(
@@ -4256,7 +4255,7 @@ class _RankPageState extends State<RankPage> {
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    label: Text(u.name),
+                    label: Text(LibraryBadge.stripIndex(u.name)),
                     selected: unitSel == u.id,
                     onSelected: (_) {
                       if (unitSel == u.id) return;
@@ -4264,15 +4263,10 @@ class _RankPageState extends State<RankPage> {
                     },
                   ),
                 ),
-            ],
-          ),
+          ],
         ),
-        SizedBox(
-          height: 46,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            children: [
+        HorizontalChipBar(
+          children: [
               for (final p in _periods.entries)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
@@ -4316,8 +4310,7 @@ class _RankPageState extends State<RankPage> {
                   load();
                 },
               ),
-            ],
-          ),
+          ],
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
@@ -4378,7 +4371,9 @@ class _RankPageState extends State<RankPage> {
                             final rowLib = sel == 'all'
                                 ? '${e['lib'] ?? cfg.lib}'
                                 : (sel.isEmpty ? cfg.lib : sel);
-                            final meta = metas[rowLib];
+                            // 0.9.15：排行榜每行都用有效 meta（缺行库时回退到当前库），
+                            // 否则作者词条会退化成 SECRET/旧词条。
+                            final meta = _rowMeta(_rowMap(e));
                             String libName(String id) {
                               for (final l in libs) {
                                 if ('${l['id']}' == id) {
@@ -4506,12 +4501,8 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
         const HomeAction(),
       ]),
       body: Column(children: [
-        SizedBox(
-          height: 46,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            children: [
+        HorizontalChipBar(
+          children: [
               ChoiceChip(
                 label: const Text('总播放量'),
                 selected: metric == 'play',
@@ -4529,8 +4520,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                   setState(() => metric = 'drop');
                 },
               ),
-            ],
-          ),
+          ],
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
@@ -9119,67 +9109,14 @@ class _RecommendPageState extends State<RecommendPage> {
                                     style: TextStyle(color: Colors.grey)))
                             : RefreshIndicator(
                                 onRefresh: () => load(refresh: true),
-                                child: GridView.builder(
-                                  padding: const EdgeInsets.all(2),
-                                  gridDelegate:
-                                      const SliverGridDelegateWithMaxCrossAxisExtent(
-                                          maxCrossAxisExtent: 180,
-                                          childAspectRatio: 3 / 4,
-                                          mainAxisSpacing: 2,
-                                          crossAxisSpacing: 2),
-                                  itemCount: visible.length,
-                                  itemBuilder: (_, i) {
-                                    final w = visible[i];
-                                    return GestureDetector(
-                                      onTap: () => Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                              builder: (_) => PlayerPage(
-                                                  works: visible, start: i))),
-                                      child: _tile(w),
-                                    );
-                                  },
-                                ),
+                                // 与作者页/基础库页/搜索页共用同一个作品卡组件
+                                child: WorkGrid(works: visible, lib: cfg.lib),
                               ),
                   ),
                 ]),
     );
   }
 
-  Widget _tile(dynamic w) {
-    return Stack(fit: StackFit.expand, children: [
-      (w['th'] ?? '').toString().isEmpty
-          ? Container(color: Colors.black26)
-          : CachedNetworkImage(
-            cacheManager: DiziCache.manager,
-              imageUrl: cfg.mediaUrl(w['th'].toString()),
-              httpHeaders: cfg.headers,
-              fit: BoxFit.cover,
-              errorWidget: (_, __, ___) => Container(color: Colors.black26)),
-      Positioned(
-          left: 4,
-          top: 4,
-          child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              color: Colors.black54,
-              child: Text(w['t'] == 'v' ? '视频' : '图文',
-                  style: const TextStyle(fontSize: 10)))),
-      Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: Container(
-              padding: const EdgeInsets.fromLTRB(6, 10, 6, 5),
-              decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black87])),
-              child: Text('@${w['a'] ?? ''} · ${w['d'] ?? ''}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10)))),
-    ]);
-  }
 }
 
 class SearchPage extends StatefulWidget {
@@ -9878,12 +9815,10 @@ class _AuthorPageState extends State<AuthorPage> {
                 ),
               const Divider(height: 1),
               if (works.isNotEmpty)
-                SizedBox(
+                HorizontalChipBar(
                   height: 46,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    children: [
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
                       Center(
                         child: FilterChip(
                             label: Text('全部 ${works.length}',
@@ -9917,8 +9852,7 @@ class _AuthorPageState extends State<AuthorPage> {
                                     style: TextStyle(fontSize: 12))),
                           ),
                         ),
-                    ],
-                  ),
+                  ],
                 ),
               Expanded(
                   child: WorkGrid(

@@ -11,6 +11,7 @@ import 'category_tree_page.dart';
 import 'library_tree.dart';
 import 'media_priority.dart';
 import 'work_card.dart';
+import 'author_grade.dart';
 import 'library_badge.dart';
 
 /// 作者卡片头像：手动设置 > 爬虫脚本（服务端下发 `av`）> 自动生成（作品图兜底）。
@@ -81,6 +82,8 @@ class _BasicLibPageState extends State<BasicLibPage>
   final Map<String, String> _authorAv = <String, String>{};
   /// 作者 → 兜底头像（该作者第一件作品的缩略图）。
   final Map<String, String> _authorFallback = <String, String>{};
+  /// 作者 → `/api/author_stats.json` 统计（用于等级词条）。
+  final Map<String, dynamic> _authorStats = <String, dynamic>{};
   /// 作品类型多选筛选（空集合 = 全部）；只在本地过滤，不影响接口分页。
   final Set<String> _typeFilter = <String>{};
   int total = 0;
@@ -95,6 +98,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     _worksScroll.addListener(_onScroll);
     _loadAuthors();
     _loadAvatars();
+    _loadAuthorStats();
     _loadWorks(reset: true);
   }
 
@@ -175,6 +179,25 @@ class _BasicLibPageState extends State<BasicLibPage>
       final th = _thumbOf(w);
       if (th.isNotEmpty) _authorFallback[a] = th;
     }
+  }
+
+  Future<void> _loadAuthorStats() async {
+    try {
+      final r = await http
+          .get(widget.urlOf('/api/author_stats.json', lib: widget.basic.id),
+              headers: widget.headersOf(widget.basic.id))
+          .timeout(const Duration(seconds: 10));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final authors = j is Map ? j['authors'] : null;
+      if (authors is! Map) return;
+      if (!mounted) return;
+      setState(() {
+        _authorStats
+          ..clear()
+          ..addAll(Map<String, dynamic>.from(authors));
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadWorks({bool reset = false}) async {
@@ -326,42 +349,71 @@ class _BasicLibPageState extends State<BasicLibPage>
                     context: c,
                     name: name,
                   ),
-                  const SizedBox(height: 8),
-                  if (widget.sourceLabel.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Container(
-                        key: const ValueKey('basic-author-source'),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Color(widget.sourceColor),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          LibraryBadge.stripIndex(widget.sourceLabel),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 9,
-                            height: 1.3,
-                            color: Color(
-                                LibraryBadge.textColorOn(widget.sourceColor)),
+                  const SizedBox(height: 6),
+                  // 词条：单元库（去序号）+ 作者等级，与作者总览卡同一套
+                  Wrap(
+                    spacing: 3,
+                    runSpacing: 3,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      if (widget.sourceLabel.isNotEmpty)
+                        Container(
+                          key: const ValueKey('basic-author-source'),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Color(widget.sourceColor),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            LibraryBadge.stripIndex(widget.sourceLabel),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 9,
+                              height: 1.3,
+                              color: Color(LibraryBadge.textColorOn(
+                                  widget.sourceColor)),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
+                      Builder(builder: (_) {
+                        final g = AuthorGrade.fromStats(
+                            _authorStats[name],
+                            works: _int(a['works']));
+                        return Container(
+                          key: const ValueKey('basic-author-grade'),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Color(AuthorGrade.colorForGrade(g)),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            g,
+                            style: TextStyle(
+                              fontSize: 9,
+                              height: 1.3,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
                   Expanded(
-                    child: Text(name,
-                        maxLines: 2,
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w600)),
+                    child: Center(
+                      child: Text(name,
+                          maxLines: 1,
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600)),
+                    ),
                   ),
                   Text('${_int(a['works'])} 作品',
-                      style:
-                          const TextStyle(fontSize: 10, color: Colors.grey)),
+                      style: const TextStyle(fontSize: 9.5, color: Colors.grey)),
                   if (sub.isNotEmpty)
                     Text(sub,
                         maxLines: 1,
@@ -384,7 +436,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     Key? key,
     required BuildContext context,
     required String name,
-    double size = 48,
+    double size = 58,
   }) {
     final scheme = Theme.of(context).colorScheme;
     final initial = name.isEmpty ? '?' : name.characters.first;

@@ -12,7 +12,7 @@ import 'package:flutter/material.dart';
 ///
 /// 所有页面（作者主页、作品页、收藏夹、搜索、基础库）都必须用这个组件，
 /// 不允许各自再写一套卡片。
-class WorkCard extends StatelessWidget {
+class WorkCard extends StatefulWidget {
   static const double radius = 10;
   static const double aspect = 3 / 4;
 
@@ -41,20 +41,36 @@ class WorkCard extends StatelessWidget {
   });
 
   @override
+  State<WorkCard> createState() => _WorkCardState();
+}
+
+class _WorkCardState extends State<WorkCard> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(radius),
+    final w = widget;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: InkWell(
+      onTap: w.onTap,
+      borderRadius: BorderRadius.circular(WorkCard.radius),
+      // 悬停只做外圈描边，不铺色，避免盖住底部标题/类型。
+      hoverColor: Colors.transparent,
+      splashColor: Colors.transparent,
+      highlightColor: Colors.transparent,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(WorkCard.radius),
         child: Stack(fit: StackFit.expand, children: [
-          if (coverUrl.isEmpty)
+          if (w.coverUrl.isEmpty)
             Container(color: Colors.black26)
           else
             CachedNetworkImage(
               cacheManager: DiziCache.manager,
-              imageUrl: coverUrl,
-              httpHeaders: headers,
+              imageUrl: w.coverUrl,
+              httpHeaders: w.headers,
               fit: BoxFit.cover,
               fadeInDuration: Duration.zero,
               errorWidget: (_, __, ___) => Container(color: Colors.black26),
@@ -79,7 +95,7 @@ class WorkCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      title.trim().isEmpty ? '未命名' : title.trim(),
+                      w.title.trim().isEmpty ? '未命名' : w.title.trim(),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -90,7 +106,7 @@ class WorkCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      typeLabel,
+                      w.typeLabel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -102,15 +118,15 @@ class WorkCard extends StatelessWidget {
               ),
             ),
           ),
-          if (badge != null && badge!.isNotEmpty)
+          if (w.badge != null && w.badge!.isNotEmpty)
             Positioned(
               right: 4,
               bottom: 4,
-              child: Text(badge!,
+              child: Text(w.badge!,
                   style: const TextStyle(
                       fontSize: 10, color: Colors.white70)),
             ),
-          if (done)
+          if (w.done)
             Positioned(
               left: 4,
               top: 4,
@@ -127,7 +143,7 @@ class WorkCard extends StatelessWidget {
                         fontWeight: FontWeight.w600)),
               ),
             ),
-          if (progress > 0.01)
+          if (w.progress > 0.01)
             Positioned(
               left: 0,
               right: 0,
@@ -135,13 +151,27 @@ class WorkCard extends StatelessWidget {
               child: SizedBox(
                 height: 2,
                 child: LinearProgressIndicator(
-                    value: progress,
+                    value: w.progress,
                     backgroundColor: Colors.black26,
                     minHeight: 2),
               ),
             ),
+          // 桌面端悬停指示：只画一圈描边，不覆盖信息区
+          if (_hover)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(WorkCard.radius),
+                    border: Border.all(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2),
+                  ),
+                ),
+              ),
+            ),
         ]),
       ),
-    );
+    ));
   }
 }
