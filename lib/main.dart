@@ -2911,11 +2911,12 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   void _showBasicOn(BuildContext c, BasicLib b) {
-    Navigator.of(c).pop();
-    _showBasic(b);
+    // 直接在当前页之上打开基础库，不能再 pop：否则返回会少一级
+    // （从「某个单元库的基础库列表」进入后，返回会越过该列表）。
+    _showBasic(b, from: c);
   }
 
-  void _showBasic(BasicLib b) {
+  void _showBasic(BasicLib b, {BuildContext? from}) {
     // 作者来源词条：本基础库所属单元库（与作者卡/作者页同一口径）。
     final root = unitTree;
     final unit = root == null ? null : unitForBasic(root, b.id);
@@ -2925,7 +2926,7 @@ class _LibraryPageState extends State<LibraryPage> {
             for (final u in flattenUnits(root))
               if (u.id != root.id) u.id
           ];
-    Navigator.of(context).push(MaterialPageRoute<void>(
+    Navigator.of(from ?? context).push(MaterialPageRoute<void>(
       builder: (_) => BasicLibPage(
         basic: b,
         urlOf: (path, {lib}) => cfg.u(path, lib: lib ?? b.id),
