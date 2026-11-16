@@ -5821,6 +5821,22 @@ class _PlayerPageState extends State<PlayerPage>
     } catch (_) {}
   }
 
+  /// 播放页头像：作品自带 `av` 优先；离线库没有作者头像时，
+  /// 用该作者任一作品的封面图兜底，避免永远显示默认人形图标。
+  String avatarFor(Map w) {
+    final av = '${w['av'] ?? ''}';
+    if (av.isNotEmpty) return av;
+    final name = '${w['a'] ?? ''}';
+    if (name.isEmpty) return '';
+    for (final e in widget.works) {
+      if (e is Map && '${e['a'] ?? ''}' == name) {
+        final t = '${e['th'] ?? ''}';
+        if (t.isNotEmpty) return t;
+      }
+    }
+    return '';
+  }
+
   /// G18：监听当前活动槽位。切换预缓冲槽位时先解绑旧槽位，避免
   /// 旧播放器迟到的 completed/position 事件干扰新作品。
   void _bindPlayer() {
@@ -7487,11 +7503,15 @@ class _PlayerPageState extends State<PlayerPage>
                   child: CircularProgressIndicator(color: Colors.white38)),
           errorBuilder: (_, __, ___) => retryBox());
     }
+    // 原图可能几千像素宽，按屏幕宽度解码，避免大图整张进内存导致卡顿/闪退。
+    final screenW = MediaQuery.sizeOf(context).width;
+    final decodeW = (screenW * MediaQuery.devicePixelRatioOf(context)).round();
     return CachedNetworkImage(
       cacheManager: DiziCache.manager,
         key: ValueKey('pic-$cur-$img-$_imgReload'),
         imageUrl: url,
         httpHeaders: cfg.headers,
+        memCacheWidth: decodeW,
         fit: BoxFit.contain,
         placeholder: (_, __) => const Center(
             child: CircularProgressIndicator(color: Colors.white38)),
@@ -8202,16 +8222,25 @@ class _PlayerPageState extends State<PlayerPage>
                       // G11：长按信息区弹出播放菜单（视频区长按仍是 2 倍速）
                       onLongPress: _showWorkMenu,
                       child: Row(children: [
-                        if ((w['av'] ?? '').toString().isNotEmpty)
+                        if (avatarFor(w).isNotEmpty)
                           ClipOval(
                               child: CachedNetworkImage(
-                                cacheManager: DiziCache.manager,
-                                  imageUrl: cfg.mediaUrl(w['av'].toString(),
+                                  cacheManager: DiziCache.manager,
+                                  imageUrl: cfg.mediaUrl(avatarFor(w),
                                       lib: _curLib),
                                   httpHeaders: cfg.headersFor(_curLib),
                                   width: 38,
                                   height: 38,
-                                  fit: BoxFit.cover))
+                                  memCacheWidth: (38 *
+                                          MediaQuery.devicePixelRatioOf(
+                                              context))
+                                      .round(),
+                                  fadeInDuration: Duration.zero,
+                                  fit: BoxFit.cover,
+                                  errorWidget: (_, __, ___) =>
+                                      const CircleAvatar(
+                                          radius: 19,
+                                          child: Icon(Icons.person))))
                         else
                           const CircleAvatar(
                               radius: 19, child: Icon(Icons.person)),
@@ -8254,7 +8283,7 @@ class _PlayerPageState extends State<PlayerPage>
                                     child: AuthorBadges(
                                       meta: _meta,
                                       name: '${w['a'] ?? ''}',
-                                      mediaPath: '${w['av'] ?? ''}',
+                                      mediaPath: avatarFor(w),
                                       // 作品条目自带基础库 id 时直接用它归属单元库
                                       basicId: '${w['_bid'] ?? w['basicId'] ?? ''}',
                                       fallbackId: _curLib,
@@ -8266,6 +8295,18 @@ class _PlayerPageState extends State<PlayerPage>
                                           .length,
                                     ),
                                   ),
+                                ),
+                              // 作品/合集文件夹里的 txt 简介（服务端下发 desc）
+                              if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 3),
+                                  child: Text(
+                                      '${w['desc']}'.trim(),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.white70)),
                                 ),
                               if (workChapterCount(widget.works[cur]) > 1)
                                 Padding(
@@ -9719,7 +9760,7 @@ class _AuthorPageState extends State<AuthorPage> {
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.sync)),
+                  : const Icon(Icons.cloud_sync_outlined)),
       ]),
       body: loading
           ? const _AuthorPageSkeleton()
@@ -9774,7 +9815,7 @@ class _AuthorPageState extends State<AuthorPage> {
                         size: 14, color: Colors.grey),
                     const SizedBox(width: 6),
                     const Expanded(
-                        child: Text('同步会立即爬取该作者的全部作品',
+                        child: Text('点右上角云同步按钮，立即爬取该作者的全部作品',
                             style:
                                 TextStyle(fontSize: 11, color: Colors.grey))),
                   ]),
@@ -10018,15 +10059,22 @@ class _WorkGridState extends State<WorkGrid> {
       itemCount: shown,
       itemBuilder: (_, i) {
         final w = works[i];
+        final lib = _libFor(w);
         final wp = WatchProgressStore.of(
-            _libFor(w), '${(w is Map ? w['id'] : null) ?? ''}');
+            lib, '${(w is Map ? w['id'] : null) ?? ''}');
+        // 视频没有 thumb.jpg 时走后端按需抽帧（生成后落盘缓存）
+        final th = (w['th'] ?? '').toString();
+        final wid = '${(w is Map ? w['id'] : null) ?? ''}';
+        final cover = th.isNotEmpty
+            ? cfg.mediaUrl(th, lib: lib)
+            : (w['t'] == 'v' && wid.isNotEmpty
+                ? cfg.u('/api/thumb/$lib/$wid', lib: lib).toString()
+                : '');
         // G13：视频右下角显示时长，图文显示图片张数
         return WorkCard(
           title: '${w['ti'] ?? ''}',
           typeLabel: widget.subtitleOf?.call(w) ?? workTypeLabel(w),
-          coverUrl: (w['th'] ?? '').toString().isEmpty
-              ? ''
-              : cfg.mediaUrl(w['th'].toString(), lib: _libFor(w)),
+          coverUrl: cover,
           headers: cfg.headersFor(_libFor(w)),
           badge: workCoverBadge(w),
           done: wp != null && wp.done,

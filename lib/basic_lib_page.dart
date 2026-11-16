@@ -528,13 +528,21 @@ class _BasicLibPageState extends State<BasicLibPage>
         }
         final w = filtered[i];
         final thumb = _thumbOf(w);
+        final wid = w is Map ? '${w['id'] ?? ''}' : '';
+        // 视频没有 thumb.jpg 时走后端按需抽帧（抽过一次即落盘缓存）
+        final cover = thumb.isNotEmpty
+            ? widget.mediaUrlOf(thumb, lib: widget.basic.id)
+            : (w is Map && w['t'] == 'v' && wid.isNotEmpty
+                ? widget
+                    .urlOf('/api/thumb/${widget.basic.id}/$wid',
+                        lib: widget.basic.id)
+                    .toString()
+                : '');
         return WorkCard(
           key: ValueKey('basic-work-${w is Map ? w['id'] : i}'),
           title: w is Map ? '${w['ti'] ?? ''}' : '',
           typeLabel: _typeLabel(_workType(w)),
-          coverUrl: thumb.isEmpty
-              ? ''
-              : widget.mediaUrlOf(thumb, lib: widget.basic.id),
+          coverUrl: cover,
           headers: widget.headersOf(widget.basic.id),
           onTap:
               widget.onPlay == null ? null : () => widget.onPlay!(filtered, i),

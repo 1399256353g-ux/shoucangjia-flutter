@@ -71,6 +71,9 @@ class _WorkCardState extends State<WorkCard> {
               cacheManager: DiziCache.manager,
               imageUrl: w.coverUrl,
               httpHeaders: w.headers,
+              // 卡片最大约 180 逻辑像素，按 220×DPR 解码足够清晰且省内存。
+              memCacheWidth:
+                  (220 * MediaQuery.devicePixelRatioOf(context)).round(),
               fit: BoxFit.cover,
               fadeInDuration: Duration.zero,
               errorWidget: (_, __, ___) => Container(color: Colors.black26),

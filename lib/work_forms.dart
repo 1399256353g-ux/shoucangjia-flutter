@@ -110,9 +110,9 @@ const String workFilterPicture = 'picture';
 
 const List<String> workFilterOrder = [
   workFilterVideo,
-  workFilterPost,
-  workFilterCollection,
   workFilterPicture,
+  workFilterCollection,
+  workFilterPost,
 ];
 
 String workFilterLabel(String type) {
