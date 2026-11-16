@@ -9,6 +9,10 @@ import 'app_settings.dart';
 class LibraryBadge {
   static const String prefsKey = 'lib_colors_v1';
 
+  /// 词条 emoji 后缀（owner 2026-11-17）：每个单元库可选一个 emoji 追加在
+  /// 词条名称后，作者卡/排行榜/基础库卡一眼区分。
+  static const String emojiPrefsKey = 'lib_badge_emoji_v1';
+
   /// 顶级单元库（SECRET）与无归属词条的固定灰色。
   static const int gray = 0xFF6B7280;
 
@@ -30,6 +34,15 @@ class LibraryBadge {
 
   /// 用户在设置里为某个库自定义的颜色；id -> ARGB。
   static final Map<String, int> custom = <String, int>{};
+
+  /// 用户在设置里为某个库选择的 emoji 后缀；id -> emoji（最多 8 个字符）。
+  static final Map<String, String> emoji = <String, String>{};
+
+  /// 词条 emoji 可选集合（设置页一键选择，也允许键盘输入其它 emoji）。
+  static const List<String> emojiChoices = <String>[
+    '🔥', '⭐', '💧', '🎬', '📷', '🍀', '🌙', '🎵',
+    '🐾', '🎯', '🍭', '💎', '🌊', '🧿', '🪩', '🦶',
+  ];
 
   static int autoColorAt(int index) {
     if (palette.isEmpty) return 0xFF6B7280;
@@ -134,6 +147,58 @@ class LibraryBadge {
     return m;
   }
 
+  /// 单元库的 emoji 后缀：id 形式在主页（`node:rel`）与 LibMeta（`rel`）
+  /// 之间不一致，两种形式都查；顶级 SECRET / 空 id 不显示。
+  static String emojiFor(String unitId) {
+    if (unitId.isEmpty || unitId == 'secret') return '';
+    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    return emoji[unitId] ?? emoji[rel] ?? emoji['node:$rel'] ?? '';
+  }
+
+  /// 词条展示文字：去序号后的名称 + 该库 emoji 后缀。
+  static String labelWithEmoji(String label, String unitId) {
+    if (label.isEmpty || label.startsWith('+')) return label;
+    final e = emojiFor(unitId);
+    return e.isEmpty ? label : '$label$e';
+  }
+
+  /// 清洗用户输入的 emoji 后缀：去空白/控制字符，最多 8 个 UTF-16 单元。
+  static String sanitizeEmoji(String raw) {
+    final s = raw.replaceAll(RegExp(r'\s'), '');
+    final buf = StringBuffer();
+    var units = 0;
+    for (final r in s.runes) {
+      final w = r > 0xFFFF ? 2 : 1;
+      if (units + w > 8) break;
+      buf.writeCharCode(r);
+      units += w;
+    }
+    return buf.toString();
+  }
+
+  static Map<String, String> parseEmoji(String? raw) {
+    final m = <String, String>{};
+    if (raw == null || raw.isEmpty) return m;
+    try {
+      final j = jsonDecode(raw);
+      if (j is Map) {
+        for (final e in j.entries) {
+          final v = e.value;
+          if (v is String) {
+            final s = sanitizeEmoji(v);
+            if (s.isNotEmpty) m['${e.key}'] = s;
+          }
+        }
+      }
+    } catch (_) {}
+    return m;
+  }
+
+  static String encodeEmoji({Map<String, String>? source}) {
+    final src = source ?? emoji;
+    return jsonEncode({for (final e in src.entries) e.key: e.value});
+  }
+
   static String encode({Map<String, int>? source}) {
     final src = source ?? custom;
     return jsonEncode({
@@ -147,6 +212,9 @@ class LibraryBadge {
       custom
         ..clear()
         ..addAll(parse(sp.getString(prefsKey)));
+      emoji
+        ..clear()
+        ..addAll(parseEmoji(sp.getString(emojiPrefsKey)));
     } catch (_) {}
   }
 
@@ -164,5 +232,26 @@ class LibraryBadge {
       custom[libId] = argb;
     }
     await save();
+  }
+
+  static Future<void> saveEmoji() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(emojiPrefsKey, encodeEmoji());
+    } catch (_) {}
+  }
+
+  /// 设置或清除单元库 emoji 后缀；同一单元库的 `rel` / `node:rel` 形式
+  /// 一起清掉，避免两种 id 各留一份导致显示不一致。
+  static Future<void> setEmoji(String unitId, String? value) async {
+    if (unitId.isEmpty) return;
+    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    emoji
+      ..remove(unitId)
+      ..remove(rel)
+      ..remove('node:$rel');
+    final v = sanitizeEmoji(value ?? '');
+    if (v.isNotEmpty) emoji[unitId] = v;
+    await saveEmoji();
   }
 }

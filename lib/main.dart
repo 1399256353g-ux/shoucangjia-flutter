@@ -1239,7 +1239,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Text(
-                        '作者/作品左上角「单元库词条」的颜色。默认按单元库顺序自动配色，也可逐个指定；SECRET 固定灰色。',
+                        '作者/作品左上角「单元库词条」的颜色与 emoji 后缀。默认按单元库顺序自动配色，'
+                        '也可逐个指定颜色并追加一个 emoji；SECRET 固定灰色、不显示后缀。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
                   if (units.isEmpty)
@@ -1258,6 +1259,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     final id = u.id;
     final name = u.name.isEmpty ? id : u.name;
     final color = LibraryBadge.colorFor(id, order: _order);
+    final emoji = LibraryBadge.emojiFor(id);
     return ListTile(
       leading: Container(
         width: 26,
@@ -1268,79 +1270,146 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       title: Row(children: [
         Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
         const SizedBox(width: 8),
-        LibBadgeChip(label: name, color: color),
+        LibBadgeChip(label: name, color: color, unitId: id),
       ]),
-      subtitle: Text('${u.basicCount} 个基础库 · $id',
+      subtitle: Text(
+          '${u.basicCount} 个基础库 · $id${emoji.isEmpty ? '' : ' · 后缀 $emoji'}',
           style: const TextStyle(fontSize: 11)),
-      trailing: Text(
-        LibraryBadge.custom[id] == null ? '自动' : '自定义',
-        style: TextStyle(
-            fontSize: 12,
-            color: LibraryBadge.custom[id] == null
-                ? Colors.grey
-                : Colors.lightBlueAccent),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (emoji.isNotEmpty)
+            Text(emoji, style: const TextStyle(fontSize: 16, height: 1.1)),
+          Text(
+            LibraryBadge.custom[id] == null ? '自动' : '自定义',
+            style: TextStyle(
+                fontSize: 12,
+                color: LibraryBadge.custom[id] == null
+                    ? Colors.grey
+                    : Colors.lightBlueAccent),
+          ),
+        ],
       ),
       onTap: () async {
-        final chosen = await _showColorDialog(name, id, color);
+        final chosen = await _showBadgeDialog(name, id, color);
         if (chosen == null) return;
-        await LibraryBadge.setColor(id, chosen == -1 ? null : chosen);
+        if (chosen.reset) {
+          await LibraryBadge.setColor(id, null);
+          await LibraryBadge.setEmoji(id, null);
+        } else {
+          await LibraryBadge.setColor(id, chosen.color);
+          await LibraryBadge.setEmoji(id, chosen.emoji);
+        }
         if (mounted) setState(() {});
       },
     );
   }
 
-  /// 返回 -1 表示恢复自动配色，null 表示取消。
-  Future<int?> _showColorDialog(String name, String id, int autoColor) async {
-    int? current = LibraryBadge.custom[id];
-    return showDialog<int>(
+  /// 词条样式（颜色 + emoji 后缀）编辑；返回 null 表示取消。
+  Future<_BadgeDraft?> _showBadgeDialog(
+      String name, String id, int autoColor) async {
+    var current = LibraryBadge.custom[id] ?? autoColor;
+    var currentEmoji = LibraryBadge.emojiFor(id);
+    return showDialog<_BadgeDraft>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
-          title: Text('「$name」词条颜色'),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            LibBadgeChip(label: name, color: current ?? autoColor),
-            const SizedBox(height: 14),
-            Wrap(spacing: 10, runSpacing: 10, children: [
-              for (var i = 0; i < LibraryBadge.palette.length; i++)
-                GestureDetector(
-                  onTap: () => setLocal(() {
-                    current = LibraryBadge.palette[i];
-                  }),
-                  child: Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: Color(LibraryBadge.palette[i]),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: current == LibraryBadge.palette[i]
-                            ? Colors.white
-                            : Colors.transparent,
-                        width: 2,
+          title: Text('「$name」词条样式'),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                LibBadgeChip(
+                    label: name,
+                    color: current,
+                    unitId: currentEmoji.isEmpty ? '' : id),
+                const SizedBox(height: 14),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('颜色',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ),
+                const SizedBox(height: 6),
+                Wrap(spacing: 10, runSpacing: 10, children: [
+                  for (var i = 0; i < LibraryBadge.palette.length; i++)
+                    GestureDetector(
+                      onTap: () => setLocal(() {
+                        current = LibraryBadge.palette[i];
+                      }),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: Color(LibraryBadge.palette[i]),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: current == LibraryBadge.palette[i]
+                                ? Colors.white
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                        child: current == LibraryBadge.palette[i]
+                            ? const Icon(Icons.check,
+                                size: 18, color: Colors.white)
+                            : null,
                       ),
                     ),
-                    child: current == LibraryBadge.palette[i]
-                        ? const Icon(Icons.check, size: 18, color: Colors.white)
-                        : null,
+                ]),
+                const SizedBox(height: 14),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('emoji 后缀（可留空）',
+                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ),
+                const SizedBox(height: 6),
+                Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final e in LibraryBadge.emojiChoices)
+                    GestureDetector(
+                      onTap: () => setLocal(() {
+                        currentEmoji = currentEmoji == e ? '' : e;
+                      }),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: currentEmoji == e
+                                ? Colors.lightBlueAccent
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                        child: Text(e, style: const TextStyle(fontSize: 17)),
+                      ),
+                    ),
+                ]),
+                const SizedBox(height: 6),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => setLocal(() {
+                      current = autoColor;
+                      currentEmoji = '';
+                    }),
+                    icon: const Icon(Icons.restart_alt, size: 18),
+                    label: const Text('恢复自动（颜色 + 后缀）'),
                   ),
                 ),
-            ]),
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => setLocal(() => current = null),
-                icon: const Icon(Icons.restart_alt, size: 18),
-                label: const Text('自动配色'),
-              ),
+              ]),
             ),
-          ]),
+          ),
           actions: [
             TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
                 child: const Text('取消')),
             FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(current ?? -1),
+                onPressed: () => Navigator.of(ctx).pop(_BadgeDraft(
+                    color: current, emoji: currentEmoji, reset: false)),
                 child: const Text('保存')),
           ],
         ),
@@ -1349,16 +1418,32 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   }
 }
 
+/// 词条样式编辑结果；[reset] 为 true 时颜色与 emoji 后缀都恢复自动。
+class _BadgeDraft {
+  final int color;
+  final String emoji;
+  final bool reset;
+  const _BadgeDraft(
+      {required this.color, required this.emoji, this.reset = false});
+}
+
 // 库词条：作者卡片左上角的小标签，颜色按库自动分配（设置里可改）
 class LibBadgeChip extends StatelessWidget {
   final String label;
   final int color;
-  const LibBadgeChip({super.key, required this.label, required this.color});
+
+  /// 单元库 id（`rel` 或 `node:rel`）；给出时追加该库 emoji 后缀。
+  final String unitId;
+  const LibBadgeChip(
+      {super.key, required this.label, required this.color, this.unitId = ''});
 
   @override
   Widget build(BuildContext context) {
     // 位置词条自动省略目录名前缀序号（`(1) 名称` → `名称`）。
-    final text = label.startsWith('+') ? label : LibraryBadge.stripIndex(label);
+    final text = label.startsWith('+')
+        ? label
+        : LibraryBadge.labelWithEmoji(
+            LibraryBadge.stripIndex(label), unitId);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
@@ -1415,6 +1500,7 @@ class LibBadges extends StatelessWidget {
         for (var i = 0; i < labels.length; i++)
           LibBadgeChip(
             label: labels[i],
+            unitId: i < shown.length ? shown[i] : '',
             color: (labels[i].startsWith('+') ||
                     (i < shown.length && grayIds.contains(shown[i])))
                 ? LibraryBadge.gray
