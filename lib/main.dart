@@ -219,10 +219,20 @@ class LibMeta {
   static final Map<String, LibMeta> cache = <String, LibMeta>{};
   static final Map<String, Future<LibMeta>> _loading =
       <String, Future<LibMeta>>{};
+  static final Map<String, DateTime> _cachedAt = <String, DateTime>{};
 
-  static Future<LibMeta> load(String lib) {
+  /// 缓存有效期：服务端改了单元库名/节点后最多 5 分钟生效，无需重启 App。
+  static const Duration cacheTtl = Duration(minutes: 5);
+
+  static Future<LibMeta> load(String lib, {bool force = false}) {
     final hit = cache[lib];
-    if (hit != null) return Future.value(hit);
+    final at = _cachedAt[lib];
+    if (!force &&
+        hit != null &&
+        at != null &&
+        DateTime.now().difference(at) < cacheTtl) {
+      return Future.value(hit);
+    }
     return _loading.putIfAbsent(lib, () async {
       var basics = const <BasicLibRef>[];
       var allBasics = const <BasicLibRef>[];
@@ -369,6 +379,7 @@ class LibMeta {
           units: units,
           basicToUnit: basicToUnit);
       cache[lib] = meta;
+      _cachedAt[lib] = DateTime.now();
       _loading.remove(lib);
       return meta;
     });
@@ -376,6 +387,7 @@ class LibMeta {
 
   static void invalidate(String lib) {
     cache.remove(lib);
+    _cachedAt.remove(lib);
   }
 
   /// 基础库词条显示名：路径命中基础库时用其名称，否则回落到传入的库名。
@@ -9187,13 +9199,6 @@ class _SearchPageState extends State<SearchPage> {
     } catch (_) {}
   }
 
-  String _libName(String id) {
-    for (final l in libs) {
-      if ('${l['id']}' == id) return '${l['name'] ?? l['id']}';
-    }
-    return id;
-  }
-
   void _select(String id) {
     if (sel == id) return;
     setState(() {
@@ -9464,58 +9469,19 @@ class _SearchPageState extends State<SearchPage> {
                               ? '没有符合筛选条件的结果'
                               : '没有找到相关作品',
                           style: const TextStyle(color: Colors.grey)))
-                  : ListView.builder(
-                      itemCount: res.length,
-                      itemBuilder: (_, i) {
-                        final e = res[i];
-                        final w = e['w'];
-                        return ListTile(
-                          leading: SizedBox(
-                              width: 40,
-                              height: 54,
-                              child: (w['th'] ?? '').toString().isEmpty
-                                  ? Container(color: Colors.black26)
-                                  : CachedNetworkImage(
-                                    cacheManager: DiziCache.manager,
-                                      imageUrl: cfg.mediaUrl(w['th'].toString(),
-                                          lib: '${e['_lib']}'),
-                                      httpHeaders:
-                                          cfg.headersFor('${e['_lib']}'),
-                                      fit: BoxFit.cover)),
-                          title: Text('${w['ti']}',
-                              maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: Builder(builder: (_) {
-                            final lib = '${e['_lib']}';
-                            final meta = metas[lib];
-                            final av = '${w['av'] ?? ''}';
-                            final author = '${w['a'] ?? ''}';
-                            return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  // T2：词条改为单元库（SECRET / 无归属灰色）
-                                  AuthorBadges(
-                                    meta: meta,
-                                    name: author,
-                                    mediaPath: av,
-                                    basicId: '${e['_bid'] ?? ''}',
-                                    fallbackId: lib,
-                                    fallbackName: _libName(lib),
-                                    works: authorWorkCount['$lib|$author'] ?? 0,
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text('@${w['a']}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis),
-                                ]);
-                          }),
-                          onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                  builder: (_) => PlayerPage(
-                                      works: e['works'],
-                                      start: e['i'],
-                                      lib: '${e['_lib']}'))),
-                        );
-                      },
+                  : WorkGrid(
+                      works: [
+                        for (final e in res)
+                          {
+                            ...Map<String, dynamic>.from(e['w'] as Map),
+                            '_lib': '${e['_lib']}',
+                            '_bid': '${e['_bid'] ?? ''}',
+                          }
+                      ],
+                      lib: sel.isEmpty ? cfg.lib : sel,
+                      // 搜索结果在卡片上保留作者，双击即从结果列表起播
+                      subtitleOf: (w) =>
+                          '@${w['a'] ?? ''} · ${workTypeLabel(w)}',
                     ),
         ),
       ]),
@@ -9974,8 +9940,11 @@ class _AuthorPageSkeleton extends StatelessWidget {
 class WorkGrid extends StatefulWidget {
   final List works;
   final String? lib;
+
+  /// 卡片第二行文字；默认「作品类型」，搜索结果可传「@作者 · 类型」。
+  final String Function(dynamic work)? subtitleOf;
   // T3：已移除旧「收藏夹」idx/名称传参链
-  const WorkGrid({super.key, required this.works, this.lib});
+  const WorkGrid({super.key, required this.works, this.lib, this.subtitleOf});
 
   @override
   State<WorkGrid> createState() => _WorkGridState();
@@ -10054,7 +10023,7 @@ class _WorkGridState extends State<WorkGrid> {
         // G13：视频右下角显示时长，图文显示图片张数
         return WorkCard(
           title: '${w['ti'] ?? ''}',
-          typeLabel: workTypeLabel(w),
+          typeLabel: widget.subtitleOf?.call(w) ?? workTypeLabel(w),
           coverUrl: (w['th'] ?? '').toString().isEmpty
               ? ''
               : cfg.mediaUrl(w['th'].toString(), lib: _libFor(w)),
