@@ -2792,6 +2792,7 @@ class _LibraryPageState extends State<LibraryPage> {
         stars = saved;
         tree = t;
         unitTree = units;
+        if (units != null) UnitBadgeRegistry.setFrom(units);
       });
     } catch (_) {}
   }
