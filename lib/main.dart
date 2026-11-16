@@ -12,6 +12,9 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'cover_cache.dart';
+import 'concurrency.dart';
+import 'crash_guard.dart';
+import 'crash_reports_page.dart';
 import 'work_cover.dart';
 import 'recommend_grid.dart';
 import 'horizontal_chip_bar.dart';
@@ -70,6 +73,8 @@ import 'work_safety.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 0.9.23：先装崩溃兜底，后面任何初始化出错都能记下来而不是整屏灰掉
+  installCrashGuard();
   MediaKit.ensureInitialized();
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
@@ -2008,6 +2013,16 @@ class SettingsHubPage extends StatelessWidget {
         ),
         const _StripIndexTile(),
         const _DoubleTapLikeTile(),
+        ListTile(
+          leading: const Icon(Icons.bug_report_outlined),
+          title: const Text('诊断信息'),
+          subtitle: const Text('最近错误 · 只在内存保留，重启清空'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => CrashReportsPage(
+                  detail: cfg.base.isEmpty
+                      ? '未连接服务器'
+                      : '${cfg.base} · ${cfg.libName.isEmpty ? cfg.lib : cfg.libName}'))),
+        ),
         ListTile(
           leading: const Icon(Icons.keyboard),
           title: const Text('按键绑定'),
@@ -9317,6 +9332,21 @@ class _RecommendPageState extends State<RecommendPage> {
   }
 }
 
+/// 搜索页待扫的基础库（0.9.23：并发拉取用）。
+class _BasicJob {
+  final String lib;
+  final String basicId;
+  final String rel;
+  final String name;
+
+  const _BasicJob({
+    required this.lib,
+    required this.basicId,
+    required this.rel,
+    required this.name,
+  });
+}
+
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
   @override
@@ -9333,6 +9363,9 @@ class _SearchPageState extends State<SearchPage> {
   bool loading = true;
   String kw = '';
   int _loadToken = 0;
+  // 0.9.23：并行拉取进度（已载入 / 共几个基础库）
+  int _loadedBasics = 0;
+  int _totalBasics = 0;
   // J11：搜索页同样支持作者筛选（与总览/排行/推荐共享同一份状态）
   Map<String, Set<String>> authorTypes = {};
   bool typesLoading = false;
@@ -9391,6 +9424,8 @@ class _SearchPageState extends State<SearchPage> {
       sel = id;
       loading = true;
       all = [];
+      _loadedBasics = 0;
+      _totalBasics = 0;
     });
     loadAll();
   }
@@ -9401,6 +9436,9 @@ class _SearchPageState extends State<SearchPage> {
     // 选定某个注册库时仍只扫该库目录。
     final targets = [sel.isEmpty ? cfg.lib : (sel == 'all' ? cfg.lib : sel)];
     final out = <Map<String, dynamic>>[];
+    // 0.9.23：先收集要扫的 (库, 基础库) 列表，再按 6 路并发拉 works.json；
+    // 原来是逐个 `await`，39 个库串行要好几个往返。
+    final jobs = <_BasicJob>[];
     try {
       for (final lib in targets) {
         try {
@@ -9411,17 +9449,44 @@ class _SearchPageState extends State<SearchPage> {
             ? (metas[lib]?.filterBasics ?? const <BasicLibRef>[])
             : (metas[lib]?.basics ?? const <BasicLibRef>[]);
         for (final b in basics) {
-          final ws = await _libWorks(lib, b.id);
-          for (var i = 0; i < ws.length; i++) {
-            out.add({
-              'w': ws[i],
-              'works': ws,
-              'i': i,
-              '_lib': lib,
-              '_bid': b.id,
-              '_rel': b.rel,
-            });
+          jobs.add(_BasicJob(
+              lib: lib, basicId: b.id, rel: b.rel, name: b.name));
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _loadedBasics = 0;
+          _totalBasics = jobs.length;
+        });
+      }
+      final pages = await mapConcurrent<_BasicJob, List<dynamic>>(
+        jobs,
+        6,
+        (j) async {
+          List<dynamic> ws;
+          try {
+            ws = await _libWorks(j.lib, j.basicId);
+          } catch (_) {
+            ws = const <dynamic>[];
           }
+          if (mounted && token == _loadToken) {
+            setState(() => _loadedBasics++);
+          }
+          return ws;
+        },
+      );
+      for (var k = 0; k < jobs.length; k++) {
+        final j = jobs[k];
+        final ws = pages[k];
+        for (var i = 0; i < ws.length; i++) {
+          out.add({
+            'w': ws[i],
+            'works': ws,
+            'i': i,
+            '_lib': j.lib,
+            '_bid': j.basicId,
+            '_rel': j.rel,
+          });
         }
       }
     } catch (_) {}
@@ -9435,6 +9500,7 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       all = out;
       loading = false;
+      _loadedBasics = _totalBasics;
     });
     _ensureTypes();
   }
@@ -9642,7 +9708,18 @@ class _SearchPageState extends State<SearchPage> {
               ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames)} · 命中 ${res.length}/${all.length}'
               : null,
         ),
-        if (loading) const LinearProgressIndicator(),
+        if (loading)
+          Column(mainAxisSize: MainAxisSize.min, children: [
+            const LinearProgressIndicator(),
+            if (_totalBasics > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '已载入 $_loadedBasics/$_totalBasics 个基础库',
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ),
+          ]),
         Expanded(
           child: kw.isEmpty
               ? const Center(
