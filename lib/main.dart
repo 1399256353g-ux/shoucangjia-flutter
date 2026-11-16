@@ -3373,24 +3373,33 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                     onChanged: (v) => setState(() => enabled = v),
                   ),
                   const Divider(),
-                  TextFormField(
-                    initialValue: schedule,
-                    decoration: const InputDecoration(
-                        labelText: '每日执行时间（HH:MM）', hintText: '04:10'),
-                    onChanged: (v) => schedule = v,
-                  ),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    const Expanded(child: Text('间隔（分钟，0 = 仅按时间）')),
-                    Text('$intervalMin'),
+                  // 抓取频率：不再以「每日几点」为主，按固定间隔执行。
+                  const Text('抓取频率',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Wrap(spacing: 8, runSpacing: 6, children: [
+                    for (final opt in const <int, String>{
+                      0: '不自动',
+                      30: '每 30 分钟',
+                      60: '每 1 小时',
+                      360: '每 6 小时',
+                      720: '每 12 小时',
+                      1440: '每 24 小时',
+                    }.entries)
+                      ChoiceChip(
+                        label: Text(opt.value),
+                        selected: intervalMin == opt.key,
+                        onSelected: (_) =>
+                            setState(() => intervalMin = opt.key),
+                      ),
                   ]),
-                  Slider(
-                    value: intervalMin.toDouble().clamp(0, 1440),
-                    min: 0,
-                    max: 1440,
-                    divisions: 48,
-                    onChanged: (v) => setState(() => intervalMin = v.round()),
-                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                      intervalMin == 0
+                          ? '当前：不自动抓取（仍可手动同步）'
+                          : '当前：每 ${intervalMin >= 60 ? '${intervalMin ~/ 60} 小时' : '$intervalMin 分钟'}抓取一次',
+                      style:
+                          const TextStyle(fontSize: 11, color: Colors.grey)),
                   TextFormField(
                     initialValue: note,
                     decoration: const InputDecoration(labelText: '备注'),
@@ -4583,6 +4592,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   bool loading = true;
   String? err;
   bool syncing = false;
+  // 当前库是否配置了爬虫脚本；没有脚本时禁用联网同步按钮。
+  bool hasScripts = false;
   // G19：作者网格渐进渲染，避免一次构建上千个头像卡顿
   int _shown = 0;
   Timer? syncTimer;
@@ -4700,6 +4711,19 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         libs = list;
         metas[cfg.lib] = meta;
       });
+      try {
+        final cr = await http.get(
+            Uri.parse('${cfg.base}/api/crawler?lib=${Uri.encodeQueryComponent(cfg.lib)}'),
+            headers: cfg.headers).timeout(const Duration(seconds: 8));
+        if (cr.statusCode == 200) {
+          final cj = jsonDecode(cr.body);
+          final scripts = (cj is Map ? cj['scripts'] : null);
+          if (mounted) {
+            setState(
+                () => hasScripts = scripts is List && scripts.isNotEmpty);
+          }
+        }
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -5095,8 +5119,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 MaterialPageRoute(builder: (_) => const LibraryRankPage())),
             icon: const Icon(Icons.stacked_bar_chart)),
         IconButton(
-            tooltip: syncing ? '同步中…' : '立即同步作者',
-            onPressed: syncing ? null : _syncAuthors,
+            tooltip: syncing
+                ? '同步中…'
+                : (hasScripts ? '立即同步作者' : '当前库未配置爬虫脚本'),
+            onPressed: (syncing || !hasScripts) ? null : _syncAuthors,
             icon: syncing
                 ? const SizedBox(
                     width: 18,
@@ -9301,7 +9327,8 @@ class _AuthorPageState extends State<AuthorPage> {
   Map<String, int> typeCounts = {};
   String primaryLib = '';
   bool loading = true;
-  bool fullSync = true;
+  // 该库是否配置了爬虫脚本；没有脚本时禁用联网同步。
+  bool _hasCrawler = false;
   bool syncing = false;
   LibMeta? meta;
   Timer? syncTimer;
@@ -9314,11 +9341,6 @@ class _AuthorPageState extends State<AuthorPage> {
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((sp) {
-      if (mounted) {
-        setState(() => fullSync = sp.getBool('sync_full_author') ?? true);
-      }
-    });
     load();
   }
 
@@ -9328,14 +9350,8 @@ class _AuthorPageState extends State<AuthorPage> {
     super.dispose();
   }
 
-  Future<void> _setFull(bool v) async {
-    setState(() => fullSync = v);
-    final sp = await SharedPreferences.getInstance();
-    await sp.setBool('sync_full_author', v);
-  }
-
-  // 单作者同步：服务端按作者名解析抖音主页标识并立即抓取全部作品
-  bool get _canSync => cfg.base.isNotEmpty;
+  // 只有配置了爬虫脚本的库才允许联网同步。
+  bool get _canSync => cfg.base.isNotEmpty && _hasCrawler;
 
   Future<void> _syncAuthor() async {
     if (syncing || !_canSync) return;
@@ -9343,9 +9359,8 @@ class _AuthorPageState extends State<AuthorPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('同步作者 @${widget.name}'),
-        content: Text(fullSync
-            ? '将立即抓取该作者在抖音的全部作品（已入库的跳过），并补全头像、简介、封面。\n\n同步在 NAS 后台运行，作品多时耗时较长。'
-            : '只补抓该作者缺失的头像/简介/封面，不抓取新作品。\n\n同步在 NAS 后台运行。'),
+        content: const Text(
+            '将立即抓取该作者的全部作品（已入库的跳过），并补全头像、简介、封面。\n\n同步在 NAS 后台运行，作品多时耗时较长。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -9358,7 +9373,7 @@ class _AuthorPageState extends State<AuthorPage> {
     );
     if (ok != true || !mounted) return;
     final j = await startServerSync(
-        target: 'author', author: widget.name, lib: primaryLib, full: fullSync);
+        target: 'author', author: widget.name, lib: primaryLib, full: true);
     if (j == null || j['ok'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -9432,6 +9447,18 @@ class _AuthorPageState extends State<AuthorPage> {
     if (primaryLib.isNotEmpty) {
       try {
         meta = await LibMeta.load(primaryLib);
+      } catch (_) {}
+      // 没有配置爬虫脚本的库：禁用联网同步按钮。
+      try {
+        final cr = await http.get(
+            Uri.parse('${cfg.baseFor(primaryLib)}/api/crawler'
+                '?lib=${Uri.encodeQueryComponent(primaryLib)}'),
+            headers: cfg.headersFor(primaryLib)).timeout(const Duration(seconds: 8));
+        if (cr.statusCode == 200) {
+          final cj = jsonDecode(cr.body);
+          final scripts = (cj is Map ? cj['scripts'] : null);
+          _hasCrawler = scripts is List && scripts.isNotEmpty;
+        }
       } catch (_) {}
     }
     fallbackAv =
@@ -9563,19 +9590,9 @@ class _AuthorPageState extends State<AuthorPage> {
                         size: 14, color: Colors.grey),
                     const SizedBox(width: 6),
                     const Expanded(
-                        child: Text('全量同步该作者作品信息（关闭则只补抓缺失）',
+                        child: Text('同步会立即爬取该作者的全部作品',
                             style:
                                 TextStyle(fontSize: 11, color: Colors.grey))),
-                    Text('全量',
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: fullSync ? Colors.blue : Colors.grey)),
-                    Transform.scale(
-                      scale: 0.8,
-                      child: Switch(
-                          value: fullSync,
-                          onChanged: syncing ? null : _setFull),
-                    ),
                   ]),
                 ),
               const Divider(height: 1),
