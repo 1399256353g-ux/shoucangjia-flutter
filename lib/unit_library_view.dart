@@ -5,6 +5,7 @@ import 'cover_cache.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
+import 'media_resize.dart';
 import 'home_action.dart';
 import 'star_store.dart';
 import 'unit_library.dart';
@@ -516,7 +517,9 @@ class _UnitCoverFill extends StatelessWidget {
     if (url.isEmpty) return fallback;
     return CachedNetworkImage(
       cacheManager: DiziCache.manager,
-      imageUrl: url,
+      // 0.9.24：卡片封面按 480px 取图（服务端 `w=` 缩放并缓存），
+      // 避免把爬虫/自定义封面的原始大图整张传给客户端。
+      imageUrl: withImageWidth(url, kCardImageWidth),
       httpHeaders: headers,
       fit: BoxFit.cover,
       fadeInDuration: Duration.zero,

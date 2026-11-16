@@ -16,6 +16,7 @@ import 'concurrency.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
 import 'work_cover.dart';
+import 'media_resize.dart';
 import 'recommend_grid.dart';
 import 'horizontal_chip_bar.dart';
 import 'cache_settings.dart';
@@ -1638,7 +1639,9 @@ class AuthorAvatar extends StatelessWidget {
             ? placeholder
             : CachedNetworkImage(
                 cacheManager: DiziCache.manager,
-                imageUrl: cfg.mediaUrl(mediaPath, lib: lib),
+                // 头像最大显示 64dp：要 200px 缩图即可（服务端 `w=`）。
+                imageUrl: withImageWidth(
+                    cfg.mediaUrl(mediaPath, lib: lib), kAvatarImageWidth),
                 httpHeaders: cfg.headersFor(lib),
                 fit: BoxFit.cover,
                 // 按实际显示尺寸 × 像素比解码，避免整张大图进内存
@@ -8368,8 +8371,11 @@ class _PlayerPageState extends State<PlayerPage>
                           ClipOval(
                               child: CachedNetworkImage(
                                   cacheManager: DiziCache.manager,
-                                  imageUrl:
-                                      cfg.mediaUrl(avatarFor(w), lib: _curLib),
+                                  // 播放页头像 38dp：取 200px 缩图即可。
+                                  imageUrl: withImageWidth(
+                                      cfg.mediaUrl(avatarFor(w),
+                                          lib: _curLib),
+                                      kAvatarImageWidth),
                                   httpHeaders: cfg.headersFor(_curLib),
                                   width: 38,
                                   height: 38,

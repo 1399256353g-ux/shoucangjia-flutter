@@ -1,4 +1,5 @@
 import 'cover_cache.dart';
+import 'media_resize.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -69,7 +70,9 @@ class _WorkCardState extends State<WorkCard> {
           else
             CachedNetworkImage(
               cacheManager: DiziCache.manager,
-              imageUrl: w.coverUrl,
+              // 0.9.24：卡片只显示 110–180dp，向服务端要 440px 缩图即可，
+              // 不再整张原图拉下来再解码（「封面加载慢」的主要来源）。
+              imageUrl: withImageWidth(w.coverUrl, kWorkImageWidth),
               httpHeaders: w.headers,
               // 卡片最大约 180 逻辑像素，按 220×DPR 解码足够清晰且省内存。
               memCacheWidth:

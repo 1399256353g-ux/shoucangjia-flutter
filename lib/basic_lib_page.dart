@@ -10,6 +10,7 @@ import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_tree.dart';
 import 'media_priority.dart';
+import 'media_resize.dart';
 import 'work_card.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
@@ -466,7 +467,7 @@ class _BasicLibPageState extends State<BasicLibPage>
             ? placeholder
             : CachedNetworkImage(
               cacheManager: DiziCache.manager,
-                imageUrl: url,
+                imageUrl: withImageWidth(url, kAvatarImageWidth),
                 httpHeaders: widget.headersOf(widget.basic.id),
                 width: size,
                 height: size,
