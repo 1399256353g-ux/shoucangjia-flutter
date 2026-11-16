@@ -2866,7 +2866,9 @@ class _LibraryPageState extends State<LibraryPage> {
         headersOf: ([lib]) => cfg.headersFor(lib ?? b.id),
         mediaUrlOf: (path, {lib}) => cfg.mediaUrl(path, lib: lib ?? b.id),
         onOpenAuthor: (name) => Navigator.of(context).push(
-            MaterialPageRoute<void>(builder: (_) => AuthorPage(name: name))),
+            MaterialPageRoute<void>(
+                builder: (_) =>
+                    AuthorPage(name: name, libs: [b.id]))),
         onPlay: (works, index) => Navigator.of(context).push(
             MaterialPageRoute<void>(
                 builder: (_) =>

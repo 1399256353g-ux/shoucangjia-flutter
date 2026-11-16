@@ -434,13 +434,15 @@ class UnitLibraryCard extends StatelessWidget {
           key: ValueKey('unit-card-${unit.id}'),
           child: Stack(children: [
             // 封面铺满（自定义封面优先，其次自动获取）。
-            ValueListenableBuilder<int>(
-              valueListenable: WorkPlaysStore.revision,
-              builder: (_, __, ___) => _UnitCoverFill(
-                key: ValueKey('unit-cover-${unit.id}'),
-                url: unitCoverUrl(unit, customUrl: coverUrl),
-                headers: headers,
-                fallbackIcon: Icons.folder_copy_outlined,
+            Positioned.fill(
+              child: ValueListenableBuilder<int>(
+                valueListenable: WorkPlaysStore.revision,
+                builder: (_, __, ___) => _UnitCoverFill(
+                  key: ValueKey('unit-cover-${unit.id}'),
+                  url: unitCoverUrl(unit, customUrl: coverUrl),
+                  headers: headers,
+                  fallbackIcon: Icons.folder_copy_outlined,
+                ),
               ),
             ),
             // 底部渐变：与基础库卡片共用同一信息层排版。
