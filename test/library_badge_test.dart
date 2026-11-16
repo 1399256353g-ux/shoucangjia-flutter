@@ -52,4 +52,19 @@ void main() {
     final raw = LibraryBadge.encode(source: m);
     expect(LibraryBadge.parse(raw), m);
   });
+
+  test('单元库配色与 id 形式无关（node:rel 与 rel 同色）', () {
+    final order = ['(1) A/(2) B', '(3) C'];
+    final a = LibraryBadge.colorForUnit('node:(1) A/(2) B', order: order);
+    final b = LibraryBadge.colorForUnit('(1) A/(2) B', order: order);
+    expect(a, b);
+    expect(a, LibraryBadge.palette[0]);
+    expect(LibraryBadge.colorForUnit('secret'), LibraryBadge.gray);
+  });
+
+  test('单元库自定义颜色对两种 id 形式都生效', () {
+    LibraryBadge.custom['node:(1) A'] = 0xFF123456;
+    expect(LibraryBadge.colorForUnit('(1) A'), 0xFF123456);
+    expect(LibraryBadge.colorForUnit('node:(1) A'), 0xFF123456);
+  });
 }

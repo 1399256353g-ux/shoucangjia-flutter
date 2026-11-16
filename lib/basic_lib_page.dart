@@ -339,7 +339,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          widget.sourceLabel,
+                          LibraryBadge.stripIndex(widget.sourceLabel),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(

@@ -739,7 +739,8 @@ class BasicLibCard extends StatelessWidget {
     final isTop = !hasUnit || unitKey == 'secret';
     final color = isTop
         ? const Color(0xFF6B7280)
-        : Color(LibraryBadge.colorFor(unitKey.isEmpty ? unitLabel : unitKey,
+        : Color(LibraryBadge.colorForUnit(
+            unitKey.isEmpty ? unitLabel : unitKey,
             order: UnitBadgeRegistry.order));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

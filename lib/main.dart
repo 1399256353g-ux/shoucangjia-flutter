@@ -1403,7 +1403,8 @@ class LibBadges extends StatelessWidget {
             color: (labels[i].startsWith('+') ||
                     (i < shown.length && grayIds.contains(shown[i])))
                 ? LibraryBadge.gray
-                : LibraryBadge.colorFor(i < shown.length ? shown[i] : '',
+                : LibraryBadge.colorForUnit(
+                    i < shown.length ? shown[i] : '',
                     order: colorOrder),
           ),
         if (grade.isNotEmpty)
@@ -3052,7 +3053,10 @@ class _LibraryPageState extends State<LibraryPage> {
         sourceLabel: unit?.name ?? '',
         sourceColor: unit == null
             ? LibraryBadge.gray
-            : LibraryBadge.colorFor(unit.id, order: unitOrder),
+            : LibraryBadge.colorForUnit(unit.id,
+                order: UnitBadgeRegistry.order.isNotEmpty
+                    ? UnitBadgeRegistry.order
+                    : unitOrder),
         onOpenAuthor: (name) => Navigator.of(context).push(
             MaterialPageRoute<void>(
                 builder: (_) => AuthorPage(name: name, libs: [b.id]))),

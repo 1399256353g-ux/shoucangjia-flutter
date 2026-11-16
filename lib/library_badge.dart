@@ -51,8 +51,23 @@ class LibraryBadge {
 
   /// 单元库词条颜色：顶级 SECRET / 空 id 固定灰色，其余按库配色。
   static int unitColor(String unitId, {List<String> order = const []}) {
+    return colorForUnit(unitId, order: order);
+  }
+
+  /// 单元库配色：同一单元库在主页（`node:rel`）与 LibMeta（`rel`）里 id
+  /// 形式不同，这里统一归一，保证作者词条与基础库卡颜色一致。
+  static int colorForUnit(String unitId, {List<String> order = const []}) {
     if (unitId.isEmpty || unitId == 'secret') return gray;
-    return colorFor(unitId, order: order);
+    final rel =
+        unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    final prefixed = 'node:$rel';
+    final c = custom[unitId] ?? custom[rel] ?? custom[prefixed];
+    if (c != null) return c;
+    var i = order.indexOf(unitId);
+    if (i < 0) i = order.indexOf(rel);
+    if (i < 0) i = order.indexOf(prefixed);
+    if (i >= 0) return autoColorAt(i);
+    return colorFor(rel, order: order);
   }
 
   /// 根据底色亮度选择黑/白文字，保证对比度。
