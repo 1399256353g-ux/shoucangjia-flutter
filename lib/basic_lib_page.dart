@@ -11,6 +11,7 @@ import 'category_tree_page.dart';
 import 'library_tree.dart';
 import 'media_priority.dart';
 import 'work_card.dart';
+import 'work_cover.dart';
 import 'author_grade.dart';
 import 'library_badge.dart';
 
@@ -527,17 +528,16 @@ class _BasicLibPageState extends State<BasicLibPage>
                   child: CircularProgressIndicator(strokeWidth: 2)));
         }
         final w = filtered[i];
-        final thumb = _thumbOf(w);
-        final wid = w is Map ? '${w['id'] ?? ''}' : '';
-        // 视频没有 thumb.jpg 时走后端按需抽帧（抽过一次即落盘缓存）
-        final cover = thumb.isNotEmpty
-            ? widget.mediaUrlOf(thumb, lib: widget.basic.id)
-            : (w is Map && w['t'] == 'v' && wid.isNotEmpty
-                ? widget
-                    .urlOf('/api/thumb/${widget.basic.id}/$wid',
-                        lib: widget.basic.id)
-                    .toString()
-                : '');
+        // 封面统一走 work_cover：th → 图文首图 → 视频抽帧（带版本参数避开旧缓存）
+        final cover = workCoverUrl(
+          w,
+          lib: widget.basic.id,
+          urls: WorkCoverUrls.standard(
+            mediaUrl: (path) => widget.mediaUrlOf(path, lib: widget.basic.id),
+            rawUrl: (path) =>
+                widget.urlOf(path, lib: widget.basic.id).toString(),
+          ),
+        );
         return WorkCard(
           key: ValueKey('basic-work-${w is Map ? w['id'] : i}'),
           title: w is Map ? '${w['ti'] ?? ''}' : '',
@@ -643,17 +643,6 @@ class _BasicLibPageState extends State<BasicLibPage>
   }
 
   /// 作品缩略图：优先 `th`，其次图文首图 `m[0]`；视频无图时为空。
-  static String _thumbOf(dynamic w) {
-    if (w is! Map) return '';
-    final th = '${w['th'] ?? ''}'.trim();
-    if (th.isNotEmpty) return th;
-    final m = w['m'];
-    if (m is List && m.isNotEmpty) {
-      final first = '${m.first}'.trim();
-      if (first.isNotEmpty && !first.toLowerCase().endsWith('.mp4')) {
-        return first;
-      }
-    }
-    return '';
-  }
+  /// 作者头像兜底图：现成缩略图优先，其次图文首图（与作品封面同一口径）。
+  static String _thumbOf(dynamic w) => workCoverPath(w);
 }

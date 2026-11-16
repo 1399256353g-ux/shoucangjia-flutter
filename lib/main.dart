@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'cover_cache.dart';
+import 'work_cover.dart';
 import 'recommend_grid.dart';
 import 'horizontal_chip_bar.dart';
 import 'cache_settings.dart';
@@ -10257,14 +10258,15 @@ class _WorkGridState extends State<WorkGrid> {
         final lib = _libFor(w);
         final wp =
             WatchProgressStore.of(lib, '${(w is Map ? w['id'] : null) ?? ''}');
-        // 视频没有 thumb.jpg 时走后端按需抽帧（生成后落盘缓存）
-        final th = (w['th'] ?? '').toString();
-        final wid = '${(w is Map ? w['id'] : null) ?? ''}';
-        final cover = th.isNotEmpty
-            ? cfg.mediaUrl(th, lib: lib)
-            : (w['t'] == 'v' && wid.isNotEmpty
-                ? cfg.u('/api/thumb/$lib/$wid', lib: lib).toString()
-                : '');
+        // 封面统一走 work_cover：th → 图文首图 → 视频抽帧（带版本参数避开旧缓存）
+        final cover = workCoverUrl(
+          w,
+          lib: lib,
+          urls: WorkCoverUrls.standard(
+            mediaUrl: (path) => cfg.mediaUrl(path, lib: lib),
+            rawUrl: (path) => cfg.u(path, lib: lib).toString(),
+          ),
+        );
         // G13：视频右下角显示时长，图文显示图片张数
         return WorkCard(
           title: '${w['ti'] ?? ''}',
