@@ -16,6 +16,13 @@ const int kWorkImageWidth = 440;
 /// 头像宽度（最大显示 64dp）。
 const int kAvatarImageWidth = 200;
 
+/// 播放页海报（全屏铺底）宽度：1080p 屏也够清晰，比动辄 2400px 的
+/// 原图省一半以上流量与解码内存。
+const int kPlayerImageWidth = 1080;
+
+/// 播放页预加载页（滑动时的相邻作品）只做占位，720px 即可盖满屏幕。
+const int kPlayerPreloadWidth = 720;
+
 final RegExp _imageExt = RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false);
 final RegExp _hasWidthParam = RegExp(r'(?:^|&)w=\d+(?:&|$)');
 

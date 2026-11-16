@@ -71,5 +71,20 @@ void main() {
       // 卡片比头像大，避免头像取到过小图糊掉。
       expect(kCardImageWidth, greaterThan(kAvatarImageWidth));
     });
+
+    test('播放页海报常量：比卡片大、预加载比正片小', () {
+      // 播放页海报要大图，但也不必把 2400px 原图整张解码进内存。
+      expect(kPlayerImageWidth, greaterThanOrEqualTo(1080));
+      expect(kPlayerPreloadWidth, lessThan(kPlayerImageWidth));
+      expect(kPlayerPreloadWidth, greaterThanOrEqualTo(kCardImageWidth));
+      expect(
+        withImageWidth('/media/lib-001/a/poster.jpg', kPlayerImageWidth),
+        '/media/lib-001/a/poster.jpg?w=1080',
+      );
+      expect(
+        withImageWidth('/media/lib-001/a/poster.jpg', kPlayerPreloadWidth),
+        '/media/lib-001/a/poster.jpg?w=720',
+      );
+    });
   });
 }

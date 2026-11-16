@@ -7532,6 +7532,14 @@ class _PlayerPageState extends State<PlayerPage>
 
   // 视频层：窗口最小化/缩放时约束可能瞬间为 0，直接挂载纹理会让
   // Windows 上的 libmpv 重建输出并崩溃；尺寸过小时用纯黑占位。
+  // 0.9.25：播放页海报按屏幕宽度解码（原图常见 2400×3600，整张进内存
+  // 约 30MB，滑动时会明显卡顿甚至闪退）。
+  int _posterDecodeWidth(BuildContext c) {
+    final size = MediaQuery.sizeOf(c);
+    final dpr = MediaQuery.devicePixelRatioOf(c);
+    return (size.width * dpr).round().clamp(360, 2160);
+  }
+
   Widget videoView() {
     return LayoutBuilder(builder: (_, c) {
       if (c.maxWidth < 2 || c.maxHeight < 2) {
@@ -8144,9 +8152,14 @@ class _PlayerPageState extends State<PlayerPage>
                           ? Container(color: Colors.black)
                           : CachedNetworkImage(
                               cacheManager: DiziCache.manager,
-                              imageUrl: cfg.mediaUrl(it['th'].toString(),
-                                  lib: _libFor(it)),
+                              // 滑动中的相邻页只是占位：720px 缩图足够，
+                              // 按屏幕宽度解码，不再整张原图进内存。
+                              imageUrl: withImageWidth(
+                                  cfg.mediaUrl(it['th'].toString(),
+                                      lib: _libFor(it)),
+                                  kPlayerPreloadWidth),
                               httpHeaders: cfg.headersFor(_libFor(it)),
+                              memCacheWidth: _posterDecodeWidth(context),
                               fit: BoxFit.contain);
                     }
                     if (it['t'] == 'v') {
@@ -8166,9 +8179,13 @@ class _PlayerPageState extends State<PlayerPage>
                           if ((it['th'] ?? '').toString().isNotEmpty)
                             CachedNetworkImage(
                                 cacheManager: DiziCache.manager,
-                                imageUrl: cfg.mediaUrl(it['th'].toString(),
-                                    lib: _libFor(it)),
+                                // 0.9.25：正片海报取 1080px 缩图并按屏幕解码。
+                                imageUrl: withImageWidth(
+                                    cfg.mediaUrl(it['th'].toString(),
+                                        lib: _libFor(it)),
+                                    kPlayerImageWidth),
                                 httpHeaders: cfg.headersFor(_libFor(it)),
+                                memCacheWidth: _posterDecodeWidth(context),
                                 fit: BoxFit.contain),
                           videoView(),
                           if (loading)
