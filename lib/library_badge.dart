@@ -64,6 +64,20 @@ class LibraryBadge {
     return lum > 0.62 ? 0xFF111827 : 0xFFFFFFFF;
   }
 
+  /// 位置词条统一去掉文件夹名前面的序号：
+  /// `(1) 名称` / `（1）名称` / `[1] 名称` / `01. 名称` / `01、名称` → `名称`。
+  /// 目录名里的序号只是排序用，不应出现在作者/作品词条上。
+  static String stripIndex(String name) {
+    var s = name.trim();
+    if (s.isEmpty) return s;
+    final bracket = RegExp(r'^[(（\[【]\s*\d{1,4}\s*[)）\]】]\s*[._\-·]?\s*');
+    var out = s.replaceFirst(bracket, '').trim();
+    if (out != s && out.isNotEmpty) return out;
+    final dotted = RegExp(r'^\d{1,4}\s*[.、]\s*');
+    out = s.replaceFirst(dotted, '').trim();
+    return out.isEmpty ? s : out;
+  }
+
   /// 卡片上最多展示 [max] 个库词条，多余的折叠为「+N」。
   static List<String> labels(List<String> libIds,
       {int max = 2, Map<String, String> names = const {}}) {
@@ -76,7 +90,7 @@ class LibraryBadge {
     final out = <String>[];
     for (var i = 0; i < ids.length && i < max; i++) {
       final name = names[ids[i]] ?? '';
-      out.add(name.isEmpty ? ids[i] : name);
+      out.add(stripIndex(name.isEmpty ? ids[i] : name));
     }
     if (ids.length > max) out.add('+${ids.length - max}');
     return out;

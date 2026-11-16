@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/author_grade.dart';
+import 'package:shoucangjia/library_badge.dart';
 import 'package:shoucangjia/library_tree.dart';
 import 'package:shoucangjia/main.dart';
 import 'package:shoucangjia/source_lib.dart';
 import 'package:shoucangjia/unit_library.dart';
+import 'package:shoucangjia/unit_library_view.dart';
 
 /// 0.9.8：作者来源词条＝该作者所属**基础库**的单元库（名称/配色）。
 void main() {
@@ -102,7 +104,7 @@ void main() {
         fallbackId: 'douyin',
         fallbackName: '',
       ))));
-      expect(find.text('(2) douyin'), findsOneWidget);
+      expect(find.text('douyin'), findsOneWidget);
     });
 
     testWidgets('作者页/基础库页只给基础库 id 时同样显示词条', (tester) async {
@@ -122,7 +124,47 @@ void main() {
         fallbackId: 'lib-029',
         fallbackName: '',
       ))));
-      expect(find.text('(1) Heterosexuality-异性恋'), findsOneWidget);
+      expect(find.text('Heterosexuality-异性恋'), findsOneWidget);
+    });
+
+    testWidgets('T5：作者词条与基础库卡词条完全同源（名称/去序号）', (tester) async {
+      final meta = LibMeta(
+        basics: refs,
+        stats: const {},
+        unitTree: tree,
+        units: flattenUnits(tree),
+        basicToUnit: toUnit,
+      );
+      final labels = unitLabelByBasic(tree);
+      final keys = unitKeyByBasic(tree);
+      // 基础库卡：词条文本＝所属单元库名去掉前缀序号
+      final cardText = BasicLibCard.badgeText(labels['lib-015']!);
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: Column(children: [
+        AuthorBadges(
+          meta: meta,
+          name: '33',
+          mediaPath: '',
+          basicId: 'lib-015',
+          fallbackId: 'douyin',
+          fallbackName: '',
+          unitLabels: labels,
+          unitKeys: keys,
+        ),
+      ]))));
+      expect(keys['lib-015'], toUnit['lib-015']);
+      expect(cardText, 'douyin');
+      expect(find.text(cardText), findsOneWidget);
+    });
+
+    test('T5：位置词条去序号规则', () {
+      expect(LibraryBadge.stripIndex('(1) 名称'), '名称');
+      expect(LibraryBadge.stripIndex('（12）名称'), '名称');
+      expect(LibraryBadge.stripIndex('[3] 名称'), '名称');
+      expect(LibraryBadge.stripIndex('01. 名称'), '名称');
+      expect(LibraryBadge.stripIndex('名称'), '名称');
+      expect(LibraryBadge.stripIndex('18+'), '18+');
     });
   });
 }

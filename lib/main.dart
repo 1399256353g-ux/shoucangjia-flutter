@@ -11,6 +11,8 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'cover_cache.dart';
+import 'cache_settings.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_filter.dart';
@@ -75,6 +77,13 @@ Future<void> main() async {
   await ContinueWatchingStore.ensureLoaded();
   // L5-C：载入本机播放量，基础库自动封面首帧即可用
   await WorkPlaysStore.ensureLoaded();
+  // T4：封面缓存落 E 盘（Windows），启动时清理过期/超限条目
+  await DiziCache.init();
+  // 退到后台/退出前再轻量清理一次（不阻塞退出）
+  AppLifecycleListener(
+    onPause: DiziCache.sweepOnExit,
+    onDetach: DiziCache.sweepOnExit,
+  );
   runApp(const App());
 }
 
@@ -1323,6 +1332,10 @@ class LibBadgeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 位置词条自动省略目录名前缀序号（`(1) 名称` → `名称`）。
+    final text = label.startsWith('+')
+        ? label
+        : LibraryBadge.stripIndex(label);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
@@ -1332,7 +1345,7 @@ class LibBadgeChip extends StatelessWidget {
             Border.all(color: Colors.black.withValues(alpha: 0.25), width: 0.5),
       ),
       child: Text(
-        label,
+        text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
@@ -1369,6 +1382,9 @@ class LibBadges extends StatelessWidget {
     final labels = LibraryBadge.labels(libIds, names: names);
     if (labels.isEmpty && grade.isEmpty) return const SizedBox.shrink();
     final shown = libIds.where((e) => e.isNotEmpty).toList();
+    // 配色顺序：调用方优先，否则用全局单元库顺序（与基础库卡同源）。
+    final colorOrder =
+        order.isNotEmpty ? order : UnitBadgeRegistry.order;
     return Wrap(
       spacing: 3,
       runSpacing: 3,
@@ -1380,7 +1396,7 @@ class LibBadges extends StatelessWidget {
                     (i < shown.length && grayIds.contains(shown[i])))
                 ? LibraryBadge.gray
                 : LibraryBadge.colorFor(i < shown.length ? shown[i] : '',
-                    order: order),
+                    order: colorOrder),
           ),
         if (grade.isNotEmpty)
           LibBadgeChip(
@@ -1408,6 +1424,12 @@ class UnitBadges extends StatelessWidget {
   final String fallbackId;
   final String fallbackName;
   final String grade;
+
+  /// T5：词条唯一来源。调用方传入与基础库卡片同一份映射
+  /// （[unitLabelByBasic] / [unitKeyByBasic]）；为空时用全局
+  /// [UnitBadgeRegistry]（主页加载单元库时写入），再退回 [meta]。
+  final Map<String, String> unitLabels;
+  final Map<String, String> unitKeys;
   const UnitBadges({
     super.key,
     required this.meta,
@@ -1416,17 +1438,40 @@ class UnitBadges extends StatelessWidget {
     required this.fallbackName,
     this.basicId = '',
     this.grade = '',
+    this.unitLabels = const {},
+    this.unitKeys = const {},
   });
+
+  /// 基础库 → 所属单元库 id。
+  String _unitKeyOf(String basic) {
+    if (basic.isEmpty) return '';
+    return unitKeys[basic] ??
+        UnitBadgeRegistry.keys[basic] ??
+        meta?.basicToUnit[basic] ??
+        '';
+  }
+
+  /// 单元库 id → 名称。
+  String _unitNameOf(String basic, String unitId) {
+    final direct = unitLabels[basic] ?? UnitBadgeRegistry.labels[basic];
+    if (direct != null && direct.isNotEmpty) return direct;
+    return meta?.unitNameOf(unitId) ?? '';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final unitId = basicId.isNotEmpty
-        ? (meta?.basicToUnit[basicId] ?? '')
-        : (meta?.unitIdFor(mediaPath) ?? '');
+    final basic = basicId.isNotEmpty ? basicId : (meta?.basicIdForPath(mediaPath) ?? '');
+    var unitId = _unitKeyOf(basic);
+    // 没有基础库归属时才按节点路径解析（旧数据 / 非基础库媒体）。
+    if (unitId.isEmpty && basic.isEmpty && mediaPath.isNotEmpty) {
+      unitId = meta?.unitIdFor(mediaPath) ?? '';
+    }
     // 不再回退到「库名」词条（抖音收藏已废弃）；没有单元库归属就显示 SECRET。
     final id = unitId.isEmpty ? 'secret' : unitId;
-    final names = <String, String>{...?meta?.unitNames};
-    names['secret'] = 'SECRET';
+    final label = unitId.isEmpty || unitId == 'secret'
+        ? 'SECRET'
+        : _unitNameOf(basic, unitId);
+    final names = <String, String>{...?meta?.unitNames, id: label};
     final gray = unitId.isEmpty || unitId == 'secret';
     return LibBadges(
       libIds: id.isEmpty ? const [] : <String>[id],
@@ -1476,6 +1521,7 @@ class AuthorAvatar extends StatelessWidget {
         child: mediaPath.isEmpty
             ? placeholder
             : CachedNetworkImage(
+              cacheManager: DiziCache.manager,
                 imageUrl: cfg.mediaUrl(mediaPath, lib: lib),
                 httpHeaders: cfg.headersFor(lib),
                 fit: BoxFit.cover,
@@ -1507,6 +1553,10 @@ class AuthorBadges extends StatelessWidget {
   /// 显式指定的作者统计（含 `p`/`dr`）；null 表示从 [meta] 取。
   final Map<String, dynamic>? stats;
 
+  /// T5：与基础库卡片同一份「基础库 → 单元库」映射（词条同源）。
+  final Map<String, String> unitLabels;
+  final Map<String, String> unitKeys;
+
   const AuthorBadges({
     super.key,
     required this.meta,
@@ -1517,6 +1567,8 @@ class AuthorBadges extends StatelessWidget {
     this.basicId = '',
     this.works = 0,
     this.stats,
+    this.unitLabels = const {},
+    this.unitKeys = const {},
   });
 
   /// 统计来源：显式 stats > 当前库 meta 中该作者的统计。
@@ -1549,6 +1601,8 @@ class AuthorBadges extends StatelessWidget {
       fallbackId: fallbackId,
       fallbackName: fallbackName,
       grade: AuthorGrade.fromStats(_stats, works: works),
+      unitLabels: unitLabels,
+      unitKeys: unitKeys,
     );
   }
 }
@@ -1787,6 +1841,13 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('默认倍速 · 图文间隔 · 全屏隐藏时间'),
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const PlaybackSettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.cleaning_services_outlined),
+          title: const Text('缓存'),
+          subtitle: const Text('封面缓存目录 · 上限与自动清理 · 立即清空'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CacheSettingsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.keyboard),
@@ -7395,7 +7456,7 @@ class _PlayerPageState extends State<PlayerPage>
           message: '图片加载失败',
           onRetry: () async {
             try {
-              await CachedNetworkImage.evictFromCache(url);
+              await DiziCache.manager.removeFile(url);
             } catch (_) {}
             if (mounted) setState(() => _imgReload++);
           },
@@ -7413,6 +7474,7 @@ class _PlayerPageState extends State<PlayerPage>
           errorBuilder: (_, __, ___) => retryBox());
     }
     return CachedNetworkImage(
+      cacheManager: DiziCache.manager,
         key: ValueKey('pic-$cur-$img-$_imgReload'),
         imageUrl: url,
         httpHeaders: cfg.headers,
@@ -7902,6 +7964,7 @@ class _PlayerPageState extends State<PlayerPage>
                       return (it['th'] ?? '').toString().isEmpty
                           ? Container(color: Colors.black)
                           : CachedNetworkImage(
+                            cacheManager: DiziCache.manager,
                               imageUrl: cfg.mediaUrl(it['th'].toString(),
                                   lib: _libFor(it)),
                               httpHeaders: cfg.headersFor(_libFor(it)),
@@ -7923,7 +7986,8 @@ class _PlayerPageState extends State<PlayerPage>
                         child: Stack(fit: StackFit.expand, children: [
                           if ((it['th'] ?? '').toString().isNotEmpty)
                             CachedNetworkImage(
-                                imageUrl: cfg.mediaUrl(it['th'].toString(),
+                              cacheManager: DiziCache.manager,
+                              imageUrl: cfg.mediaUrl(it['th'].toString(),
                                     lib: _libFor(it)),
                                 httpHeaders: cfg.headersFor(_libFor(it)),
                                 fit: BoxFit.contain),
@@ -8127,6 +8191,7 @@ class _PlayerPageState extends State<PlayerPage>
                         if ((w['av'] ?? '').toString().isNotEmpty)
                           ClipOval(
                               child: CachedNetworkImage(
+                                cacheManager: DiziCache.manager,
                                   imageUrl: cfg.mediaUrl(w['av'].toString(),
                                       lib: _curLib),
                                   httpHeaders: cfg.headersFor(_curLib),
@@ -9071,6 +9136,7 @@ class _RecommendPageState extends State<RecommendPage> {
       (w['th'] ?? '').toString().isEmpty
           ? Container(color: Colors.black26)
           : CachedNetworkImage(
+            cacheManager: DiziCache.manager,
               imageUrl: cfg.mediaUrl(w['th'].toString()),
               httpHeaders: cfg.headers,
               fit: BoxFit.cover,
@@ -9459,6 +9525,7 @@ class _SearchPageState extends State<SearchPage> {
                               child: (w['th'] ?? '').toString().isEmpty
                                   ? Container(color: Colors.black26)
                                   : CachedNetworkImage(
+                                    cacheManager: DiziCache.manager,
                                       imageUrl: cfg.mediaUrl(w['th'].toString(),
                                           lib: '${e['_lib']}'),
                                       httpHeaders:
@@ -9706,6 +9773,7 @@ class _AuthorPageState extends State<AuthorPage> {
           maxScale: 5,
           child: Center(
             child: CachedNetworkImage(
+              cacheManager: DiziCache.manager,
               imageUrl: cfg.mediaUrl(src,
                   lib: primaryLib.isEmpty ? null : primaryLib),
               httpHeaders:

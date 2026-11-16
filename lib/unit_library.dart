@@ -402,6 +402,38 @@ UnitLibrary? unitForBasic(UnitLibrary root, String basicId) {
   return hit;
 }
 
+/// 基础库 → 直接上级单元库名称（位置词条唯一来源）。
+Map<String, String> unitLabelByBasic(UnitLibrary root) {
+  final out = <String, String>{};
+  void walk(UnitLibrary u) {
+    for (final b in u.basics) {
+      out[b.id] = u.name;
+    }
+    for (final c in u.children) {
+      walk(c);
+    }
+  }
+
+  walk(root);
+  return out;
+}
+
+/// 基础库 → 直接上级单元库 id（配色唯一来源）。
+Map<String, String> unitKeyByBasic(UnitLibrary root) {
+  final out = <String, String>{};
+  void walk(UnitLibrary u) {
+    for (final b in u.basics) {
+      out[b.id] = u.id;
+    }
+    for (final c in u.children) {
+      walk(c);
+    }
+  }
+
+  walk(root);
+  return out;
+}
+
 /// 基础库 → 直接上级单元库的映射（词条唯一来源）。
 ///
 /// 作者卡、基础库卡、播放页信息行都必须从这里取词条，禁止各自解析，
@@ -409,21 +441,22 @@ UnitLibrary? unitForBasic(UnitLibrary root, String basicId) {
 class UnitBadgeRegistry {
   static final Map<String, String> labels = <String, String>{};
   static final Map<String, String> keys = <String, String>{};
+  /// 单元库配色顺序（不含顶级 SECRET）：作者词条与基础库卡片共用。
+  static final List<String> order = <String>[];
 
   static void setFrom(UnitLibrary root) {
-    labels.clear();
-    keys.clear();
-    void walk(UnitLibrary u) {
-      for (final b in u.basics) {
-        labels[b.id] = u.name;
-        keys[b.id] = u.id;
-      }
-      for (final c in u.children) {
-        walk(c);
-      }
-    }
-
-    walk(root);
+    labels
+      ..clear()
+      ..addAll(unitLabelByBasic(root));
+    keys
+      ..clear()
+      ..addAll(unitKeyByBasic(root));
+    order
+      ..clear()
+      ..addAll([
+        for (final u in flattenUnits(root))
+          if (u.node.id != root.node.id) u.id,
+      ]);
   }
 
   static String labelFor(String basicId) => labels[basicId] ?? '';

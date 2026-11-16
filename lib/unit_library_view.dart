@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import 'cover_cache.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
@@ -514,6 +515,7 @@ class _UnitCoverFill extends StatelessWidget {
     );
     if (url.isEmpty) return fallback;
     return CachedNetworkImage(
+      cacheManager: DiziCache.manager,
       imageUrl: url,
       httpHeaders: headers,
       fit: BoxFit.cover,
@@ -725,11 +727,8 @@ class BasicLibCard extends StatelessWidget {
     this.unitKey = '',
   });
 
-  /// 词条文本：基础库名去掉「(序号) 」前缀。
-  static String badgeText(String name) {
-    final raw = name.replaceFirst(RegExp(r'^\(\d+\)\s*'), '').trim();
-    return raw.isEmpty ? name : raw;
-  }
+  /// 词条文本：与作者词条共用同一套「去序号」规则。
+  static String badgeText(String name) => LibraryBadge.stripIndex(name);
 
   Widget _badge() {
     // 位置词条只由「单元库」生成：取所属单元库名称与配色，不再用基础库自身。
@@ -740,7 +739,8 @@ class BasicLibCard extends StatelessWidget {
     final isTop = !hasUnit || unitKey == 'secret';
     final color = isTop
         ? const Color(0xFF6B7280)
-        : Color(LibraryBadge.colorFor(unitKey.isEmpty ? unitLabel : unitKey));
+        : Color(LibraryBadge.colorFor(unitKey.isEmpty ? unitLabel : unitKey,
+            order: UnitBadgeRegistry.order));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(

@@ -1,3 +1,4 @@
+import 'cover_cache.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -51,6 +52,7 @@ class WorkCard extends StatelessWidget {
             Container(color: Colors.black26)
           else
             CachedNetworkImage(
+              cacheManager: DiziCache.manager,
               imageUrl: coverUrl,
               httpHeaders: headers,
               fit: BoxFit.cover,

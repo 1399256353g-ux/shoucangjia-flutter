@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'cover_cache.dart';
 import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
@@ -411,6 +412,7 @@ class _BasicLibPageState extends State<BasicLibPage>
         child: url.isEmpty
             ? placeholder
             : CachedNetworkImage(
+              cacheManager: DiziCache.manager,
                 imageUrl: url,
                 httpHeaders: widget.headersOf(widget.basic.id),
                 width: size,
