@@ -166,5 +166,26 @@ void main() {
       expect(LibraryBadge.stripIndex('名称'), '名称');
       expect(LibraryBadge.stripIndex('18+'), '18+');
     });
+
+    testWidgets('T5：注册表优先，作者主页/播放页与主页词条一致', (tester) async {
+      // 主页/基础库页：完整树写入注册表
+      UnitBadgeRegistry.setFrom(tree);
+      // 作者主页/播放页可能拿到一份退化的 meta（没有单元库树）
+      final degraded = LibMeta(basics: refs, stats: const {});
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: AuthorBadges(
+        meta: degraded,
+        name: '33',
+        mediaPath: '',
+        basicId: 'lib-015',
+        fallbackId: 'douyin',
+        fallbackName: '',
+      ))));
+      expect(find.text('douyin'), findsOneWidget);
+      expect(UnitBadgeRegistry.labelFor('lib-015'), '(2) douyin');
+      expect(LibraryBadge.stripIndex(UnitBadgeRegistry.labelFor('lib-015')),
+          'douyin');
+    });
   });
 }

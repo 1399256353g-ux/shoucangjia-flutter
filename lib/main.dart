@@ -340,6 +340,14 @@ class LibMeta {
                 unitTree = tree;
                 units = flattenUnits(tree);
                 basicToUnit = unitOfBasics(tree);
+                // T5：任何页面加载 LibMeta 都刷新全局词条注册表，
+                // 保证作者主页/播放页与主页/基础库卡取同一份单元库词条。
+                // 只接受「有下级单元库」的完整树，避免个别基础库作用域
+                // 的退化树（全部落 SECRET）覆盖掉主页的好映射。
+                if (tree.children.isNotEmpty ||
+                    UnitBadgeRegistry.keys.isEmpty) {
+                  UnitBadgeRegistry.setFrom(tree);
+                }
               }
             }
           }
@@ -1382,9 +1390,9 @@ class LibBadges extends StatelessWidget {
     final labels = LibraryBadge.labels(libIds, names: names);
     if (labels.isEmpty && grade.isEmpty) return const SizedBox.shrink();
     final shown = libIds.where((e) => e.isNotEmpty).toList();
-    // 配色顺序：调用方优先，否则用全局单元库顺序（与基础库卡同源）。
+    // 配色顺序：全局单元库顺序优先（与基础库卡同源），没有时才用调用方的。
     final colorOrder =
-        order.isNotEmpty ? order : UnitBadgeRegistry.order;
+        UnitBadgeRegistry.order.isNotEmpty ? UnitBadgeRegistry.order : order;
     return Wrap(
       spacing: 3,
       runSpacing: 3,
@@ -8241,6 +8249,8 @@ class _PlayerPageState extends State<PlayerPage>
                                       meta: _meta,
                                       name: '${w['a'] ?? ''}',
                                       mediaPath: '${w['av'] ?? ''}',
+                                      // 作品条目自带基础库 id 时直接用它归属单元库
+                                      basicId: '${w['_bid'] ?? w['basicId'] ?? ''}',
                                       fallbackId: _curLib,
                                       // 0.9.6：不再回退库名文案，无归属显示 SECRET
                                       fallbackName: '',
