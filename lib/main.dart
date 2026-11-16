@@ -1195,7 +1195,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       setState(() {
         meta = m;
         // 顶级 SECRET 固定灰色（无归属时兜底），不参与自定义。
-        units = [for (final u in m.units) if (u.id != 'secret') u];
+        units = [
+          for (final u in m.units)
+            if (u.id != 'secret') u
+        ];
         loading = false;
       });
     } catch (e) {
@@ -1208,8 +1211,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     }
   }
 
-  List<String> get _order =>
-      meta?.unitOrder ?? [for (final u in units) u.id];
+  List<String> get _order => meta?.unitOrder ?? [for (final u in units) u.id];
 
   @override
   Widget build(BuildContext context) {
@@ -1236,7 +1238,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
               : ListView(children: [
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-                    child: Text('作者/作品左上角「单元库词条」的颜色。默认按单元库顺序自动配色，也可逐个指定；SECRET 固定灰色。',
+                    child: Text(
+                        '作者/作品左上角「单元库词条」的颜色。默认按单元库顺序自动配色，也可逐个指定；SECRET 固定灰色。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
                   if (units.isEmpty)
@@ -1355,9 +1358,7 @@ class LibBadgeChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 位置词条自动省略目录名前缀序号（`(1) 名称` → `名称`）。
-    final text = label.startsWith('+')
-        ? label
-        : LibraryBadge.stripIndex(label);
+    final text = label.startsWith('+') ? label : LibraryBadge.stripIndex(label);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
@@ -1417,8 +1418,7 @@ class LibBadges extends StatelessWidget {
             color: (labels[i].startsWith('+') ||
                     (i < shown.length && grayIds.contains(shown[i])))
                 ? LibraryBadge.gray
-                : LibraryBadge.colorForUnit(
-                    i < shown.length ? shown[i] : '',
+                : LibraryBadge.colorForUnit(i < shown.length ? shown[i] : '',
                     order: colorOrder),
           ),
         if (grade.isNotEmpty)
@@ -1483,7 +1483,8 @@ class UnitBadges extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final basic = basicId.isNotEmpty ? basicId : (meta?.basicIdForPath(mediaPath) ?? '');
+    final basic =
+        basicId.isNotEmpty ? basicId : (meta?.basicIdForPath(mediaPath) ?? '');
     var unitId = _unitKeyOf(basic);
     // 没有基础库归属时才按节点路径解析（旧数据 / 非基础库媒体）。
     if (unitId.isEmpty && basic.isEmpty && mediaPath.isNotEmpty) {
@@ -1544,7 +1545,7 @@ class AuthorAvatar extends StatelessWidget {
         child: mediaPath.isEmpty
             ? placeholder
             : CachedNetworkImage(
-              cacheManager: DiziCache.manager,
+                cacheManager: DiziCache.manager,
                 imageUrl: cfg.mediaUrl(mediaPath, lib: lib),
                 httpHeaders: cfg.headersFor(lib),
                 fit: BoxFit.cover,
@@ -1829,6 +1830,29 @@ class _StripIndexTileState extends State<_StripIndexTile> {
   }
 }
 
+/// 设置：播放页双击点赞开关（关闭后双击按两次单击处理）。
+class _DoubleTapLikeTile extends StatefulWidget {
+  const _DoubleTapLikeTile();
+  @override
+  State<_DoubleTapLikeTile> createState() => _DoubleTapLikeTileState();
+}
+
+class _DoubleTapLikeTileState extends State<_DoubleTapLikeTile> {
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      secondary: const Icon(Icons.favorite_border),
+      title: const Text('双击点赞'),
+      subtitle: const Text('播放页双击画面点赞并弹红心；关闭后双击按两次单击处理'),
+      value: AppSettings.doubleTapLike,
+      onChanged: (v) async {
+        setState(() => AppSettings.doubleTapLike = v);
+        await AppSettings.save();
+      },
+    );
+  }
+}
+
 class SettingsHubPage extends StatelessWidget {
   const SettingsHubPage({super.key});
 
@@ -1896,6 +1920,7 @@ class SettingsHubPage extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const CacheSettingsPage())),
         ),
         const _StripIndexTile(),
+        const _DoubleTapLikeTile(),
         ListTile(
           leading: const Icon(Icons.keyboard),
           title: const Text('按键绑定'),
@@ -3520,10 +3545,9 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
               : ListView(children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-                    child: Text(
-                        '${libs.length} 个库 · $withScripts 个已配置爬虫脚本',
-                        style: const TextStyle(
-                            fontSize: 12, color: Colors.grey)),
+                    child: Text('${libs.length} 个库 · $withScripts 个已配置爬虫脚本',
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
                   for (final l in libs)
                     ListTile(
@@ -3552,10 +3576,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                           }
                         },
                         itemBuilder: (_) => const [
-                          PopupMenuItem(
-                              value: 'crawler', child: Text('爬虫配置')),
-                          PopupMenuItem(
-                              value: 'maint', child: Text('维护检查')),
+                          PopupMenuItem(value: 'crawler', child: Text('爬虫配置')),
+                          PopupMenuItem(value: 'maint', child: Text('维护检查')),
                         ],
                       ),
                     ),
@@ -3677,7 +3699,8 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                   const Divider(),
                   // 抓取频率：不再以「每日几点」为主，按固定间隔执行。
                   const Text('抓取频率',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                      style:
+                          TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
                   Wrap(spacing: 8, runSpacing: 6, children: [
                     for (final opt in const <int, String>{
@@ -3700,8 +3723,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                       intervalMin == 0
                           ? '当前：不自动抓取（仍可手动同步）'
                           : '当前：每 ${intervalMin >= 60 ? '${intervalMin ~/ 60} 小时' : '$intervalMin 分钟'}抓取一次',
-                      style:
-                          const TextStyle(fontSize: 11, color: Colors.grey)),
+                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
                   TextFormField(
                     initialValue: note,
                     decoration: const InputDecoration(labelText: '备注'),
@@ -4277,76 +4299,76 @@ class _RankPageState extends State<RankPage> {
           height: 42,
           padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
           children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: const Text('全部单元库'),
+                selected: unitSel.isEmpty,
+                onSelected: (_) {
+                  if (unitSel.isEmpty) return;
+                  setState(() => unitSel = '');
+                },
+              ),
+            ),
+            for (final u in _allUnits)
               Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: ChoiceChip(
-                  label: const Text('全部单元库'),
-                  selected: unitSel.isEmpty,
+                  label: Text(LibraryBadge.stripIndex(u.name)),
+                  selected: unitSel == u.id,
                   onSelected: (_) {
-                    if (unitSel.isEmpty) return;
-                    setState(() => unitSel = '');
+                    if (unitSel == u.id) return;
+                    setState(() => unitSel = u.id);
                   },
                 ),
               ),
-              for (final u in _allUnits)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(LibraryBadge.stripIndex(u.name)),
-                    selected: unitSel == u.id,
-                    onSelected: (_) {
-                      if (unitSel == u.id) return;
-                      setState(() => unitSel = u.id);
-                    },
-                  ),
-                ),
           ],
         ),
         HorizontalChipBar(
           children: [
-              for (final p in _periods.entries)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(p.value),
-                    selected: period == p.key,
-                    onSelected: (_) {
-                      setState(() {
-                        period = p.key;
-                        loading = true;
-                      });
-                      load();
-                    },
-                  ),
+            for (final p in _periods.entries)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(p.value),
+                  selected: period == p.key,
+                  onSelected: (_) {
+                    setState(() {
+                      period = p.key;
+                      loading = true;
+                    });
+                    load();
+                  },
                 ),
-              const SizedBox(width: 8),
-              const VerticalDivider(width: 1, indent: 10, endIndent: 10),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('播放量'),
-                selected: metric == 'play',
-                onSelected: (_) {
-                  if (metric == 'play') return;
-                  setState(() {
-                    metric = 'play';
-                    loading = true;
-                  });
-                  load();
-                },
               ),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('小水滴'),
-                selected: metric == 'drop',
-                onSelected: (_) {
-                  if (metric == 'drop') return;
-                  setState(() {
-                    metric = 'drop';
-                    loading = true;
-                  });
-                  load();
-                },
-              ),
+            const SizedBox(width: 8),
+            const VerticalDivider(width: 1, indent: 10, endIndent: 10),
+            const SizedBox(width: 8),
+            ChoiceChip(
+              label: const Text('播放量'),
+              selected: metric == 'play',
+              onSelected: (_) {
+                if (metric == 'play') return;
+                setState(() {
+                  metric = 'play';
+                  loading = true;
+                });
+                load();
+              },
+            ),
+            const SizedBox(width: 8),
+            ChoiceChip(
+              label: const Text('小水滴'),
+              selected: metric == 'drop',
+              onSelected: (_) {
+                if (metric == 'drop') return;
+                setState(() {
+                  metric = 'drop';
+                  loading = true;
+                });
+                load();
+              },
+            ),
           ],
         ),
         Padding(
@@ -4540,23 +4562,23 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
       body: Column(children: [
         HorizontalChipBar(
           children: [
-              ChoiceChip(
-                label: const Text('总播放量'),
-                selected: metric == 'play',
-                onSelected: (_) {
-                  if (metric == 'play') return;
-                  setState(() => metric = 'play');
-                },
-              ),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('总水滴数'),
-                selected: metric == 'drop',
-                onSelected: (_) {
-                  if (metric == 'drop') return;
-                  setState(() => metric = 'drop');
-                },
-              ),
+            ChoiceChip(
+              label: const Text('总播放量'),
+              selected: metric == 'play',
+              onSelected: (_) {
+                if (metric == 'play') return;
+                setState(() => metric = 'play');
+              },
+            ),
+            const SizedBox(width: 8),
+            ChoiceChip(
+              label: const Text('总水滴数'),
+              selected: metric == 'drop',
+              onSelected: (_) {
+                if (metric == 'drop') return;
+                setState(() => metric = 'drop');
+              },
+            ),
           ],
         ),
         Padding(
@@ -5003,15 +5025,17 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         metas[cfg.lib] = meta;
       });
       try {
-        final cr = await http.get(
-            Uri.parse('${cfg.base}/api/crawler?lib=${Uri.encodeQueryComponent(cfg.lib)}'),
-            headers: cfg.headers).timeout(const Duration(seconds: 8));
+        final cr = await http
+            .get(
+                Uri.parse(
+                    '${cfg.base}/api/crawler?lib=${Uri.encodeQueryComponent(cfg.lib)}'),
+                headers: cfg.headers)
+            .timeout(const Duration(seconds: 8));
         if (cr.statusCode == 200) {
           final cj = jsonDecode(cr.body);
           final scripts = (cj is Map ? cj['scripts'] : null);
           if (mounted) {
-            setState(
-                () => hasScripts = scripts is List && scripts.isNotEmpty);
+            setState(() => hasScripts = scripts is List && scripts.isNotEmpty);
           }
         }
       } catch (_) {}
@@ -5410,9 +5434,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 MaterialPageRoute(builder: (_) => const LibraryRankPage())),
             icon: const Icon(Icons.stacked_bar_chart)),
         IconButton(
-            tooltip: syncing
-                ? '同步中…'
-                : (hasScripts ? '立即同步作者' : '当前库未配置爬虫脚本'),
+            tooltip: syncing ? '同步中…' : (hasScripts ? '立即同步作者' : '当前库未配置爬虫脚本'),
             onPressed: (syncing || !hasScripts) ? null : _syncAuthors,
             icon: syncing
                 ? const SizedBox(
@@ -6763,11 +6785,13 @@ class _PlayerPageState extends State<PlayerPage>
     final now = DateTime.now().millisecondsSinceEpoch;
     // M1：全屏单击只切换功能区显隐，不暂停；非全屏保持单击暂停。
     // 双击仍可点赞，即使第一次单击已把全屏功能区收起。
-    final isDouble = isStageDoubleTap(
-        nowMs: now,
-        lastMs: _lastStageTapAt,
-        lastPos: _lastStageTapAt > 0 ? _lastStageTapPos : null,
-        pos: pos);
+    // 设置里可关闭双击点赞：关闭时双击退化为两次单击（显隐功能区/暂停）。
+    final isDouble = AppSettings.doubleTapLike &&
+        isStageDoubleTap(
+            nowMs: now,
+            lastMs: _lastStageTapAt,
+            lastPos: _lastStageTapAt > 0 ? _lastStageTapPos : null,
+            pos: pos);
     final action = stageTapAction(
       uiVisible: ui,
       fullscreen: fs && _mobileStageTap,
@@ -7539,7 +7563,7 @@ class _PlayerPageState extends State<PlayerPage>
     final screenW = MediaQuery.sizeOf(context).width;
     final decodeW = (screenW * MediaQuery.devicePixelRatioOf(context)).round();
     return CachedNetworkImage(
-      cacheManager: DiziCache.manager,
+        cacheManager: DiziCache.manager,
         key: ValueKey('pic-$cur-$img-$_imgReload'),
         imageUrl: url,
         httpHeaders: cfg.headers,
@@ -7699,6 +7723,16 @@ class _PlayerPageState extends State<PlayerPage>
                 _restartPlayback();
               },
             ),
+            // 0.9.19：自定义封面——把当前作品图片设为该基础库封面（服务端只新增文件）。
+            ListTile(
+              leading: const Icon(Icons.wallpaper_outlined),
+              title: const Text('设为该库封面'),
+              subtitle: const Text('用当前作品图片作为基础库封面，不影响原文件'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _setLibCover(w);
+              },
+            ),
             if (menu.canResume)
               ListTile(
                 leading: const Icon(Icons.play_circle_outline),
@@ -7734,6 +7768,29 @@ class _PlayerPageState extends State<PlayerPage>
         );
       },
     );
+  }
+
+  // 0.9.19：把当前作品图片设为基础库自定义封面（服务端复制到 `<库>/_cover/`）。
+  Future<void> _setLibCover(dynamic w) async {
+    final lib = _libFor(w);
+    final id = '${(w is Map ? w['id'] : null) ?? ''}';
+    try {
+      final r = await http.post(
+        cfg.u('/api/cover/set', lib: lib),
+        headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
+        body: jsonEncode({'lib': lib, 'work': id}),
+      );
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('已设为该库封面（返回主页刷新即可看到）')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('设置封面失败：$e')));
+      }
+    }
   }
 
   // G11：跳到记录位置（「继续观看」）
@@ -8030,7 +8087,7 @@ class _PlayerPageState extends State<PlayerPage>
                       return (it['th'] ?? '').toString().isEmpty
                           ? Container(color: Colors.black)
                           : CachedNetworkImage(
-                            cacheManager: DiziCache.manager,
+                              cacheManager: DiziCache.manager,
                               imageUrl: cfg.mediaUrl(it['th'].toString(),
                                   lib: _libFor(it)),
                               httpHeaders: cfg.headersFor(_libFor(it)),
@@ -8052,8 +8109,8 @@ class _PlayerPageState extends State<PlayerPage>
                         child: Stack(fit: StackFit.expand, children: [
                           if ((it['th'] ?? '').toString().isNotEmpty)
                             CachedNetworkImage(
-                              cacheManager: DiziCache.manager,
-                              imageUrl: cfg.mediaUrl(it['th'].toString(),
+                                cacheManager: DiziCache.manager,
+                                imageUrl: cfg.mediaUrl(it['th'].toString(),
                                     lib: _libFor(it)),
                                 httpHeaders: cfg.headersFor(_libFor(it)),
                                 fit: BoxFit.contain),
@@ -8258,8 +8315,8 @@ class _PlayerPageState extends State<PlayerPage>
                           ClipOval(
                               child: CachedNetworkImage(
                                   cacheManager: DiziCache.manager,
-                                  imageUrl: cfg.mediaUrl(avatarFor(w),
-                                      lib: _curLib),
+                                  imageUrl:
+                                      cfg.mediaUrl(avatarFor(w), lib: _curLib),
                                   httpHeaders: cfg.headersFor(_curLib),
                                   width: 38,
                                   height: 38,
@@ -8317,7 +8374,8 @@ class _PlayerPageState extends State<PlayerPage>
                                       name: '${w['a'] ?? ''}',
                                       mediaPath: avatarFor(w),
                                       // 作品条目自带基础库 id 时直接用它归属单元库
-                                      basicId: '${w['_bid'] ?? w['basicId'] ?? ''}',
+                                      basicId:
+                                          '${w['_bid'] ?? w['basicId'] ?? ''}',
                                       fallbackId: _curLib,
                                       // 0.9.6：不再回退库名文案，无归属显示 SECRET
                                       fallbackName: '',
@@ -8332,13 +8390,11 @@ class _PlayerPageState extends State<PlayerPage>
                               if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 3),
-                                  child: Text(
-                                      '${w['desc']}'.trim(),
+                                  child: Text('${w['desc']}'.trim(),
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.white70)),
+                                          fontSize: 11, color: Colors.white70)),
                                 ),
                               if (workChapterCount(widget.works[cur]) > 1)
                                 Padding(
@@ -8834,9 +8890,8 @@ class _PlayerPageState extends State<PlayerPage>
                                                   color: Colors.white70))),
                                       IconButton(
                                           // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
-                                          onPressed: loopOne
-                                              ? null
-                                              : toggleAutoplay,
+                                          onPressed:
+                                              loopOne ? null : toggleAutoplay,
                                           tooltip: loopOne
                                               ? '单条循环开启时自动连播不可用'
                                               : '自动连播',
@@ -9222,7 +9277,6 @@ class _RecommendPageState extends State<RecommendPage> {
                 ]),
     );
   }
-
 }
 
 class SearchPage extends StatefulWidget {
@@ -9727,10 +9781,12 @@ class _AuthorPageState extends State<AuthorPage> {
       } catch (_) {}
       // 没有配置爬虫脚本的库：禁用联网同步按钮。
       try {
-        final cr = await http.get(
-            Uri.parse('${cfg.baseFor(primaryLib)}/api/crawler'
-                '?lib=${Uri.encodeQueryComponent(primaryLib)}'),
-            headers: cfg.headersFor(primaryLib)).timeout(const Duration(seconds: 8));
+        final cr = await http
+            .get(
+                Uri.parse('${cfg.baseFor(primaryLib)}/api/crawler'
+                    '?lib=${Uri.encodeQueryComponent(primaryLib)}'),
+                headers: cfg.headersFor(primaryLib))
+            .timeout(const Duration(seconds: 8));
         if (cr.statusCode == 200) {
           final cj = jsonDecode(cr.body);
           final scripts = (cj is Map ? cj['scripts'] : null);
@@ -9879,39 +9935,39 @@ class _AuthorPageState extends State<AuthorPage> {
                   height: 46,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   children: [
-                      Center(
-                        child: FilterChip(
-                            label: Text('全部 ${works.length}',
-                                style: const TextStyle(fontSize: 12)),
-                            selected: typeFilter.isEmpty,
-                            showCheckmark: false,
-                            onSelected: (_) => _clearTypeFilter()),
+                    Center(
+                      child: FilterChip(
+                          label: Text('全部 ${works.length}',
+                              style: const TextStyle(fontSize: 12)),
+                          selected: typeFilter.isEmpty,
+                          showCheckmark: false,
+                          onSelected: (_) => _clearTypeFilter()),
+                    ),
+                    for (final type in workFilterOrder)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Center(
+                          child: FilterChip(
+                              label: Text(
+                                  '${workFilterLabel(type)} ${typeCounts[type] ?? 0}',
+                                  style: const TextStyle(fontSize: 12)),
+                              selected: typeFilter.contains(type),
+                              showCheckmark: false,
+                              onSelected: (typeCounts[type] ?? 0) == 0
+                                  ? null
+                                  : (_) => _toggleType(type)),
+                        ),
                       ),
-                      for (final type in workFilterOrder)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 6),
-                          child: Center(
-                            child: FilterChip(
-                                label: Text(
-                                    '${workFilterLabel(type)} ${typeCounts[type] ?? 0}',
-                                    style: const TextStyle(fontSize: 12)),
-                                selected: typeFilter.contains(type),
-                                showCheckmark: false,
-                                onSelected: (typeCounts[type] ?? 0) == 0
-                                    ? null
-                                    : (_) => _toggleType(type)),
-                          ),
+                    if (typeFilter.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Center(
+                          child: TextButton(
+                              onPressed: _clearTypeFilter,
+                              child: const Text('清除',
+                                  style: TextStyle(fontSize: 12))),
                         ),
-                      if (typeFilter.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 6),
-                          child: Center(
-                            child: TextButton(
-                                onPressed: _clearTypeFilter,
-                                child: const Text('清除',
-                                    style: TextStyle(fontSize: 12))),
-                          ),
-                        ),
+                      ),
                   ],
                 ),
               Expanded(
@@ -10113,8 +10169,8 @@ class _WorkGridState extends State<WorkGrid> {
       itemBuilder: (_, i) {
         final w = works[i];
         final lib = _libFor(w);
-        final wp = WatchProgressStore.of(
-            lib, '${(w is Map ? w['id'] : null) ?? ''}');
+        final wp =
+            WatchProgressStore.of(lib, '${(w is Map ? w['id'] : null) ?? ''}');
         // 视频没有 thumb.jpg 时走后端按需抽帧（生成后落盘缓存）
         final th = (w['th'] ?? '').toString();
         final wid = '${(w is Map ? w['id'] : null) ?? ''}';

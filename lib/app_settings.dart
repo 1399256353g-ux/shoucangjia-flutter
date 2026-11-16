@@ -36,13 +36,18 @@ class AppSettings {
   static double defaultSpeed = 1.0;
   static int imageIntervalSec = 3;
   static int hideUiSec = 3;
+
   /// M6：滑动方向前后各预载多少条（0 = 关闭）。
   static int preloadPerSide = preloadDefaultPerSide;
+
   /// M6：预加载缓存内存上限（MB）。
   static int preloadMemoryMb = preloadDefaultMemoryMb;
 
   /// 词条是否自动省略库名前的序号（`(1) 名称` → `名称`）。
   static bool stripLibIndex = true;
+
+  /// 播放页双击点赞（G9）。关闭后双击不再点赞，两次单击按单击处理。
+  static bool doubleTapLike = true;
 
   static final Map<PlayerAction, int> keyIds =
       Map<PlayerAction, int>.from(_defaultKeyIds);
@@ -54,6 +59,7 @@ class AppSettings {
         'preloadPerSide': preloadPerSide,
         'preloadMemory': preloadMemoryMb,
         'stripIndex': stripLibIndex,
+        'doubleTapLike': doubleTapLike,
         'keys': {
           for (final e in keyIds.entries) e.key.name: e.value,
         },
@@ -74,6 +80,8 @@ class AppSettings {
     if (pm != null) preloadMemoryMb = clampPreloadMemoryMb(pm);
     final si = j['stripIndex'];
     if (si is bool) stripLibIndex = si;
+    final dt = j['doubleTapLike'];
+    if (dt is bool) doubleTapLike = dt;
     final keys = j['keys'];
     if (keys is Map) {
       for (final a in PlayerAction.values) {
@@ -90,6 +98,7 @@ class AppSettings {
     preloadPerSide = preloadDefaultPerSide;
     preloadMemoryMb = preloadDefaultMemoryMb;
     stripLibIndex = true;
+    doubleTapLike = true;
     keyIds
       ..clear()
       ..addAll(_defaultKeyIds);
