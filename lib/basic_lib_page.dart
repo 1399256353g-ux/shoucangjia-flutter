@@ -11,6 +11,7 @@ import 'category_tree_page.dart';
 import 'library_tree.dart';
 import 'media_priority.dart';
 import 'media_resize.dart';
+import 'thumb_prefetch.dart';
 import 'work_card.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
@@ -234,6 +235,7 @@ class _BasicLibPageState extends State<BasicLibPage>
         // 头像兜底跟着作品更新（作者第一件作品的缩略图）
         _rebuildAuthorFallback();
       });
+      if (reset) _prefetchFirstScreen();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -529,16 +531,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                   child: CircularProgressIndicator(strokeWidth: 2)));
         }
         final w = filtered[i];
-        // 封面统一走 work_cover：th → 图文首图 → 视频抽帧（带版本参数避开旧缓存）
-        final cover = workCoverUrl(
-          w,
-          lib: widget.basic.id,
-          urls: WorkCoverUrls.standard(
-            mediaUrl: (path) => widget.mediaUrlOf(path, lib: widget.basic.id),
-            rawUrl: (path) =>
-                widget.urlOf(path, lib: widget.basic.id).toString(),
-          ),
-        );
+        final cover = _coverOf(w);
         return WorkCard(
           key: ValueKey('basic-work-${w is Map ? w['id'] : i}'),
           title: w is Map ? '${w['ti'] ?? ''}' : '',
@@ -549,6 +542,51 @@ class _BasicLibPageState extends State<BasicLibPage>
               widget.onPlay == null ? null : () => widget.onPlay!(filtered, i),
         );
       },
+    );
+  }
+
+  /// 封面统一走 work_cover：th → 图文首图 → 视频抽帧（带版本参数避开旧缓存）。
+  String _coverOf(dynamic w) => workCoverUrl(
+        w,
+        lib: widget.basic.id,
+        urls: WorkCoverUrls.standard(
+          mediaUrl: (path) => widget.mediaUrlOf(path, lib: widget.basic.id),
+          rawUrl: (path) => widget.urlOf(path, lib: widget.basic.id).toString(),
+        ),
+      );
+
+  /// 首屏缩略图预热（0.9.26）：作品一到手就先按显示宽度拉首屏可见封面，
+  /// provider 与 `WorkCard` 完全一致（同 URL + 同 `ResizeImage` 宽度），
+  /// 因此卡片渲染时直接命中缓存，不再先空白再逐张请求。
+  void _prefetchFirstScreen() {
+    if (!mounted || works.isEmpty) return;
+    final mq = MediaQuery.of(context);
+    final n = firstScreenThumbCount(
+      viewportWidth: mq.size.width,
+      viewportHeight: mq.size.height,
+      maxCrossAxisExtent: 150,
+      aspectRatio: 0.72,
+    );
+    if (n <= 0) return;
+    final px = (220 * mq.devicePixelRatio).round();
+    final headers = widget.headersOf(widget.basic.id);
+    final urls = <String>[];
+    for (final w in filtered.take(n)) {
+      final c = _coverOf(w);
+      if (c.isNotEmpty) urls.add(withImageWidth(c, kWorkImageWidth));
+    }
+    ThumbPrefetch.instance.run(
+      urls,
+      limit: n,
+      provider: (u) => ResizeImage.resizeIfNeeded(
+        px,
+        null,
+        CachedNetworkImageProvider(
+          u,
+          headers: headers,
+          cacheManager: DiziCache.manager,
+        ),
+      ),
     );
   }
 
@@ -589,11 +627,13 @@ class _BasicLibPageState extends State<BasicLibPage>
     setState(() {
       if (!_typeFilter.add(type)) _typeFilter.remove(type);
     });
+    _prefetchFirstScreen();
   }
 
   void _clearTypeFilter() {
     if (_typeFilter.isEmpty) return;
     setState(_typeFilter.clear);
+    _prefetchFirstScreen();
   }
 
   Widget _typeFilterBar() {

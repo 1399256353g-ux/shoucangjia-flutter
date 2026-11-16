@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'crash_guard.dart';
+import 'thumb_prefetch.dart';
 
 class CrashReportsPage extends StatelessWidget {
   /// 顶部一行环境信息（如服务器地址），可为空。
@@ -65,6 +66,7 @@ class CrashReportsPage extends StatelessWidget {
                   subtitle: Text(detail, maxLines: 2,
                       overflow: TextOverflow.ellipsis),
                 ),
+              _prefetchTile(),
               ListTile(
                 dense: true,
                 leading: const Icon(Icons.bug_report_outlined),
@@ -120,6 +122,40 @@ class CrashReportsPage extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+
+  /// 首屏缩略图预热 + 图片缓存现状（0.9.26）。
+  Widget _prefetchTile() {
+    final p = ThumbPrefetch.instance;
+    final cache = PaintingBinding.instance.imageCache;
+    final mb = (cache.currentSizeBytes / (1024 * 1024)).toStringAsFixed(1);
+    final pending = p.stats.pending;
+    return AnimatedBuilder(
+      animation: p,
+      builder: (context, _) {
+        final s = p.stats;
+        return ListTile(
+          dense: true,
+          leading: p.busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.bolt_outlined),
+          title: Text(s.requested == 0
+              ? '首屏缩略图：尚未预热'
+              : '首屏缩略图：${s.loaded}/${s.requested} 张就绪'),
+          subtitle: Text(
+            '失败 ${s.failed} · 跳过 ${s.skipped}'
+            '${pending > 0 ? ' · 进行中 $pending' : ''}'
+            ' · 最近 ${s.lastRunText}\n'
+            '图片缓存 ${cache.currentSize} 张 / $mb MB'
+            '（上限 ${(cache.maximumSizeBytes / (1024 * 1024)).round()} MB）',
+            style: const TextStyle(fontSize: 11, height: 1.35),
+          ),
+        );
+      },
     );
   }
 }
