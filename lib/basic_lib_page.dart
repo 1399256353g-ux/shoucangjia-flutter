@@ -8,16 +8,28 @@ import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_tree.dart';
+import 'media_priority.dart';
 import 'work_card.dart';
 import 'library_badge.dart';
 
-/// 作者卡片头像：优先用服务端下发的 `av`；为空时用兜底图（该作者作品首图）。
-/// 两者都为空时由调用方回退到「首字」占位。
-String pickAuthorAvatar({String av = '', String fallback = ''}) {
-  final a = av.trim();
-  if (a.isNotEmpty) return a;
-  return fallback.trim();
-}
+/// 作者卡片头像：手动设置 > 爬虫脚本（服务端下发 `av`）> 自动生成（作品图兜底）。
+/// 同级按时间新→旧；都为空时由调用方回退到「首字」占位。
+String pickAuthorAvatar({
+  String manual = '',
+  String av = '',
+  String fallback = '',
+  int manualAt = 0,
+  int crawlerAt = 0,
+  int autoAt = 0,
+}) =>
+    pickAvatarPath(
+      manual: manual,
+      crawler: av,
+      auto: fallback,
+      manualAt: manualAt,
+      crawlerAt: crawlerAt,
+      autoAt: autoAt,
+    );
 
 /// M10：基础库页面「作者视图 / 作品视图」双视图。
 ///

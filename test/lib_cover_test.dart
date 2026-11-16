@@ -111,6 +111,32 @@ void main() {
       expect(p.custom, isFalse);
       expect(p.path, '/media/lib-01/a/th.jpg');
     });
+
+    test('爬虫封面优先于自动生成的最高播放缩略图', () {
+      final b = pickBasicCover(
+        rel: '(1) A/x',
+        crawlerThumb: '/media/lib-01/x/cover.jpg',
+        bestThumb: '/media/lib-01/x/thumb.jpg',
+      );
+      expect(b.path, '/media/lib-01/x/cover.jpg');
+      expect(b.custom, isFalse);
+      final u = pickUnitCover(
+        rel: '(1) A',
+        crawlerThumb: '/media/lib-01/x/cover.jpg',
+        bestThumb: '/media/lib-01/x/thumb.jpg',
+      );
+      expect(u.path, '/media/lib-01/x/cover.jpg');
+    });
+
+    test('手动封面仍优先于爬虫封面', () {
+      final p = pickBasicCover(
+        rel: '(1) A/x',
+        version: 'v2',
+        crawlerThumb: '/media/lib-01/x/cover.jpg',
+      );
+      expect(p.custom, isTrue);
+      expect(p.path, '(1) A/x/_cover/v2.jpg');
+    });
   });
 
   group('媒体地址', () {

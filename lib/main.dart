@@ -2603,7 +2603,8 @@ class _LibraryPageState extends State<LibraryPage> {
     if (mounted) setState(() {});
   }
 
-  /// L5-C：基础库封面 URL。自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图。
+  /// L5-C：基础库封面 URL。手动 `_cover/` > 爬虫封面（`cv`）> 自动封面
+  /// （本机播放量最高的作品，有图文作品时优先图文图片）。
   String _basicCoverUrl(BasicLib b) {
     final top = topPlayed(WorkPlaysStore.countsFor(b.id));
     final pick = pickBasicCover(
@@ -2611,9 +2612,26 @@ class _LibraryPageState extends State<LibraryPage> {
       version: b.coverVersion,
       ext: b.coverExt,
       bestThumb: top?.thumb ?? '',
+      crawlerThumb: b.crawlerCover,
     );
     if (pick.isEmpty) return '';
     return cfg.mediaUrl(pick.path, lib: b.id);
+  }
+
+  /// 0.9.9 自动生成规则：单元库取整棵子树里本机播放量最高的基础库。
+  BasicLib? _topPlayedBasic(UnitLibrary u) {
+    BasicLib? best;
+    var bestPlays = -1;
+    for (final b in u.allBasics) {
+      final plays = WorkPlaysStore.countsFor(b.id)
+          .values
+          .fold<int>(0, (n, p) => n + p.count);
+      if (plays > bestPlays) {
+        bestPlays = plays;
+        best = b;
+      }
+    }
+    return best;
   }
 
   Uri _u(String path, [String? lib, String? atBase]) {
@@ -2788,15 +2806,16 @@ class _LibraryPageState extends State<LibraryPage> {
   /// L5-C：基础库封面（自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图）。
   String _coverUrlFor(BasicLib b) => _basicCoverUrl(b);
 
-  /// L5-C：单元库封面（仅自定义 `_cover/`，否则默认图）。
+  /// L5-C：单元库封面。手动 `_cover/` > 子树最高播放基础库的封面 > 默认图。
   String _unitCoverUrl(UnitLibrary u) {
-    final pick = pickUnitCover(
+    final custom = pickUnitCover(
         rel: u.rel, version: u.node.coverVersion, ext: u.node.coverExt);
-    if (!pick.isEmpty) return cfg.mediaUrl(pick.path);
-    // 没有自定义封面时，用该单元库下第一个基础库的封面兜底，
-    // 避免单元库卡片大面积空白。
-    if (u.basics.isNotEmpty) {
-      final fallback = _basicCoverUrl(u.basics.first);
+    if (!custom.isEmpty) return cfg.mediaUrl(custom.path);
+    // 自动生成：整棵子树里本机播放量最高的基础库，走该基础库完整封面链
+    // （手动 > 爬虫 > 自动），并按基础库所属连接解析媒体地址。
+    final top = _topPlayedBasic(u);
+    if (top != null) {
+      final fallback = _basicCoverUrl(top);
       if (fallback.isNotEmpty) return fallback;
     }
     return '';
@@ -6302,7 +6321,13 @@ class _PlayerPageState extends State<PlayerPage>
     _refreshDrop('${w['id'] ?? ''}', my, wl);
     postStat('play', '${w['a'] ?? ''}', lib: wl);
     // L5-C：本机播放量（基础库自动封面取播放量最高的作品），顺手记住缩略图
-    WorkPlaysStore.bump(wl, _watchIdFor(w), thumb: '${w['th'] ?? ''}'.trim());
+    WorkPlaysStore.bump(
+      wl,
+      _watchIdFor(w),
+      thumb: '${w['th'] ?? ''}'.trim(),
+      kind: '${w['t'] ?? ''}'.trim(),
+      at: DateTime.tryParse('${w['d'] ?? ''}')?.millisecondsSinceEpoch ?? 0,
+    );
     if (!canUsePreload) {
       try {
         if (w['t'] == 'v') {

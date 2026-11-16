@@ -30,24 +30,45 @@ String workPlaysKey({required String lib, required String id}) {
 class WorkPlay {
   final int count;
   final String thumb;
+  /// 0.9.9：作品类型（`p` 图文 / `v` 视频）；空串表示旧记录未知。
+  /// 自动封面据此「有图片时优先最高播放的图文作品」。
+  final String kind;
+  /// 0.9.9：最近一次播放时间（毫秒时间戳）；0 表示旧记录未知。
+  final int at;
 
-  const WorkPlay({required this.count, this.thumb = ''});
+  const WorkPlay({
+    required this.count,
+    this.thumb = '',
+    this.kind = '',
+    this.at = 0,
+  });
 
-  WorkPlay bump({String? thumb}) => WorkPlay(
+  bool get isImage => kind == 'p';
+
+  WorkPlay bump({String? thumb, String? kind, int? at}) => WorkPlay(
         count: count + 1,
         thumb: (thumb ?? '').trim().isNotEmpty ? thumb!.trim() : this.thumb,
+        kind: (kind ?? '').trim().isNotEmpty ? kind!.trim() : this.kind,
+        at: (at != null && at > 0) ? at : this.at,
       );
 
   Map<String, dynamic> toJson() => {
         'n': count,
         if (thumb.isNotEmpty) 't': thumb,
+        if (kind.isNotEmpty) 'k': kind,
+        if (at > 0) 'a': at,
       };
 
   static WorkPlay? fromJson(dynamic raw) {
     if (raw is! Map) return null;
     final n = raw['n'] is num ? (raw['n'] as num).toInt() : int.tryParse('${raw['n'] ?? ''}') ?? 0;
     if (n <= 0) return null;
-    return WorkPlay(count: n, thumb: '${raw['t'] ?? ''}'.trim());
+    return WorkPlay(
+      count: n,
+      thumb: '${raw['t'] ?? ''}'.trim(),
+      kind: '${raw['k'] ?? ''}'.trim(),
+      at: raw['a'] is num ? (raw['a'] as num).toInt() : int.tryParse('${raw['a'] ?? ''}') ?? 0,
+    );
   }
 }
 
@@ -82,10 +103,13 @@ Map<String, WorkPlay> bumpWorkPlay(
   Map<String, WorkPlay> plays,
   String key, {
   String? thumb,
+  String? kind,
+  int? at,
 }) {
   if (key.isEmpty) return plays;
   final next = Map<String, WorkPlay>.from(plays);
-  next[key] = (next[key] ?? const WorkPlay(count: 0)).bump(thumb: thumb);
+  next[key] = (next[key] ?? const WorkPlay(count: 0))
+      .bump(thumb: thumb, kind: kind, at: at);
   return next;
 }
 
@@ -116,7 +140,30 @@ Map<String, WorkPlay> playsOfLib(Map<String, WorkPlay> plays, String lib) {
 }
 
 /// 本机播放量最高、且有缩略图的作品；没有则返回 null。
+///
+/// 0.9.9 自动封面规则：**有图片作品时优先最高播放的图文作品**，
+/// 一张图片作品都没有时才用最高播放的视频帧。同分取更新的记录。
 WorkPlay? topPlayed(Map<String, WorkPlay> plays) {
+  WorkPlay? bestImage;
+  WorkPlay? bestOther;
+  plays.forEach((k, v) {
+    if (v.thumb.isEmpty) return;
+    if (v.isImage) {
+      if (bestImage == null || _betterPlay(v, bestImage!)) bestImage = v;
+    } else {
+      if (bestOther == null || _betterPlay(v, bestOther!)) bestOther = v;
+    }
+  });
+  return bestImage ?? bestOther;
+}
+
+bool _betterPlay(WorkPlay a, WorkPlay b) {
+  if (a.count != b.count) return a.count > b.count;
+  return a.at > b.at;
+}
+
+/// 旧的纯播放量最高实现（不看作品类型）；保留给需要跨类型比较的调用方。
+WorkPlay? topPlayedAny(Map<String, WorkPlay> plays) {
   WorkPlay? best;
   String? bestKey;
   plays.forEach((k, v) {
@@ -167,10 +214,11 @@ class WorkPlaysStore {
   static Map<String, WorkPlay> countsFor(String lib) => playsOfLib(_items, lib);
 
   /// 记一次播放；落盘延迟 1.5s，退出时调用 [flush]。
-  static void bump(String lib, String id, {String? thumb}) {
+  static void bump(String lib, String id,
+      {String? thumb, String? kind, int? at}) {
     final key = workPlaysKey(lib: lib, id: id);
     if (key.isEmpty) return;
-    _items = bumpWorkPlay(_items, key, thumb: thumb);
+    _items = bumpWorkPlay(_items, key, thumb: thumb, kind: kind, at: at);
     revision.value++;
     _flush ??= Timer(const Duration(milliseconds: 1500), flush);
   }

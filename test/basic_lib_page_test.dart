@@ -23,5 +23,25 @@ void main() {
       expect(pickAuthorAvatar(), '');
       expect(pickAuthorAvatar(av: ' ', fallback: ''), '');
     });
+
+    test('手动设置头像优先于爬虫与自动生成', () {
+      expect(
+          pickAuthorAvatar(
+              manual: '/media/lib-01/av/manual.jpg',
+              av: '/media/lib-01/av/crawler.jpg',
+              fallback: '/media/lib-01/a/th.jpg'),
+          '/media/lib-01/av/manual.jpg');
+    });
+
+    test('清除手动设置后回落到爬虫头像，再回落到自动生成', () {
+      expect(
+          pickAuthorAvatar(
+              av: '/media/lib-01/av/crawler.jpg',
+              fallback: '/media/lib-01/a/th.jpg'),
+          '/media/lib-01/av/crawler.jpg');
+      expect(
+          pickAuthorAvatar(fallback: '/media/lib-01/a/th.jpg'),
+          '/media/lib-01/a/th.jpg');
+    });
   });
 }

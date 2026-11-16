@@ -4,12 +4,15 @@
 ///  1. 文件夹自定义封面：`_cover/<version>.<ext>`（版本指针由服务端扫描写入
 ///     `libraries.json` 的 `cover` / `cover_ext`；只新增文件、不改旧文件，
 ///     旧图因此全部保留，回滚只需把指针改回旧版本）。
-///  2. 本机「App 本地播放量最高」且带缩略图的作品封面：
+///  2. 爬虫脚本抓取的封面（作品目录的 `cover.jpg`，服务端索引以 `cv` 下发）。
+///  3. 本机「App 本地播放量最高」且带缩略图的作品封面：
 ///     基础库取库内最高，单元库取整棵子树（含下级单元库）最高。
-///  3. 都没有 → 默认图（文件夹图标）。
+///  4. 都没有 → 默认图（文件夹图标）。
 ///
 /// 本文件不碰网络与文件系统，只做「该用哪张图」的判定。
 library;
+
+import 'media_priority.dart';
 
 /// 自定义封面目录名（位于库/单元库文件夹内）。
 const String kCoverDir = '_cover';
@@ -145,13 +148,14 @@ String absoluteMediaUrl(
 CoverPick pickBasicCover({
   required String rel,
   String bestThumb = '',
+  String crawlerThumb = '',
   String version = '',
   String ext = 'jpg',
 }) {
   final custom = coverImageRel(rel, version, ext: ext);
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
-  final th = bestThumb.trim();
-  if (th.isNotEmpty) return CoverPick(th);
+  final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
+  if (pick.isNotEmpty) return CoverPick(pick);
   return const CoverPick.none();
 }
 
@@ -162,12 +166,13 @@ CoverPick pickBasicCover({
 CoverPick pickUnitCover({
   required String rel,
   String bestThumb = '',
+  String crawlerThumb = '',
   String version = '',
   String ext = 'jpg',
 }) {
   final custom = coverImageRel(rel, version, ext: ext);
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
-  final th = bestThumb.trim();
-  if (th.isNotEmpty) return CoverPick(th);
+  final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
+  if (pick.isNotEmpty) return CoverPick(pick);
   return const CoverPick.none();
 }

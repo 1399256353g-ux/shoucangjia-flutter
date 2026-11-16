@@ -23,6 +23,9 @@ class BasicLib {
   /// L5-C：自定义封面版本（`_cover/<version>.<ext>`）；空串表示无自定义封面。
   final String coverVersion;
   final String coverExt;
+  /// 0.9.9：爬虫脚本抓到的封面（作品目录 `cover.jpg`，服务端索引 `cv` 下发）；
+  /// 空串表示没有。优先级介于手动封面与自动封面之间。
+  final String crawlerCover;
   /// J7：来源连接（多 IP 聚合时用于路由与去重展示）。
   final String serverId;
   final String serverBase;
@@ -37,6 +40,7 @@ class BasicLib {
     required this.works,
     this.coverVersion = '',
     this.coverExt = 'jpg',
+    this.crawlerCover = '',
     this.serverId = '',
     this.serverBase = '',
     this.serverLabel = '',
@@ -50,6 +54,7 @@ class BasicLib {
         'authors': authors,
         'works': works,
         if (coverVersion.isNotEmpty) 'cover': {'v': coverVersion, 'e': coverExt},
+        if (crawlerCover.isNotEmpty) 'cv': crawlerCover,
         if (serverId.isNotEmpty) '_serverId': serverId,
         if (serverBase.isNotEmpty) '_serverBase': serverBase,
         if (serverLabel.isNotEmpty) '_serverLabel': serverLabel,
@@ -115,6 +120,7 @@ class LibraryTree {
         works: _num(raw['works']),
         coverVersion: coverPointerOf(raw['cover']).version,
         coverExt: coverPointerOf(raw['cover']).ext,
+        crawlerCover: '${raw['cv'] ?? ''}'.trim(),
         serverId: '${raw['_serverId'] ?? ''}'.trim(),
         serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
         serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
