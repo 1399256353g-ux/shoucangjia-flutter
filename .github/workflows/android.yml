@@ -63,8 +63,19 @@ jobs:
           print(open(p).read()[-400:])
           PY2
       - run: flutter pub get
+      - name: Validate workflow YAML
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" .github/workflows/android.yml
+
+      - name: Flutter tests
+        run: flutter test -r compact
       - run: dart run flutter_launcher_icons
-      - run: flutter build apk --release
+      - name: Build APK (retry once)
+        env:
+          GRADLE_OPTS: -Dorg.gradle.internal.http.connectionTimeout=60000 -Dorg.gradle.internal.http.socketTimeout=60000
+        run: |
+          flutter build apk --release || flutter build apk --release
       - name: Rename APK with version
         run: |
           VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
