@@ -9160,12 +9160,19 @@ class _PlayerPageState extends State<PlayerPage>
                             Text(
                                 isV
                                     ? '${fmt(pos)} / ${fmt(dur)}'
-                                    : '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}',
+                                    // 单图没有“第几张/共几张”，不显示计数
+                                    : (pics.length > 1
+                                        ? '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}'
+                                        : ''),
                                 style: const TextStyle(
                                     fontSize: 10, color: Colors.white60)),
                             const SizedBox(width: 8),
                             Expanded(
                               child: LayoutBuilder(builder: (ctx, cons) {
+                                // 单图播放没有进度可走，底部不显示进度条。
+                                if (!isV && pics.length <= 1) {
+                                  return const SizedBox.shrink();
+                                }
                                 void seekAt(Offset p) {
                                   if (!isV || dur.inMilliseconds == 0) return;
                                   final f =
