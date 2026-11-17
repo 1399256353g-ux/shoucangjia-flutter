@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
-import 'dart:math' show Random;
+import 'dart:math' show Random, max, min;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
+import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -14,7 +17,6 @@ import 'package:window_manager/window_manager.dart';
 
 import 'cover_admin.dart';
 import 'cover_cache.dart';
-import 'cover_memo.dart';
 import 'cover_upload.dart';
 import 'deleted_monitor.dart';
 import 'concurrency.dart';
@@ -795,6 +797,211 @@ Future<Map<String, dynamic>?> sendDrop(String id, String author,
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// NEXT_BATCH E（K2/K3/K7）：作品管理多选、手动名单、单元库标记剪枝。
+// 以下纯函数不碰网络与 UI，便于单测；卡片/页面只调用它们。
+// ---------------------------------------------------------------------------
+
+/// K2：切换一个作品的选择状态（幂等、自动去重）。
+Set<String> toggleWorkSelection(Set<String> selected, String id) {
+  final next = Set<String>.from(selected);
+  if (id.isEmpty) return next;
+  if (!next.remove(id)) next.add(id);
+  return next;
+}
+
+/// K2：当前列表是否已全选（空列表不算全选）。
+bool allWorksSelected(Set<String> selected, Iterable<String> ids) {
+  final list = ids.where((e) => e.isNotEmpty).toSet();
+  return list.isNotEmpty && list.every(selected.contains);
+}
+
+/// K2：全选 / 取消全选切换；已全选则清空，否则选中全部（去重）。
+Set<String> toggleSelectAllWorks(Set<String> selected, Iterable<String> ids) {
+  if (allWorksSelected(selected, ids)) return <String>{};
+  return ids.where((e) => e.isNotEmpty).toSet();
+}
+
+/// K2：批量删除按钮是否可用。
+bool canBatchDelete(Set<String> selected) => selected.isNotEmpty;
+
+/// K2：批量移动按钮是否可用（有选中且已选目标文件夹）。
+bool canBatchMove(Set<String> selected, String? targetRel) =>
+    selected.isNotEmpty && (targetRel ?? '').trim().isNotEmpty;
+
+/// K2：删除确认文案（作品数 + 预检文件数）。
+String batchDeleteConfirmText(int works, int files) =>
+    '将删除 $works 个作品（$files 个文件）。\n文件会移到库内回收站，并记入手动名单，'
+    '可在「内容维护」里撤销。';
+
+/// K2：移动确认文案。
+String batchMoveConfirmText(int works, String targetRel) =>
+    '将移动 $works 个作品到「$targetRel」。\n只允许同作者、同单元库内移动，'
+    '由服务端校验；移动结果会记入手动名单。';
+
+/// K3：来源文案，优先级与 J19 一致（手动 > 爬虫）。
+String workSourceLabel({required bool manual}) => manual ? '手动' : '爬虫';
+
+/// K3：作品是否在手动名单里（名单可接受 Map / List / Set 的 id 集合）。
+bool isManualWork(Object? manualIds, String id) {
+  if (id.isEmpty) return false;
+  if (manualIds is Set) return manualIds.contains(id);
+  if (manualIds is Iterable) return manualIds.any((e) => '$e' == id);
+  return false;
+}
+
+/// K7：剪掉已不存在的单元库标记，保留原顺序并去重。
+List<String> pruneUnitMarks(Iterable<String> existingIds, Iterable<String> marks) {
+  final keep = existingIds.where((e) => e.isNotEmpty).toSet();
+  final out = <String>[];
+  final seen = <String>{};
+  for (final m in marks) {
+    if (m.isEmpty || !keep.contains(m) || !seen.add(m)) continue;
+    out.add(m);
+  }
+  return out;
+}
+
+/// K7：存在但顺序/数量与剪枝结果不一致时返回 true（用于判断是否要写回）。
+bool unitMarksNeedPrune(Iterable<String> existingIds, Iterable<String> marks) {
+  final pruned = pruneUnitMarks(existingIds, marks);
+  final src = marks.toList();
+  if (pruned.length != src.length) return true;
+  for (var i = 0; i < pruned.length; i++) {
+    if (pruned[i] != src[i]) return true;
+  }
+  return false;
+}
+
+/// K7：收集单元库树里全部节点 id（含根）。
+Set<String> unitIdsOf(UnitLibrary? root) {
+  final out = <String>{};
+  void walk(UnitLibrary u) {
+    out.add(u.id);
+    for (final c in u.children) {
+      walk(c);
+    }
+  }
+
+  if (root != null) walk(root);
+  return out;
+}
+
+/// K3：读取某个基础库的手动名单（作品 id 集合）。
+/// 失败返回空集合，不阻断页面加载。
+Future<Set<String>> fetchManualWorkIds(String lib) async {
+  if (cfg.baseFor(lib).isEmpty || lib.isEmpty) return <String>{};
+  try {
+    final r = await http
+        .get(cfg.u('/api/work/manual', lib: lib), headers: cfg.headersFor(lib))
+        .timeout(const Duration(seconds: 8));
+    if (r.statusCode != 200) return <String>{};
+    final j = jsonDecode(r.body);
+    final list = (j is Map ? j['works'] : null);
+    if (list is! List) return <String>{};
+    return list
+        .whereType<Map>()
+        .map((e) => '${e['id'] ?? ''}')
+        .where((e) => e.isNotEmpty)
+        .toSet();
+  } catch (_) {
+    return <String>{};
+  }
+}
+
+/// K2/K3：作品删除请求。`dry:true` 只预检，`confirm:true` 才执行；
+/// 客户端发起的手动操作固定带 `manual:true` 记入名单。
+Future<Map<String, dynamic>?> postWorkDelete(String lib, String id,
+    {bool confirm = false}) async {
+  if (cfg.baseFor(lib).isEmpty || lib.isEmpty || id.isEmpty) return null;
+  try {
+    final r = await http
+        .post(cfg.u('/api/work/delete', lib: lib),
+            headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'lib': lib,
+              'id': id,
+              'dry': !confirm,
+              'confirm': confirm,
+              'manual': true,
+            }))
+        .timeout(const Duration(seconds: 20));
+    final j = jsonDecode(r.body);
+    if (j is Map) {
+      return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
+    }
+    return {'status': r.statusCode, 'ok': false, 'error': 'HTTP ${r.statusCode}'};
+  } catch (e) {
+    return {'ok': false, 'error': '$e'};
+  }
+}
+
+/// K2/K3：作品移动请求（同作者同单元库由服务端校验）。
+Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
+    {bool confirm = false}) async {
+  if (cfg.baseFor(lib).isEmpty || lib.isEmpty || id.isEmpty || toRel.isEmpty) {
+    return null;
+  }
+  try {
+    final r = await http
+        .post(cfg.u('/api/work/move', lib: lib),
+            headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'lib': lib,
+              'id': id,
+              'to': toRel,
+              'dry': !confirm,
+              'confirm': confirm,
+              'manual': true,
+            }))
+        .timeout(const Duration(seconds: 20));
+    final j = jsonDecode(r.body);
+    if (j is Map) {
+      return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
+    }
+    return {'status': r.statusCode, 'ok': false, 'error': 'HTTP ${r.statusCode}'};
+  } catch (e) {
+    return {'ok': false, 'error': '$e'};
+  }
+}
+
+/// K2：从作品媒体路径推断作者目录前缀（VID/PIC 之前的段）。
+/// 路径形如 `/media/<lib>/<rel>`，先去掉 `/media/` 与库 id 再取前缀。
+String authorPrefixOfMedia(String path) {
+  var p = path.trim();
+  if (p.startsWith('/media/')) {
+    p = p.substring(7);
+    final at = p.indexOf('/');
+    if (at > 0) p = p.substring(at + 1);
+  }
+  final segs = p.split('/').where((e) => e.isNotEmpty).toList();
+  final i = segs.indexWhere((s) => s == 'VID' || s == 'PIC' || s == 'vid' || s == 'pic');
+  if (i > 0) return segs.sublist(0, i).join('/');
+  return segs.length > 1 ? segs.sublist(0, segs.length - 1).join('/') : '';
+}
+
+/// K2：目标文件夹候选列表（`/api/cat/tree` 的 dirs 拍平），
+/// 只保留与作者前缀一致的目录，避免把作品移到别的作者下。
+List<String> moveTargetCandidates(dynamic catTree, String authorPrefix) {
+  final out = <String>[];
+  final prefix = authorPrefix.trim();
+  void walk(List dirs) {
+    for (final d in dirs) {
+      if (d is! Map) continue;
+      final rel = '${d['rel'] ?? ''}'.trim();
+      if (rel.isEmpty) continue;
+      if (prefix.isEmpty || rel == prefix || rel.startsWith('$prefix/')) {
+        out.add(rel);
+      }
+      final kids = d['dirs'];
+      if (kids is List) walk(kids);
+    }
+  }
+
+  if (catTree is Map && catTree['dirs'] is List) walk(catTree['dirs'] as List);
+  return out;
+}
+
 class App extends StatefulWidget {
   const App({super.key});
   @override
@@ -841,6 +1048,7 @@ class _AppState extends State<App> {
     cfg.setBindings(decodeBindings(sp.getString('lib_bindings_v1')));
     cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
+    await RecommendCountSettings.load();
     await AppTheme.load();
     if (mounted) setState(() => ready = true);
   }
@@ -1784,20 +1992,14 @@ class AuthorAvatar extends StatelessWidget {
   }
 
   Widget _buildWith(BuildContext context, {required String override}) {
-    final letter = name.isEmpty ? '?' : name[0];
     // 覆盖图可能来自别的基础库：按路径里的库前缀路由/取鉴权，避免拼错地址。
     final overLib = override.isEmpty ? '' : libOfMediaPath(override);
     final src = override.isNotEmpty ? override : mediaPath;
     final srcLib = override.isNotEmpty
         ? (overLib.isEmpty ? lib : overLib)
         : lib;
-    final placeholder = Container(
-      width: size,
-      height: size,
-      color: Colors.blueGrey,
-      alignment: Alignment.center,
-      child: Text(letter, style: TextStyle(fontSize: size * 0.4)),
-    );
+    // 统一占位：无图/加载中/失败都不空白，用首字母圆形占位（emoji 安全）。
+    final placeholder = AvatarLetterPlaceholder(name: name, size: size);
     return ClipOval(
       child: SizedBox(
         width: size,
@@ -1816,6 +2018,7 @@ class AuthorAvatar extends StatelessWidget {
                     displaySize: size,
                     devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
                 fadeInDuration: Duration.zero,
+                placeholder: (_, __) => placeholder,
                 errorWidget: (_, __, ___) => placeholder,
               ),
       ),
@@ -2331,6 +2534,157 @@ class _DoubleTapLikeTileState extends State<_DoubleTapLikeTile> {
   }
 }
 
+/// 推荐页每批数量：0 或空 = 默认 40，上限 500（服务端上限 1000）。
+const int kRecommendDefaultCount = 40;
+const int kRecommendMaxCount = 500;
+const String kRecommendCountPrefsKey = 'recommend_n_v1';
+
+/// 容错解析用户输入：空/非数字 → 默认 40；数字夹紧到 0..500。
+int parseRecommendCount(dynamic raw) {
+  if (raw == null) return kRecommendDefaultCount;
+  if (raw is num) {
+    if (raw.isNaN || raw.isInfinite) return kRecommendDefaultCount;
+    return raw.round().clamp(0, kRecommendMaxCount);
+  }
+  final s = '$raw'.trim();
+  if (s.isEmpty) return kRecommendDefaultCount;
+  final v = int.tryParse(s.replaceAll(RegExp(r'[^0-9-]'), ''));
+  if (v == null) return kRecommendDefaultCount;
+  return v.clamp(0, kRecommendMaxCount);
+}
+
+/// 实际请求数量：0（用户设为「默认」）或空时用 40。
+int recommendRequestCount(int raw) =>
+    raw <= 0 ? kRecommendDefaultCount : raw.clamp(1, kRecommendMaxCount);
+
+/// 推荐作品去重键：库 + 作品 id（无库时只用 id）。
+String recommendWorkKey(dynamic w) {
+  if (w is! Map) return '';
+  final id = '${w['id'] ?? ''}';
+  if (id.isEmpty) return '';
+  final lib = '${w['_lib'] ?? ''}';
+  return lib.isEmpty ? id : '$lib|$id';
+}
+
+/// 续播合并：把 [incoming] 追加到 [existing] 尾部，按作品 id 去重，
+/// 保留原有顺序；没有 id 的条目无法判重，按原样保留。
+List mergeRecommendPages(List existing, List incoming) {
+  final out = <dynamic>[];
+  final seen = <String>{};
+  void addAll(List src) {
+    for (final w in src) {
+      final k = recommendWorkKey(w);
+      if (k.isNotEmpty && !seen.add(k)) continue;
+      out.add(w);
+    }
+  }
+
+  addAll(existing);
+  addAll(incoming);
+  return out;
+}
+
+/// 生成未用过的推荐 seed：同一秒内多次续播也不会重复请求同一批。
+int nextRecommendSeed({
+  required int nowSeconds,
+  required int seq,
+  required Set<int> used,
+}) {
+  var s = seq;
+  var seed = nowSeconds + s * 7919;
+  while (used.contains(seed)) {
+    s++;
+    seed = nowSeconds + s * 7919;
+  }
+  return seed;
+}
+
+/// 推荐数量设置：持久化到本机 SharedPreferences。
+class RecommendCountSettings {
+  /// 用户原始值（0 表示默认 40）。
+  static int raw = kRecommendDefaultCount;
+
+  /// 实际请求数量（已把 0 折算为 40）。
+  static int get value => recommendRequestCount(raw);
+
+  static Future<void> load() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      raw = parseRecommendCount(sp.get(kRecommendCountPrefsKey));
+    } catch (_) {
+      raw = kRecommendDefaultCount;
+    }
+  }
+
+  /// 保存并返回夹紧后的原始值。
+  static Future<int> save(dynamic input) async {
+    raw = parseRecommendCount(input);
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setInt(kRecommendCountPrefsKey, raw);
+    } catch (_) {}
+    return raw;
+  }
+}
+
+/// 设置：推荐页每批数量（0/空 = 默认 40）。
+class _RecommendCountTile extends StatefulWidget {
+  const _RecommendCountTile();
+  @override
+  State<_RecommendCountTile> createState() => _RecommendCountTileState();
+}
+
+class _RecommendCountTileState extends State<_RecommendCountTile> {
+  Future<void> _edit() async {
+    final ctrl = TextEditingController(
+        text: RecommendCountSettings.raw == 0
+            ? ''
+            : '${RecommendCountSettings.raw}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('推荐数量'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: '每次推荐作品数',
+            helperText: '0–500，0 或留空 = 默认 40',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('保存')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final v = await RecommendCountSettings.save(ctrl.text);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        content: Text(v == 0 ? '已设为默认 40' : '已设为 $v 个')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = RecommendCountSettings.raw;
+    return ListTile(
+      leading: const Icon(Icons.auto_awesome_outlined),
+      title: const Text('推荐数量'),
+      subtitle: Text(v == 0
+          ? '默认 40 个 · 续播自动追加'
+          : '$v 个 · 0–500 · 续播自动追加'),
+      onTap: _edit,
+    );
+  }
+}
+
 class SettingsHubPage extends StatelessWidget {
   const SettingsHubPage({super.key});
 
@@ -2406,6 +2760,7 @@ class SettingsHubPage extends StatelessWidget {
         ),
         const _StripIndexTile(),
         const _DoubleTapLikeTile(),
+        const _RecommendCountTile(),
         ListTile(
           leading: const Icon(Icons.bug_report_outlined),
           title: const Text('诊断信息'),
@@ -3241,13 +3596,8 @@ class _LibraryPageState extends State<LibraryPage> {
 
   // L5-C：有新的本机播放记录时刷新封面
   void _onPlaysChanged() {
-    // 0.9.53：播放次数会影响「子树最高播放基础库」，缓存必须一起失效。
-    _unitCoverMemo.clear();
     if (mounted) setState(() {});
   }
-
-  /// 0.9.53：单元库封面链的记忆化缓存（键含播放/封面修订号）。
-  final CoverMemo _unitCoverMemo = CoverMemo();
 
   /// L5-C：基础库封面 URL。手动 `_cover/` > 爬虫封面（`cv`）> 自动封面
   /// （本机播放量最高的作品，有图文作品时优先图文图片）。
@@ -3274,8 +3624,9 @@ class _LibraryPageState extends State<LibraryPage> {
     BasicLib? best;
     var bestPlays = -1;
     for (final b in u.allBasics) {
-      // 0.9.53：O(1) 取整库播放总数，不再每次扫全部播放记录。
-      final plays = WorkPlaysStore.playsInLib(b.id);
+      final plays = WorkPlaysStore.countsFor(b.id)
+          .values
+          .fold<int>(0, (n, p) => n + p.count);
       if (plays > bestPlays) {
         bestPlays = plays;
         best = b;
@@ -3437,9 +3788,19 @@ class _LibraryPageState extends State<LibraryPage> {
         basics: t?.allBasics ?? const <BasicLib>[],
         topName: 'SECRET',
       );
+      // K7：单元库被删除/重建后，清掉已不存在节点的星标（标记只存本机
+      // SharedPreferences，不写 NAS）。树拿不到时（网络失败）不动标记。
+      var kept = saved;
+      if (units != null && unitMarksNeedPrune(unitIdsOf(units), saved)) {
+        final pruned = pruneUnitMarks(unitIdsOf(units), saved);
+        for (final stale in saved.where((e) => !pruned.contains(e))) {
+          await StarStore.instance.toggle(stale);
+        }
+        kept = StarStore.instance.ordered;
+      }
       if (!mounted) return;
       setState(() {
-        stars = saved;
+        stars = kept;
         tree = t;
         unitTree = units;
         if (units != null) UnitBadgeRegistry.setFrom(units);
@@ -3461,17 +3822,6 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 0.9.35：owner 手动设置的单元库封面（服务端 `unit-covers.json` → `cover.u`）
   /// 优先 > 手动 `_cover/` > 子树最高播放基础库的封面 > 第一个有封面的基础库。
   String _unitCoverUrl(UnitLibrary u) {
-    // 0.9.53：同一单元库 + 同一播放/封面状态只算一次；滚动重建时直接命中。
-    return _unitCoverMemo.resolve(
-      '${u.id}\u0001${u.node.coverUrl}\u0001${u.node.coverVersion}'
-      '\u0001${u.node.coverExt}\u0001${WorkPlaysStore.revision.value}'
-      '\u0001${coverRevision.value}\u0001${cfg.base}',
-      () => _resolveUnitCover(u),
-    );
-  }
-
-  /// 单元库封面链的真实计算（被 [_unitCoverUrl] 记忆化包裹）。
-  String _resolveUnitCover(UnitLibrary u) {
     final pick = u.node.coverUrl.trim();
     if (pick.isNotEmpty) {
       final ownLib = libOfMediaPath(pick);
@@ -3516,6 +3866,7 @@ class _LibraryPageState extends State<LibraryPage> {
         onToggleUnitStar: _toggleUnitStar,
         unitCoverOf: _unitCoverUrl,
         coverUploader: uploadCoverFromPicker,
+        onConfigureUnit: _openUnitCrawler,
       ),
     ));
   }
@@ -6166,7 +6517,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                                 maxCrossAxisExtent: 150,
                                 mainAxisSpacing: 10,
                                 crossAxisSpacing: 10,
-                                mainAxisExtent: 170,
+                                mainAxisExtent: AuthorGridCard.extent,
                               ),
                               itemCount: _ordered.length,
                               itemBuilder: (_, i) => _authorCell(_ordered[i]),
@@ -6216,9 +6567,15 @@ class PlayerPage extends StatefulWidget {
   final int start;
   // 作品可能来自非当前库（按库筛选 / 全部库），lib 为列表默认所属库
   final String? lib;
+  // A2：列表到底时向来源页请求续播（返回是否追加成功）。
+  final Future<bool> Function()? onNeedMore;
   // T3：不再携带旧「收藏夹」idx/名称，来源只由单元库体系表达
   const PlayerPage(
-      {super.key, required this.works, required this.start, this.lib});
+      {super.key,
+      required this.works,
+      required this.start,
+      this.lib,
+      this.onNeedMore});
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
@@ -6288,6 +6645,8 @@ class _PlayerPageState extends State<PlayerPage>
   int _openToken = 0;
   double _wheelAcc = 0;
   bool _wheelLock = false;
+  // A2：列表到底续播请求进行中，避免重复请求。
+  bool _fetchingMore = false;
   Timer? _wheelUnlock;
   Timer? _wheelIdle;
   bool _fsBusy = false;
@@ -7471,7 +7830,26 @@ class _PlayerPageState extends State<PlayerPage>
             count: widget.works.length,
             step: delta,
             playable: (i) => workPlayable(_workAt(i)));
-    if (target < 0 || target == base) return;
+    if (target < 0 || target == base) {
+      // A2：最后一条再往后走时向来源页续拉新一批，成功后重试一次。
+      if (delta > 0 &&
+          !_fetchingMore &&
+          widget.onNeedMore != null &&
+          base >= widget.works.length - 1) {
+        _fetchingMore = true;
+        widget.onNeedMore!().then((ok) {
+          _fetchingMore = false;
+          if (!mounted) return;
+          if (ok && widget.works.length > base) {
+            setState(() {});
+            _step(delta, instant: instant);
+          }
+        }).catchError((_) {
+          _fetchingMore = false;
+        });
+      }
+      return;
+    }
     _pendingPage = target;
     final now = DateTime.now().millisecondsSinceEpoch;
     // I2：110ms 动画结束后再按键仍走动画，只有连击间隔短于动画才直接跳页
@@ -9947,6 +10325,12 @@ class _RecommendPageState extends State<RecommendPage> {
   bool loading = true;
   String? err;
   int batch = 0;
+  // A2：无限续播状态。失败静默；空结果/连续重复则停止继续请求。
+  bool _loadingMore = false;
+  bool _moreExhausted = false;
+  int _moreSeq = 0;
+  bool _showAll = false;
+  final Set<int> _usedSeeds = {};
   // J11：推荐页支持作者筛选（与总览/排行/搜索共享状态）
   LibMeta? meta;
   Map<String, Set<String>> authorTypes = {};
@@ -9977,6 +10361,12 @@ class _RecommendPageState extends State<RecommendPage> {
       loading = true;
       err = null;
     });
+    _moreExhausted = false;
+    _moreSeq = 0;
+    _showAll = false;
+    _usedSeeds
+      ..clear()
+      ..add(seed);
     try {
       // 推荐改为跨全部已注册库：每个库取一批，按库轮转合并，
       // 避免默认库（抖音收藏）独占整个页面。
@@ -9999,23 +10389,8 @@ class _RecommendPageState extends State<RecommendPage> {
       }
       // 0.9.8：推荐改为全部基础库池（服务端 lib=all，约 1.1 万作品，60s 缓存）。
       // 每条作品带 `_lib`（所属基础库），播放/词条按基础库路由。
-      // 有范围筛选时先多取（筛完仍要够 40 个），无筛选按 40 取。
-      final _filtering = authorFilter.value.isActive;
-      final _poolSize = _filtering ? 600 : 40;
-      final r = await http.get(
-          cfg.u('/api/recommend?n=$_poolSize&seed=$seed', lib: 'all'),
-          headers: cfg.headers);
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
-      final merged = <Map<String, dynamic>>[];
-      for (final w in (j is Map && j['works'] is List)
-          ? (j['works'] as List)
-          : const []) {
-        if (w is! Map) continue;
-        final m = Map<String, dynamic>.from(w);
-        merged.add({...m, '_lib': '${m['_lib'] ?? cfg.lib}'});
-        if (merged.length >= _poolSize) break;
-      }
+      // 有范围筛选时先多取（筛完仍要够数量），无筛选按设置数量取。
+      final merged = await _fetchPage(seed, _fetchCount);
       if (!mounted) return;
       setState(() {
         works = merged;
@@ -10036,6 +10411,83 @@ class _RecommendPageState extends State<RecommendPage> {
           loading = false;
         });
       }
+    }
+  }
+
+  /// 本次请求数量：筛选时多取（筛完仍要够数），否则用设置值（0/空 = 40）。
+  int get _fetchCount =>
+      authorFilter.value.isActive ? 600 : RecommendCountSettings.value;
+
+  Future<List<Map<String, dynamic>>> _fetchPage(int seed, int n) async {
+    final r = await http.get(
+        cfg.u('/api/recommend?n=$n&seed=$seed', lib: 'all'),
+        headers: cfg.headers);
+    if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+    final j = jsonDecode(utf8.decode(r.bodyBytes));
+    final out = <Map<String, dynamic>>[];
+    for (final w in (j is Map && j['works'] is List)
+        ? (j['works'] as List)
+        : const []) {
+      if (w is! Map) continue;
+      final m = Map<String, dynamic>.from(w);
+      out.add({...m, '_lib': '${m['_lib'] ?? cfg.lib}'});
+      if (out.length >= n) break;
+    }
+    return out;
+  }
+
+  /// A2：列表到底后换新 seed 拉一批并追加（按 id 去重，保持原顺序）。
+  ///
+  /// [target] 是播放器手里的列表实例（可能不是 [works]），追加后播放器
+  /// 可以直接继续连播。失败静默返回 false，不打断播放。
+  Future<bool> _loadMore({List? target}) async {
+    if (_loadingMore || _moreExhausted || !mounted) return false;
+    _loadingMore = true;
+    try {
+      final n = _fetchCount;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final seed = nextRecommendSeed(
+            nowSeconds: now, seq: ++_moreSeq, used: _usedSeeds);
+        _usedSeeds.add(seed);
+        List<Map<String, dynamic>> page;
+        try {
+          page = await _fetchPage(seed, n);
+        } catch (_) {
+          return false; // 失败静默：保留现有列表，下次滚动可再试
+        }
+        if (page.isEmpty) {
+          _moreExhausted = true;
+          return false;
+        }
+        final merged = mergeRecommendPages(works, page);
+        if (merged.length == works.length) continue; // 整批重复，换 seed 重试
+        final appended = merged.sublist(works.length);
+        if (!mounted) return false;
+        setState(() {
+          works = merged;
+          _authorCount.clear();
+          for (final w in works) {
+            if (w is! Map) continue;
+            final a = '${w['a'] ?? ''}';
+            if (a.isEmpty) continue;
+            _authorCount[a] = (_authorCount[a] ?? 0) + 1;
+          }
+        });
+        if (target != null && !identical(target, works)) {
+          try {
+            target.addAll(appended);
+          } catch (_) {
+            // 目标列表不可变时忽略：播放器下次 next() 会再请求。
+          }
+        }
+        _showAll = true;
+        return appended.isNotEmpty;
+      }
+      _moreExhausted = true;
+      return false;
+    } finally {
+      _loadingMore = false;
     }
   }
 
@@ -10153,6 +10605,17 @@ class _RecommendPageState extends State<RecommendPage> {
     authorFilter.apply(res);
   }
 
+  /// 首屏展示数量：默认铺满一屏；设置更大时按设置；续播过则全部展示。
+  List _displayWorks(List visible, Size size) {
+    if (_showAll) return visible;
+    final fill = recommendVisibleCount(size);
+    final want = RecommendCountSettings.value;
+    final cap = want > fill ? want : fill;
+    if (visible.length <= cap) return visible;
+    // 续播时要往播放器手里的同一列表追加，必须是可变列表。
+    return visible.take(cap).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _visibleWorks;
@@ -10198,13 +10661,15 @@ class _RecommendPageState extends State<RecommendPage> {
                             : RefreshIndicator(
                                 onRefresh: () => load(refresh: true),
                                 // 与作者页/基础库页/搜索页共用同一个作品卡组件；
-                                // 显示数量随窗口自适应铺满一屏，最少 40 个。
+                                // 首屏数量：默认铺满一屏（最少 40），设置更大时按设置；
+                                // 滚到末尾后自动换 seed 续一批（A2 无限续播）。
                                 child: WorkGrid(
-                                  works: visible
-                                      .take(recommendVisibleCount(
-                                          MediaQuery.sizeOf(context)))
-                                      .toList(growable: false),
+                                  works: _displayWorks(
+                                      visible, MediaQuery.sizeOf(context)),
                                   lib: cfg.lib,
+                                  onEndReached: () => _loadMore(),
+                                  onNeedMoreWorks: (list) =>
+                                      _loadMore(target: list),
                                 ),
                               ),
                   ),
@@ -10633,6 +11098,389 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
+// ───────────────────────── J12b：头像裁切 ─────────────────────────
+//
+// 视窗固定正方形；图像先按 cover 铺满视窗，再乘 zoom 放大。平移量以视窗
+// 中心为原点夹紧，保证任何缩放级别都不会露出黑边。这里只放纯几何，便于单测。
+
+const double kAvatarCropMinZoom = 1.0;
+const double kAvatarCropMaxZoom = 4.0;
+
+/// 输出头像的最小像素边（服务端仍会统一裁成 512×512）。
+const int kAvatarCropMinPixels = 512;
+
+/// zoom 夹紧到 [1,4]；非有限值按 1 处理。
+double avatarCropClampZoom(double zoom) {
+  if (!zoom.isFinite) return kAvatarCropMinZoom;
+  return zoom.clamp(kAvatarCropMinZoom, kAvatarCropMaxZoom).toDouble();
+}
+
+/// cover 之后乘 zoom 的显示尺寸；参数非法时返回 [Size.zero]。
+Size avatarCropDisplaySize(Size image, double viewSide, double zoom) {
+  if (image.width <= 0 || image.height <= 0 || viewSide <= 0) {
+    return Size.zero;
+  }
+  final z = avatarCropClampZoom(zoom);
+  final scale = max(viewSide / image.width, viewSide / image.height) * z;
+  return Size(image.width * scale, image.height * scale);
+}
+
+/// 平移夹紧：显示尺寸超出视窗的一半即上限，另一方向不许移动。
+Offset avatarCropClampOffset(Offset offset, Size display, double viewSide) {
+  final mx = max(0.0, (display.width - viewSide) / 2);
+  final my = max(0.0, (display.height - viewSide) / 2);
+  final dx = offset.dx.isFinite ? offset.dx : 0.0;
+  final dy = offset.dy.isFinite ? offset.dy : 0.0;
+  return Offset(dx.clamp(-mx, mx).toDouble(), dy.clamp(-my, my).toDouble());
+}
+
+/// 当前平移的归一化坐标（-1..1，0=居中）；该方向不可移动时恒为 0。
+Offset avatarCropNormalizedOffset(
+    Offset offset, Size display, double viewSide) {
+  final mx = max(0.0, (display.width - viewSide) / 2);
+  final my = max(0.0, (display.height - viewSide) / 2);
+  final c = avatarCropClampOffset(offset, display, viewSide);
+  return Offset(mx <= 0 ? 0 : c.dx / mx, my <= 0 ? 0 : c.dy / my);
+}
+
+/// 归一化平移还原为像素平移（先夹紧 norm，再夹紧结果）。
+Offset avatarCropOffsetFromNormalized(
+    Offset norm, Size display, double viewSide) {
+  final mx = max(0.0, (display.width - viewSide) / 2);
+  final my = max(0.0, (display.height - viewSide) / 2);
+  final nx = norm.dx.isFinite ? norm.dx.clamp(-1.0, 1.0).toDouble() : 0.0;
+  final ny = norm.dy.isFinite ? norm.dy.clamp(-1.0, 1.0).toDouble() : 0.0;
+  return avatarCropClampOffset(Offset(nx * mx, ny * my), display, viewSide);
+}
+
+/// 渲染像素比：保证输出短边 ≥512，上限 6（避免超大内存）。
+double avatarCropPixelRatio(double viewSide) {
+  if (!viewSide.isFinite || viewSide <= 0) return 1;
+  return (kAvatarCropMinPixels / viewSide).clamp(1.0, 6.0).toDouble();
+}
+
+/// J13：简介按 Unicode 码点计数（中文/emoji 各算 1）。
+int authorBioLength(String text) => text.runes.length;
+
+const int kAuthorBioMaxChars = 500;
+
+/// 与服务端一致：去 `\r`、去首尾空白；清空 = 空串。
+String normalizeAuthorBio(String raw) => raw.replaceAll('\r', '').trim();
+
+/// 不合法时返回提示；空串合法（表示清空）。
+String? validateAuthorBio(String raw) {
+  if (authorBioLength(normalizeAuthorBio(raw)) > kAuthorBioMaxChars) {
+    return '简介最多 $kAuthorBioMaxChars 字';
+  }
+  return null;
+}
+
+/// 服务端 bioAt（秒）→ 本地时间；0/负数返回空串。
+String formatAuthorBioAt(int ts) {
+  if (ts <= 0) return '';
+  final t = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  String two(int v) => v < 10 ? '0$v' : '$v';
+  return '${t.year}-${two(t.month)}-${two(t.day)} '
+      '${two(t.hour)}:${two(t.minute)}';
+}
+
+/// J12b/J13：作者头像/简介写入结果。
+class AuthorEditResult {
+  final bool ok;
+  final String message;
+
+  /// 头像：服务端返回的媒体路径；简介：服务端回写的正文。
+  final String path;
+
+  const AuthorEditResult(this.ok, this.message, {this.path = ''});
+}
+
+/// 把裁切好的 PNG 字节 POST 到 `/api/author/avatar`。
+Future<AuthorEditResult> uploadAuthorAvatarBytes({
+  required String libId,
+  required String author,
+  required List<int> pngBytes,
+}) async {
+  http.Response r;
+  try {
+    r = await http.post(
+      cfg.u('/api/author/avatar', lib: libId),
+      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'lib': libId,
+        'author': author,
+        'data': base64Encode(pngBytes),
+      }),
+    );
+  } catch (e) {
+    return AuthorEditResult(false, '上传失败：$e');
+  }
+  Map<String, dynamic> j = const {};
+  try {
+    final d = jsonDecode(r.body);
+    if (d is Map<String, dynamic>) j = d;
+  } catch (_) {}
+  if (r.statusCode != 200 || j['ok'] != true) {
+    final msg = j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
+    return AuthorEditResult(false, '头像上传失败：$msg');
+  }
+  return AuthorEditResult(true, '头像已更新', path: '${j['u'] ?? ''}');
+}
+
+/// J13：把简介写回 `/api/author/bio`（空串表示清空）。
+Future<AuthorEditResult> uploadAuthorBio({
+  required String libId,
+  required String author,
+  required String bio,
+}) async {
+  final bad = validateAuthorBio(bio);
+  if (bad != null) return AuthorEditResult(false, bad);
+  final clean = normalizeAuthorBio(bio);
+  http.Response r;
+  try {
+    r = await http.post(
+      cfg.u('/api/author/bio', lib: libId),
+      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
+      body: jsonEncode({'lib': libId, 'author': author, 'bio': clean}),
+    );
+  } catch (e) {
+    return AuthorEditResult(false, '保存失败：$e');
+  }
+  Map<String, dynamic> j = const {};
+  try {
+    final d = jsonDecode(r.body);
+    if (d is Map<String, dynamic>) j = d;
+  } catch (_) {}
+  if (r.statusCode != 200 || j['ok'] != true) {
+    final msg = j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
+    return AuthorEditResult(false, '保存失败：$msg');
+  }
+  final saved = j['bio'] is String ? j['bio'] as String : clean;
+  return AuthorEditResult(true, '简介已更新', path: saved);
+}
+
+/// J12b：方形裁切页。确定后返回 PNG 字节（短边 ≥512）。
+class AvatarCropPage extends StatefulWidget {
+  final List<int> bytes;
+  const AvatarCropPage({super.key, required this.bytes});
+
+  @override
+  State<AvatarCropPage> createState() => _AvatarCropPageState();
+}
+
+class _AvatarCropPageState extends State<AvatarCropPage> {
+  final GlobalKey _viewKey = GlobalKey();
+  ui.Image? _image;
+  String? _error;
+  double _zoom = kAvatarCropMinZoom;
+  Offset _offset = Offset.zero;
+  double _startZoom = kAvatarCropMinZoom;
+  double _viewSide = 0;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _decode();
+  }
+
+  Future<void> _decode() async {
+    try {
+      final codec =
+          await ui.instantiateImageCodec(Uint8List.fromList(widget.bytes));
+      final frame = await codec.getNextFrame();
+      if (!mounted) {
+        frame.image.dispose();
+        return;
+      }
+      setState(() => _image = frame.image);
+    } catch (e) {
+      if (mounted) setState(() => _error = '图片解码失败：$e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _image?.dispose();
+    super.dispose();
+  }
+
+  Size _displayFor(double zoom) {
+    final img = _image;
+    if (img == null) return Size.zero;
+    return avatarCropDisplaySize(
+        Size(img.width.toDouble(), img.height.toDouble()), _viewSide, zoom);
+  }
+
+  void _setZoom(double z) {
+    final next = avatarCropClampZoom(z);
+    setState(() {
+      _zoom = next;
+      _offset = avatarCropClampOffset(_offset, _displayFor(next), _viewSide);
+    });
+  }
+
+  Widget _cropView(ui.Image img, double side) {
+    final display = avatarCropDisplaySize(
+        Size(img.width.toDouble(), img.height.toDouble()), side, _zoom);
+    final offset = avatarCropClampOffset(_offset, display, side);
+    return GestureDetector(
+      onScaleStart: (_) => _startZoom = _zoom,
+      onScaleUpdate: (d) {
+        final z = avatarCropClampZoom(_startZoom * d.scale);
+        final nextDisplay = avatarCropDisplaySize(
+            Size(img.width.toDouble(), img.height.toDouble()), side, z);
+        setState(() {
+          _zoom = z;
+          _offset = avatarCropClampOffset(
+              _offset + d.focalPointDelta, nextDisplay, side);
+        });
+      },
+      child: SizedBox(
+        width: side,
+        height: side,
+        child: Stack(fit: StackFit.expand, children: [
+          RepaintBoundary(
+            key: _viewKey,
+            child: ClipRect(
+              child: Stack(children: [
+                const Positioned.fill(child: ColoredBox(color: Colors.black)),
+                Center(
+                  child: Transform.translate(
+                    offset: offset,
+                    child: SizedBox(
+                      width: display.width,
+                      height: display.height,
+                      child: RawImage(
+                        image: img,
+                        fit: BoxFit.fill,
+                        filterQuality: FilterQuality.medium,
+                      ),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+          IgnorePointer(
+              child: CustomPaint(painter: const _AvatarCropGridPainter())),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _confirm() async {
+    final ro = _viewKey.currentContext?.findRenderObject();
+    if (ro is! RenderRepaintBoundary) return;
+    setState(() => _busy = true);
+    try {
+      final shot =
+          await ro.toImage(pixelRatio: avatarCropPixelRatio(_viewSide));
+      final data = await shot.toByteData(format: ui.ImageByteFormat.png);
+      shot.dispose();
+      if (data == null) throw 'PNG 编码失败';
+      if (!mounted) return;
+      Navigator.of(context).pop(Uint8List.view(
+          data.buffer, data.offsetInBytes, data.lengthInBytes));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('生成头像失败：$e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final img = _image;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('裁剪头像'),
+      ),
+      body: SafeArea(
+        child: Column(children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Text('拖动调整位置，双指或滑杆缩放；确定后上传为 512×512 头像',
+                style: TextStyle(fontSize: 12, color: Colors.white70)),
+          ),
+          Expanded(
+            child: Center(
+              child: LayoutBuilder(builder: (context, cons) {
+                if (img == null) {
+                  return _error != null
+                      ? Text(_error!,
+                          style: const TextStyle(color: Colors.white70))
+                      : const CircularProgressIndicator();
+                }
+                final side =
+                    max(80.0, min(cons.maxWidth, cons.maxHeight) - 16);
+                _viewSide = side;
+                return _cropView(img, side);
+              }),
+            ),
+          ),
+          Slider(
+            value: _zoom,
+            min: kAvatarCropMinZoom,
+            max: kAvatarCropMaxZoom,
+            onChanged: img == null ? null : _setZoom,
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed:
+                      _busy ? null : () => Navigator.of(context).pop(),
+                  child: const Text('取消'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: (_busy || img == null) ? null : _confirm,
+                  child: _busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Text('确定'),
+                ),
+              ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _AvatarCropGridPainter extends CustomPainter {
+  const _AvatarCropGridPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = Colors.white54;
+    for (var i = 1; i < 3; i++) {
+      final d = size.width * i / 3;
+      canvas.drawLine(Offset(d, 0), Offset(d, size.height), paint);
+      canvas.drawLine(Offset(0, d), Offset(size.width, d), paint);
+    }
+    canvas.drawRect(Offset.zero & size, paint);
+  }
+
+  @override
+  bool shouldRepaint(_AvatarCropGridPainter oldDelegate) => false;
+}
+
 class AuthorPage extends StatefulWidget {
   final String name;
   // 按库筛选后可能合并多个库；默认当前库
@@ -10644,6 +11492,8 @@ class AuthorPage extends StatefulWidget {
 
 class _AuthorPageState extends State<AuthorPage> {
   String bio = '';
+  /// J13：本机最近一次简介写入时间（服务端 authors.json 的 bioAt 未下发）。
+  int bioAt = 0;
   String av = '';
   // J12：没有现成头像时，从作品图里自动挑一张兜底（中心裁剪）。
   String fallbackAv = '';
@@ -10659,6 +11509,12 @@ class _AuthorPageState extends State<AuthorPage> {
   bool syncing = false;
   LibMeta? meta;
   Timer? syncTimer;
+
+  // K2：多选模式与已选作品；K3：手动名单（作品 id）。
+  bool selectingWorks = false;
+  Set<String> selectedWorks = <String>{};
+  Set<String> manualWorkIds = <String>{};
+  bool _batchBusy = false;
 
   List<String> get _libs =>
       (widget.libs == null || widget.libs!.isEmpty) ? [cfg.lib] : widget.libs!;
@@ -10677,6 +11533,13 @@ class _AuthorPageState extends State<AuthorPage> {
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.crop_square),
+            title: const Text('更换头像（裁切上传）'),
+            subtitle: const Text('裁切为 512×512 写回 NAS，旧图保留',
+                style: TextStyle(fontSize: 11)),
+            onTap: () => Navigator.of(ctx).pop('upload'),
+          ),
           ListTile(
             leading: const Icon(Icons.photo_library_outlined),
             title: const Text('从作品里挑一张作头像'),
@@ -10702,6 +11565,8 @@ class _AuthorPageState extends State<AuthorPage> {
         ..showSnackBar(const SnackBar(content: Text('已清除手动头像')));
     } else if (choice == 'pick') {
       _pickAvatarImage(context);
+    } else if (choice == 'upload') {
+      _pickCropUploadAvatar();
     }
   }
 
@@ -10772,6 +11637,122 @@ class _AuthorPageState extends State<AuthorPage> {
         ),
       ),
     );
+  }
+
+  /// J12b：本地选图 → 方形裁切 → PNG 直传 `/api/author/avatar`。
+  Future<void> _pickCropUploadAvatar() async {
+    final lib = primaryLib.isEmpty ? cfg.lib : primaryLib;
+    if (lib.isEmpty) {
+      _toast('请先选择库');
+      return;
+    }
+    XFile? picked;
+    try {
+      picked = await openFile(acceptedTypeGroups: const [
+        XTypeGroup(label: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp']),
+      ]);
+    } catch (e) {
+      _toast('打开文件选择器失败：$e');
+      return;
+    }
+    if (picked == null) return;
+    List<int> bytes;
+    try {
+      bytes = await picked.readAsBytes();
+    } catch (e) {
+      _toast('读取图片失败：$e');
+      return;
+    }
+    if (bytes.isEmpty) {
+      _toast('图片为空');
+      return;
+    }
+    if (bytes.length > kCoverUploadMaxBytes) {
+      _toast('图片超过 12MB，请先压缩');
+      return;
+    }
+    if (!isSupportedCoverBytes(bytes)) {
+      _toast('只支持 JPG/PNG/WebP 图片');
+      return;
+    }
+    if (!mounted) return;
+    final png = await Navigator.of(context).push<Uint8List>(
+        MaterialPageRoute(builder: (_) => AvatarCropPage(bytes: bytes)));
+    if (png == null || png.isEmpty || !mounted) return;
+    final r = await uploadAuthorAvatarBytes(
+        libId: lib, author: widget.name, pngBytes: png);
+    if (!mounted) return;
+    if (!r.ok) {
+      _toast(r.message);
+      return;
+    }
+    // 清掉本机覆盖，避免旧的手动头像继续遮住服务端新图。
+    await AuthorAvatarStore.instance.clear(widget.name);
+    if (!mounted) return;
+    setState(() {
+      if (r.path.isNotEmpty) av = r.path;
+    });
+    _toast(r.message);
+  }
+
+  /// J13：编辑简介（0–500 字，留空=清空），写回 authors.json。
+  Future<void> _editBio() async {
+    final ctrl = TextEditingController(text: bio);
+    String? error;
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          void save() {
+            final bad = validateAuthorBio(ctrl.text);
+            if (bad != null) {
+              setD(() => error = bad);
+              return;
+            }
+            Navigator.of(ctx).pop(normalizeAuthorBio(ctrl.text));
+          }
+
+          return AlertDialog(
+            title: const Text('编辑作者简介'),
+            content: SizedBox(
+              width: 460,
+              child: TextField(
+                controller: ctrl,
+                autofocus: true,
+                minLines: 4,
+                maxLines: 8,
+                maxLength: kAuthorBioMaxChars,
+                decoration: InputDecoration(
+                  hintText: '留空表示清空简介',
+                  errorText: error,
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('取消')),
+              FilledButton(onPressed: save, child: const Text('保存')),
+            ],
+          );
+        },
+      ),
+    );
+    ctrl.dispose();
+    if (result == null || !mounted) return;
+    final lib = primaryLib.isEmpty ? cfg.lib : primaryLib;
+    final r =
+        await uploadAuthorBio(libId: lib, author: widget.name, bio: result);
+    if (!mounted) return;
+    if (!r.ok) {
+      _toast(r.message);
+      return;
+    }
+    setState(() {
+      bio = r.path;
+      bioAt = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    });
+    _toast(r.message);
   }
 
   /// 简介只保留正文：去掉与作者名重复的行、以及单独一行的日期。
@@ -10872,6 +11853,7 @@ class _AuthorPageState extends State<AuthorPage> {
     final seen = <String>{};
     works = [];
     bio = '';
+    bioAt = 0;
     av = '';
     fallbackAv = '';
     primaryLib = '';
@@ -10920,12 +11902,284 @@ class _AuthorPageState extends State<AuthorPage> {
     fallbackAv =
         pickFallbackAvatar(avatarCandidatesFromWorks(works.whereType<Map>())) ??
             '';
+    // K3：手动名单按库拉取并缓存，刷新后重取。
+    final manual = <String>{};
+    final manualLibs = _libs.toSet();
+    for (final lib in manualLibs) {
+      manual.addAll(await fetchManualWorkIds(lib));
+    }
+    manualWorkIds = manual;
     if (mounted) {
       setState(() {
         loading = false;
+        // 作品被删/移动后，已不存在的选择一并清掉。
+        final ids = works
+            .whereType<Map>()
+            .map((w) => '${w['id'] ?? ''}')
+            .where((e) => e.isNotEmpty)
+            .toSet();
+        selectedWorks = selectedWorks.where(ids.contains).toSet();
+        if (selectedWorks.isEmpty) selectingWorks = false;
         _refreshFilter();
       });
     }
+  }
+
+  // ---------------- K2：多选与批量操作 ----------------
+
+  List<String> get _visibleIds => filteredWorks
+      .whereType<Map>()
+      .map((w) => '${w['id'] ?? ''}')
+      .where((e) => e.isNotEmpty)
+      .toList();
+
+  String _libOfWork(dynamic w) =>
+      '${(w is Map ? w['_lib'] : null) ?? primaryLib}';
+
+  Map<String, dynamic>? _workById(String id) {
+    for (final w in works) {
+      if (w is Map<String, dynamic> && '${w['id'] ?? ''}' == id) return w;
+      if (w is Map && '${w['id'] ?? ''}' == id) {
+        return Map<String, dynamic>.from(w);
+      }
+    }
+    return null;
+  }
+
+  void _enterSelect(String id) {
+    setState(() {
+      selectingWorks = true;
+      selectedWorks = toggleWorkSelection(selectedWorks, id);
+    });
+  }
+
+  void _exitSelect() {
+    setState(() {
+      selectingWorks = false;
+      selectedWorks = <String>{};
+    });
+  }
+
+  void _toggleSelect(String id) {
+    setState(() => selectedWorks = toggleWorkSelection(selectedWorks, id));
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      selectedWorks = toggleSelectAllWorks(selectedWorks, _visibleIds);
+    });
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// 把选中作品按库分组（删除时逐库逐作品调用）。
+  Map<String, List<String>> _selectedByLib() {
+    final out = <String, List<String>>{};
+    for (final id in selectedWorks) {
+      final w = _workById(id);
+      if (w == null) continue;
+      out.putIfAbsent(_libOfWork(w), () => <String>[]).add(id);
+    }
+    return out;
+  }
+
+  Future<void> _batchDelete() async {
+    if (_batchBusy || !canBatchDelete(selectedWorks)) return;
+    setState(() => _batchBusy = true);
+    try {
+      final groups = _selectedByLib();
+      var files = 0;
+      final errors = <String>[];
+      for (final e in groups.entries) {
+        for (final id in e.value) {
+          final j = await postWorkDelete(e.key, id);
+          if (j == null) {
+            errors.add('网络错误');
+            continue;
+          }
+          if (j['ok'] != true) {
+            errors.add('${j['error'] ?? 'HTTP ${j['status']}'}');
+            continue;
+          }
+          files += (j['count'] is num) ? (j['count'] as num).toInt() : 0;
+        }
+      }
+      if (errors.isNotEmpty) {
+        _toast('预检失败：${errors.first}');
+        return;
+      }
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('批量删除'),
+          content: Text(batchDeleteConfirmText(selectedWorks.length, files)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('确认删除')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      var done = 0;
+      for (final e in groups.entries) {
+        for (final id in e.value) {
+          final j = await postWorkDelete(e.key, id, confirm: true);
+          if (j != null && j['ok'] == true) {
+            done++;
+          } else if (j != null) {
+            errors.add('${j['error'] ?? 'HTTP ${j['status']}'}');
+          } else {
+            errors.add('网络错误');
+          }
+        }
+      }
+      _exitSelect();
+      await load();
+      _toast(errors.isEmpty
+          ? '已删除 $done 个作品（可在内容维护里撤销）'
+          : '已删除 $done 个，失败：${errors.first}');
+    } finally {
+      if (mounted) setState(() => _batchBusy = false);
+    }
+  }
+
+  Future<String?> _pickMoveTarget(String lib) async {
+    try {
+      final r = await http
+          .get(cfg.u('/api/cat/tree', lib: lib), headers: cfg.headersFor(lib))
+          .timeout(const Duration(seconds: 10));
+      if (r.statusCode != 200) {
+        _toast('读取目录失败：HTTP ${r.statusCode}');
+        return null;
+      }
+      dynamic tree = jsonDecode(r.body);
+      // 用选中作品第一条媒体路径推断作者前缀，只列出该作者下的目录。
+      String prefix = '';
+      for (final id in selectedWorks) {
+        final w = _workById(id);
+        final m = (w == null) ? null : w['m'];
+        final media = (m is List && m.isNotEmpty) ? '${m.first}' : '';
+        if (media.startsWith('/media/')) {
+          prefix = authorPrefixOfMedia(media);
+          break;
+        }
+      }
+      final cands = moveTargetCandidates(tree, prefix);
+      if (cands.isEmpty) {
+        _toast('没有可用的目标文件夹（需同作者同单元库）');
+        return null;
+      }
+      if (!mounted) return null;
+      return showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('移动到文件夹'),
+          content: SizedBox(
+            width: 420,
+            height: 420,
+            child: cands.length > 400
+                ? ListView.builder(
+                    itemCount: 400,
+                    itemBuilder: (_, i) => ListTile(
+                      dense: true,
+                      title: Text(cands[i],
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      onTap: () => Navigator.of(ctx).pop(cands[i]),
+                    ),
+                  )
+                : ListView(
+                    children: [
+                      for (final c in cands)
+                        ListTile(
+                          dense: true,
+                          title: Text(c, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          onTap: () => Navigator.of(ctx).pop(c),
+                        ),
+                    ],
+                  ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('取消')),
+          ],
+        ),
+      );
+    } catch (e) {
+      _toast('读取目录失败：$e');
+      return null;
+    }
+  }
+
+  Future<void> _batchMove() async {
+    if (_batchBusy || !canBatchDelete(selectedWorks)) return;
+    final groups = _selectedByLib();
+    if (groups.length != 1) {
+      _toast('批量移动一次只能处理同一基础库的作品');
+      return;
+    }
+    final lib = groups.keys.first;
+    final ids = groups[lib]!;
+    setState(() => _batchBusy = true);
+    try {
+      final target = await _pickMoveTarget(lib);
+      if (target == null || !canBatchMove(selectedWorks, target)) return;
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('批量移动'),
+          content: Text(batchMoveConfirmText(ids.length, target)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('确认移动')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      var done = 0;
+      final errors = <String>[];
+      for (final id in ids) {
+        // 先 dry 预检（服务端校验同作者/同单元库），再确认执行。
+        final dry = await postWorkMove(lib, id, target);
+        if (dry == null || dry['ok'] != true) {
+          errors.add('${dry?['error'] ?? '网络错误'}');
+          continue;
+        }
+        final j = await postWorkMove(lib, id, target, confirm: true);
+        if (j != null && j['ok'] == true) {
+          done++;
+        } else {
+          errors.add('${j?['error'] ?? '网络错误'}');
+        }
+      }
+      _exitSelect();
+      await load();
+      _toast(errors.isEmpty
+          ? '已移动 $done 个作品到「$target」'
+          : '已移动 $done 个，失败：${errors.first}');
+    } finally {
+      if (mounted) setState(() => _batchBusy = false);
+    }
+  }
+
+  // K2 第3项：服务端暂未提供"手动新增作品"接口，入口保留但置灰。
+  void _manualAddUnavailable() {
+    _toast('服务端未提供新增作品接口');
   }
 
   // 仅在数据加载/筛选变化时重算，避免观看进度刷新时反复重建列表
@@ -10985,6 +12239,31 @@ class _AuthorPageState extends State<AuthorPage> {
     return Scaffold(
       appBar: AppBar(title: Text('@${widget.name}'), actions: [
         const HomeAction(),
+        if (loading)
+          const SizedBox.shrink()
+        else if (selectingWorks) ...[
+          IconButton(
+              tooltip: allWorksSelected(selectedWorks, _visibleIds) ? '取消全选' : '全选',
+              onPressed: _visibleIds.isEmpty ? null : _toggleSelectAll,
+              icon: Icon(allWorksSelected(selectedWorks, _visibleIds)
+                  ? Icons.deselect
+                  : Icons.select_all)),
+          IconButton(
+              tooltip: '退出多选',
+              onPressed: _exitSelect,
+              icon: const Icon(Icons.close)),
+        ] else ...[
+          IconButton(
+              tooltip: '手动新增作品（服务端未提供）',
+              onPressed: _manualAddUnavailable,
+              icon: const Icon(Icons.add_box_outlined, color: Colors.grey)),
+          IconButton(
+              tooltip: '多选作品',
+              onPressed: works.isEmpty
+                  ? null
+                  : () => setState(() => selectingWorks = true),
+              icon: const Icon(Icons.checklist)),
+        ],
         if (_canSync)
           IconButton(
               tooltip: syncing ? '同步中…' : '同步该作者',
@@ -11031,14 +12310,44 @@ class _AuthorPageState extends State<AuthorPage> {
                               works: works.length,
                             ),
                             const SizedBox(height: 6),
-                            const Text('作者简介',
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey)),
+                            Row(children: [
+                              const Text('作者简介',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey)),
+                              const SizedBox(width: 4),
+                              InkWell(
+                                onTap: _editBio,
+                                borderRadius: BorderRadius.circular(4),
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 4, vertical: 2),
+                                  child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.edit_outlined,
+                                            size: 13, color: Colors.grey),
+                                        SizedBox(width: 2),
+                                        Text('编辑',
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.grey)),
+                                      ]),
+                                ),
+                              ),
+                            ]),
                             const SizedBox(height: 6),
                             Text(_bioText,
                                 maxLines: 6,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontSize: 13)),
+                            if (bioAt > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Text(
+                                    '简介更新于 ${formatAuthorBioAt(bioAt)}',
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.grey)),
+                              ),
                           ])),
                     ]),
               ),
@@ -11096,10 +12405,70 @@ class _AuthorPageState extends State<AuthorPage> {
                       ),
                   ],
                 ),
+              // K2：批量操作条（多选时显示）。
+              if (selectingWorks)
+                Material(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      child: Row(children: [
+                        Text('已选 ${selectedWorks.length}',
+                            style: const TextStyle(fontSize: 12)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _visibleIds.isEmpty
+                                ? ''
+                                : '共 ${_visibleIds.length} 个',
+                            style:
+                                const TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                        ),
+                        TextButton.icon(
+                            onPressed: _visibleIds.isEmpty
+                                ? null
+                                : _toggleSelectAll,
+                            icon: const Icon(Icons.select_all, size: 16),
+                            label: Text(
+                                allWorksSelected(selectedWorks, _visibleIds)
+                                    ? '取消全选'
+                                    : '全选',
+                                style: const TextStyle(fontSize: 12))),
+                        TextButton.icon(
+                            onPressed: (_batchBusy ||
+                                    !canBatchMove(selectedWorks, 'x'))
+                                ? null
+                                : _batchMove,
+                            icon: const Icon(Icons.drive_file_move_outline,
+                                size: 16),
+                            label: const Text('移动',
+                                style: TextStyle(fontSize: 12))),
+                        TextButton.icon(
+                            onPressed: (_batchBusy ||
+                                    !canBatchDelete(selectedWorks))
+                                ? null
+                                : _batchDelete,
+                            icon: const Icon(Icons.delete_outline,
+                                size: 16, color: Colors.redAccent),
+                            label: const Text('删除',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.redAccent))),
+                      ]),
+                    ),
+                  ),
+                ),
               Expanded(
                   child: WorkGrid(
                       works: filteredWorks,
-                      lib: primaryLib.isEmpty ? null : primaryLib)),
+                      lib: primaryLib.isEmpty ? null : primaryLib,
+                      selecting: selectingWorks,
+                      selectedIds: selectedWorks,
+                      onToggleSelect: _toggleSelect,
+                      onEnterSelect: _enterSelect,
+                      manualIds: manualWorkIds)),
             ]),
     );
   }
@@ -11219,8 +12588,42 @@ class WorkGrid extends StatefulWidget {
 
   /// 卡片第二行文字；默认「作品类型」，搜索结果可传「@作者 · 类型」。
   final String Function(dynamic work)? subtitleOf;
+
+  /// 已展示到列表末尾时回调（推荐页用它续拉下一批）。
+  final VoidCallback? onEndReached;
+
+  /// 播放器走到末尾需要更多作品时的回调，返回是否追加成功。
+  final Future<bool> Function(List works)? onNeedMoreWorks;
+
+  /// K2：多选模式（卡片显示勾选圈，点击改为切换选择）。
+  final bool selecting;
+
+  /// K2：当前已选作品 id。
+  final Set<String> selectedIds;
+
+  /// K2：切换某个作品的选择状态。
+  final ValueChanged<String>? onToggleSelect;
+
+  /// K2：长按卡片进入多选模式（携带被长按的作品 id）。
+  final ValueChanged<String>? onEnterSelect;
+
+  /// K3：手动名单（作品 id），卡片左上角显示「手」角标。
+  final Set<String> manualIds;
+
   // T3：已移除旧「收藏夹」idx/名称传参链
-  const WorkGrid({super.key, required this.works, this.lib, this.subtitleOf});
+  const WorkGrid({
+    super.key,
+    required this.works,
+    this.lib,
+    this.subtitleOf,
+    this.onEndReached,
+    this.onNeedMoreWorks,
+    this.selecting = false,
+    this.selectedIds = const <String>{},
+    this.onToggleSelect,
+    this.onEnterSelect,
+    this.manualIds = const <String>{},
+  });
 
   @override
   State<WorkGrid> createState() => _WorkGridState();
@@ -11241,8 +12644,16 @@ class _WorkGridState extends State<WorkGrid> {
     super.didUpdateWidget(old);
     if (!identical(old.works, widget.works) ||
         old.works.length != widget.works.length) {
-      // 重新加载/筛选后回到首屏分页，避免沿用上一个列表的滚动位置
-      _shown = initialGridCount(widget.works.length);
+      // 推荐页续播是「尾部追加」：保留已渲染进度，新条目随滚动出现。
+      final appended = widget.onEndReached != null &&
+          widget.works.length > old.works.length &&
+          _shown >= old.works.length;
+      if (appended) {
+        _shown = widget.works.length;
+      } else {
+        // 重新加载/筛选后回到首屏分页，避免沿用上一个列表的滚动位置
+        _shown = initialGridCount(widget.works.length);
+      }
     }
     if (_shown > widget.works.length) _shown = widget.works.length;
   }
@@ -11255,7 +12666,10 @@ class _WorkGridState extends State<WorkGrid> {
 
   void _maybeLoadMore() {
     if (!_scroll.hasClients) return;
-    if (_shown >= widget.works.length) return;
+    if (_shown >= widget.works.length) {
+      widget.onEndReached?.call();
+      return;
+    }
     final p = _scroll.position;
     if (shouldLoadNextPage(
         pixels: p.pixels,
@@ -11304,18 +12718,96 @@ class _WorkGridState extends State<WorkGrid> {
           ),
         );
         // G13：视频右下角显示时长，图文显示图片张数
-        return WorkCard(
+        final wid = '${(w is Map ? w['id'] : null) ?? ''}';
+        final selected = widget.selecting && widget.selectedIds.contains(wid);
+        final manual = widget.manualIds.contains(wid);
+        Widget card = WorkCard(
           title: '${w['ti'] ?? ''}',
           typeLabel: widget.subtitleOf?.call(w) ?? workTypeLabel(w),
           coverUrl: cover,
           headers: cfg.headersFor(_libFor(w)),
           badge: workCoverBadge(w),
           watchLib: lib,
-          watchId: '${(w is Map ? w['id'] : null) ?? ''}',
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) =>
-                  PlayerPage(works: works, start: i, lib: _libFor(w)))),
+          watchId: wid,
+          onTap: () {
+            // K2：多选模式下点击只切换选择，不进播放器。
+            if (widget.selecting) {
+              widget.onToggleSelect?.call(wid);
+              return;
+            }
+            // 播放器需要可变列表：续播时直接追加到它自己手里这份。
+            final playerWorks = List.of(works, growable: true);
+            Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => PlayerPage(
+                    works: playerWorks,
+                    start: i,
+                    lib: _libFor(w),
+                    onNeedMore: widget.onNeedMoreWorks == null
+                        ? null
+                        : () => widget.onNeedMoreWorks!(playerWorks))));
+          },
         );
+        // K2：选择圈与选中描边（画在卡片外层，不改 WorkCard 本身）。
+        card = Stack(fit: StackFit.expand, children: [
+          card,
+          if (widget.selecting)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: selected ? Theme.of(context).colorScheme.primary : Colors.black45,
+                  border: Border.all(color: Colors.white70, width: 1.5),
+                ),
+                child: selected
+                    ? const Icon(Icons.check, size: 15, color: Colors.white)
+                    : null,
+              ),
+            ),
+          if (selected)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(WorkCard.radius),
+                    border: Border.all(
+                        color: Theme.of(context).colorScheme.primary, width: 2),
+                  ),
+                ),
+              ),
+            ),
+        ]);
+        // K3：手动作品角标（手动 > 爬虫，与 J19 一致）。
+        if (manual) {
+          card = Stack(fit: StackFit.expand, children: [
+            card,
+            Positioned(
+              top: 6,
+              left: 6,
+              child: IgnorePointer(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(workSourceLabel(manual: true),
+                      style: const TextStyle(fontSize: 9, color: Colors.white70)),
+                ),
+              ),
+            ),
+          ]);
+        }
+        if (widget.onEnterSelect != null && !widget.selecting) {
+          card = GestureDetector(
+            onLongPress: () => widget.onEnterSelect!(wid),
+            child: card,
+          );
+        }
+        return card;
       },
     );
   }

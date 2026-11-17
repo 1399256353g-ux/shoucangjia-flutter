@@ -7,6 +7,35 @@ library;
 
 import 'decode_plan.dart';
 
+/// 作者总览卡与库/单元库卡片共用的外观规格。
+///
+/// 库卡片（`kLibCardRadius = 12`、1 行名称 + 1 行统计）与作者卡此前已基本一致，
+/// 这里把它们提成常量，避免后续改动各自漂移；不改布局本身。
+class AuthorGridStyle {
+  /// 与库/单元库卡片一致的圆角。
+  static const double radius = 12;
+
+  /// 头像显示尺寸（库卡片用封面，尺寸不同属正常）。
+  static const double avatarSize = 58;
+
+  static const double cardPaddingH = 6;
+  static const double cardPaddingTop = 22;
+  static const double cardPaddingBottom = 8;
+
+  /// 名称/副标题/作品数各 1 行，超出省略。
+  static const int nameLines = 1;
+  static const int subtitleLines = 1;
+  static const int worksLines = 1;
+
+  static const double nameFontSize = 12;
+  static const double subtitleFontSize = 10;
+  static const double worksFontSize = 9;
+
+  /// 卡片底色/次要文字配色与库卡片同走 ColorScheme。
+  static const double gapAfterAvatar = 6;
+  static const double gapAfterName = 2;
+}
+
 /// 作者网格的布局几何。
 class AuthorGridGeometry {
   /// 每行可放多少个作者卡片（至少 1 个）。

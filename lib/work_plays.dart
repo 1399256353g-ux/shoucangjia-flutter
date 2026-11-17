@@ -213,44 +213,6 @@ class WorkPlaysStore {
 
   static Map<String, WorkPlay> countsFor(String lib) => playsOfLib(_items, lib);
 
-  // 0.9.53：按库汇总播放次数的缓存。
-  // `playsOfLib` 每次调用都要扫全部记录（上限 3000 条）；单元库封面会按子树里
-  // 每个基础库调一次，滚动时每次重建都是 O(基础库数 × 记录数)，是「封面加载慢
-  // / 列表卡顿」的主要来源之一。这里按 `revision` 惰性重算，取用是 O(1)。
-  static int _totalsRev = -1;
-  static Map<String, int> _totals = const <String, int>{};
-
-  static Map<String, int> _libTotals() {
-    final rev = revision.value;
-    if (_totalsRev == rev) return _totals;
-    final out = <String, int>{};
-    _items.forEach((k, v) {
-      final sep = k.indexOf('/');
-      if (sep <= 0 || v.count <= 0) return;
-      final lib = k.substring(0, sep);
-      out[lib] = (out[lib] ?? 0) + v.count;
-    });
-    _totals = out;
-    _totalsRev = rev;
-    return out;
-  }
-
-  /// 某库的总播放次数（O(1)，随 `revision` 自动失效）。
-  static int playsInLib(String lib) {
-    final l = lib.trim();
-    if (l.isEmpty) return 0;
-    return _libTotals()[l] ?? 0;
-  }
-
-  /// 仅供测试：清空内存缓存与缓存标记。
-  static void debugResetForTest(Map<String, WorkPlay> items) {
-    _items = Map<String, WorkPlay>.from(items);
-    _loaded = true;
-    _totalsRev = -1;
-    _totals = const <String, int>{};
-    revision.value++;
-  }
-
   /// 记一次播放；落盘延迟 1.5s，退出时调用 [flush]。
   static void bump(String lib, String id,
       {String? thumb, String? kind, int? at}) {

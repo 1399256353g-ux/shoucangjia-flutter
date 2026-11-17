@@ -427,6 +427,9 @@ class StarredUnitsPage extends StatefulWidget {
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
   final CoverUploader? coverUploader;
 
+  /// 右上角爬虫配置入口（与主页/详情页单元库卡片一致；非顶级才显示）。
+  final void Function(UnitLibrary unit)? onConfigureUnit;
+
   const StarredUnitsPage({
     super.key,
     required this.units,
@@ -435,6 +438,7 @@ class StarredUnitsPage extends StatefulWidget {
     this.unitCoverOf,
     this.headersOf,
     this.coverUploader,
+    this.onConfigureUnit,
   });
 
   @override
@@ -548,6 +552,10 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                       widget.coverUploader == null || coverLib.isEmpty
                           ? null
                           : () => _pickCover(coverLib, u.rel),
+                  onConfigure: (widget.onConfigureUnit == null ||
+                          !UnitLibraryCard.canConfigure(u))
+                      ? null
+                      : () => widget.onConfigureUnit!(u),
                 );
               },
               ),

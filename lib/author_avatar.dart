@@ -8,6 +8,8 @@
 /// 只做纯逻辑，不碰网络与磁盘，方便单测。
 library;
 
+import 'package:flutter/material.dart';
+
 /// 头像候选图。`width/height` 未知时填 0（列表接口通常不给尺寸）。
 class AvatarCandidate {
   final String path;
@@ -169,4 +171,55 @@ class AvatarCropBox {
   /// 标准方形头像的默认取景：横向居中，竖向略偏上（人脸通常在画面 40% 处）。
   static AvatarCropBox centerFace({double size = 1.0}) =>
       AvatarCropBox(left: 0.5, top: 0.38, size: size);
+}
+
+/// 头像首字母：空名返回 `?`；按 rune 取第一个完整字符，
+/// 避免 emoji / 代理对被截成半个而显示空白。
+String avatarInitial(String name) {
+  final t = name.trim();
+  if (t.isEmpty) return '?';
+  return String.fromCharCode(t.runes.first);
+}
+
+/// 没有可用头像路径时必须显示首字母占位（不能返回空白）。
+bool needsAvatarPlaceholder(String path) => path.trim().isEmpty;
+
+/// 首字母圆形占位：
+/// - 无头像（`mediaPath` 为空）时直接显示；
+/// - 有头像时作为 `CachedNetworkImage` 的 `placeholder`/`errorWidget`，
+///   加载期间与加载失败都不会出现空白区域。
+class AvatarLetterPlaceholder extends StatelessWidget {
+  const AvatarLetterPlaceholder({
+    super.key,
+    required this.name,
+    required this.size,
+    this.color,
+  });
+
+  /// 与 `AuthorAvatar` 的蓝灰色占位保持一致。
+  static const Color defaultColor = Color(0xFF546E7A);
+
+  final String name;
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = size <= 0 ? 1.0 : size;
+    return Container(
+      width: s,
+      height: s,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color ?? defaultColor,
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        avatarInitial(name),
+        maxLines: 1,
+        overflow: TextOverflow.clip,
+        style: TextStyle(fontSize: s * 0.4, color: Colors.white),
+      ),
+    );
+  }
 }

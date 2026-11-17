@@ -495,6 +495,11 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       appBar: AppBar(
         title: const Text('文件结构'),
         actions: [
+          IconButton(
+            tooltip: '刷新',
+            onPressed: loading ? null : _load,
+            icon: const Icon(Icons.refresh),
+          ),
           const HomeAction(),
           TextButton(
             onPressed: (dirty && !saving) ? _save : null,
