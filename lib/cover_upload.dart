@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
 /// C2：库卡片「本地选图上传封面」的结果。
 class CoverUploadResult {
@@ -38,6 +40,23 @@ bool isSupportedCoverBytes(List<int> b) {
   return riff && webp;
 }
 
+/// 打开选图失败时的可读文案：不把原始异常字符串暴露给用户。
+String coverPickErrorText(Object e) {
+  final s = '$e'.toLowerCase();
+  if (s.contains('cancelled') || s.contains('canceled') || s.contains('cancel')) {
+    return '已取消';
+  }
+  if (s.contains('denied') ||
+      s.contains('permission') ||
+      s.contains('not authorized')) {
+    return '没有照片访问权限：请在系统设置里允许访问照片后重试';
+  }
+  if (s.contains('notsupported') || s.contains('unsupported')) {
+    return '当前系统不支持选择图片';
+  }
+  return '无法打开图片选择器，请稍后重试';
+}
+
 /// 打开本地文件选择器挑一张图片，base64 POST 到 `/api/cover/upload`。
 ///
 /// 只上传图片字节，不改作品原图与已有封面文件；`unitRel` 非空时表示
@@ -50,11 +69,21 @@ Future<CoverUploadResult> pickAndUploadCover({
 }) async {
   XFile? picked;
   try {
-    picked = await openFile(acceptedTypeGroups: const [
-      XTypeGroup(label: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp']),
-    ]);
+    // iOS：file_selector 在部分系统上打不开，改用系统照片选择器（image_picker），
+    // 需要 Info.plist 的 NSPhotoLibraryUsageDescription（CI 里注入）。
+    if (Platform.isIOS) {
+      picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 4096,
+        imageQuality: 95,
+      );
+    } else {
+      picked = await openFile(acceptedTypeGroups: const [
+        XTypeGroup(label: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp']),
+      ]);
+    }
   } catch (e) {
-    return CoverUploadResult(false, '打开文件选择器失败：$e');
+    return CoverUploadResult(false, coverPickErrorText(e));
   }
   if (picked == null) return const CoverUploadResult.cancelled();
 
@@ -62,7 +91,7 @@ Future<CoverUploadResult> pickAndUploadCover({
   try {
     bytes = await picked.readAsBytes();
   } catch (e) {
-    return CoverUploadResult(false, '读取图片失败：$e');
+    return const CoverUploadResult(false, '读取图片失败，请重试');
   }
   if (bytes.isEmpty) return const CoverUploadResult(false, '图片为空');
   if (bytes.length > kCoverUploadMaxBytes) {
@@ -84,7 +113,7 @@ Future<CoverUploadResult> pickAndUploadCover({
       }),
     );
   } catch (e) {
-    return CoverUploadResult(false, '上传失败：$e');
+    return const CoverUploadResult(false, '上传失败：网络异常，请检查连接后重试');
   }
   if (r.statusCode != 200) {
     var msg = 'HTTP ${r.statusCode}';

@@ -38,4 +38,12 @@ void main() {
     expect(r.cancelled, isTrue);
     expect(r.message, isNotEmpty);
   });
+  test('打开失败的文案不暴露原始异常', () {
+    expect(coverPickErrorText(Exception('PlatformException(photo_access_denied, ...)')),
+        contains('权限'));
+    expect(coverPickErrorText(Exception('cancelled by user')), '已取消');
+    expect(coverPickErrorText(Exception('boom 0xdeadbeef')),
+        isNot(contains('boom')));
+    expect(coverPickErrorText(Exception('boom')), contains('重试'));
+  });
 }

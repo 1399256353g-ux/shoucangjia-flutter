@@ -26,6 +26,34 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PL" || true
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string 访问局域网图库" "$PL" || true
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Dizi" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Dizi" "$PL"
+      - name: Photo permissions
+        run: |
+          PL=ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 选择本地图片作为库封面" "$PL" || true
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 拍摄图片作为库封面" "$PL" || true
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 保存图片" "$PL" || true
+      - name: Ensure iOS min version (image_picker)
+        run: |
+          P=ios/Podfile
+          if [ -f "$P" ]; then
+            if grep -q '^# platform :ios' "$P"; then
+              sed -i '' "s/^# platform :ios.*/platform :ios, '12.0'/" "$P"
+            fi
+            if ! grep -q '^platform :ios' "$P"; then
+              sed -i '' "2i\
+platform :ios, '12.0'\
+" "$P"
+            fi
+            grep -n 'platform :ios' "$P"
+          fi
+      - name: Verify Info.plist permissions
+        run: |
+          PL=ios/Runner/Info.plist
+          for k in NSPhotoLibraryUsageDescription NSCameraUsageDescription; do
+            V=$(/usr/libexec/PlistBuddy -c "Print :$k" "$PL") || { echo "MISSING $k"; exit 1; }
+            echo "$k = $V"
+          done
+          echo "INFO_PLIST_OK"
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build ios --release --no-codesign
