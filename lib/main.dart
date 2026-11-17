@@ -9983,8 +9983,11 @@ class _RecommendPageState extends State<RecommendPage> {
       }
       // 0.9.8：推荐改为全部基础库池（服务端 lib=all，约 1.1 万作品，60s 缓存）。
       // 每条作品带 `_lib`（所属基础库），播放/词条按基础库路由。
+      // 有范围筛选时先多取（筛完仍要够 40 个），无筛选按 40 取。
+      final _filtering = authorFilter.value.isActive;
+      final _poolSize = _filtering ? 600 : 40;
       final r = await http.get(
-          cfg.u('/api/recommend?n=40&seed=$seed', lib: 'all'),
+          cfg.u('/api/recommend?n=$_poolSize&seed=$seed', lib: 'all'),
           headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final j = jsonDecode(utf8.decode(r.bodyBytes));
@@ -9995,7 +9998,7 @@ class _RecommendPageState extends State<RecommendPage> {
         if (w is! Map) continue;
         final m = Map<String, dynamic>.from(w);
         merged.add({...m, '_lib': '${m['_lib'] ?? cfg.lib}'});
-        if (merged.length >= 40) break;
+        if (merged.length >= _poolSize) break;
       }
       if (!mounted) return;
       setState(() {
