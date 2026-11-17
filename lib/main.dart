@@ -2025,7 +2025,13 @@ class SettingsHubPage extends StatelessWidget {
               builder: (_) => CrashReportsPage(
                   detail: cfg.base.isEmpty
                       ? '未连接服务器'
-                      : '${cfg.base} · ${cfg.libName.isEmpty ? cfg.lib : cfg.libName}'))),
+                      : '${cfg.base} · ${cfg.libName.isEmpty ? cfg.lib : cfg.libName}',
+                  cacheStatsUri: cfg.base.isEmpty
+                      ? null
+                      : cfg.u('/api/cache/stats'),
+                  cachePruneUri:
+                      cfg.base.isEmpty ? null : cfg.u('/api/cache/prune'),
+                  cacheHeaders: cfg.headers))),
         ),
         ListTile(
           leading: const Icon(Icons.keyboard),

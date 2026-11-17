@@ -6,13 +6,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'crash_guard.dart';
+import 'resize_cache_api.dart';
 import 'thumb_prefetch.dart';
 
 class CrashReportsPage extends StatelessWidget {
   /// 顶部一行环境信息（如服务器地址），可为空。
   final String detail;
 
-  const CrashReportsPage({super.key, this.detail = ''});
+  /// 服务端缩图缓存统计 / 清理地址（无连接时为空）。
+  final Uri? cacheStatsUri;
+  final Uri? cachePruneUri;
+  final Map<String, String> cacheHeaders;
+
+  const CrashReportsPage({
+    super.key,
+    this.detail = '',
+    this.cacheStatsUri,
+    this.cachePruneUri,
+    this.cacheHeaders = const {},
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +79,12 @@ class CrashReportsPage extends StatelessWidget {
                       overflow: TextOverflow.ellipsis),
                 ),
               _prefetchTile(),
+              if (cacheStatsUri != null)
+                _ResizeCacheTile(
+                  statsUri: cacheStatsUri!,
+                  pruneUri: cachePruneUri,
+                  headers: cacheHeaders,
+                ),
               ListTile(
                 dense: true,
                 leading: const Icon(Icons.bug_report_outlined),
@@ -156,6 +174,130 @@ class CrashReportsPage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// 服务端缩图缓存（`?w=`）现状 + 手动清理（0.9.28）。
+///
+/// 只读 `/api/cache/stats`；清理走 `/api/cache/prune`，服务端只删
+/// `~/.cache/gallery-resize` 自己的文件，不会碰作品原图。
+class _ResizeCacheTile extends StatefulWidget {
+  final Uri statsUri;
+  final Uri? pruneUri;
+  final Map<String, String> headers;
+
+  const _ResizeCacheTile({
+    required this.statsUri,
+    required this.pruneUri,
+    required this.headers,
+  });
+
+  @override
+  State<_ResizeCacheTile> createState() => _ResizeCacheTileState();
+}
+
+class _ResizeCacheTileState extends State<_ResizeCacheTile> {
+  ResizeCacheStats? stats;
+  bool loading = true;
+  bool pruning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    if (mounted) setState(() => loading = true);
+    final s = await fetchResizeCacheStats(widget.statsUri, widget.headers);
+    if (!mounted) return;
+    setState(() {
+      stats = s;
+      loading = false;
+    });
+  }
+
+  Future<void> _prune() async {
+    final uri = widget.pruneUri;
+    if (uri == null || pruning) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清理缩图缓存'),
+        content: const Text('只会删除服务端生成的缩图缓存（卡片、头像、海报的小图），'
+            '不会删除或改动任何作品原图。下次浏览会按需重新生成。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('清理')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => pruning = true);
+    final msg = await pruneResizeCache(uri, widget.headers);
+    if (!mounted) return;
+    setState(() => pruning = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(msg ?? '清理失败，检查服务器连接')));
+    if (msg != null) await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = stats;
+    final percent = s?.usedPercent;
+    final String title;
+    if (loading && s == null) {
+      title = '缩图缓存：读取中…';
+    } else if (s == null) {
+      title = '缩图缓存：读取失败';
+    } else {
+      title = '缩图缓存 ${s.usageText}'
+          '${s.files > 0 ? '（${s.files} 张）' : ''}';
+    }
+    final subtitle = s == null
+        ? '服务端按显示宽度生成的缩图，只读原图、不覆盖媒体'
+        : '${s.countersText}\n'
+            '命中率 ${s.hitRateText}'
+            '${percent != null ? ' · 占用上限的 $percent%' : ''}'
+            '${s.pruneDeleted > 0 ? ' · 已自动清理 ${s.pruneDeleted} 个' : ''}';
+    return ListTile(
+      dense: true,
+      leading: loading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2))
+          : const Icon(Icons.photo_size_select_small_outlined),
+      title: Text(title),
+      subtitle: Text(subtitle,
+          style: const TextStyle(fontSize: 11, height: 1.35)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: '刷新',
+            icon: const Icon(Icons.refresh, size: 20),
+            onPressed: loading ? null : _refresh,
+          ),
+          if (widget.pruneUri != null)
+            IconButton(
+              tooltip: '清理缩图缓存',
+              icon: pruning
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.cleaning_services_outlined, size: 20),
+              onPressed: pruning ? null : _prune,
+            ),
+        ],
+      ),
     );
   }
 }
