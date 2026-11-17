@@ -40,9 +40,7 @@ jobs:
               sed -i '' "s/^# platform :ios.*/platform :ios, '12.0'/" "$P"
             fi
             if ! grep -q '^platform :ios' "$P"; then
-              sed -i '' "2i\
-platform :ios, '12.0'\
-" "$P"
+              awk 'NR==1{print; print "platform :ios, '"'"'12.0'"'"'"; next} {print}' "$P" > "$P.tmp" && mv "$P.tmp" "$P"
             fi
             grep -n 'platform :ios' "$P"
           fi

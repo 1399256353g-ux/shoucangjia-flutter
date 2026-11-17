@@ -618,7 +618,11 @@ class UnitLibraryCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final server = unit.node.serverLabel;
     final showCrawler = onConfigure != null && canConfigure(unit);
-    return Material(
+    // 0.9.55：每张卡片独立重绘层。主页/单元库页一次滚很多卡，
+    // 悬停涟漪或播放次数变化（WorkPlaysStore）只重绘这一张，
+    // 不再让整块网格跟着重绘（owner「电脑卡顿」的滚动项）。
+    return RepaintBoundary(
+      child: Material(
       color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
       borderRadius: BorderRadius.circular(radius),
       clipBehavior: Clip.antiAlias,
@@ -694,6 +698,7 @@ class UnitLibraryCard extends StatelessWidget {
             ),
           ]),
         ),
+      ),
       ),
     );
   }
@@ -1116,7 +1121,9 @@ class BasicLibCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    // 0.9.55：与单元库卡片一致，网格里每张卡各自一层重绘边界。
+    return RepaintBoundary(
+      child: Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(kLibCardRadius),
       clipBehavior: Clip.antiAlias,
@@ -1164,6 +1171,7 @@ class BasicLibCard extends StatelessWidget {
               ),
             ),
         ]),
+      ),
       ),
     );
   }
