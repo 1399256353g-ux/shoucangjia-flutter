@@ -71,37 +71,39 @@ void main() {
     });
   });
 
-  group('WorkPlaysStore.playsInLib', () {
+  group('WorkPlaysStore 按库汇总', () {
+    int totalIn(String lib) =>
+        WorkPlaysStore.countsFor(lib).values.fold<int>(0, (a, b) => a + b.count);
     test('按库汇总次数', () {
-      WorkPlaysStore.debugResetForTest(<String, WorkPlay>{
+      WorkPlaysStore.resetForTest(items: <String, WorkPlay>{
         'l1/a': const WorkPlay(count: 2),
         'l1/b': const WorkPlay(count: 3),
         'l2/c': const WorkPlay(count: 1),
       });
-      expect(WorkPlaysStore.playsInLib('l1'), 5);
-      expect(WorkPlaysStore.playsInLib('l2'), 1);
-      expect(WorkPlaysStore.playsInLib('l3'), 0);
-      expect(WorkPlaysStore.playsInLib(''), 0);
+      expect(totalIn('l1'), 5);
+      expect(totalIn('l2'), 1);
+      expect(totalIn('l3'), 0);
+      expect(totalIn(''), 0);
     });
 
     test('revision 变化后缓存自动失效', () {
-      WorkPlaysStore.debugResetForTest(<String, WorkPlay>{
+      WorkPlaysStore.resetForTest(items: <String, WorkPlay>{
         'l1/a': const WorkPlay(count: 2),
       });
-      expect(WorkPlaysStore.playsInLib('l1'), 2);
-      WorkPlaysStore.debugResetForTest(<String, WorkPlay>{
+      expect(totalIn('l1'), 2);
+      WorkPlaysStore.resetForTest(items: <String, WorkPlay>{
         'l1/a': const WorkPlay(count: 7),
         'l1/b': const WorkPlay(count: 1),
       });
-      expect(WorkPlaysStore.playsInLib('l1'), 8);
+      expect(totalIn('l1'), 8);
     });
 
     test('计数为 0 的记录不计入', () {
-      WorkPlaysStore.debugResetForTest(<String, WorkPlay>{
+      WorkPlaysStore.resetForTest(items: <String, WorkPlay>{
         'l/a': const WorkPlay(count: 0),
         'l/b': const WorkPlay(count: 4),
       });
-      expect(WorkPlaysStore.playsInLib('l'), 4);
+      expect(totalIn('l'), 4);
     });
   });
 }

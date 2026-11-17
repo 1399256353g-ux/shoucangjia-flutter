@@ -6692,6 +6692,12 @@ class _PlayerPageState extends State<PlayerPage>
   bool fs = false;
   // M5：非全屏上下拖拽切条期间，功能区整体淡化（松手恢复）。
   bool _pageSwiping = false;
+  // J-A2：播放页统一顶部提示（不随功能区淡出，约 3 秒自动消失）。
+  String? _noticeText;
+  Timer? _noticeTimer;
+  int _noticeSeq = 0;
+  // J-A4：滑动切条——拖拽期间不暂停当前视频，松手落定后才真正切条。
+  int? _swipePendingIndex;
   // M2：是否由播放页主动锁定过屏幕方向（退出时需恢复系统默认）。
   bool _orientationForced = false;
   bool dragging = false;
@@ -7756,16 +7762,18 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  void _toast(String msg) {
+  // J-A2：所有播放页提示统一走顶部胶囊，不再用底部 SnackBar。
+  void _toast(String msg) => _showTopNotice(msg);
+
+  void _showTopNotice(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg, style: const TextStyle(fontSize: 13)),
-        backgroundColor: const Color(0xE6222222),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(milliseconds: 1600),
-      ));
+    final seq = ++_noticeSeq;
+    setState(() => _noticeText = msg);
+    _noticeTimer?.cancel();
+    _noticeTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted || seq != _noticeSeq) return;
+      setState(() => _noticeText = null);
+    });
   }
 
   void startAuto() {
@@ -8556,6 +8564,7 @@ class _PlayerPageState extends State<PlayerPage>
     _wheelUnlock?.cancel();
     _wheelIdle?.cancel();
     _volHintTimer?.cancel();
+    _noticeTimer?.cancel();
     _fadeTimer?.cancel();
     _fadeGen++;
     _swipeHintTimer?.cancel();
@@ -9301,6 +9310,10 @@ class _PlayerPageState extends State<PlayerPage>
                     _setPageSwiping(true);
                   } else if (n is ScrollEndNotification) {
                     _setPageSwiping(false);
+                    // J-A4：拖动/回弹结束后才切条，拖拽过程中旧视频继续播放。
+                    final pending = _swipePendingIndex;
+                    _swipePendingIndex = null;
+                    if (pending != null && pending != cur) open(pending);
                   }
                   return false;
                 },
@@ -9321,7 +9334,15 @@ class _PlayerPageState extends State<PlayerPage>
                   dragStartBehavior: DragStartBehavior.down,
                   scrollDirection: Axis.vertical,
                   itemCount: widget.works.length,
-                  onPageChanged: open,
+                  onPageChanged: (i) {
+                    // J-A4：手势滑动中只记下标，等 ScrollEnd 确认后再切；
+                    // 键盘/按钮的程序化翻页（不在滑动中）保持立即切换。
+                    if (_pageSwiping) {
+                      _swipePendingIndex = i;
+                    } else {
+                      open(i);
+                    }
+                  },
                   itemBuilder: (_, i) {
                     final it = _workAt(i);
                     if (!workPlayable(it)) return _brokenWorkView(it);
@@ -9366,10 +9387,22 @@ class _PlayerPageState extends State<PlayerPage>
                                 memCacheWidth: _posterDecodeWidth(context),
                                 fit: BoxFit.contain),
                           videoView(),
+                          // J-A5：加载圈移到右上角，垂直中线与左侧返回键图标对齐；
+                          // 错误/重试仍由中央的 _failureOverlay 展示。
                           if (loading)
-                            const Center(
-                                child: CircularProgressIndicator(
-                                    color: Colors.white38)),
+                            Positioned(
+                              top: pad.top + 20,
+                              right: pad.right + 18,
+                              child: const IgnorePointer(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2.2,
+                                      color: Colors.white38),
+                                ),
+                              ),
+                            ),
                         ]),
                       );
                     }
@@ -9518,34 +9551,6 @@ class _PlayerPageState extends State<PlayerPage>
                     swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
                 if (_swipeHint) _swipeHintWidget(pad),
               ],
-              // M13：水滴余额胶囊（顶部居中、半透明；pad.top 已避开 iOS 刘海/灵动岛）
-              Positioned(
-                top: pad.top + 6,
-                left: 0,
-                right: 0,
-                child: IgnorePointer(
-                  child: AnimatedOpacity(
-                    opacity: chromeOpacity,
-                    duration: Duration(milliseconds: chromeMs),
-                    curve: Curves.easeOut,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: Text(
-                          '💧 今日 $gDropDayLeft/$gDropDayLimit · 本周 $gDropWeekLeft/$gDropWeekLimit',
-                          style: const TextStyle(
-                              fontSize: 11, color: Colors.white70),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
               Positioned(
                 left: pad.left + 8,
                 top: pad.top + 8,
@@ -10215,10 +10220,9 @@ class _PlayerPageState extends State<PlayerPage>
                                               color: loopOne
                                                   ? Colors.white70
                                                   : Colors.white24)),
-                                      // H15：水滴图标下方常驻当前水滴数；默认灰、点击后变蓝并 +1 弹跳
+                                      // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
                                       Tooltip(
-                                        message:
-                                            '小水滴：今日剩 $dropDayLeft/1，本周剩 $dropWeekLeft/3，累计 $dropTotal',
+                                        message: '送一颗小水滴',
                                         child: GestureDetector(
                                           behavior: HitTestBehavior.opaque,
                                           onTap: (dropBusy ||
@@ -10258,24 +10262,6 @@ class _PlayerPageState extends State<PlayerPage>
                                                                 ? Colors.white38
                                                                 : Colors
                                                                     .white24)),
-                                                  const SizedBox(height: 1),
-                                                  Text('$dropTotal',
-                                                      style: TextStyle(
-                                                          fontSize: 9,
-                                                          height: 1.0,
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                          color: dropGlow
-                                                              ? Colors
-                                                                  .lightBlueAccent
-                                                              : (dropDayLeft >
-                                                                          0 &&
-                                                                      dropWeekLeft >
-                                                                          0
-                                                                  ? Colors
-                                                                      .white54
-                                                                  : Colors
-                                                                      .white24))),
                                                 ],
                                               ),
                                             ),
@@ -10304,7 +10290,61 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
+              // J-A2：顶部固定半透明胶囊（位于顶部工具按钮下沿，
+              // 不随功能区淡出，也绝不进入底部任务栏区域）。
+              if (_noticeText != null)
+                _PlayerTopNotice(text: _noticeText!, pad: pad),
             ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// J-A2：播放页统一提示条——贴 SafeArea 顶部、水平居中、半透明胶囊。
+class _PlayerTopNotice extends StatelessWidget {
+  final String text;
+  final EdgeInsets pad;
+  const _PlayerTopNotice({required this.text, required this.pad});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      // 顶部工具按钮行高 48；下移一行避免遮挡返回/主页/封面按钮。
+      top: pad.top + 58,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: Center(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            switchInCurve: Curves.easeOut,
+            switchOutCurve: Curves.easeIn,
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.94, end: 1).animate(anim),
+                child: child,
+              ),
+            ),
+            child: Container(
+              key: ValueKey<String>(text),
+              margin: const EdgeInsets.symmetric(horizontal: 24),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.62),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: Colors.white),
+              ),
+            ),
           ),
         ),
       ),
@@ -11509,6 +11549,9 @@ class _AuthorPageState extends State<AuthorPage> {
   bool syncing = false;
   LibMeta? meta;
   Timer? syncTimer;
+  // J-A3：作者主页头部上滑自动收起为紧凑条（头像 + 名字 + 等级）。
+  bool _headerCollapsed = false;
+
 
   // K2：多选模式与已选作品；K3：手动名单（作品 id）。
   bool selectingWorks = false;
@@ -12234,6 +12277,138 @@ class _AuthorPageState extends State<AuthorPage> {
     );
   }
 
+  // J-A3：作者信息头——展开为完整资料，收起为紧凑条（头像 + 名字 + 等级）。
+  Widget _authorHeader(BuildContext context) {
+    final grade =
+        AuthorGrade.fromStats(meta?.stats[widget.name], works: works.length);
+    if (_headerCollapsed) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+        child: Row(children: [
+          GestureDetector(
+            onTap: () => _showAvatar(context),
+            onLongPress: () => _showAvatarMenu(context),
+            child: AuthorAvatar(
+              name: widget.name,
+              mediaPath: displayAv,
+              lib: primaryLib.isEmpty ? null : primaryLib,
+              size: 26,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('@${widget.name}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Color(AuthorGrade.colorForGrade(grade))
+                  .withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(grade,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(AuthorGrade.colorForGrade(grade)))),
+          ),
+        ]),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  onTap: () => _showAvatar(context),
+                  onLongPress: () => _showAvatarMenu(context),
+                  child: AuthorAvatar(
+                    name: widget.name,
+                    mediaPath: displayAv,
+                    lib: primaryLib.isEmpty ? null : primaryLib,
+                    size: AuthorAvatar.headerSize,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      // T2：作者主页词条改为单元库（SECRET / 无归属灰色）
+                      AuthorBadges(
+                        meta: meta,
+                        name: widget.name,
+                        mediaPath: displayAv,
+                        fallbackId: primaryLib.isEmpty ? cfg.lib : primaryLib,
+                        // 0.9.6：不再回退库名文案，无归属显示 SECRET
+                        fallbackName: '',
+                        works: works.length,
+                      ),
+                      const SizedBox(height: 6),
+                      Row(children: [
+                        const Text('作者简介',
+                            style:
+                                TextStyle(fontSize: 12, color: Colors.grey)),
+                        const SizedBox(width: 4),
+                        InkWell(
+                          onTap: _editBio,
+                          borderRadius: BorderRadius.circular(4),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 2),
+                            child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.edit_outlined,
+                                      size: 13, color: Colors.grey),
+                                  SizedBox(width: 2),
+                                  Text('编辑',
+                                      style: TextStyle(
+                                          fontSize: 12, color: Colors.grey)),
+                                ]),
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 6),
+                      Text(_bioText,
+                          maxLines: 6,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 13)),
+                      if (bioAt > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text('简介更新于 ${formatAuthorBioAt(bioAt)}',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.grey)),
+                        ),
+                    ])),
+              ]),
+          if (_canSync)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(children: [
+                const Icon(Icons.cloud_sync_outlined,
+                    size: 14, color: Colors.grey),
+                const SizedBox(width: 6),
+                const Expanded(
+                    child: Text('点右上角云同步按钮，立即爬取该作者的全部作品',
+                        style: TextStyle(fontSize: 11, color: Colors.grey))),
+              ]),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -12278,92 +12453,13 @@ class _AuthorPageState extends State<AuthorPage> {
       body: loading
           ? const _AuthorPageSkeleton()
           : Column(children: [
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      GestureDetector(
-                        onTap: () => _showAvatar(context),
-                        onLongPress: () => _showAvatarMenu(context),
-                        child: AuthorAvatar(
-                          name: widget.name,
-                          mediaPath: displayAv,
-                          lib: primaryLib.isEmpty ? null : primaryLib,
-                          size: AuthorAvatar.headerSize,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                            // T2：作者主页词条改为单元库（SECRET / 无归属灰色）
-                            AuthorBadges(
-                              meta: meta,
-                              name: widget.name,
-                              mediaPath: displayAv,
-                              fallbackId:
-                                  primaryLib.isEmpty ? cfg.lib : primaryLib,
-                              // 0.9.6：不再回退库名文案，无归属显示 SECRET
-                              fallbackName: '',
-                              works: works.length,
-                            ),
-                            const SizedBox(height: 6),
-                            Row(children: [
-                              const Text('作者简介',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.grey)),
-                              const SizedBox(width: 4),
-                              InkWell(
-                                onTap: _editBio,
-                                borderRadius: BorderRadius.circular(4),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(
-                                      horizontal: 4, vertical: 2),
-                                  child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.edit_outlined,
-                                            size: 13, color: Colors.grey),
-                                        SizedBox(width: 2),
-                                        Text('编辑',
-                                            style: TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.grey)),
-                                      ]),
-                                ),
-                              ),
-                            ]),
-                            const SizedBox(height: 6),
-                            Text(_bioText,
-                                maxLines: 6,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 13)),
-                            if (bioAt > 0)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: Text(
-                                    '简介更新于 ${formatAuthorBioAt(bioAt)}',
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.grey)),
-                              ),
-                          ])),
-                    ]),
+              // J-A3：可滚动收起的作者信息头（高度动画，不回弹抖动）。
+              AnimatedSize(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: _authorHeader(context),
               ),
-              if (_canSync)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
-                  child: Row(children: [
-                    const Icon(Icons.cloud_sync_outlined,
-                        size: 14, color: Colors.grey),
-                    const SizedBox(width: 6),
-                    const Expanded(
-                        child: Text('点右上角云同步按钮，立即爬取该作者的全部作品',
-                            style:
-                                TextStyle(fontSize: 11, color: Colors.grey))),
-                  ]),
-                ),
               const Divider(height: 1),
               if (works.isNotEmpty)
                 HorizontalChipBar(
@@ -12461,14 +12557,32 @@ class _AuthorPageState extends State<AuthorPage> {
                   ),
                 ),
               Expanded(
-                  child: WorkGrid(
-                      works: filteredWorks,
-                      lib: primaryLib.isEmpty ? null : primaryLib,
-                      selecting: selectingWorks,
-                      selectedIds: selectedWorks,
-                      onToggleSelect: _toggleSelect,
-                      onEnterSelect: _enterSelect,
-                      manualIds: manualWorkIds)),
+                  child: NotificationListener<ScrollNotification>(
+                onNotification: (n) {
+                  if (n.depth != 0) return false;
+                  if (n is ScrollUpdateNotification) {
+                    final p = n.metrics.pixels;
+                    // 阀值分离（上滑 32 / 回顶 8）避免临界处反复折叠。
+                    // J3b：中途下滑（内容下移、pixels 回落）也展开，
+                    // 不必滚到最顶部；上限 160 防抖，避免刚收起又立刻展开。
+                    final back = (n.scrollDelta ?? 0) < 0;
+                    if (!_headerCollapsed && p > 32) {
+                      setState(() => _headerCollapsed = true);
+                    } else if (_headerCollapsed && (p <= 8 || (back && p < 160))) {
+                      setState(() => _headerCollapsed = false);
+                    }
+                  }
+                  return false;
+                },
+                child: WorkGrid(
+                    works: filteredWorks,
+                    lib: primaryLib.isEmpty ? null : primaryLib,
+                    selecting: selectingWorks,
+                    selectedIds: selectedWorks,
+                    onToggleSelect: _toggleSelect,
+                    onEnterSelect: _enterSelect,
+                    manualIds: manualWorkIds),
+              )),
             ]),
     );
   }
