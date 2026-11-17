@@ -84,15 +84,16 @@ bool showRotateButton({required bool isAndroid, required bool isIOS}) =>
 /// M3：任务栏平台策略。
 ///
 /// Windows/桌面端保持原交互：播放/暂停按钮必须常驻任务栏，横竖屏按钮
-/// 一律不渲染；Android/iOS 两者都显示。把规则集中在这里，避免调用点
-/// 各自判断导致桌面端误出横屏按钮。
+/// 一律不渲染；Android/iOS 只显示横竖屏按钮（O2：手机端播放/暂停改由
+/// 画面中央大圆钮承担，任务栏不再重复放置）。把规则集中在这里，避免
+/// 调用点各自判断导致桌面端误出横屏按钮。
 class TaskbarPolicy {
   const TaskbarPolicy({required this.isAndroid, required this.isIOS});
 
   final bool isAndroid;
   final bool isIOS;
 
-  bool get showPlayPause => true;
+  bool get showPlayPause => !(isAndroid || isIOS);
 
   bool get showRotate => showRotateButton(isAndroid: isAndroid, isIOS: isIOS);
 }

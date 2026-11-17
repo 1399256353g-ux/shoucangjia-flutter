@@ -75,6 +75,7 @@ import 'preload_policy.dart';
 import 'preload_plan.dart';
 import 'video_prefetch.dart';
 import 'swipe_control.dart';
+import 'video_layout.dart';
 import 'swipe_physics.dart';
 import 'stage_tap.dart';
 import 'star_store.dart';
@@ -6612,6 +6613,56 @@ class _MediaRetryBox extends StatelessWidget {
   }
 }
 
+/// O1：边缘竖滑识别器——方向不满足要求时主动 reject，把手势还给 PageView。
+///
+/// 只有「竖向位移 > 12px 且横向位移 < 竖向位移的 0.6」才接管；
+/// 斜向/横向拖动直接让位，避免调亮度时误切作品。
+class _EdgeVerticalDragRecognizer extends VerticalDragGestureRecognizer {
+  _EdgeVerticalDragRecognizer({
+    required this.screenWidth,
+    required this.portrait,
+    required this.zone,
+  });
+
+  final double screenWidth;
+  final bool portrait;
+  final SwipeZone zone;
+  Offset _down = Offset.zero;
+  bool _decided = false;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    _down = event.position;
+    _decided = false;
+    super.addAllowedPointer(event);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (!_decided && event is PointerMoveEvent) {
+      final d = event.position - _down;
+      if (d.distance > 6) {
+        _decided = true;
+        final intent = edgeGestureIntent(
+          dx: d.dx,
+          dy: d.dy,
+          width: screenWidth,
+          startX: _down.dx,
+          portrait: portrait,
+        );
+        final want = zone == SwipeZone.brightness
+            ? EdgeGestureIntent.brightness
+            : EdgeGestureIntent.volume;
+        if (intent != want) {
+          resolve(GestureDisposition.rejected);
+          return;
+        }
+      }
+    }
+    super.handleEvent(event);
+  }
+}
+
 class PlayerPage extends StatefulWidget {
   final List works;
   final int start;
@@ -6743,6 +6794,12 @@ class _PlayerPageState extends State<PlayerPage>
   bool get _swipeHint => _swipeActive || _swipeShow;
   bool get _mobileSwipe =>
       swipeEnabledFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
+  /// O4：当前视频宽高比（来自播放器 videoParams），用于把手机端任务栏
+  /// 贴到画面下沿；拿不到时退回屏幕底部。
+  double? _videoAspect;
+  /// O3：iOS 启动 1.5 秒内未真正播放时只重开一次，避免循环重开。
+  Timer? _startupGuard;
+  bool _startupReopened = false;
   // I1：音量调节 UI 仅桌面端保留，移动端交给系统音量键。
   bool get _volumeUi => volumeUiEnabled(
       isDesktop: Platform.isWindows || Platform.isMacOS || Platform.isLinux);
@@ -7135,6 +7192,18 @@ class _PlayerPageState extends State<PlayerPage>
         if (mounted && _buffering) setState(() => _slowBuffer = true);
       });
     }));
+    // O4：跟踪视频显示宽高比，供手机端任务栏贴画面下沿。
+    _playerSubs.add(p.stream.videoParams.listen((vp) {
+      if (!identical(p, player)) return;
+      if (!mounted) return;
+      final a = vp.aspect ??
+          ((vp.dw != null && vp.dh != null && vp.dh! > 0)
+              ? vp.dw! / vp.dh!
+              : null);
+      if (a == null || a <= 0) return;
+      if (_videoAspect != null && (_videoAspect! - a).abs() < 0.001) return;
+      setState(() => _videoAspect = a);
+    }));
   }
 
   /// 播放器报「不在播放」后，等一小段确认是真空转，再决定是否自救。
@@ -7206,8 +7275,9 @@ class _PlayerPageState extends State<PlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // G16：切后台/最小化/来电时自动暂停（先落盘位置），回前台再恢复；
-    // 移动端 inactive 就暂停，桌面端仅最小化/隐藏暂停（失去焦点不打断）。
+    // G16：切后台/最小化时自动暂停（先落盘位置），回前台再恢复；
+    // O3：移动端仅 paused 暂停——iOS 的 inactive 会被控制中心、通知横幅、
+    // 本地网络授权弹窗瞬时触发，不再采信。
     final isMobile = Platform.isAndroid || Platform.isIOS;
     if (shouldPauseInBackground(state: state.name, isMobile: isMobile)) {
       _appForeground = false;
@@ -7663,7 +7733,12 @@ class _PlayerPageState extends State<PlayerPage>
     // 否则「重开 → 又停 → 再重开」会无限循环。
     final switching = i != cur;
     _stallTimer?.cancel();
-    if (switching) _stallAttempts = 0;
+    _startupGuard?.cancel();
+    if (switching) {
+      _stallAttempts = 0;
+      _startupReopened = false;
+      _videoAspect = null;
+    }
     _userPaused = false;
     // 切条前先把上一条的进度落盘
     if (saveProgress) _saveWatchProgress(force: true);
@@ -7900,6 +7975,45 @@ class _PlayerPageState extends State<PlayerPage>
         } catch (_) {}
       }
     });
+    // O3：iOS 专项——媒体已就绪但 1.5 秒内仍 playing=false 视为启动失败，
+    // 重开一次当前媒体并恢复位置；仍失败再交给故障提示/用户操作。
+    _startupGuard?.cancel();
+    if (Platform.isIOS && w['t'] == 'v') {
+      _startupGuard = Timer(const Duration(milliseconds: 1500), () async {
+        if (!mounted || my != _openToken || _failure != null) return;
+        if (_startupReopened || !_appForeground) return;
+        var playing = false;
+        var at = pos;
+        try {
+          playing = player.state.playing;
+          if (at.inMilliseconds <= 0) at = player.state.position;
+        } catch (_) {}
+        if (!shouldStartupReopen(
+          playing: playing,
+          positionMs: at.inMilliseconds,
+          durationMs: dur.inMilliseconds,
+          opening: _opening,
+          userPaused: _userPaused,
+          backgroundPaused: _pausedByBackground,
+          failed: _failure != null,
+          retried: _startupReopened,
+        )) {
+          return;
+        }
+        _startupReopened = true;
+        PauseTrace.mark('startup:ios-reopen');
+        await open(i, saveProgress: false);
+        if (!mounted || my == _openToken) return;
+        final my2 = _openToken;
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        if (!mounted || my2 != _openToken || paused) return;
+        try {
+          if (at.inMilliseconds > 500) await player.seek(at);
+          await player.setRate(speed);
+          await player.play();
+        } catch (_) {}
+      });
+    }
     retryTimer = Timer(const Duration(milliseconds: 1800), () {
       if (mounted &&
           my == _openToken &&
@@ -8518,20 +8632,32 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
-  // 左右两条窄边手势区：中间留给 PageView 上下滑翻页。
+  // 左右两条边缘手势区（各 1/4 屏宽）：中间与斜向手势留给 PageView。
   Widget _swipeEdge(SwipeZone zone, double width, EdgeInsets pad) {
+    final size = MediaQuery.sizeOf(context);
+    final portrait = size.width <= size.height;
     return Positioned(
       left: zone == SwipeZone.brightness ? 0 : null,
       right: zone == SwipeZone.volume ? 0 : null,
       top: pad.top + 64,
       bottom: pad.bottom + 132,
       width: width,
-      child: GestureDetector(
+      child: RawGestureDetector(
         behavior: HitTestBehavior.translucent,
-        onVerticalDragStart: (d) => _swipeStart(d, zone),
-        onVerticalDragUpdate: _swipeUpdate,
-        onVerticalDragEnd: (_) => _swipeEnd(),
-        onVerticalDragCancel: _swipeEnd,
+        gestures: <Type, GestureRecognizerFactory>{
+          _EdgeVerticalDragRecognizer:
+              GestureRecognizerFactoryWithHandlers<
+                  _EdgeVerticalDragRecognizer>(
+            () => _EdgeVerticalDragRecognizer(
+                screenWidth: size.width, portrait: portrait, zone: zone),
+            (r) {
+              r.onStart = (d) => _swipeStart(d, zone);
+              r.onUpdate = _swipeUpdate;
+              r.onEnd = (_) => _swipeEnd();
+              r.onCancel = _swipeEnd;
+            },
+          ),
+        },
       ),
     );
   }
@@ -8819,6 +8945,7 @@ class _PlayerPageState extends State<PlayerPage>
     _volHintTimer?.cancel();
     _noticeTimer?.cancel();
     _fadeTimer?.cancel();
+    _startupGuard?.cancel();
     _fadeGen++;
     _swipeHintTimer?.cancel();
     _preloadTimer?.cancel();
@@ -9486,6 +9613,7 @@ class _PlayerPageState extends State<PlayerPage>
     // H2：iOS 刘海/灵动岛与横屏左右安全区。视频/图片仍全屏出血，
     // 但返回键、图文圆点、作者/标题信息、音量面板与底部控制栏都要避开安全区。
     final pad = MediaQuery.of(context).padding;
+    final viewSize = MediaQuery.sizeOf(context);
     return Focus(
       focusNode: focus,
       autofocus: true,
@@ -9800,11 +9928,13 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
-              // G15：移动端左右窄边上下滑（左亮度 / 右音量），中间仍可翻页
-              // I1：移动端音量改由系统音量键控制，右侧音量手势已移除
-              if (_mobileSwipe) ...[
-                _swipeEdge(SwipeZone.brightness,
-                    swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
+              // O1：仅手机竖屏启用边缘竖滑（左右各 1/4 屏宽）。
+              // 斜向/横向位移交给 PageView，避免误触切条。
+              if (_mobileSwipe && viewSize.width <= viewSize.height) ...[
+                _swipeEdge(
+                    SwipeZone.brightness, edgeHotZoneWidth(viewSize.width), pad),
+                _swipeEdge(
+                    SwipeZone.volume, edgeHotZoneWidth(viewSize.width), pad),
                 if (_swipeHint) _swipeHintWidget(pad),
               ],
               Positioned(
@@ -10061,6 +10191,36 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               ),
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
+              // O2：手机端中央大号播放/暂停圆钮，随控制层淡入淡出。
+              if (_mobileStageTap && isV && !broken)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    ignoring: !ui,
+                    child: AnimatedOpacity(
+                      opacity: chromeOpacity,
+                      duration: Duration(milliseconds: chromeMs),
+                      curve: Curves.easeOut,
+                      child: Center(
+                        child: GestureDetector(
+                          key: const Key('center-pause'),
+                          behavior: HitTestBehavior.opaque,
+                          onTap: togglePause,
+                          child: Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black.withValues(alpha: 0.45)),
+                            child: Icon(
+                                paused ? Icons.play_arrow : Icons.pause,
+                                size: 44,
+                                color: Colors.white70),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               if (_volumeUi && _volHintVisible && ui && !_swipeHint)
                 Positioned(
                   right: pad.right + 16,
@@ -10115,7 +10275,12 @@ class _PlayerPageState extends State<PlayerPage>
                 Positioned(
                   left: 0,
                   right: 0,
-                  bottom: 0,
+                  // O4：手机端任务栏贴视频画面下沿；全屏/桌面仍贴屏幕底。
+                  bottom: taskbarBottomInset(
+                    box: viewSize,
+                    aspect: _videoAspect,
+                    fullscreen: fs || !_mobileStageTap,
+                  ),
                   child: IgnorePointer(
                     ignoring: !ui,
                     child: AnimatedOpacity(
@@ -10447,10 +10612,12 @@ class _PlayerPageState extends State<PlayerPage>
                                             ),
                                           ),
                                         ),
-                                      // M2/M3：播放/暂停常驻任务栏，图标随播放器状态同步。
-                                      TaskbarPlayButton(
-                                          paused: paused,
-                                          onPressed: togglePause),
+                                      // M2/M3：桌面端播放/暂停常驻任务栏；
+                                      // O2：手机端改由画面中央大圆钮承担。
+                                      if (taskbar.showPlayPause)
+                                        TaskbarPlayButton(
+                                            paused: paused,
+                                            onPressed: togglePause),
                                       IconButton(
                                           onPressed: cycleSpeed,
                                           icon: Text('${speed}x',

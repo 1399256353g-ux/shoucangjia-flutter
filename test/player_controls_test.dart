@@ -126,12 +126,12 @@ void _m3DesktopTests() {
       expect(policy.showRotate, isFalse);
     });
 
-    test('移动端策略：播放/暂停与横竖屏按钮都显示', () {
+    test('移动端策略：O2 后任务栏不再有播放/暂停，只保留横竖屏', () {
       for (final p in [
         taskbarPolicyFor(isAndroid: true, isIOS: false),
         taskbarPolicyFor(isAndroid: false, isIOS: true),
       ]) {
-        expect(p.showPlayPause, isTrue);
+        expect(p.showPlayPause, isFalse);
         expect(p.showRotate, isTrue);
       }
     });

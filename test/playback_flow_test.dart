@@ -141,4 +141,41 @@ void main() {
             index: 4, count: 5, loopOne: false, hasAudio: false, autoplay: true),
         SlideshowAction.nextWork);
   });
+
+  group('O3 启动 1.5 秒未播放', () {
+    bool check({
+      bool playing = false,
+      int positionMs = 0,
+      int durationMs = 120000,
+      bool opening = false,
+      bool userPaused = false,
+      bool backgroundPaused = false,
+      bool failed = false,
+      bool retried = false,
+    }) =>
+        shouldStartupReopen(
+          playing: playing,
+          positionMs: positionMs,
+          durationMs: durationMs,
+          opening: opening,
+          userPaused: userPaused,
+          backgroundPaused: backgroundPaused,
+          failed: failed,
+          retried: retried,
+        );
+    test('媒体就绪且停在开头 → 重开一次', () {
+      expect(check(), isTrue);
+    });
+    test('已在播放/用户暂停/后台/已重开过 → 不重开', () {
+      expect(check(playing: true), isFalse);
+      expect(check(userPaused: true), isFalse);
+      expect(check(backgroundPaused: true), isFalse);
+      expect(check(retried: true), isFalse);
+    });
+    test('媒体未就绪、判失败或已播过一段时间 → 不重开', () {
+      expect(check(durationMs: 0), isFalse);
+      expect(check(failed: true), isFalse);
+      expect(check(positionMs: 5000), isFalse);
+    });
+  });
 }

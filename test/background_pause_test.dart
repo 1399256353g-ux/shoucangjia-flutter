@@ -3,9 +3,11 @@ import 'package:shoucangjia/background_pause.dart';
 
 void main() {
   group('shouldPauseInBackground', () {
-    test('移动端 inactive 即暂停（来电/通知中心）', () {
+    test('O3：移动端 inactive 不暂停，仅真正进入后台才暂停', () {
+      // iOS 控制中心、通知横幅、本地网络授权弹窗都会瞬时触发 inactive。
       expect(
-          shouldPauseInBackground(state: 'inactive', isMobile: true), isTrue);
+          shouldPauseInBackground(state: 'inactive', isMobile: true), isFalse);
+      expect(shouldPauseInBackground(state: 'paused', isMobile: true), isTrue);
     });
 
     test('桌面端失去焦点不暂停，最小化/隐藏才暂停', () {

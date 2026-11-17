@@ -21,6 +21,40 @@ double swipeEdgeWidth(double screenWidth) {
   return (screenWidth * 0.18).clamp(48.0, 96.0);
 }
 
+/// 手机竖屏边缘热区宽度：左右各 1/4 屏宽（抖音式边缘手势已收窄）。
+double edgeHotZoneWidth(double screenWidth) =>
+    screenWidth <= 0 ? 0 : screenWidth * 0.25;
+
+/// 边缘竖滑的接管意图。
+enum EdgeGestureIntent { none, brightness, volume }
+
+/// 判定这次拖动是否应由边缘竖滑接管；返回 [EdgeGestureIntent.none] 时
+/// 必须把整个手势让给 PageView 翻页。
+///
+/// 规则（O1）：
+/// - 只在小屏竖屏启用（桌面/横屏不启用）；
+/// - 起点落在左右各 1/4 屏宽内（左=亮度，右=音量）；
+/// - 竖向位移必须大于 [minVertical]，且横向位移小于竖向位移的
+///   [horizontalRatio]；斜向拖动交给翻页。
+EdgeGestureIntent edgeGestureIntent({
+  required double dx,
+  required double dy,
+  required double width,
+  required double startX,
+  bool portrait = true,
+  double minVertical = 12,
+  double horizontalRatio = 0.6,
+}) {
+  if (!portrait || width <= 0) return EdgeGestureIntent.none;
+  final adx = dx.abs();
+  final ady = dy.abs();
+  if (ady <= minVertical) return EdgeGestureIntent.none;
+  if (adx >= ady * horizontalRatio) return EdgeGestureIntent.none;
+  if (startX <= width * 0.25) return EdgeGestureIntent.brightness;
+  if (startX >= width * 0.75) return EdgeGestureIntent.volume;
+  return EdgeGestureIntent.none;
+}
+
 /// 根据横向位置返回作用区；中间区域返回 null（交给翻页手势）。
 SwipeZone? swipeZoneAt(double x, double screenWidth) {
   if (screenWidth <= 0) return null;

@@ -109,3 +109,28 @@ StallRecoveryAction stallRecoveryAction({
       ? StallRecoveryAction.retryPlay
       : StallRecoveryAction.reopen;
 }
+
+/// O3：iOS 启动 1.5 秒内仍未播放时是否应重开一次。
+///
+/// 只在「媒体已就绪（duration > 0）、位置仍停在开头、用户没有暂停、
+/// 不在后台、未判失败、且本轮还没重开过」时触发；重开只做一次，
+/// 失败后交给故障提示，避免无限重开。
+bool shouldStartupReopen({
+  required bool playing,
+  required int positionMs,
+  required int durationMs,
+  required bool opening,
+  required bool userPaused,
+  required bool backgroundPaused,
+  required bool failed,
+  required bool retried,
+  int startupWindowMs = 3000,
+}) =>
+    !retried &&
+    !playing &&
+    !opening &&
+    !userPaused &&
+    !backgroundPaused &&
+    !failed &&
+    durationMs > 0 &&
+    positionMs <= startupWindowMs;

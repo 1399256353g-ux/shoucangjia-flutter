@@ -1,7 +1,9 @@
 /// G16：切后台自动暂停并记忆位置。
 ///
 /// 生命周期判定抽成纯函数，避免把平台差异散落在播放页里：
-/// - 移动端：`inactive`（来电/下拉通知/多任务预览）就要暂停，避免声音外泄；
+/// - 移动端：仅 `paused`（真正进入后台）暂停。iOS 的 `inactive` 会被
+///   控制中心、通知横幅、系统权限弹窗（如首次访问 NAS 的本地网络授权）
+///   瞬时触发，按它暂停会造成「播放 1 秒即暂停」，因此不再采信；
 /// - 桌面端：只有窗口最小化/隐藏（`hidden`/`paused`）才暂停，
 ///   单纯失去焦点（点别的窗口）不打断播放。
 library;
@@ -17,7 +19,7 @@ bool shouldPauseInBackground({
     case 'detached':
       return true;
     case 'inactive':
-      return isMobile;
+      return false;
     default:
       return false;
   }
