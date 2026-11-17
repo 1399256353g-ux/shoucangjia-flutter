@@ -52,6 +52,51 @@ jobs:
             echo "$k = $V"
           done
           echo "INFO_PLIST_OK"
+      - name: Audio config (background playback)
+        run: |
+          PL=ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PL" || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PL" || true
+          /usr/libexec/PlistBuddy -c "Set :UIBackgroundModes:0 audio" "$PL" 2>/dev/null || true
+          python3 - <<'PY'
+          import re
+          p = 'ios/Runner/AppDelegate.swift'
+          s = open(p, encoding='utf-8').read()
+          if 'AVAudioSession' not in s:
+              if 'import AVFoundation' not in s:
+                  if 'import Flutter' in s:
+                      s = s.replace('import Flutter', 'import Flutter\nimport AVFoundation', 1)
+                  else:
+                      s = 'import AVFoundation\n' + s
+              cfg = ('    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)\n'
+                     '    try? AVAudioSession.sharedInstance().setActive(true)\n')
+              m = re.search(r'didFinishLaunchingWithOptions', s)
+              if m:
+                  i = s.find('{', m.end())
+                  s = s[:i + 1] + '\n' + cfg + s[i + 1:]
+              else:
+                  j = s.rfind('}')
+                  add = ('\n  override func application(\n'
+                         '    _ application: UIApplication,\n'
+                         '    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?\n'
+                         '  ) -> Bool {\n'
+                         '    GeneratedPluginRegistrant.register(with: self)\n' + cfg +
+                         '    return super.application(application, didFinishLaunchingWithOptions: launchOptions)\n'
+                         '  }\n')
+                  s = s[:j] + add + s[j:]
+              open(p, 'w', encoding='utf-8').write(s)
+          print('AppDelegate patched')
+          PY
+      - name: Verify audio config
+        run: |
+          PL=ios/Runner/Info.plist
+          if ! /usr/libexec/PlistBuddy -c "Print :UIBackgroundModes" "$PL" | grep -q 'audio'; then
+            echo "MISSING UIBackgroundModes audio"; exit 1
+          fi
+          if ! grep -q "AVAudioSession" ios/Runner/AppDelegate.swift; then
+            echo "MISSING AVAudioSession in AppDelegate"; exit 1
+          fi
+          echo "AUDIO_CFG_OK"
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build ios --release --no-codesign
