@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/author_filter.dart';
 import 'package:shoucangjia/author_filter_bar.dart';
+import 'package:shoucangjia/library_badge.dart';
 
 void main() {
+  tearDown(() => LibraryBadge.emoji.clear());
+
   test('pickOnlyIn 只收敛目标维度，其他维度不动', () {
     final f = AuthorFilterState(
       bigs: {'big-01', 'big-02'},
@@ -99,5 +102,25 @@ void main() {
           isFalse,
           reason: '多选时 $k 不应伪造单选态');
     }
+  });
+
+  testWidgets('快捷条文案追加单元库 emoji 后缀，未设置的库不变', (tester) async {
+    LibraryBadge.emoji['u2'] = '🔥';
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: AuthorQuickChips(
+          allLabel: '全部单元库',
+          items: const [
+            AuthorLibNode(id: 'u1', name: '单元一'),
+            AuthorLibNode(id: 'u2', name: '单元二'),
+          ],
+          selected: const {},
+          onPick: (_) {},
+        ),
+      ),
+    ));
+    expect(find.text('单元一'), findsOneWidget);
+    expect(find.text('单元二🔥'), findsOneWidget);
+    expect(find.text('单元二'), findsNothing);
   });
 }

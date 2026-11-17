@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_badge.dart';
 import 'package:shoucangjia/main.dart';
+import 'package:shoucangjia/unit_library_view.dart';
 
 void main() {
   setUp(() => LibraryBadge.emoji.clear());
@@ -56,6 +57,29 @@ void main() {
         label: '+2', color: LibraryBadge.gray, unitId: 'unit-1');
     final plusText = (plus.build(_FakeContext()) as Container).child as Text;
     expect(plusText.data, '+2');
+  });
+
+  testWidgets('库卡片标题追加单元库 emoji 后缀（与词条同一规则）', (tester) async {
+    LibraryBadge.emoji['unit-1'] = '💎';
+
+    Future<void> pump({String unitId = 'unit-1'}) => tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LibCardInfo(
+                title: '单元库',
+                unitId: unitId,
+                stats: '2 作者 · 3 作品',
+              ),
+            ),
+          ),
+        );
+
+    await pump();
+    expect(find.text('单元库💎'), findsOneWidget);
+
+    // 不属于任何单元库的库卡片标题不加后缀。
+    await pump(unitId: '');
+    expect(find.text('单元库'), findsOneWidget);
   });
 }
 

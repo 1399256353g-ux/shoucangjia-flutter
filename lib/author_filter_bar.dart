@@ -58,7 +58,8 @@ class AuthorQuickChips extends StatelessWidget {
             padding: const EdgeInsets.only(right: 8),
             child: ChoiceChip(
               key: ValueKey('quick-chip-${n.id}'),
-              label: Text(LibraryBadge.stripIndex(n.name)),
+              label: Text(LibraryBadge.labelWithEmoji(
+                  LibraryBadge.stripIndex(n.name), n.id)),
               selected: only == n.id,
               onSelected: (_) {
                 if (only == n.id) return;

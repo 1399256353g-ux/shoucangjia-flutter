@@ -53,6 +53,10 @@ class LibCardInfo extends StatelessWidget {
   final String server;
   final bool dense;
 
+  /// 所属单元库 id（`rel` 或 `node:rel`）；给出时标题追加该库 emoji 后缀。
+  /// 与作者词条共用同一套 emoji 规则，保证「词条看到什么，卡片标题就是什么」。
+  final String unitId;
+
   const LibCardInfo({
     super.key,
     this.badge,
@@ -60,12 +64,15 @@ class LibCardInfo extends StatelessWidget {
     required this.stats,
     this.server = '',
     this.dense = false,
+    this.unitId = '',
   });
 
   @override
   Widget build(BuildContext context) {
-    // D2：所有库卡片标题统一去掉目录名前的排序序号（受「省略编号」开关控制）。
-    final titleText = LibraryBadge.stripIndex(title);
+    // D2：所有库卡片标题统一去掉目录名前的排序序号（受「省略编号」开关控制）；
+    // 再追加所属单元库的 emoji 后缀（与作者卡片词条同一套规则）。
+    final titleText =
+        LibraryBadge.labelWithEmoji(LibraryBadge.stripIndex(title), unitId);
     return Container(
       padding: dense
           ? const EdgeInsets.fromLTRB(10, 22, 10, 8)
@@ -655,6 +662,7 @@ class UnitLibraryCard extends StatelessWidget {
               bottom: 0,
               child: LibCardInfo(
                 title: unit.name,
+                unitId: unit.id,
                 stats: '${formatCount(unit.authors)} 作者 · '
                     '${formatCount(unit.works)} 作品',
                 server: server,
@@ -966,7 +974,10 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
 
     walkOwners(unit);
     return Scaffold(
-      appBar: AppBar(title: Text(LibraryBadge.stripIndex(unit.name)), actions: [
+      appBar: AppBar(
+          title: Text(LibraryBadge.labelWithEmoji(
+              LibraryBadge.stripIndex(unit.name), unit.id)),
+          actions: [
         const HomeAction(),
         if (onConfigureUnit != null && UnitLibraryCard.canConfigure(unit))
           IconButton(
@@ -1092,7 +1103,8 @@ class BasicLibCard extends StatelessWidget {
     // 位置词条只由「单元库」生成：取所属单元库名称与配色，不再用基础库自身。
     // K17：有单元库就用单元库词条；没有则回退到「库名」灰色词条。
     final hasUnit = unitLabel.isNotEmpty;
-    final text = badgeText(hasUnit ? unitLabel : basic.name);
+    final text = LibraryBadge.labelWithEmoji(
+        badgeText(hasUnit ? unitLabel : basic.name), hasUnit ? unitKey : '');
     // 顶级节点库（SECRET）下发的词条固定灰色；其余按单元库配色。
     final isTop = !hasUnit || unitKey == 'secret';
     final color = isTop
@@ -1151,6 +1163,7 @@ class BasicLibCard extends StatelessWidget {
             child: LibCardInfo(
               badge: _badge(),
               title: basic.name,
+              unitId: unitKey,
               stats: '${basic.authors} 作者 · ${basic.works} 作品',
               server: basic.serverLabel,
               dense: true,
