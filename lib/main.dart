@@ -191,6 +191,9 @@ class Cfg {
 final cfg = Cfg();
 final navKey = GlobalKey<NavigatorState>();
 
+/// 封面设置成功后的刷新信号：主页库卡片据此重新拉取封面索引。
+final ValueNotifier<int> coverRevision = ValueNotifier<int>(0);
+
 /// J9：作者来源词条所需的基础库映射与统计。
 /// 一次加载后按库缓存，词条显示「基础库」名称（如「🦶」），不是大库名。
 class LibMeta {
@@ -255,7 +258,7 @@ class LibMeta {
       var basicToUnit = const <String, String>{};
       try {
         final rs = await Future.wait([
-          http.get(cfg.u('/api/libraries.json', lib: lib),
+          http.get(cfg.u('/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}', lib: lib),
               headers: cfg.headers),
           http.get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers),
           http.get(cfg.u('/api/author_stats.json', lib: lib),
@@ -527,7 +530,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
           .timeout(const Duration(seconds: 12));
       if (reg.statusCode != 200) return <String, Set<String>>{};
       final lj = await http
-          .get(cfg.u('/api/libraries.json', lib: lib), headers: cfg.headers)
+          .get(cfg.u('/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}', lib: lib), headers: cfg.headers)
           .timeout(const Duration(seconds: 12));
       if (lj.statusCode != 200) return <String, Set<String>>{};
       final regJson = jsonDecode(utf8.decode(reg.bodyBytes));
@@ -922,7 +925,7 @@ class _SettingsPageState extends State<SettingsPage> {
             .get(Uri.parse('${s.base}/api/index.json'), headers: headers)
             .timeout(const Duration(seconds: 8)),
         http
-            .get(Uri.parse('${s.base}/api/libraries.json'), headers: headers)
+            .get(Uri.parse('${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'), headers: headers)
             .timeout(const Duration(seconds: 8)),
       ]);
       if (rs[0].statusCode != 200) throw Exception('HTTP ${rs[0].statusCode}');
@@ -3023,6 +3026,8 @@ class _LibraryPageState extends State<LibraryPage> {
     WorkPlaysStore.revision.addListener(_onPlaysChanged);
     // 0.9.6：星标是全局状态，任何页面切换后本页都要跟着刷新。
     StarStore.instance.addListener(_onStarsChanged);
+    // 封面设置成功后立即刷新库卡片，不必等手动刷新/重启。
+    coverRevision.addListener(_onCoverChanged);
     load();
   }
 
@@ -3030,7 +3035,12 @@ class _LibraryPageState extends State<LibraryPage> {
   void dispose() {
     WorkPlaysStore.revision.removeListener(_onPlaysChanged);
     StarStore.instance.removeListener(_onStarsChanged);
+    coverRevision.removeListener(_onCoverChanged);
     super.dispose();
+  }
+
+  void _onCoverChanged() {
+    if (mounted) load();
   }
 
   // 0.9.6：星标被任何页面改动后，同步本页快照（返回主页不再显示旧图标）。
@@ -3127,7 +3137,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 .get(Uri.parse('${s.base}/api/libraries'), headers: h)
                 .timeout(const Duration(seconds: 10)),
             http
-                .get(Uri.parse('${s.base}/api/libraries.json'), headers: h)
+                .get(Uri.parse('${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'), headers: h)
                 .timeout(const Duration(seconds: 10)),
           ]);
           var list = <Map<String, dynamic>>[];
@@ -3206,7 +3216,7 @@ class _LibraryPageState extends State<LibraryPage> {
         };
         try {
           final r = await http
-              .get(Uri.parse('${s.base}/api/libraries.json'), headers: h)
+              .get(Uri.parse('${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'), headers: h)
               .timeout(const Duration(seconds: 8));
           if (r.statusCode != 200) continue;
           final j = jsonDecode(r.body);
@@ -8318,6 +8328,8 @@ class _PlayerPageState extends State<PlayerPage>
         return;
       }
       _toast(req.doneText);
+      // 封面已写入服务端：通知主页/库页重新拉取封面索引，立即显示新封面。
+      coverRevision.value++;
     } catch (e) {
       _toast('${req.failText}：$e');
     }
