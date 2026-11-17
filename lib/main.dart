@@ -7079,18 +7079,17 @@ class _PlayerPageState extends State<PlayerPage>
   int _lastStageTapAt = 0;
   Offset _lastStageTapPos = Offset.zero;
   bool _tapWasPausedBefore = false;
-  late final AnimationController _heartAnim = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 650));
-  late final Animation<double> _heartScale = TweenSequence<double>([
-    TweenSequenceItem(
-        tween: Tween(begin: 0.55, end: 1.25)
-            .chain(CurveTween(curve: Curves.easeOutBack)),
-        weight: 45),
-    TweenSequenceItem(
-        tween: Tween(begin: 1.25, end: 1.0)
-            .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 55),
-  ]).animate(_heartAnim);
+  // P0 §5：爱心 700ms（参数见 player_controls.dart），数值由纯函数给出。
+  late final AnimationController _heartAnim =
+      AnimationController(vsync: this, duration: kHeartAnimDuration);
+  // P0（非全屏）：单击延迟 250ms 判定、双击取消单击、双击不暂停。
+  final StageTapArbiter _stageTapArbiter = StageTapArbiter();
+  Timer? _singleTapTimer;
+  // P0（非全屏）：暂停时只显示播放图标，0.8s / easeOut 淡出。
+  late final AnimationController _playHintAnim = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: kPlayHintFadeMs));
+  // P0 §3：进度条是否处于「按住/拖动」态（与拖动 seek 合并为一次按下）。
+  bool _seeking = false;
   double speed = 1.0;
   Duration pos = Duration.zero;
   Duration dur = Duration.zero;
@@ -7118,6 +7117,10 @@ class _PlayerPageState extends State<PlayerPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // P0：播放图标淡出结束后重建一次，从树上移除该覆盖层。
+    _playHintAnim.addStatusListener((s) {
+      if (s == AnimationStatus.completed && mounted) setState(() {});
+    });
     PerfDiagnostics.instance.beginSpan('page:player');
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
@@ -8392,6 +8395,12 @@ class _PlayerPageState extends State<PlayerPage>
   // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停；
   // 320ms 内在相近位置再次点击视为双击：点赞并恢复到点击前的播放状态。
   void onStageTap([Offset? pos]) {
+    // P0：非全屏走抖音式仲裁（250ms 单击判定，双击只点赞不暂停）；
+    // 全屏分支完全保持原行为，不进入下面的新逻辑。
+    if (!fs) {
+      _onStageTapNonFullscreen(pos);
+      return;
+    }
     focus.requestFocus();
     final w = _workAt(cur);
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -8447,6 +8456,59 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  /// P0：非全屏单击/双击仲裁。首次点击延迟 250ms 判定单击，双击取消单击；
+  /// 双击只点赞（位置=点击点）、不暂停，也不恢复任何暂停状态。
+  void _onStageTapNonFullscreen(Offset? pos) {
+    focus.requestFocus();
+    final at = pos ?? Offset.zero;
+    // G14：图片放大时单击只恢复原始大小
+    if (_picZoom.isZoomed) {
+      _cancelPendingSingleTap();
+      _resetPicZoom();
+      return;
+    }
+    // 设置里关闭双击点赞时无需等待仲裁窗口，直接走单击。
+    if (!AppSettings.doubleTapLike) {
+      _cancelPendingSingleTap();
+      _singleStageTap();
+      return;
+    }
+    final w = _workAt(cur);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_stageTapArbiter.registerTap(nowMs: now, pos: at)) {
+      _cancelPendingSingleTap();
+      if (!_isLiked(w)) _setLiked(w, true, at: at);
+      showUi();
+      return;
+    }
+    _singleTapTimer?.cancel();
+    _singleTapTimer = Timer(
+        const Duration(milliseconds: kStageSingleTapDelayMs), () {
+      _stageTapArbiter.clear();
+      if (mounted) _singleStageTap();
+    });
+  }
+
+  /// 取消已排队但尚未触发的单击（双击、拖动、翻页时调用）。
+  void _cancelPendingSingleTap() {
+    _singleTapTimer?.cancel();
+    _singleTapTimer = null;
+    _stageTapArbiter.clear();
+  }
+
+  /// 非全屏单击：功能区隐藏时先呼出；否则暂停/继续。
+  /// 暂停时中央只显示播放图标（无大按钮），0.8s 后 easeOut 淡出。
+  void _singleStageTap() {
+    if (!ui) {
+      showUi();
+      return;
+    }
+    hapticTap();
+    togglePause();
+    showUi();
+    if (paused) _playHintAnim.forward(from: 0);
+  }
+
   /// M1：立即收起功能区（取消自动隐藏计时器，避免残留定时器再触发）。
   void hideUiNow() {
     hideTimer?.cancel();
@@ -8484,6 +8546,8 @@ class _PlayerPageState extends State<PlayerPage>
   bool _authorDragClosing = false;
 
   void _authorDragStart() {
+    // P0：左滑拉作者页时取消单击判定，避免“滑一下却切了暂停”。
+    _cancelPendingSingleTap();
     if (_authorDrag != null) return;
     final name = '${_workAt(cur)['a'] ?? ''}';
     if (name.isEmpty) return;
@@ -8933,6 +8997,8 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// M5：只在状态真正变化时重建，避免滚动通知每帧触发 setState。
   void _setPageSwiping(bool value) {
+    // P0：一旦开始翻页手势，取消尚未触发的单击判定，避免拖完再跳一次暂停。
+    if (value) _cancelPendingSingleTap();
     if (!mounted || _pageSwiping == value) return;
     setState(() => _pageSwiping = value);
   }
@@ -9071,6 +9137,8 @@ class _PlayerPageState extends State<PlayerPage>
     WatchProgressStore.flush();
     _dropAnim.dispose();
     _heartAnim.dispose();
+    _playHintAnim.dispose();
+    _singleTapTimer?.cancel();
     autoTimer?.cancel();
     hideTimer?.cancel();
     retryTimer?.cancel();
@@ -9785,7 +9853,10 @@ class _PlayerPageState extends State<PlayerPage>
         uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
     final ms = ChromeFade.durationMs(swiping: _pageSwiping);
     final chapters = workChapterCount(w);
-    final bottom = stageProgressBottomOffset(safeBottom: fs ? pad.bottom : 0);
+    // P0 §3：非全屏进度条距任务栏 8dp（全屏保持旧值 10dp）。
+    final bottom = stageProgressBottomOffset(
+        safeBottom: fs ? pad.bottom : 0,
+        padding: fs ? 10 : kProgressBottomGap);
     return Positioned(
       left: 0,
       right: 0,
@@ -9820,8 +9891,11 @@ class _PlayerPageState extends State<PlayerPage>
                         : (pics.length > 1
                             ? '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}'
                             : ''),
-                    style:
-                        const TextStyle(fontSize: 10, color: Colors.white60)),
+                    // P0 §3：非全屏时间 11px tabular / 白 90%。
+                    style: fs
+                        ? const TextStyle(
+                            fontSize: 10, color: Colors.white60)
+                        : kProgressTimeStyle),
                 const SizedBox(width: 8),
                 Expanded(
                   child: LayoutBuilder(builder: (ctx, cons) {
@@ -9833,13 +9907,21 @@ class _PlayerPageState extends State<PlayerPage>
                           pics: pics, idx: idx, width: cons.maxWidth);
                     }
                     return _videoProgressBar(
-                        progress: progress, width: cons.maxWidth);
+                        progress: progress,
+                        width: cons.maxWidth,
+                        // P0 §3 只改非全屏的进度条视觉与按下/拖动交互。
+                        spec: !fs);
                   }),
                 ),
                 const SizedBox(width: 8),
                 Text('${cur + 1} / ${widget.works.length}',
-                    style:
-                        const TextStyle(fontSize: 10, color: Colors.white54)),
+                    style: fs
+                        ? const TextStyle(
+                            fontSize: 10, color: Colors.white54)
+                        : const TextStyle(
+                            fontSize: kProgressTimeFontSize,
+                            color: Color(0xB3FFFFFF),
+                            fontFeatures: [FontFeature.tabularFigures()])),
               ]),
             ]),
           ),
@@ -9850,17 +9932,87 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// 视频进度条：点击跳转、横向拖动预览；按下暂停、松手才 seek 并恢复。
   /// J4 语义不变：拖动期间当前视频不切条，松手才落定。
-  Widget _videoProgressBar({required double progress, required double width}) {
+  /// P0 §3：非全屏（[spec]）按下即暂停；常态 2dp/白 60%/圆角 1dp，
+  /// 按住或拖动 4dp/全白/圆角 2dp；拖动显示 mm:ss 气泡；松手恢复（仅原本在播）。
+  /// 全屏（spec=false）保持旧视觉与旧拖动语义。
+  Widget _videoProgressBar({
+    required double progress,
+    required double width,
+    bool spec = false,
+  }) {
     void seekAt(Offset p) {
       if (dur.inMilliseconds == 0) return;
       final f = (p.dx / width).clamp(0.0, 1.0);
       player.seek(dur * f);
     }
 
+    // 按下即进入「按住」态并暂停；只在原本播放时记录松手恢复。
+    void beginSeek(Offset p) {
+      if (_seeking) return;
+      _seeking = true;
+      resumeAfterDrag = !paused;
+      if (!paused) {
+        _userPaused = true;
+        PauseTrace.mark('user:seek-press');
+        player.pause();
+      }
+      setState(() {
+        dragging = true;
+        dragFrac = (p.dx / width).clamp(0.0, 1.0);
+      });
+    }
+
+    // 松手：spec 模式里 commit=true 时 seek 并（仅原本在播）恢复播放。
+    void endSeek({bool commit = true}) {
+      if (!_seeking) return;
+      _seeking = false;
+      final f = dragFrac ?? progress;
+      if (commit && dur.inMilliseconds > 0) {
+        player.seek(dur * f);
+        if (resumeAfterDrag) {
+          _userPaused = false;
+          _stallAttempts = 0;
+          player.play();
+        }
+      } else if (resumeAfterDrag) {
+        _userPaused = false;
+        _stallAttempts = 0;
+        player.play();
+      }
+      setState(() {
+        dragging = false;
+        dragFrac = null;
+      });
+    }
+
+    final pressed = spec && (dragging || _seeking);
+    final metrics = stageProgressMetrics(pressed: pressed);
+    final idleH = spec ? kProgressIdleHeight : ((dragging || barHover) ? 7.0 : 3.0);
+    final h = spec ? metrics.height : idleH;
+    final trackColor =
+        spec ? metrics.trackColor : Colors.white24;
+    final playedColor = spec
+        ? metrics.playedColor
+        : (dragging ? Colors.white : Colors.white70);
+    final radius = spec
+        ? BorderRadius.circular(metrics.radius)
+        : BorderRadius.circular(0);
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTapUp: (d) => seekAt(d.localPosition),
-      onHorizontalDragStart: (_) {
+      onTapDown: spec ? (d) => beginSeek(d.localPosition) : null,
+      onTapUp: spec
+          ? (d) {
+              seekAt(d.localPosition);
+              endSeek(commit: false);
+            }
+          : (d) => seekAt(d.localPosition),
+      onTapCancel: spec ? () => endSeek(commit: false) : null,
+      onHorizontalDragStart: (d) {
+        if (spec) {
+          beginSeek(d.localPosition);
+          return;
+        }
         resumeAfterDrag = !paused;
         if (!paused) {
           _userPaused = true;
@@ -9876,38 +10028,62 @@ class _PlayerPageState extends State<PlayerPage>
         final f = (d.localPosition.dx / width).clamp(0.0, 1.0);
         setState(() => dragFrac = f);
       },
-      onHorizontalDragEnd: (_) {
-        final f = dragFrac ?? progress;
-        if (dur.inMilliseconds > 0) {
-          player.seek(dur * f);
-          if (resumeAfterDrag) {
-            _userPaused = false;
-            _stallAttempts = 0;
-            player.play();
-          }
-        }
-        setState(() {
-          dragging = false;
-          dragFrac = null;
-        });
-      },
+      onHorizontalDragEnd: spec
+          ? (_) => endSeek()
+          : (_) {
+              final f = dragFrac ?? progress;
+              if (dur.inMilliseconds > 0) {
+                player.seek(dur * f);
+                if (resumeAfterDrag) {
+                  _userPaused = false;
+                  _stallAttempts = 0;
+                  player.play();
+                }
+              }
+              setState(() {
+                dragging = false;
+                dragFrac = null;
+              });
+            },
+      onHorizontalDragCancel: spec ? () => endSeek(commit: false) : null,
       child: MouseRegion(
         onEnter: (_) => setState(() => barHover = true),
         onExit: (_) => setState(() => barHover = false),
         child: SizedBox(
           height: 30,
           child: Stack(
+            // P0：拖动气泡画在轨道上方，不能裁掉。
+            clipBehavior: Clip.none,
             alignment: Alignment.centerLeft,
             children: [
               Container(
-                  height: (dragging || barHover) ? 7 : 3, color: Colors.white24),
+                  height: h,
+                  decoration:
+                      BoxDecoration(color: trackColor, borderRadius: radius)),
               FractionallySizedBox(
                 alignment: Alignment.centerLeft,
                 widthFactor: dragFrac ?? progress,
                 child: Container(
-                    height: (dragging || barHover) ? 7 : 3,
-                    color: dragging ? Colors.white : Colors.white70),
+                    height: h,
+                    decoration: BoxDecoration(
+                        color: playedColor, borderRadius: radius)),
               ),
+              // P0 §3：拖动气泡（12px / #CC000000 / 圆角 6dp / mm:ss）。
+              if (spec && dragging && dragFrac != null)
+                Positioned(
+                  left: ((dragFrac! * width) - 24)
+                      .clamp(0.0, (width - 48).clamp(0.0, width)),
+                  top: -28,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: kSeekBubbleColor,
+                        borderRadius: BorderRadius.circular(kSeekBubbleRadius)),
+                    child: Text(fmt(dur * (dragFrac ?? 0)),
+                        style: kSeekBubbleTextStyle),
+                  ),
+                ),
             ],
           ),
         ),
@@ -10346,25 +10522,26 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               // G12：加载超时/解码失败/网络失败 —— 给出重试入口
               if (_failure != null) _failureOverlay(),
-              // G9：双击位置的红心反馈
+              // G9 / P0 §5：双击位置的红心反馈（58dp、#FFFF3B5C、700ms、
+              // scale 0.6→1.15→1.0、上浮 60dp、opacity 1→0）。
               if (_heartPos != null)
                 Positioned(
-                  left: _heartPos!.dx - 30,
-                  top: _heartPos!.dy - 30,
+                  left: _heartPos!.dx - kHeartSize / 2,
+                  top: _heartPos!.dy - kHeartSize / 2,
                   child: IgnorePointer(
                     child: AnimatedBuilder(
                       animation: _heartAnim,
                       builder: (_, __) {
                         final t = _heartAnim.value;
-                        final opacity = t < 0.7
-                            ? 1.0
-                            : (1 - (t - 0.7) / 0.3).clamp(0.0, 1.0);
                         return Opacity(
-                          opacity: opacity,
-                          child: Transform.scale(
-                            scale: _heartScale.value,
-                            child: const Icon(Icons.favorite,
-                                size: 58, color: Color(0xFFFF3B5C)),
+                          opacity: heartOpacityAt(t),
+                          child: Transform.translate(
+                            offset: Offset(0, heartRiseOffsetAt(t)),
+                            child: Transform.scale(
+                              scale: heartScaleAt(t),
+                              child: const Icon(Icons.favorite,
+                                  size: kHeartSize, color: kHeartColor),
+                            ),
                           ),
                         );
                       },
@@ -10391,7 +10568,8 @@ class _PlayerPageState extends State<PlayerPage>
                 if (_swipeHint) _swipeHintWidget(pad),
               ],
               Positioned(
-                left: pad.left + 8,
+                // P0 §6：非全屏左边距 12dp（全屏保持旧值 8dp）。
+                left: pad.left + (fs ? 8 : 12),
                 top: pad.top + 8,
                 child: IgnorePointer(
                   ignoring: !ui,
@@ -10399,28 +10577,50 @@ class _PlayerPageState extends State<PlayerPage>
                     opacity: chromeOpacity,
                     duration: Duration(milliseconds: chromeMs),
                     curve: Curves.easeOut,
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      IconButton(
-                          onPressed: () => Navigator.of(context).maybePop(),
-                          icon: const Icon(Icons.arrow_back,
-                              color: Colors.white70),
-                          style: IconButton.styleFrom(
-                              overlayColor: Colors.white24)),
-                      // 深页面统一「返回主页」：从作者页/搜索进播放页也能一步回主页。
-                      const HomeOverlayButton(),
-                      // 封面入口做成可见按钮（长按信息区同样可用）
-                      IconButton(
-                          tooltip: '设置封面',
-                          onPressed: _openCoverSheet,
-                          icon: const Icon(Icons.image_outlined,
-                              color: Colors.white70),
-                          style: IconButton.styleFrom(
-                              overlayColor: Colors.white24)),
-                    ]),
+                    // P0 §6：非全屏改用 24dp/间距 12dp/无圆底的抖音式图标按钮；
+                    // 全屏保留原 IconButton 组合，行为与视觉均不变。
+                    child: Row(mainAxisSize: MainAxisSize.min, children: fs
+                        ? [
+                            IconButton(
+                                onPressed: () =>
+                                    Navigator.of(context).maybePop(),
+                                icon: const Icon(Icons.arrow_back,
+                                    color: Colors.white70),
+                                style: IconButton.styleFrom(
+                                    overlayColor: Colors.white24)),
+                            // 深页面统一「返回主页」：从作者页/搜索进播放页也能一步回主页。
+                            const HomeOverlayButton(),
+                            // 封面入口做成可见按钮（长按信息区同样可用）
+                            IconButton(
+                                tooltip: '设置封面',
+                                onPressed: _openCoverSheet,
+                                icon: const Icon(Icons.image_outlined,
+                                    color: Colors.white70),
+                                style: IconButton.styleFrom(
+                                    overlayColor: Colors.white24)),
+                          ]
+                        : [
+                            StageIconButton(
+                                tooltip: '返回',
+                                icon: Icons.arrow_back,
+                                onPressed: () =>
+                                    Navigator.of(context).maybePop()),
+                            const SizedBox(width: kStageIconSpacing),
+                            StageIconButton(
+                                tooltip: '返回主页',
+                                icon: Icons.home_outlined,
+                                onPressed: () => Navigator.of(context)
+                                    .popUntil((r) => r.isFirst)),
+                            const SizedBox(width: kStageIconSpacing),
+                            StageIconButton(
+                                tooltip: '设置封面',
+                                icon: Icons.image_outlined,
+                                onPressed: _openCoverSheet),
+                          ]),
                   ),
                 ),
               ),
-              // owner 修正：中央大播放/暂停按钮只在全屏显示，非全屏不渲染。
+              // P0：常驻大播放图标只在全屏保留；非全屏改为 0.8s 淡出提示。
               if (fs && paused && !broken)
                 const IgnorePointer(
                   child: Center(
@@ -10637,7 +10837,7 @@ class _PlayerPageState extends State<PlayerPage>
               ),
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
               // O2：手机端中央大号播放/暂停圆钮，随控制层淡入淡出。
-              // owner 修正：仅全屏渲染，非全屏一律不出现。
+              // P0：中央大圆钮只在全屏出现；非全屏暂停只显示 0.8s 播放图标。
               if (fs && _mobileStageTap && isV && !broken)
                 Positioned.fill(
                   child: IgnorePointer(
@@ -10662,6 +10862,23 @@ class _PlayerPageState extends State<PlayerPage>
                                 size: 44,
                                 color: Colors.white70),
                           ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              // P0 §5：非全屏暂停提示——无背景大按钮，只一个播放图标，
+              // 0.8s / Curves.easeOut 淡出（每次暂停重新计时）。
+              if (!fs && !broken && _playHintAnim.isAnimating)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Center(
+                      child: AnimatedBuilder(
+                        animation: _playHintAnim,
+                        builder: (_, __) => Opacity(
+                          opacity: playHintOpacityAt(_playHintAnim.value),
+                          child: const Icon(Icons.play_arrow_rounded,
+                              size: 64, color: Colors.white),
                         ),
                       ),
                     ),
