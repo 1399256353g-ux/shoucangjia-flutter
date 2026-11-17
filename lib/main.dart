@@ -13,6 +13,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'cover_admin.dart';
 import 'cover_cache.dart';
+import 'deleted_monitor.dart';
 import 'concurrency.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
@@ -1904,6 +1905,183 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
       );
 }
 
+/// 删除监测页：展示服务端 `_deleted.log` 的只读记录。
+class DeletedMonitorPage extends StatefulWidget {
+  const DeletedMonitorPage({super.key});
+  @override
+  State<DeletedMonitorPage> createState() => _DeletedMonitorPageState();
+}
+
+class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
+  DeletedReport report = DeletedReport.empty;
+  bool loading = true;
+  String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      err = null;
+    });
+    try {
+      final r = await http
+          .get(cfg.u('/api/deleted.json'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      final parsed = parseDeletedReport(utf8.decode(r.bodyBytes));
+      if (!mounted) return;
+      setState(() {
+        report = parsed;
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        err = '$e';
+        loading = false;
+      });
+    }
+  }
+
+  Widget _cover(DeletedEntry e) {
+    if (!e.hasCover) {
+      return Container(
+        width: 56,
+        height: 56,
+        color: Colors.black26,
+        child: const Icon(Icons.image_not_supported_outlined, size: 20),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: CachedNetworkImage(
+        cacheManager: DiziCache.manager,
+        imageUrl: cfg.mediaUrl(e.cover),
+        httpHeaders: cfg.headers,
+        width: 56,
+        height: 56,
+        fit: BoxFit.cover,
+        memCacheWidth: 160,
+        fadeInDuration: Duration.zero,
+        errorWidget: (_, __, ___) => Container(
+          width: 56,
+          height: 56,
+          color: Colors.black26,
+          child: const Icon(Icons.broken_image_outlined, size: 20),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('删除监测'), actions: [
+        IconButton(
+            tooltip: '刷新',
+            onPressed: loading ? null : load,
+            icon: const Icon(Icons.refresh)),
+        const HomeAction(),
+      ]),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : err != null
+              ? Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text('加载失败：$err',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 12))),
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: load, child: const Text('重试')),
+                ]))
+              : Column(children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                    child: Row(children: [
+                      const Icon(Icons.delete_outline,
+                          size: 14, color: Colors.grey),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                            '共 ${report.total} 条'
+                            '${report.updatedLabel.isEmpty ? '' : ' · 日志更新 ${report.updatedLabel}'}'
+                            ' · 只读记录，不删除媒体',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: cs.onSurfaceVariant)),
+                      ),
+                    ]),
+                  ),
+                  if (report.items.isEmpty)
+                    const Expanded(
+                      child: Center(
+                          child: Text('暂无删除记录',
+                              style: TextStyle(color: Colors.grey))),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                        itemCount: report.items.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (_, i) {
+                          final e = report.items[i];
+                          return ListTile(
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 4),
+                            leading: _cover(e),
+                            title: Text(
+                                e.title.trim().isEmpty ? '（无标题）' : e.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                            subtitle: Text(
+                                '@${e.author}'
+                                '${e.date.isEmpty ? '' : ' · ${e.date}'}'
+                                '${e.collection.isEmpty ? '' : ' · ${e.collection}'}'
+                                ' · ${e.atLabel}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 10.5)),
+                            trailing: IconButton(
+                              tooltip: '复制作品链接',
+                              icon: const Icon(Icons.link, size: 18),
+                              onPressed: e.link.isEmpty
+                                  ? null
+                                  : () async {
+                                      await Clipboard.setData(
+                                          ClipboardData(text: e.link));
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(const SnackBar(
+                                              content: Text('链接已复制')));
+                                    },
+                            ),
+                            onTap: e.author.isEmpty
+                                ? null
+                                : () => Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                        builder: (_) => AuthorPage(
+                                            name: e.author, libs: [cfg.lib]))),
+                          );
+                        },
+                      ),
+                    ),
+                ]),
+    );
+  }
+}
+
 /// 设置：是否自动省略库名/词条前的序号（`(1) 名称` → `名称`）。
 class _StripIndexTile extends StatefulWidget {
   const _StripIndexTile();
@@ -2015,6 +2193,13 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('封面缓存目录 · 上限与自动清理 · 立即清空'),
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CacheSettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.delete_outline),
+          title: const Text('删除监测'),
+          subtitle: const Text('已删除 / 取消收藏的作品记录 · 只读日志，不动媒体'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DeletedMonitorPage())),
         ),
         const _StripIndexTile(),
         const _DoubleTapLikeTile(),

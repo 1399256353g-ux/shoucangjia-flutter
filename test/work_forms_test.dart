@@ -156,4 +156,32 @@ void main() {
       expect(workTypeCounts([])[workFilterVideo], 0);
     });
   });
+
+  test('混合合集：视频章节在前，图片章节排最后并切换播放类型', () {
+    final w = {
+      'id': 'x',
+      't': 'v',
+      'kind': 'chapters',
+      'ch': [
+        {'ti': '第1段', 'm': ['/media/lib-001/a/1.mp4']},
+        {'ti': '图片A', 't': 'p', 'm': ['/media/lib-001/a/1.jpg']},
+        {'ti': '第2段', 'm': ['/media/lib-001/a/2.mp4']},
+        {'ti': '图片B', 't': 'p', 'm': ['/media/lib-001/a/2.jpg']},
+      ],
+    };
+    final chs = workChapters(w);
+    expect(chs.map((c) => c['ti']).toList(),
+        ['第1段', '第2段', '图片A', '图片B']);
+    expect(chapterIsImage(chs[2]), isTrue);
+    final img = workWithChapter(w, 2);
+    expect(img['t'], 'p');
+    expect(img['m'], ['/media/lib-001/a/1.jpg']);
+    final vid = workWithChapter(w, 0);
+    expect(vid['t'], 'v');
+  });
+
+  test('章节没写 t 时按扩展名识别图片', () {
+    expect(chapterIsImage({'m': ['/x/a.png']}), isTrue);
+    expect(chapterIsImage({'m': ['/x/a.MP4']}), isFalse);
+  });
 }
