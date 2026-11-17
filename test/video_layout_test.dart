@@ -50,4 +50,47 @@ void main() {
       expect(inset, lessThanOrEqualTo(800 * 0.45));
     });
   });
+
+  group('T stageBottomInset', () {
+    test('正常态舞台按任务栏高度内缩', () {
+      expect(
+          stageBottomInset(screenHeight: 800, taskbarHeight: 96), 96);
+      expect(stageBottomInset(screenHeight: 800, taskbarHeight: 0), 0);
+      expect(stageBottomInset(screenHeight: 800, taskbarHeight: -20), 0);
+    });
+
+    test('全屏时舞台铺满，不因任务栏残留高度内缩', () {
+      expect(
+          stageBottomInset(
+              screenHeight: 800, taskbarHeight: 96, fullscreen: true),
+          0);
+    });
+
+    test('栏高超过屏高或屏高非法时退化，不产生负高度', () {
+      expect(stageBottomInset(screenHeight: 800, taskbarHeight: 900), 800);
+      expect(stageBottomInset(screenHeight: 0, taskbarHeight: 96), 0);
+    });
+  });
+
+  group('T stageProgressBottomOffset', () {
+    test('默认只留内边距；有安全区时叠加', () {
+      expect(stageProgressBottomOffset(), 10);
+      expect(stageProgressBottomOffset(safeBottom: 34), 44);
+      expect(stageProgressBottomOffset(safeBottom: -3), 10);
+      expect(stageProgressBottomOffset(safeBottom: 20, padding: 0), 20);
+    });
+
+    test('内边距非法时退化为 0', () {
+      expect(stageProgressBottomOffset(padding: -4), 0);
+    });
+  });
+
+  group('T stageProgressOverlayHeight', () {
+    test('有集数标签时更高，供信息行避让', () {
+      expect(stageProgressOverlayHeight(), 30);
+      expect(stageProgressOverlayHeight(hasChapter: true), 48);
+      expect(stageProgressOverlayHeight(hasChapter: true),
+          greaterThan(stageProgressOverlayHeight()));
+    });
+  });
 }

@@ -22,9 +22,9 @@ Map<String, dynamic> _payload() => {
         },
       ],
       'basicLibraries': [
-        {'id': 'lib-1', 'name': '基础一', 'rel': 'a/x', 'big_id': 'big-01', 'authors': 5, 'works': 100},
-        {'id': 'lib-2', 'name': '基础二', 'rel': 'a/y', 'big_id': 'big-01', 'authors': 2, 'works': 50},
-        {'id': 'lib-3', 'name': '基础三', 'rel': 'b/z', 'big_id': 'big-02', 'authors': 1, 'works': 10},
+        {'id': 'lib-1', 'name': '基础一', 'rel': 'a/基础一', 'big_id': 'big-01', 'authors': 5, 'works': 100},
+        {'id': 'lib-2', 'name': '基础二', 'rel': 'a/基础二', 'big_id': 'big-01', 'authors': 2, 'works': 50},
+        {'id': 'lib-3', 'name': '基础三', 'rel': 'b/基础三', 'big_id': 'big-02', 'authors': 1, 'works': 10},
         {'id': 'lib-9', 'name': '基础九', 'rel': 'orphan', 'big_id': 'big-99', 'authors': 0, 'works': 0},
       ],
     };

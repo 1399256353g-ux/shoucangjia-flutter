@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_tree.dart';
+import 'package:shoucangjia/disk_name.dart';
 import 'package:shoucangjia/unit_library.dart';
 
 BasicLib basic(String id, String rel, {int authors = 1, int works = 10}) =>
@@ -154,5 +155,24 @@ void main() {
     expect(formatCount(999), '999');
     expect(formatCount(1200), '1.2k');
     expect(formatCount(12345), '1.2万');
+  });
+  group('基础库名称以磁盘目录为准', () {
+    test('rel 末段优先，name 仅空 rel 兜底', () {
+      expect(diskNameOf('(1) A', '(2) B'), '(1) A');
+      expect(diskNameOf('(1) A', '(1) A'), '(1) A');
+      expect(diskNameOf('', '旧名'), '旧名');
+      expect(diskNameOf('/x/(3) C', ''), '(3) C');
+    });
+
+    test('nodesFromV2：name 与 rel 不一致时取 rel 末段', () {
+      final nodes = nodesFromV2({
+        'nodesMode': 'auto',
+        'bigLibraries': [
+          {'id': 'b1', 'rel': '(1) A', 'name': '旧名'},
+        ],
+        'groups': <dynamic>[],
+      }, root: '/r');
+      expect(nodes.first.name, '(1) A');
+    });
   });
 }

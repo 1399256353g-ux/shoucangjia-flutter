@@ -4,6 +4,11 @@
 /// 任务栏原先固定贴屏幕最底，离画面很远；这里按视频宽高比算出实际
 /// 画面矩形，把任务栏 Positioned 到画面下沿（全屏时仍贴屏幕底）。
 /// 计算保持纯函数，便于单元测试。
+///
+/// T：任务栏改为贴屏幕最底的不透明实底后，视频舞台（PageView 单页）
+/// 按屏高 − 栏高内缩；进度条等随页元素则贴在本页舞台底边。相关纯函数
+/// （[stageBottomInset] / [stageProgressBottomOffset] /
+/// [stageProgressOverlayHeight]）同样集中在这里，便于回归测试。
 library;
 
 import 'dart:ui' show Offset, Rect, Size;
@@ -81,3 +86,35 @@ double taskbarBottomInset({
   // 极端长图/异常宽高比时最多上移 45% 屏高，避免任务栏跑到画面中央。
   return inset.clamp(0.0, box.height * 0.45);
 }
+
+/// T：舞台（PageView 单页）相对屏幕底部的内缩量。
+///
+/// 正常态 = 任务栏高度（栏已含底部安全区）；全屏沉浸态任务栏隐藏，
+/// 舞台铺满屏幕，内缩量固定为 0。异常尺寸按 0 处理，避免负高度。
+double stageBottomInset({
+  required double screenHeight,
+  required double taskbarHeight,
+  bool fullscreen = false,
+}) {
+  if (screenHeight <= 0 || fullscreen) return 0;
+  final bar = taskbarHeight > 0 ? taskbarHeight : 0.0;
+  return bar.clamp(0.0, screenHeight).toDouble();
+}
+
+/// T：舞台内进度层距舞台底边的距离（底部安全区 + 少量内边距）。
+///
+/// 舞台本身已在上方把任务栏（含安全区）让掉了，正常态调用方传
+/// `safeBottom: 0`；全屏沉浸式仍需给 iPhone Home 指示条留位置。
+double stageProgressBottomOffset({
+  double safeBottom = 0,
+  double padding = 10,
+}) {
+  final safe = safeBottom > 0 ? safeBottom : 0.0;
+  final p = padding > 0 ? padding : 0.0;
+  return safe + p;
+}
+
+/// T：舞台底部进度层占用的高度（进度行 + 可选的集数标签行）。
+/// 供作者/标题信息行避让，避免压住进度条。
+double stageProgressOverlayHeight({bool hasChapter = false}) =>
+    hasChapter ? 48 : 30;

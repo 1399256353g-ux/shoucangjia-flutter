@@ -1,3 +1,4 @@
+import 'disk_name.dart';
 import 'lib_cover.dart';
 
 // 「大库 / 基础库」两级选择模型（纯函数，便于单测）。
@@ -111,10 +112,11 @@ class LibraryTree {
       if (raw is! Map) continue;
       final id = '${raw['id'] ?? ''}'.trim();
       if (id.isEmpty) continue;
+      final relRaw = '${raw['rel'] ?? ''}'.trim();
       basics.add(BasicLib(
         id: id,
-        name: '${raw['name'] ?? id}'.trim(),
-        rel: '${raw['rel'] ?? ''}'.trim(),
+        name: diskNameOf(relRaw, '${raw['name'] ?? id}'.trim(), where: 'BasicLib'),
+        rel: relRaw,
         bigId: '${raw['big_id'] ?? ''}'.trim(),
         authors: _num(raw['authors']),
         works: _num(raw['works']),

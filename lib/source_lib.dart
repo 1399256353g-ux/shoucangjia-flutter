@@ -1,3 +1,5 @@
+import 'disk_name.dart';
+
 /// 作者来源词条（J9）的纯逻辑：
 /// 从作品/头像的媒体路径反查所属「基础库」，词条显示基础库名称而不是大库名。
 /// 媒体路径形如 `/media/(1)%20%E5%85%B6%E4%BB%96/@作者/_avatar/x.jpg`，
@@ -75,12 +77,13 @@ List<BasicLibRef> basicsUnderBase(
   for (final e in raw) {
     if (e is! Map) continue;
     final id = '${e['id'] ?? ''}';
-    final name = '${e['name'] ?? ''}';
+    final rawName = '${e['name'] ?? ''}';
     final path = '${e['path'] ?? ''}';
     final bigId = '${e['big_id'] ?? ''}';
-    if (id.isEmpty || name.isEmpty) continue;
+    if (id.isEmpty) continue;
     final rel = relUnderBase(basePath, path);
     if (rel.isEmpty) continue;
+    final name = diskNameOf(rel, rawName, where: 'BasicLibRef');
     out.add(
         BasicLibRef(id: id, name: name, rel: rel, bigId: bigId, path: path));
   }

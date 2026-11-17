@@ -13,7 +13,7 @@ LibraryTree _tree({List<String> stars = const []}) => LibraryTree.parse({
         {
           'id': 'lib-001',
           'name': '基础一',
-          'rel': '一/a',
+          'rel': '一/基础一',
           'big_id': 'big-01',
           'authors': 2,
           'works': 6
@@ -21,7 +21,7 @@ LibraryTree _tree({List<String> stars = const []}) => LibraryTree.parse({
         {
           'id': 'lib-002',
           'name': '基础二',
-          'rel': '一/b',
+          'rel': '一/基础二',
           'big_id': 'big-01',
           'authors': 1,
           'works': 3
@@ -29,7 +29,7 @@ LibraryTree _tree({List<String> stars = const []}) => LibraryTree.parse({
         {
           'id': 'lib-003',
           'name': '基础三',
-          'rel': '二/a',
+          'rel': '二/基础三',
           'big_id': 'big-02',
           'authors': 2,
           'works': 5

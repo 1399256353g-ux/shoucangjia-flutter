@@ -14,6 +14,7 @@
 // 数据来源：/api/libraries.json v2 的 bigLibraries / groups（节点）与
 // basicLibraries（基础库，带 rel 相对路径）。
 
+import 'disk_name.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 
@@ -274,7 +275,8 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     out.add(LibNode(
       id: '${raw['id'] ?? rel}'.trim(),
       rel: rel,
-      name: name.isEmpty ? splitRel(rel).last : name,
+      // 显示名以磁盘目录名为准；name 只在 rel 为空时兜底。
+      name: diskNameOf(rel, name, where: 'nodesFromV2'),
       coverVersion: coverPointerOf(raw['cover']).version,
       coverExt: coverPointerOf(raw['cover']).ext,
       coverUrl: coverUrlOf(raw['cover']),

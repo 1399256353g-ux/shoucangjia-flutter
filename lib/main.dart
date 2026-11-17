@@ -9768,6 +9768,234 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
+  /// T：本页舞台底部的进度层（进度条 / 图文分段 / 集数标签）。
+  ///
+  /// 放在 PageView 子页的 Stack 内、贴舞台底边，随页面一起上下位移；
+  /// 页面级只留不透明任务栏自身控件。进度条的操作仍是全局控制当前视频，
+  /// 这里只改变视觉归属。
+  Widget _stageProgressOverlay({
+    required dynamic w,
+    required bool isV,
+    required List<String> pics,
+    required int idx,
+    required double progress,
+  }) {
+    final pad = MediaQuery.paddingOf(context);
+    final opacity = ChromeFade.opacity(
+        uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
+    final ms = ChromeFade.durationMs(swiping: _pageSwiping);
+    final chapters = workChapterCount(w);
+    final bottom = stageProgressBottomOffset(safeBottom: fs ? pad.bottom : 0);
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        ignoring: !ui,
+        child: AnimatedOpacity(
+          opacity: opacity,
+          duration: Duration(milliseconds: ms),
+          curve: Curves.easeOut,
+          child: Padding(
+            padding: EdgeInsets.only(
+                left: pad.left + 12, right: pad.right + 12, bottom: bottom),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // 集数标签（视频合集）：随页移动，不再固定在页面级底栏。
+              if (chapters > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 3),
+                  child: Text(
+                      '第 ${_chapter.clamp(0, chapters - 1) + 1}/$chapters 集 · '
+                      '${chapterLabel(workChapters(w)[_chapter.clamp(0, chapters - 1)], _chapter)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 10.5, color: Colors.lightBlueAccent)),
+                ),
+              Row(children: [
+                Text(
+                    isV
+                        ? '${fmt(pos)} / ${fmt(dur)}'
+                        // 单图没有“第几张/共几张”，不显示计数
+                        : (pics.length > 1
+                            ? '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}'
+                            : ''),
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.white60)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: LayoutBuilder(builder: (ctx, cons) {
+                    if (!isV && pics.length <= 1) {
+                      return const SizedBox.shrink();
+                    }
+                    if (!isV) {
+                      return _picProgressBar(
+                          pics: pics, idx: idx, width: cons.maxWidth);
+                    }
+                    return _videoProgressBar(
+                        progress: progress, width: cons.maxWidth);
+                  }),
+                ),
+                const SizedBox(width: 8),
+                Text('${cur + 1} / ${widget.works.length}',
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.white54)),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 视频进度条：点击跳转、横向拖动预览；按下暂停、松手才 seek 并恢复。
+  /// J4 语义不变：拖动期间当前视频不切条，松手才落定。
+  Widget _videoProgressBar({required double progress, required double width}) {
+    void seekAt(Offset p) {
+      if (dur.inMilliseconds == 0) return;
+      final f = (p.dx / width).clamp(0.0, 1.0);
+      player.seek(dur * f);
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (d) => seekAt(d.localPosition),
+      onHorizontalDragStart: (_) {
+        resumeAfterDrag = !paused;
+        if (!paused) {
+          _userPaused = true;
+          PauseTrace.mark('user:seek-drag');
+          player.pause();
+        }
+        setState(() {
+          dragging = true;
+          dragFrac = progress;
+        });
+      },
+      onHorizontalDragUpdate: (d) {
+        final f = (d.localPosition.dx / width).clamp(0.0, 1.0);
+        setState(() => dragFrac = f);
+      },
+      onHorizontalDragEnd: (_) {
+        final f = dragFrac ?? progress;
+        if (dur.inMilliseconds > 0) {
+          player.seek(dur * f);
+          if (resumeAfterDrag) {
+            _userPaused = false;
+            _stallAttempts = 0;
+            player.play();
+          }
+        }
+        setState(() {
+          dragging = false;
+          dragFrac = null;
+        });
+      },
+      child: MouseRegion(
+        onEnter: (_) => setState(() => barHover = true),
+        onExit: (_) => setState(() => barHover = false),
+        child: SizedBox(
+          height: 30,
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Container(
+                  height: (dragging || barHover) ? 7 : 3, color: Colors.white24),
+              FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: dragFrac ?? progress,
+                child: Container(
+                    height: (dragging || barHover) ? 7 : 3,
+                    color: dragging ? Colors.white : Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 图文分段进度：按图片数量分段，当前张高亮；拖动跨段震动、松手才切图。
+  Widget _picProgressBar({
+    required List<String> pics,
+    required int idx,
+    required double width,
+  }) {
+    // H1：按下即进入拖动，跨段震动反馈，松手才切换图片；
+    // 拖动中的目标段放大到与视频进度条一致（7px）。
+    int picAt(Offset p) =>
+        picIndexAtFraction(p.dx / width, pics.length);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (d) {
+        stopAuto();
+        setState(() => _setPicIndex(picAt(d.localPosition)));
+        hapticTap();
+      },
+      onHorizontalDragStart: (d) {
+        stopAuto();
+        final k = picAt(d.localPosition);
+        setState(() {
+          dragging = true;
+          dragPic = k;
+          dragFrac = ((k + 0.5) / pics.length).clamp(0.0, 1.0);
+        });
+        hapticTap();
+      },
+      onHorizontalDragUpdate: (d) {
+        final f = (d.localPosition.dx / width).clamp(0.0, 1.0);
+        final k = picIndexAtFraction(f, pics.length);
+        if (k != dragPic) hapticSelect();
+        setState(() {
+          dragPic = k;
+          dragFrac = f;
+        });
+      },
+      onHorizontalDragEnd: (_) {
+        final k = dragPic;
+        setState(() {
+          if (k != null) _setPicIndex(k);
+          dragging = false;
+          dragPic = null;
+          dragFrac = null;
+        });
+      },
+      onHorizontalDragCancel: () {
+        setState(() {
+          dragging = false;
+          dragPic = null;
+          dragFrac = null;
+        });
+      },
+      child: SizedBox(
+        height: 30,
+        child: Row(
+          children: List.generate(pics.length, (k) {
+            final selected = k == (dragging ? dragPic : idx);
+            final active = k <= (dragging ? (dragPic ?? idx) : idx);
+            return Expanded(
+              child: Container(
+                height: 30,
+                alignment: Alignment.center,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  height: dragging ? (selected ? 7 : 3) : (selected ? 6 : 3),
+                  margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? (selected ? Colors.white : Colors.white70)
+                        : Colors.white24,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final w = _workAt(cur);
@@ -9792,12 +10020,27 @@ class _PlayerPageState extends State<PlayerPage>
     // 但返回键、图文圆点、作者/标题信息、音量面板与底部控制栏都要避开安全区。
     final pad = MediaQuery.of(context).padding;
     final viewSize = MediaQuery.sizeOf(context);
-    // A：任务栏实底后，视频视口内缩到栏上方（首帧栏高未知，测量后校正）。
+    // A/T：任务栏实底后，视频舞台内缩到栏上方（首帧栏高未知，测量后校正）；
+    // 移动端全屏为沉浸式，任务栏隐藏、舞台铺满屏幕。
+    final hideTaskbar = fs && _mobileStageTap;
     final stageInset = broken
         ? 0.0
-        : (_taskbarH > 0
-            ? _taskbarH
-            : taskbarReservedHeight(safeBottom: pad.bottom));
+        : stageBottomInset(
+            screenHeight: viewSize.height,
+            taskbarHeight: _taskbarH > 0
+                ? _taskbarH
+                : taskbarReservedHeight(safeBottom: pad.bottom),
+            fullscreen: hideTaskbar,
+          );
+    // T：进度层贴在本页舞台底边（PageView 子页 Stack 内）；作者/标题信息行
+    // 在进度层上方避让，避免压住进度条。
+    final progressBottom =
+        stageProgressBottomOffset(safeBottom: fs ? pad.bottom : 0);
+    final chapterCount = workChapterCount(w);
+    final infoBottom = stageInset +
+        progressBottom +
+        stageProgressOverlayHeight(hasChapter: chapterCount > 1) +
+        10;
     if (!broken) _scheduleTaskbarMeasure();
     // 邻页缓存只保留当前 ±2，避免滑动久后持有过多封面。
     _neighborPages.removeWhere((k, _) {
@@ -9979,6 +10222,14 @@ class _PlayerPageState extends State<PlayerPage>
                                 ),
                               ),
                             ),
+                          // T：进度条/集数标签贴本页舞台底边，随 PageView 位移。
+                          _stageProgressOverlay(
+                            w: it,
+                            isV: true,
+                            pics: const <String>[],
+                            idx: 0,
+                            progress: progress,
+                          ),
                         ]),
                       );
                     }
@@ -10046,6 +10297,15 @@ class _PlayerPageState extends State<PlayerPage>
                                                     : Colors.white24),
                                           ))),
                             ),
+                          ),
+                        // T：图文分段进度 + 计数贴本页舞台底边，随页位移。
+                        if (pics.length > 1)
+                          _stageProgressOverlay(
+                            w: it,
+                            isV: false,
+                            pics: pics,
+                            idx: idx,
+                            progress: progress,
                           ),
                       ]),
                     );
@@ -10160,7 +10420,8 @@ class _PlayerPageState extends State<PlayerPage>
                   ),
                 ),
               ),
-              if (paused && !broken)
+              // owner 修正：中央大播放/暂停按钮只在全屏显示，非全屏不渲染。
+              if (fs && paused && !broken)
                 const IgnorePointer(
                   child: Center(
                     child:
@@ -10170,7 +10431,8 @@ class _PlayerPageState extends State<PlayerPage>
               Positioned(
                 left: pad.left + 14,
                 right: pad.right + 80,
-                bottom: pad.bottom + 96,
+                // T：让位给页内舞台底部的进度层（进度条已随页滑动到这里）。
+                bottom: infoBottom,
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
@@ -10273,18 +10535,8 @@ class _PlayerPageState extends State<PlayerPage>
                                       style: const TextStyle(
                                           fontSize: 11, color: Colors.white70)),
                                 ),
-                              if (workChapterCount(widget.works[cur]) > 1)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 2),
-                                  child: Text(
-                                      '第 ${_chapter.clamp(0, workChapterCount(widget.works[cur]) - 1) + 1}/${workChapterCount(widget.works[cur])} 集 · '
-                                      '${chapterLabel(workChapters(widget.works[cur])[_chapter.clamp(0, workChapterCount(widget.works[cur]) - 1)], _chapter)}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 10.5,
-                                          color: Colors.lightBlueAccent)),
-                                ),
+                              // T：集数标签已移入页内舞台底部的进度层（随页位移），
+                              // 信息行不再重复展示。
                               Row(children: [
                                 Expanded(
                                   child: LayoutBuilder(builder: (context, c) {
@@ -10385,7 +10637,8 @@ class _PlayerPageState extends State<PlayerPage>
               ),
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
               // O2：手机端中央大号播放/暂停圆钮，随控制层淡入淡出。
-              if (_mobileStageTap && isV && !broken)
+              // owner 修正：仅全屏渲染，非全屏一律不出现。
+              if (fs && _mobileStageTap && isV && !broken)
                 Positioned.fill(
                   child: IgnorePointer(
                     ignoring: !ui,
@@ -10464,11 +10717,13 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
-              if (!broken)
+              // T：任务栏只放自身控件并固定屏幕最底；移动端全屏时隐藏，
+              // 舞台铺满（进度条仍在页内舞台底部随页滑动）。
+              if (!broken && !hideTaskbar)
                 Positioned(
                   left: 0,
                   right: 0,
-                  // A：实底任务栏贴屏幕底；视频视口已按其高度内缩。
+                  // A：实底任务栏贴屏幕底；视频舞台已按其高度内缩。
                   bottom: 0,
                   child: IgnorePointer(
                     ignoring: !ui,
@@ -10487,204 +10742,6 @@ class _PlayerPageState extends State<PlayerPage>
                             bottom: 6 + pad.bottom),
                         child:
                             Column(mainAxisSize: MainAxisSize.min, children: [
-                          Row(children: [
-                            Text(
-                                isV
-                                    ? '${fmt(pos)} / ${fmt(dur)}'
-                                    // 单图没有“第几张/共几张”，不显示计数
-                                    : (pics.length > 1
-                                        ? '${(dragging && dragPic != null ? dragPic! : idx) + 1}/${pics.length}'
-                                        : ''),
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.white60)),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: LayoutBuilder(builder: (ctx, cons) {
-                                // 单图播放没有进度可走，底部不显示进度条。
-                                if (!isV && pics.length <= 1) {
-                                  return const SizedBox.shrink();
-                                }
-                                void seekAt(Offset p) {
-                                  if (!isV || dur.inMilliseconds == 0) return;
-                                  final f =
-                                      (p.dx / cons.maxWidth).clamp(0.0, 1.0);
-                                  player.seek(dur * f);
-                                }
-
-                                // 图文：按图片数量分段显示进度，当前张高亮
-                                if (!isV && pics.length > 1) {
-                                  // H1：按下即进入拖动，跨段震动反馈，松手才切换图片；
-                                  // 拖动中的目标段放大到与视频进度条一致（7px）。
-                                  int picAt(Offset p) => picIndexAtFraction(
-                                      p.dx / cons.maxWidth, pics.length);
-                                  return GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onTapUp: (d) {
-                                      stopAuto();
-                                      setState(() =>
-                                          _setPicIndex(picAt(d.localPosition)));
-                                      hapticTap();
-                                    },
-                                    onHorizontalDragStart: (d) {
-                                      stopAuto();
-                                      final k = picAt(d.localPosition);
-                                      setState(() {
-                                        dragging = true;
-                                        dragPic = k;
-                                        dragFrac = ((k + 0.5) / pics.length)
-                                            .clamp(0.0, 1.0);
-                                      });
-                                      hapticTap();
-                                    },
-                                    onHorizontalDragUpdate: (d) {
-                                      final f =
-                                          (d.localPosition.dx / cons.maxWidth)
-                                              .clamp(0.0, 1.0);
-                                      final k =
-                                          picIndexAtFraction(f, pics.length);
-                                      if (k != dragPic) hapticSelect();
-                                      setState(() {
-                                        dragPic = k;
-                                        dragFrac = f;
-                                      });
-                                    },
-                                    onHorizontalDragEnd: (_) {
-                                      final k = dragPic;
-                                      setState(() {
-                                        if (k != null) _setPicIndex(k);
-                                        dragging = false;
-                                        dragPic = null;
-                                        dragFrac = null;
-                                      });
-                                    },
-                                    onHorizontalDragCancel: () {
-                                      setState(() {
-                                        dragging = false;
-                                        dragPic = null;
-                                        dragFrac = null;
-                                      });
-                                    },
-                                    child: SizedBox(
-                                      height: 30,
-                                      child: Row(
-                                        children:
-                                            List.generate(pics.length, (k) {
-                                          final selected =
-                                              k == (dragging ? dragPic : idx);
-                                          final active = k <=
-                                              (dragging
-                                                  ? (dragPic ?? idx)
-                                                  : idx);
-                                          return Expanded(
-                                            child: Container(
-                                              height: 30,
-                                              alignment: Alignment.center,
-                                              child: AnimatedContainer(
-                                                duration: const Duration(
-                                                    milliseconds: 120),
-                                                height: dragging
-                                                    ? (selected ? 7 : 3)
-                                                    : (selected ? 6 : 3),
-                                                margin:
-                                                    const EdgeInsets.symmetric(
-                                                        horizontal: 1.5),
-                                                decoration: BoxDecoration(
-                                                  color: active
-                                                      ? (selected
-                                                          ? Colors.white
-                                                          : Colors.white70)
-                                                      : Colors.white24,
-                                                  borderRadius:
-                                                      BorderRadius.circular(3),
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        }),
-                                      ),
-                                    ),
-                                  );
-                                }
-
-                                return GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTapUp: (d) => seekAt(d.localPosition),
-                                  onHorizontalDragStart: (_) {
-                                    resumeAfterDrag = !paused;
-                                    if (!paused) {
-                                      _userPaused = true;
-                                      PauseTrace.mark('user:seek-drag');
-                                      player.pause();
-                                    }
-                                    setState(() {
-                                      dragging = true;
-                                      dragFrac = progress;
-                                    });
-                                  },
-                                  onHorizontalDragUpdate: (d) {
-                                    final f =
-                                        (d.localPosition.dx / cons.maxWidth)
-                                            .clamp(0.0, 1.0);
-                                    setState(() => dragFrac = f);
-                                  },
-                                  onHorizontalDragEnd: (_) {
-                                    final f = dragFrac ?? progress;
-                                    if (isV && dur.inMilliseconds > 0) {
-                                      player.seek(dur * f);
-                                      if (resumeAfterDrag) {
-                                        _userPaused = false;
-                                        _stallAttempts = 0;
-                                        player.play();
-                                      }
-                                    } else if (!isV && pics.isNotEmpty) {
-                                      setState(() => _setPicIndex(
-                                          (f * (pics.length - 1))
-                                              .round()
-                                              .clamp(0, pics.length - 1)));
-                                    }
-                                    setState(() {
-                                      dragging = false;
-                                      dragFrac = null;
-                                    });
-                                  },
-                                  child: MouseRegion(
-                                    onEnter: (_) =>
-                                        setState(() => barHover = true),
-                                    onExit: (_) =>
-                                        setState(() => barHover = false),
-                                    child: SizedBox(
-                                      height: 30,
-                                      child: Stack(
-                                        alignment: Alignment.centerLeft,
-                                        children: [
-                                          Container(
-                                              height: (dragging || barHover)
-                                                  ? 7
-                                                  : 3,
-                                              color: Colors.white24),
-                                          FractionallySizedBox(
-                                            alignment: Alignment.centerLeft,
-                                            widthFactor: dragFrac ?? progress,
-                                            child: Container(
-                                                height: (dragging || barHover)
-                                                    ? 7
-                                                    : 3,
-                                                color: dragging
-                                                    ? Colors.white
-                                                    : Colors.white70),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }),
-                            ),
-                            const SizedBox(width: 8),
-                            Text('${cur + 1} / ${widget.works.length}',
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.white54)),
-                          ]),
                           Row(children: [
                             // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
                             // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
