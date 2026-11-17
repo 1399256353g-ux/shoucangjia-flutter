@@ -5,8 +5,10 @@ void main() {
   test('配置默认值与解析', () {
     const def = UnitCrawlerConfig();
     expect(def.enabled, isFalse);
-    expect(def.schedule, '04:10');
-    expect(def.intervalMin, 0);
+    expect(def.quickCheck, isTrue);
+    expect(def.quickMin, 5);
+    expect(def.fullMin, 60);
+    expect(def.cooldownMin, 15);
     expect(def.script, 'sync.sh');
     expect(def.syncReady, isFalse);
 
@@ -18,8 +20,7 @@ void main() {
       'script': 'run.sh',
     });
     expect(c.enabled, isTrue);
-    expect(c.schedule, '07:05');
-    expect(c.intervalMin, 1440);
+    expect(c.fullMin, 60);
     expect(c.note, 'hello');
     expect(c.script, 'run.sh');
     expect(c.syncReady, isTrue);
@@ -78,5 +79,30 @@ void main() {
     expect(u, contains('rel=%281%29+A'));
     expect(unitCrawlerRunLabel(false), '运行单元库同步');
     expect(unitCrawlerRunLabel(true), '运行中…');
+  });
+
+  test('同步频率：快检/全量/冷却取值收敛并兼容旧字段', () {
+    final c = UnitCrawlerConfig.fromJson({
+      'enabled': true,
+      'quickCheck': false,
+      'quickMin': 15,
+      'fullMin': 180,
+      'cooldownMin': 60,
+      'intervalMin': 30,
+      'script': 'sync.sh',
+    });
+    expect(c.quickCheck, isFalse);
+    expect(c.quickMin, 15);
+    expect(c.fullMin, 180);
+    expect(c.cooldownMin, 60);
+    expect(c.toJson()['intervalMin'], 180, reason: '旧服务端读 intervalMin');
+
+    final bad = UnitCrawlerConfig.fromJson(
+        {'quickMin': 7, 'fullMin': 33, 'cooldownMin': 9});
+    expect(bad.quickMin, 5);
+    expect(bad.fullMin, 60);
+    expect(bad.cooldownMin, 15);
+    expect(bad.quickCheck, isTrue);
+    expect(bad.intervalLabel, contains('快检'));
   });
 }

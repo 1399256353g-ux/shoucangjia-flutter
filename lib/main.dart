@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:math' show Random;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
@@ -6117,6 +6118,48 @@ class _PlayerPageState extends State<PlayerPage>
   LoopLink _link = const LoopLink();
   bool get autoplay => _link.autoplay;
   bool get loopOne => _link.loopOne;
+
+  /// 乱序播放：只打乱当前列表（同一基础库/同一来源）的顺序，不跨库。
+  bool shuffle = false;
+  List<int> _shuffleOrder = const <int>[];
+
+  void toggleShuffle() {
+    setState(() {
+      shuffle = !shuffle;
+      if (shuffle) {
+        final rest = <int>[
+          for (var i = 0; i < widget.works.length; i++)
+            if (i != cur) i
+        ]..shuffle(Random());
+        _shuffleOrder = <int>[cur, ...rest];
+      } else {
+        _shuffleOrder = const <int>[];
+      }
+    });
+  }
+
+  /// 乱序模式下的目标下标；按当前作品在乱序序列里的位置前后移动。
+  int _shuffleTarget(int delta) {
+    final n = widget.works.length;
+    if (n <= 1) return -1;
+    var order = _shuffleOrder;
+    if (order.length != n) {
+      final rest = <int>[
+        for (var i = 0; i < n; i++)
+          if (i != cur) i
+      ]..shuffle(Random());
+      order = <int>[cur, ...rest];
+      _shuffleOrder = order;
+    }
+    var pos = order.indexOf(cur);
+    if (pos < 0) pos = 0;
+    for (var k = 0; k < order.length; k++) {
+      pos = (pos + delta + order.length) % order.length;
+      final idx = order[pos];
+      if (workPlayable(_workAt(idx))) return idx;
+    }
+    return -1;
+  }
   // 当前页面实际已载入的媒体所属 open token；图文无音频时为 -1。
   // 用于忽略 player.stop()/切条时上一段媒体迟到的 completed 事件，
   // 避免刚打开图文就被上一次播放的完成事件带去下一条。
@@ -7065,12 +7108,14 @@ class _PlayerPageState extends State<PlayerPage>
   // 连点/连按方向键时直接跳页，避免动画未结束把后续按键吃掉
   void _step(int delta, {bool instant = false}) {
     final base = _pendingPage ?? cur;
-    // G20：自动/键盘翻页跳过数据异常的作品，避免卡在坏条目上。
-    final target = nextPlayableIndex(
-        current: base,
-        count: widget.works.length,
-        step: delta,
-        playable: (i) => workPlayable(_workAt(i)));
+    // 乱序模式：按随机序列前后走；否则按原顺序并跳过数据异常的作品。
+    final target = (shuffle && base == cur)
+        ? _shuffleTarget(delta)
+        : nextPlayableIndex(
+            current: base,
+            count: widget.works.length,
+            step: delta,
+            playable: (i) => workPlayable(_workAt(i)));
     if (target < 0 || target == base) return;
     _pendingPage = target;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -9285,6 +9330,15 @@ class _PlayerPageState extends State<PlayerPage>
                                               style: const TextStyle(
                                                   fontSize: 11,
                                                   color: Colors.white70))),
+                                      IconButton(
+                                          onPressed: toggleShuffle,
+                                          tooltip: shuffle
+                                              ? '乱序播放（当前库内随机）'
+                                              : '顺序播放',
+                                          icon: Icon(Icons.shuffle,
+                                              color: shuffle
+                                                  ? Colors.lightBlueAccent
+                                                  : Colors.white24)),
                                       IconButton(
                                           // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
                                           onPressed:

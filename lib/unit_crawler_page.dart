@@ -183,7 +183,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                       contentPadding: EdgeInsets.zero,
                       title: const Text('启用同步调度'),
                       subtitle: Text(hasScript
-                          ? '仅保存配置；实际调度由 NAS cron / 维护接口触发'
+                          ? '保存后由 NAS 调度读取；无脚本时不可用'
                           : '无爬虫脚本，同步设置不可用'),
                       value: hasScript && config.enabled,
                       onChanged: hasScript
@@ -192,30 +192,84 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                           : null,
                     ),
                     const SizedBox(height: 8),
-                    TextFormField(
-                      key: const ValueKey('unit-crawler-schedule'),
-                      initialValue: config.schedule,
-                      enabled: hasScript,
-                      decoration: const InputDecoration(
-                          labelText: '每日执行时间（HH:MM）', hintText: '04:10'),
-                      onChanged: (v) => config = config.copyWith(
-                          schedule: normalizeSchedule(v)),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(children: [
-                      const Expanded(child: Text('间隔（分钟，0 = 仅按时间）')),
-                      Text('${config.intervalMin}'),
-                    ]),
-                    Slider(
-                      value: config.intervalMin.toDouble().clamp(0, 1440),
-                      min: 0,
-                      max: 1440,
-                      divisions: 48,
+                    // 同步频率：快检只扫新增/删除，全量才完整抓取。
+                    SwitchListTile(
+                      key: const ValueKey('unit-crawler-quick'),
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('启用快检'),
+                      subtitle: const Text('只扫新增/删除，开销小；发现新作品再排全量'),
+                      value: hasScript && config.quickCheck,
                       onChanged: hasScript
-                          ? (v) => setState(() => config = config.copyWith(
-                              intervalMin: normalizeInterval(v.round())))
+                          ? (v) => setState(
+                              () => config = config.copyWith(quickCheck: v))
                           : null,
                     ),
+                    const SizedBox(height: 4),
+                    Text('快检间隔',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
+                    const SizedBox(height: 4),
+                    Wrap(spacing: 8, runSpacing: 6, children: [
+                      for (final m in kQuickMinOptions)
+                        ChoiceChip(
+                          label: Text(m >= 60 ? '每 ${m ~/ 60} 小时' : '每 $m 分钟'),
+                          selected: config.quickMin == m,
+                          onSelected: hasScript
+                              ? (_) => setState(() =>
+                                  config = config.copyWith(quickMin: m))
+                              : null,
+                        ),
+                    ]),
+                    const SizedBox(height: 10),
+                    Text('全量同步间隔',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
+                    const SizedBox(height: 4),
+                    Wrap(spacing: 8, runSpacing: 6, children: [
+                      for (final m in kFullMinOptions)
+                        ChoiceChip(
+                          label: Text(m >= 60
+                              ? '每 ${m ~/ 60} 小时'
+                              : '每 $m 分钟'),
+                          selected: config.fullMin == m,
+                          onSelected: hasScript
+                              ? (_) => setState(() =>
+                                  config = config.copyWith(fullMin: m))
+                              : null,
+                        ),
+                    ]),
+                    const SizedBox(height: 10),
+                    Text('快检冷却',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant)),
+                    const SizedBox(height: 4),
+                    Wrap(spacing: 8, runSpacing: 6, children: [
+                      for (final m in kCooldownOptions)
+                        ChoiceChip(
+                          label: Text('$m 分钟'),
+                          selected: config.cooldownMin == m,
+                          onSelected: hasScript
+                              ? (_) => setState(() =>
+                                  config = config.copyWith(cooldownMin: m))
+                              : null,
+                        ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text(
+                        '当前：${config.quickCheck ? '快检每 ${config.quickMin} 分钟' : '快检关闭'}'
+                        ' · 全量每 ${config.fullMin >= 60 ? '${config.fullMin ~/ 60} 小时' : '${config.fullMin} 分钟'}'
+                        ' · 冷却 ${config.cooldownMin} 分钟',
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.grey)),
                     TextFormField(
                       initialValue: config.note,
                       enabled: hasScript,
