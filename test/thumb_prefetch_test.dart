@@ -103,6 +103,9 @@ void main() {
       expect(p.stats.requested, 4);
       expect(p.stats.loaded, 4);
       expect(p.stats.pending, 0);
+      // 诊断：报告在途并发峰值，且不超过预算上限。
+      expect(p.stats.peakActive, 2);
+      expect(p.stats.peakActive, lessThanOrEqualTo(p.effectiveLimit));
     });
 
     test('滚动期间收紧并发（默认 4 → 2），停下后恢复', () async {
@@ -123,6 +126,7 @@ void main() {
       final urls = List<String>.generate(8, (i) => 's$i');
       expect(await p.runWith(urls, fetch: fetch), 8);
       expect(peakScrolling, lessThanOrEqualTo(2));
+      expect(p.stats.peakActive, lessThanOrEqualTo(2));
       expect(p.stats.loaded, 8);
 
       p.setScrolling(false);

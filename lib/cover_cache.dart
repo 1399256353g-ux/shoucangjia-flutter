@@ -202,12 +202,16 @@ class DiziCache {
   }
 
   /// 启动初始化：读设置 → 建目录/管理器 → 清旧临时缓存 → 首次清理 → 定时器。
-  static Future<void> init() async {
+  ///
+  /// [sweepOnStart] 为 false 时跳过首次全目录清理（仍启动定时器），
+  /// 供 App 冷启动使用：清理遍历每个缓存文件做一次 stat，移动端缓存
+  /// 上万条时会把首帧推迟到几秒后；调用方可在首帧后自行 `sweep()`。
+  static Future<void> init({bool sweepOnStart = true}) async {
     await _loadPrefs();
     rootDir = await resolveRoot();
     _manager = _build();
     await _cleanLegacyTempDirs();
-    await sweep();
+    if (sweepOnStart) await sweep();
     _timer?.cancel();
     _timer = Timer.periodic(
       const Duration(minutes: 30), (_) => unawaited(sweep(light: true)));

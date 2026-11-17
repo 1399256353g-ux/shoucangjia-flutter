@@ -137,4 +137,49 @@ void main() {
       expect(huge.toPixels(500, 500).$3, 500);
     });
   });
+
+  group('播放页作者兜底图', () {
+    test('th 优先；没有 th 取第一张非视频媒体；全无返回空串', () {
+      expect(workAvatarFallbackPath({'th': 't.jpg', 'm': ['a.mp4']}), 't.jpg');
+      expect(
+          workAvatarFallbackPath({
+            'th': '',
+            'm': ['a.mp4', 'b.webm', 'c.jpg', 'd.jpg'],
+          }),
+          'c.jpg');
+      expect(workAvatarFallbackPath({'m': ['a.mp4']}), '');
+      expect(workAvatarFallbackPath('bad'), '');
+      expect(workAvatarFallbackPath(null), '');
+    });
+
+    test('按作品顺序取每个作者第一张可用图，空作者跳过', () {
+      final idx = authorFallbackThumbs(<dynamic>[
+        {'a': 'A', 'th': 'a1.jpg'},
+        {'a': 'A', 'th': 'a2.jpg'},
+        {'a': '', 'th': 'noname.jpg'},
+        {'a': 'B', 'm': ['x.mp4', 'b1.jpg']},
+        {'a': 'B', 'th': 'b2.jpg'},
+        {'a': 'C', 'm': ['only.mp4']},
+      ]);
+      expect(idx['A'], 'a1.jpg');
+      expect(idx['B'], 'b1.jpg');
+      expect(idx.containsKey('C'), isFalse);
+      expect(idx.containsKey(''), isFalse);
+    });
+
+    test('分页追加只补新作者，已记录的不覆盖', () {
+      final target = <String, String>{'A': 'a1.jpg'};
+      final added = addFirstThumbPerAuthor(
+        target,
+        <dynamic>[
+          {'a': 'A', 'th': 'a9.jpg'},
+          {'a': 'B', 'th': 'b1.jpg'},
+        ],
+        thumbOf: workAvatarFallbackPath,
+      );
+      expect(added, 1);
+      expect(target['A'], 'a1.jpg');
+      expect(target['B'], 'b1.jpg');
+    });
+  });
 }

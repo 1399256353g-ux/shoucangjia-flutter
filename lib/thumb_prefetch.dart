@@ -13,6 +13,7 @@ import 'dart:collection';
 import 'package:flutter/widgets.dart';
 
 import 'decode_plan.dart';
+import 'perf_diagnostics.dart';
 
 /// 首屏需要预热的封面张数。
 ///
@@ -69,6 +70,10 @@ class ThumbPrefetchStats {
   int loaded = 0;
   int failed = 0;
   int skipped = 0;
+  /// 本轮预取的在途并发峰值（诊断用）。
+  int peakActive = 0;
+  /// 排队等待的峰值（诊断用）。
+  int peakWaiting = 0;
   DateTime? lastRun;
 
   int get pending => requested - loaded - failed;
@@ -131,6 +136,8 @@ class ThumbPrefetch extends ChangeNotifier {
       ..loaded = 0
       ..failed = 0
       ..skipped = 0
+      ..peakActive = 0
+      ..peakWaiting = 0
       ..lastRun = null;
     notifyListeners();
   }
@@ -173,7 +180,11 @@ class ThumbPrefetch extends ChangeNotifier {
     notifyListeners();
 
     Future<void> one(String url) async {
+      if (budget.waiting > stats.peakWaiting) {
+        stats.peakWaiting = budget.waiting;
+      }
       _active++;
+      if (_active > stats.peakActive) stats.peakActive = _active;
       var ok = false;
       try {
         ok = await fetch(url);
@@ -192,9 +203,20 @@ class ThumbPrefetch extends ChangeNotifier {
     }
 
     // 并发由 [budget] 统一把关：滚动期间自动收紧，不打断在途请求。
-    await Future.wait(<Future<void>>[
-      for (final url in todo) budget.run(() => one(url)),
-    ]);
+    final pending = <Future<void>>[];
+    for (final url in todo) {
+      if (budget.waiting > stats.peakWaiting) {
+        stats.peakWaiting = budget.waiting;
+      }
+      pending.add(budget.run(() => one(url)));
+    }
+    await Future.wait(pending);
+    // 解码并发峰值上报给本地诊断日志（不联网）。
+    PerfDiagnostics.instance.recordDecode(
+      active: stats.peakActive,
+      waiting: stats.peakWaiting,
+      limit: effectiveLimit,
+    );
     notifyListeners();
     return todo.length;
   }

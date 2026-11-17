@@ -61,6 +61,7 @@ import 'multi_server.dart';
 import 'playback_flow.dart';
 import 'pic_zoom.dart';
 import 'playback_error.dart';
+import 'perf_diagnostics.dart';
 import 'text_fit.dart';
 import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
@@ -86,28 +87,43 @@ import 'work_safety.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final perf = PerfDiagnostics.instance..markAppStart();
   // 0.9.23：先装崩溃兜底，后面任何初始化出错都能记下来而不是整屏灰掉
   installCrashGuard();
+  perf.step('crash_guard');
   MediaKit.ensureInitialized();
+  perf.step('media_kit');
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
   }
   // G10：先载入观看记录，列表首帧就能显示「已看完」角标
   await WatchProgressStore.ensureLoaded();
+  perf.step('watch_progress');
   // G17：载入「继续观看」，主页首帧直接显示
   await ContinueWatchingStore.ensureLoaded();
+  perf.step('continue_watching');
   // L5-C：载入本机播放量，基础库自动封面首帧即可用
   await WorkPlaysStore.ensureLoaded();
+  perf.step('work_plays');
   // T4：封面缓存落 E 盘（Windows），启动时清理过期/超限条目
-  await DiziCache.init();
+  // iOS 卡死定位：清理要遍历整个缓存目录（每文件一次 stat），
+  // 原先挡住首帧；现在只做必要初始化，清理改到首帧之后异步跑。
+  await DiziCache.init(sweepOnStart: false);
+  perf.step('cache');
   // 0.9.41：本机「手动作者头像」覆盖，首帧头像就按覆盖显示
   await AuthorAvatarStore.instance.load();
+  perf.step('author_avatar');
   // 退到后台/退出前再轻量清理一次（不阻塞退出）
   AppLifecycleListener(
     onPause: DiziCache.sweepOnExit,
     onDetach: DiziCache.sweepOnExit,
   );
   runApp(const App());
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    perf.markFirstFrame();
+    // 首帧后再清理缓存，避免冷启动卡在目录扫描上。
+    unawaited(DiziCache.sweep());
+  });
 }
 
 // 轻触震动：iOS/Android 生效，桌面端静默忽略
@@ -5912,6 +5928,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   void initState() {
     super.initState();
     authorFilter.addListener(_onSharedFilter);
+    PerfDiagnostics.instance.beginSpan('page:authors');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      PerfDiagnostics.instance.endSpan('page:authors');
+    });
     loadLibs();
     LibraryBadge.load().then((_) {
       if (mounted) setState(() {});
@@ -6634,6 +6654,7 @@ class _PlaybackSlot {
       player,
       configuration: VideoControllerConfiguration(hwdec: hwdecFor(mode)),
     );
+    PerfDiagnostics.instance.slotCreated();
   }
 }
 
@@ -6904,6 +6925,7 @@ class _PlayerPageState extends State<PlayerPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    PerfDiagnostics.instance.beginSpan('page:player');
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
     _loadLikes();
@@ -6911,6 +6933,8 @@ class _PlayerPageState extends State<PlayerPage>
     _bindPlayer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       focus.requestFocus();
+      PerfDiagnostics.instance.endSpan('page:player',
+          <String, Object?>{'works': widget.works.length});
       open(widget.start);
     });
   }
@@ -6924,8 +6948,18 @@ class _PlayerPageState extends State<PlayerPage>
     } catch (_) {}
   }
 
+  // 作者 → 兜底头像缓存。此前每次 build 都全量扫作品列表，
+  // 播放中位置每秒 setState 会把「作品数 × 4 次调用」重复扫一遍，
+  // 上万条列表时会明显卡住主线程（iOS 上尤其明显）。
+  final Map<String, String> _avatarFallbackCache = <String, String>{};
+  Map<String, String>? _avatarFallbackIndex;
+  int _avatarFallbackLen = -1;
+
   /// 播放页头像：作品自带 `av` 优先；离线库没有作者头像时，
   /// 用该作者任一作品的封面图兜底，避免永远显示默认人形图标。
+  ///
+  /// 兜底索引按「作者 → 首张可用图」预建一次，只在作品数变化时重建；
+  /// 结果按作者名缓存，单次 build 内的多次调用都是 O(1)。
   String avatarFor(Map w) {
     final av = '${w['av'] ?? ''}';
     if (av.isNotEmpty) return av;
@@ -6935,27 +6969,16 @@ class _PlayerPageState extends State<PlayerPage>
     // 只有作者确实没有头像时，才退到作品缩略图。
     final stored = AuthorAvatarStore.instance.pathFor(name);
     if (stored != null && stored.isNotEmpty) return stored;
-    for (final e in widget.works) {
-      if (e is! Map || '${e['a'] ?? ''}' != name) continue;
-      final t = '${e['th'] ?? ''}';
-      if (t.isNotEmpty) return t;
-      final m = e['m'];
-      if (m is List) {
-        for (final x in m) {
-          final u = '$x';
-          if (u.isEmpty) continue;
-          final low = u.toLowerCase();
-          if (low.endsWith('.mp4') ||
-              low.endsWith('.webm') ||
-              low.endsWith('.mov') ||
-              low.endsWith('.m4v')) {
-            continue;
-          }
-          return u;
-        }
-      }
+    final cached = _avatarFallbackCache[name];
+    if (cached != null && cached.isNotEmpty) return cached;
+    if (_avatarFallbackIndex == null ||
+        _avatarFallbackLen != widget.works.length) {
+      _avatarFallbackIndex = authorFallbackThumbs(widget.works);
+      _avatarFallbackLen = widget.works.length;
     }
-    return '';
+    final fb = _avatarFallbackIndex![name] ?? '';
+    if (fb.isNotEmpty) _avatarFallbackCache[name] = fb;
+    return fb;
   }
 
   /// 头像/兜底图归属的库：优先用媒体路径里的库 id，取不到再用当前库。
@@ -7334,6 +7357,9 @@ class _PlayerPageState extends State<PlayerPage>
     PauseTrace.mark('decode:rebuild-software');
     _softwareDecodeRetried = true;
     _decodeMode = DecodeMode.software;
+    // 这里整体重建槽位，所有旧槽位随后统一 dispose；只作废预载计划，
+    // 不走 _cancelPreload（否则非活动槽位会被释放两次）。
+    _invalidatePreload();
     final old = List<_PlaybackSlot>.from(_slots);
     _cancelPreload();
     _preloadBusy.clear();
@@ -7355,6 +7381,7 @@ class _PlayerPageState extends State<PlayerPage>
         await s.player.dispose();
       } catch (_) {}
     }
+    PerfDiagnostics.instance.slotsReleased(old.length);
     if (!mounted) return;
     setState(() {
       _failure = null;
@@ -7386,19 +7413,35 @@ class _PlayerPageState extends State<PlayerPage>
     _preloadGen++;
   }
 
-  /// 清空预加载缓存并停掉所有非活动槽位（关闭连播/单条循环等场景）。
+  /// 清空预加载缓存并释放所有非活动槽位（关闭连播/单条循环等场景）。
+  ///
+  /// 此前只 `stop()` 不释放：关闭连播后这些播放器仍常驻（最多 9 个、
+  /// 每个带 32MB 缓冲与一个视频控制器），iOS 上内存/解码器压力很大。
+  /// 现在直接 dispose 并从槽位表移除；下次需要预载时按需重建。
+  /// 正在预载（[_preloadBusy]）的槽位不在这里动，交给任务自己收尾。
   void _cancelPreload({bool stopIdle = true}) {
     _invalidatePreload();
     if (!stopIdle) return;
+    final activeSid = _active.sid;
+    final drop = <_PlaybackSlot>[];
     for (final s in _slots) {
       // 用对象身份判断，避免 sid 复用（解码重建/槽位回收）时误停正在播放的槽位。
       if (identical(s, _active)) continue;
+      // 正在预载的槽位不在这里停，交给预载流程自己收尾。
+      if (_preloadBusy.containsKey(s.sid)) continue;
       _preloadCache.removeSlot(s.sid);
       PauseTrace.mark('preload:stop-idle(sid=${s.sid})');
       try {
         s.player.stop();
       } catch (_) {}
+      try {
+        s.player.dispose();
+      } catch (_) {}
     }
+    _slots.removeWhere(drop.contains);
+    final idx = _slots.indexWhere((s) => s.sid == activeSid);
+    _slotActive = idx < 0 ? 0 : idx;
+    PerfDiagnostics.instance.slotsReleased(drop.length);
   }
 
   _PlaybackSlot? _slotBySid(int sid) {
@@ -7421,7 +7464,11 @@ class _PlayerPageState extends State<PlayerPage>
   /// M6：当前条起播后，按滑动方向预载前后各 N 条。
   void _schedulePreload() {
     _invalidatePreload();
-    if (AppSettings.preloadPerSide <= 0) return;
+    if (AppSettings.preloadPerSide <= 0) {
+      // 预加载已关闭：顺手释放之前常驻的空闲槽位。
+      _cancelPreload();
+      return;
+    }
     if (widget.works.length <= 1) return;
     final gen = _preloadGen;
     _preloadTimer = Timer(const Duration(milliseconds: 600), () {
@@ -8808,6 +8855,7 @@ class _PlayerPageState extends State<PlayerPage>
     for (final s in _slots) {
       s.player.dispose();
     }
+    PerfDiagnostics.instance.slotsReleased(_slots.length);
     _preloadCache.clear();
     pc.dispose();
     focus.dispose();
@@ -10597,6 +10645,10 @@ class _RecommendPageState extends State<RecommendPage> {
   void initState() {
     super.initState();
     authorFilter.addListener(_onSharedFilter);
+    PerfDiagnostics.instance.beginSpan('page:recommend');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      PerfDiagnostics.instance.endSpan('page:recommend');
+    });
     load(refresh: false);
   }
 
@@ -10978,6 +11030,10 @@ class _SearchPageState extends State<SearchPage> {
     super.initState();
     authorFilter.addListener(_onSharedFilter);
     sel = cfg.lib;
+    PerfDiagnostics.instance.beginSpan('page:search');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      PerfDiagnostics.instance.endSpan('page:search');
+    });
     _init();
   }
 

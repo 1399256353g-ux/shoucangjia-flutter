@@ -145,6 +145,61 @@ List<AvatarCandidate> avatarCandidatesFromWorks(Iterable<Map> works) {
   return out;
 }
 
+/// 播放页作者头像的兜底图路径（纯逻辑，便于单测）。
+///
+/// 规则与播放页原实现一致：`th` 优先；没有 `th` 时取 `m` 里第一张
+/// 非视频文件（图文原图）；都没有返回空串。
+String workAvatarFallbackPath(dynamic work) {
+  if (work is! Map) return '';
+  final t = '${work['th'] ?? ''}';
+  if (t.isNotEmpty) return t;
+  final m = work['m'];
+  if (m is List) {
+    for (final x in m) {
+      final u = '$x';
+      if (u.isEmpty) continue;
+      final low = u.toLowerCase();
+      if (low.endsWith('.mp4') ||
+          low.endsWith('.webm') ||
+          low.endsWith('.mov') ||
+          low.endsWith('.m4v')) {
+        continue;
+      }
+      return u;
+    }
+  }
+  return '';
+}
+
+/// 把 [works] 中「尚未记录作者」的第一张缩略图写进 [target]（就地更新），
+/// 返回新增的作者数。
+///
+/// 列表分页追加时只处理新批次即可，避免每次都全量重扫（O(n²)）。
+int addFirstThumbPerAuthor(
+  Map<String, String> target,
+  Iterable<dynamic> works, {
+  required String Function(dynamic work) thumbOf,
+}) {
+  var added = 0;
+  for (final w in works) {
+    if (w is! Map) continue;
+    final a = '${w['a'] ?? ''}';
+    if (a.isEmpty || target.containsKey(a)) continue;
+    final th = thumbOf(w).trim();
+    if (th.isEmpty) continue;
+    target[a] = th;
+    added++;
+  }
+  return added;
+}
+
+/// 作者 → 头像兜底图（`th` › 图文第一张非视频图）。
+Map<String, String> authorFallbackThumbs(Iterable<dynamic> works) {
+  final out = <String, String>{};
+  addFirstThumbPerAuthor(out, works, thumbOf: workAvatarFallbackPath);
+  return out;
+}
+
 /// 方形中心裁剪取景框（以图宽高的比例表示），竖图略微上移对准人脸。
 class AvatarCropBox {
   final double left;

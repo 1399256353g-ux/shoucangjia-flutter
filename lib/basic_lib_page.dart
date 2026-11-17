@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'cover_cache.dart';
 import 'decode_plan.dart';
+import 'author_avatar.dart';
 import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
@@ -93,6 +94,8 @@ class _BasicLibPageState extends State<BasicLibPage>
   final Map<String, dynamic> _authorStats = <String, dynamic>{};
   /// 作品类型多选筛选（空集合 = 全部）；只在本地过滤，不影响接口分页。
   final Set<String> _typeFilter = <String>{};
+  /// 各类型数量：作品分页更新时算一次，避免每次 build 全量重扫。
+  Map<String, int> _typeCounts = const <String, int>{};
   int total = 0;
   bool loadingAuthors = true;
   bool loadingWorks = true;
@@ -179,13 +182,7 @@ class _BasicLibPageState extends State<BasicLibPage>
   /// 兜底头像：每个作者第一件作品的缩略图（作品分页更新时重建）。
   void _rebuildAuthorFallback() {
     _authorFallback.clear();
-    for (final w in works) {
-      if (w is! Map) continue;
-      final a = '${w['a'] ?? ''}'.trim();
-      if (a.isEmpty || _authorFallback.containsKey(a)) continue;
-      final th = _thumbOf(w);
-      if (th.isNotEmpty) _authorFallback[a] = th;
-    }
+    addFirstThumbPerAuthor(_authorFallback, works, thumbOf: _thumbOf);
   }
 
   Future<void> _loadAuthorStats() async {
@@ -236,8 +233,14 @@ class _BasicLibPageState extends State<BasicLibPage>
         total = _int(j['total']);
         loadingWorks = false;
         loadingMore = false;
-        // 头像兜底跟着作品更新（作者第一件作品的缩略图）
-        _rebuildAuthorFallback();
+        // 类型数量只在作品变化时算一次（原来是每次 build 扫 4 遍全列表）。
+        _typeCounts = workTypeCounts(works);
+        // 头像兜底跟着作品更新；分页追加时只处理新批次，避免 O(n²) 全量重扫。
+        if (reset) {
+          _rebuildAuthorFallback();
+        } else {
+          addFirstThumbPerAuthor(_authorFallback, batch, thumbOf: _thumbOf);
+        }
       });
       if (reset) _prefetchFirstScreen();
     } catch (e) {
@@ -611,7 +614,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     return works.where((w) => _typeFilter.contains(_workType(w))).toList();
   }
 
-  int _countOf(String type) => works.where((w) => _workType(w) == type).length;
+  int _countOf(String type) => _typeCounts[type] ?? 0;
 
   void _toggleType(String type) {
     setState(() {
