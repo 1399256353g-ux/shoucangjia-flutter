@@ -3,8 +3,10 @@
 // 目标：
 //  - 单个部件构建失败时不再整页灰屏/红屏，只坏那一块（`CrashFallback`）；
 //  - 未捕获的异步异常不再让界面「无声无息」停住，记下来继续跑；
-//  - 记录只在内存里（最多 50 条，同名错误合并计数），供「设置 → 诊断信息」查看，
-//    不写文件、不上传，符合 NAS 隐私红线。
+//  - 内存里保留最近 50 条（同名错误合并计数）供「设置 → 诊断信息」查看；
+//  - 同时追加到本机日志文件（Windows 落 E 盘），诊断页可读取尾部并复制，
+//    不上传、不发给任何服务，符合 NAS 隐私红线。
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -117,6 +119,101 @@ class CrashLog extends ChangeNotifier {
       b.writeln();
     }
     return b.toString().trimRight();
+  }
+}
+
+/// 落盘日志尾部截取（纯逻辑，便于单测）。
+///
+/// 文件可能很大（最多 2 MB），诊断页只展示最近的一段：先按行数限制，
+/// 再按字符数限制；被截断时在开头加一行提示，并避免从半个 UTF-16
+/// 代理对（emoji 等）中间开始。
+String crashTailOf(
+  String raw, {
+  int maxChars = 20000,
+  int maxLines = 400,
+}) {
+  if (raw.trim().isEmpty) return '';
+  var text = raw;
+  var cut = false;
+  if (maxLines > 0) {
+    final lines = text.split('\n');
+    if (lines.length > maxLines) {
+      text = lines.sublist(lines.length - maxLines).join('\n');
+      cut = true;
+    }
+  }
+  if (maxChars > 0 && text.length > maxChars) {
+    text = text.substring(text.length - maxChars);
+    cut = true;
+    final c = text.codeUnitAt(0);
+    // 低代理项开头说明切断了 emoji，丢掉这半个码元。
+    if (c >= 0xDC00 && c <= 0xDFFF) text = text.substring(1);
+  }
+  return cut ? '…（已截断，仅显示最近的日志）\n$text' : text;
+}
+
+/// 落盘日志的可能路径（去重；只用于界面提示，不做操作）。
+List<String> crashLogPaths() => <String>{
+      CrashLog.logPath,
+      if (Platform.isWindows) r'E:\Dizi\logs\crash.log',
+    }.toList(growable: false);
+
+/// 读取落盘崩溃日志的尾部；文件不存在或读失败返回空串。
+///
+/// 大文件只读最后 512 KB，避免把内存和 IO 拖住。
+Future<String> readCrashLogTail({
+  String? path,
+  int maxChars = 20000,
+  int maxLines = 400,
+  int readBytes = 512 * 1024,
+}) async {
+  final p = path ?? CrashLog.logPath;
+  try {
+    final f = File(p);
+    if (!f.existsSync()) return '';
+    final len = f.lengthSync();
+    if (len <= 0) return '';
+    String raw;
+    if (len > readBytes && readBytes > 0) {
+      final raf = f.openSync();
+      try {
+        raf.setPositionSync(len - readBytes);
+        final bytes = raf.readSync(readBytes);
+        raw = utf8.decode(bytes, allowMalformed: true);
+        // 从文件中间开始时，首行多半是半截，丢掉。
+        final nl = raw.indexOf('\n');
+        if (nl >= 0) raw = raw.substring(nl + 1);
+      } finally {
+        raf.closeSync();
+      }
+    } else {
+      raw = f.readAsStringSync();
+    }
+    return crashTailOf(raw, maxChars: maxChars, maxLines: maxLines);
+  } catch (_) {
+    return '';
+  }
+}
+
+/// 落盘日志的一句话状态：不存在时返回 null。
+Future<String?> crashLogFileInfo({String? path}) async {
+  final p = path ?? CrashLog.logPath;
+  try {
+    final f = File(p);
+    if (!f.existsSync()) return null;
+    final len = f.lengthSync();
+    final at = f.statSync().modified;
+    String two(int n) => n.toString().padLeft(2, '0');
+    final size = len < 1024
+        ? '$len B'
+        : (len < 1024 * 1024
+            ? '${(len / 1024).toStringAsFixed(1)} KB'
+            : '${(len / (1024 * 1024)).toStringAsFixed(1)} MB');
+    return '$size · 最近写入 '
+        '${two(at.month)}-${two(at.day)} '
+        '${two(at.hour)}:${two(at.minute)}';
+  } catch (_) {
+    return null;
   }
 }
 

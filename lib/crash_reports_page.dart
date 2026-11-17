@@ -1,6 +1,6 @@
 // 设置 → 诊断信息：看最近错误（0.9.23）。
 //
-// 只展示内存里的错误记录（`CrashLog`），不读文件、不上传；
+// 展示内存里的错误记录（`CrashLog`）+ 本机落盘日志尾部（只读、不发送），
 // 「复制全部」方便 owner 直接把问题贴回来。
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -78,6 +78,7 @@ class CrashReportsPage extends StatelessWidget {
                   subtitle: Text(detail, maxLines: 2,
                       overflow: TextOverflow.ellipsis),
                 ),
+              const _CrashLogFileTile(),
               _prefetchTile(),
               if (cacheStatsUri != null)
                 _ResizeCacheTile(
@@ -298,6 +299,113 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// 本机落盘日志：路径 + 最近写入时间 + 尾部内容（0.9.37）。
+///
+/// 闪退（尤其 Windows 上的封面闪退）后 owner 无法取到终端输出，
+/// 这里把 `crash.log` 的尾部直接读出来，可一键复制。只读本机文件，
+/// 不发网络请求、不写回。
+class _CrashLogFileTile extends StatefulWidget {
+  const _CrashLogFileTile();
+
+  @override
+  State<_CrashLogFileTile> createState() => _CrashLogFileTileState();
+}
+
+class _CrashLogFileTileState extends State<_CrashLogFileTile> {
+  bool _loading = true;
+  String _info = '';
+  String _tail = '';
+  bool _expanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (mounted) setState(() => _loading = true);
+    final info = await crashLogFileInfo();
+    final tail = await readCrashLogTail();
+    if (!mounted) return;
+    setState(() {
+      _info = info ?? '';
+      _tail = tail;
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasFile = _info.isNotEmpty;
+    final path = CrashLog.logPath;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ListTile(
+          dense: true,
+          leading: _loading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : Icon(hasFile
+                  ? Icons.description_outlined
+                  : Icons.note_alt_outlined),
+          title: Text(hasFile ? '崩溃日志文件：$_info' : '崩溃日志文件：暂无'),
+          subtitle: Text(
+            '$path\n'
+            '${hasFile ? '只读本机文件，不上传；点开可看最近内容' : '闪退后重开应用再看，日志写在应用所在机器的本地磁盘'}',
+            style: const TextStyle(fontSize: 11, height: 1.35),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: '刷新',
+                icon: const Icon(Icons.refresh, size: 20),
+                onPressed: _loading ? null : _load,
+              ),
+              IconButton(
+                tooltip: '复制日志',
+                icon: const Icon(Icons.copy_all_outlined, size: 20),
+                onPressed: _tail.isEmpty
+                    ? null
+                    : () async {
+                        await Clipboard.setData(ClipboardData(text: _tail));
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已复制日志内容')));
+                      },
+              ),
+            ],
+          ),
+          onTap: _tail.isEmpty
+              ? null
+              : () => setState(() => _expanded = !_expanded),
+        ),
+        if (_expanded && _tail.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0x0F000000),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                _tail,
+                style:
+                    const TextStyle(fontSize: 10.5, fontFamily: 'monospace'),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
