@@ -639,7 +639,7 @@ class _StarButtonState extends State<_StarButton> {
 }
 
 /// 单元库详情：下级单元库卡片 + 基础库卡片网格。
-class UnitLibraryPage extends StatelessWidget {
+class UnitLibraryPage extends StatefulWidget {
   final UnitLibrary unit;
   final Set<String> stars;
   final void Function(UnitLibrary unit) onOpenUnit;
@@ -668,6 +668,104 @@ class UnitLibraryPage extends StatelessWidget {
   });
 
   @override
+  State<UnitLibraryPage> createState() => _UnitLibraryPageState();
+}
+
+class _UnitLibraryPageState extends State<UnitLibraryPage> {
+  @override
+  void initState() {
+    super.initState();
+    _schedulePrefetch();
+  }
+
+  @override
+  void didUpdateWidget(covariant UnitLibraryPage old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.unit, widget.unit) ||
+        old.coverOf != widget.coverOf ||
+        old.unitCoverOf != widget.unitCoverOf) {
+      _schedulePrefetch();
+    }
+  }
+
+  void _schedulePrefetch() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _prefetchCovers());
+  }
+
+  /// 0.9.31：单元库页首屏封面预热。
+  ///
+  /// 进单元库后第一屏是下级单元库卡片与基础库卡片，两者此前都是逐张请求，
+  /// 会先露底色再出图。这里按两个网格各自的真实几何算张数，URL 与卡片
+  /// 用的是同一套解析（`unitCoverUrl` / `basicCoverUrl`），provider 与
+  /// `_UnitCoverFill` 完全一致（同 `w=480` + 同鉴权头 + 同 `DiziCache`），
+  /// 卡片渲染时直接命中缓存。失败交给卡片自己重试。
+  void _prefetchCovers() {
+    if (!mounted) return;
+    final unit = widget.unit;
+    final mq = MediaQuery.maybeOf(context);
+    if (mq == null) return;
+    final urls = <String>[];
+    final headers = <String, Map<String, String>>{};
+
+    void add(String raw, Map<String, String> h) {
+      final cover = raw.trim();
+      if (cover.isEmpty) return;
+      final url = withImageWidth(cover, kCardImageWidth);
+      if (headers.containsKey(url)) return;
+      urls.add(url);
+      headers[url] = h;
+    }
+
+    // 下级单元库卡片：260 / 1.02，一屏、上限 6。
+    final subN = firstScreenThumbCount(
+      viewportWidth: mq.size.width,
+      viewportHeight: mq.size.height,
+      maxCrossAxisExtent: 260,
+      padding: kLibGridPadding.left,
+      crossSpacing: kLibGridSpacing,
+      mainSpacing: kLibGridSpacing,
+      aspectRatio: 1.02,
+      screens: 1,
+      maxItems: 6,
+    );
+    if (subN > 0) {
+      for (final sub in unit.children.take(subN)) {
+        final cover = widget.unitCoverOf?.call(sub) ?? '';
+        add(cover, unitHeadersOf(sub, widget.headersOf));
+      }
+    }
+
+    // 基础库卡片：220 / 0.92，一屏、上限 8（与 `BasicLibCard` 同一封面解析）。
+    final basicN = firstScreenThumbCount(
+      viewportWidth: mq.size.width,
+      viewportHeight: mq.size.height,
+      maxCrossAxisExtent: 220,
+      padding: kLibGridPadding.left,
+      crossSpacing: kLibGridSpacing,
+      mainSpacing: kLibGridSpacing,
+      aspectRatio: 0.92,
+      screens: 1,
+      maxItems: 8,
+    );
+    if (basicN > 0) {
+      for (final b in unit.basics.take(basicN)) {
+        final cover = basicCoverUrl(b, preset: widget.coverOf?.call(b) ?? '');
+        add(cover, widget.headersOf?.call(b.id) ?? const <String, String>{});
+      }
+    }
+    if (urls.isEmpty) return;
+    ThumbPrefetch.instance.run(
+      urls,
+      limit: urls.length,
+      provider: (u) => CachedNetworkImageProvider(
+        u,
+        headers: headers[u] ?? const <String, String>{},
+        cacheManager: DiziCache.manager,
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     // 0.9.6：星标走 StarStore，入栈后其它页面改动也能即时反映。
     return AnimatedBuilder(
@@ -677,6 +775,16 @@ class UnitLibraryPage extends StatelessWidget {
   }
 
   Widget _buildPage(BuildContext context) {
+    // 原 `StatelessWidget` 字段在这里落地成局部变量，保持下面的构建代码不动。
+    final unit = widget.unit;
+    final stars = widget.stars;
+    final coverOf = widget.coverOf;
+    final unitCoverOf = widget.unitCoverOf;
+    final headersOf = widget.headersOf;
+    final onOpenUnit = widget.onOpenUnit;
+    final onToggleUnitStar = widget.onToggleUnitStar;
+    final onTapBasic = widget.onTapBasic;
+    final onConfigureUnit = widget.onConfigureUnit;
     final liveStars = StarStore.instance.ready ? StarStore.instance.ids : stars;
     // 只列直属基础库；下级基础库跟随各自的单元库，避免 SECRET 直通全部。
     final sorted = unit.basics;
@@ -702,7 +810,7 @@ class UnitLibraryPage extends StatelessWidget {
             key: ValueKey('unit-crawler-${unit.id}'),
             tooltip: '爬虫配置',
             icon: const Icon(Icons.settings_ethernet),
-            onPressed: () => onConfigureUnit!(unit),
+            onPressed: () => onConfigureUnit(unit),
           ),
       ]),
       body: ListView(
@@ -737,7 +845,7 @@ class UnitLibraryPage extends StatelessWidget {
                   onTap: () => onOpenUnit(sub),
                   onConfigure: onConfigureUnit == null
                       ? null
-                      : () => onConfigureUnit!(sub),
+                      : () => onConfigureUnit(sub),
                 );
               },
             ),
