@@ -52,9 +52,11 @@ import 'library_rank.dart';
 import 'lib_cover.dart';
 import 'loop_link.dart';
 import 'library_tree.dart';
+import 'unit_crawler.dart';
 import 'unit_crawler_page.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
+import 'header_collapse.dart';
 import 'work_card.dart';
 import 'likes.dart';
 import 'multi_server.dart';
@@ -4405,6 +4407,9 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   final Map<String, Map<String, dynamic>> crawlers = {};
   bool loading = true;
   String? err;
+  // H：节点/单元库列表与「是否有爬虫脚本」，同步源不再只有 douyin。
+  List<UnitLibrary> units = const [];
+  Map<String, bool> unitFlags = const {};
 
   @override
   void initState() {
@@ -4445,9 +4450,26 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
           }
         } catch (_) {}
       }
+      // H：同步源适配单元库——列出所有节点文件夹，并标记是否有爬虫脚本。
+      var unitList = const <UnitLibrary>[];
+      var flags = const <String, bool>{};
+      try {
+        final m = await LibMeta.load(cfg.lib);
+        unitList = [for (final u in m.units) if (u.id != 'secret') u];
+      } catch (_) {}
+      try {
+        final nr = await http
+            .get(Uri.parse('${cfg.base}/api/nodes'), headers: cfg.headers)
+            .timeout(const Duration(seconds: 8));
+        if (nr.statusCode == 200) {
+          flags = unitCrawlerFlags(jsonDecode(utf8.decode(nr.bodyBytes)));
+        }
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         libs = list;
+        units = unitList;
+        unitFlags = flags;
         loading = false;
       });
     } catch (e) {
@@ -4474,6 +4496,39 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     return iv >= 60 ? '每 ${iv ~/ 60} 小时' : '每 $iv 分钟';
   }
 
+  /// H：单个单元库的配置入口；没有脚本时置灰并写明 J17 原因。
+  Widget _unitTile(UnitLibrary u) {
+    final has = unitFlags[u.rel] == true ||
+        unitFlags[u.id.replaceFirst('node:', '')] == true;
+    return ListTile(
+      enabled: has,
+      leading: Icon(
+        has ? Icons.folder_copy_outlined : Icons.folder_off_outlined,
+        color: has ? null : Colors.grey,
+      ),
+      title: Text(u.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        has ? '已配置爬虫脚本 · 可单独设置同步频率' : '无爬虫脚本（J17：同步设置不可用）',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 11, color: has ? Colors.grey : Colors.orange),
+      ),
+      trailing: Icon(Icons.chevron_right,
+          color: has ? null : Colors.grey.withValues(alpha: 0.4)),
+      onTap: has
+          ? () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => UnitCrawlerPage(
+                        unit: u,
+                        base: cfg.base,
+                        headers: cfg.headers,
+                      )));
+              load();
+            }
+          : null,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final withScripts =
@@ -4495,6 +4550,15 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                         style:
                             const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
+                  if (units.isNotEmpty) ...[
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+                      child: Text('单元库（节点文件夹）',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600)),
+                    ),
+                    for (final u in units) _unitTile(u),
+                  ],
                   for (final l in libs)
                     ListTile(
                       leading: const Icon(Icons.library_books_outlined),
@@ -11990,6 +12054,11 @@ class _AuthorPageState extends State<AuthorPage> {
   Timer? syncTimer;
   // J-A3：作者主页头部上滑自动收起为紧凑条（头像 + 名字 + 等级）。
   bool _headerCollapsed = false;
+  // P 修复：
+  // - 外部滚动控制器，收起后能读到实时的 maxScrollExtent；
+  // - 收起动画结束（260ms）后再判定一次，避免“收起→范围变小→锁死”。
+  final ScrollController _authorScroll = ScrollController();
+  Timer? _headerRecheck;
 
 
   // K2：多选模式与已选作品；K3：手动名单（作品 id）。
@@ -12264,7 +12333,22 @@ class _AuthorPageState extends State<AuthorPage> {
   @override
   void dispose() {
     syncTimer?.cancel();
+    _headerRecheck?.cancel();
+    _authorScroll.dispose();
     super.dispose();
+  }
+
+  // P 修复：收起动画结束后再判定一次滚动范围，避免“收起→范围变小→锁死”。
+  void _scheduleHeaderRecheck() {
+    _headerRecheck?.cancel();
+    _headerRecheck = Timer(const Duration(milliseconds: 260), () {
+      if (!mounted || !_headerCollapsed) return;
+      final ok = _authorScroll.hasClients &&
+          _authorScroll.position.maxScrollExtent > 0 &&
+          _authorScroll.position.pixels <
+              _authorScroll.position.maxScrollExtent;
+      if (!ok) setState(() => _headerCollapsed = false);
+    });
   }
 
   // 只有配置了爬虫脚本的库才允许联网同步。
@@ -12999,21 +13083,31 @@ class _AuthorPageState extends State<AuthorPage> {
                   child: NotificationListener<ScrollNotification>(
                 onNotification: (n) {
                   if (n.depth != 0) return false;
-                  if (n is ScrollUpdateNotification) {
-                    final p = n.metrics.pixels;
-                    // 阀值分离（上滑 32 / 回顶 8）避免临界处反复折叠。
-                    // J3b：中途下滑（内容下移、pixels 回落）也展开，
-                    // 不必滚到最顶部；上限 160 防抖，避免刚收起又立刻展开。
-                    final back = (n.scrollDelta ?? 0) < 0;
-                    if (!_headerCollapsed && p > 32) {
+                  if (n is ScrollUpdateNotification ||
+                      n is OverscrollNotification) {
+                    final m = n.metrics;
+                    final action = headerActionFor(
+                      collapsed: _headerCollapsed,
+                      pixels: m.pixels,
+                      maxScrollExtent: m.maxScrollExtent,
+                      delta: n is ScrollUpdateNotification
+                          ? (n.scrollDelta ?? 0)
+                          : 0,
+                      overscroll: n is OverscrollNotification &&
+                          n.overscroll < 0,
+                    );
+                    if (action == HeaderAction.collapse && !_headerCollapsed) {
                       setState(() => _headerCollapsed = true);
-                    } else if (_headerCollapsed && (p <= 8 || (back && p < 160))) {
+                      _scheduleHeaderRecheck();
+                    } else if (action == HeaderAction.expand &&
+                        _headerCollapsed) {
                       setState(() => _headerCollapsed = false);
                     }
                   }
                   return false;
                 },
                 child: WorkGrid(
+                    controller: _authorScroll,
                     works: filteredWorks,
                     lib: primaryLib.isEmpty ? null : primaryLib,
                     selecting: selectingWorks,
@@ -13163,6 +13257,10 @@ class WorkGrid extends StatefulWidget {
   /// K3：手动名单（作品 id），卡片左上角显示「手」角标。
   final Set<String> manualIds;
 
+  /// P 修复：外部可传入滚动控制器（作者页头部收起需要读实时滚动范围）。
+  /// 为空时沿用内部控制器。
+  final ScrollController? controller;
+
   // T3：已移除旧「收藏夹」idx/名称传参链
   const WorkGrid({
     super.key,
@@ -13176,6 +13274,7 @@ class WorkGrid extends StatefulWidget {
     this.onToggleSelect,
     this.onEnterSelect,
     this.manualIds = const <String>{},
+    this.controller,
   });
 
   @override
@@ -13183,7 +13282,8 @@ class WorkGrid extends StatefulWidget {
 }
 
 class _WorkGridState extends State<WorkGrid> {
-  final ScrollController _scroll = ScrollController();
+  late final bool _ownsScroll = widget.controller == null;
+  late final ScrollController _scroll = widget.controller ?? ScrollController();
   int _shown = 0;
   @override
   void initState() {
@@ -13213,7 +13313,7 @@ class _WorkGridState extends State<WorkGrid> {
 
   @override
   void dispose() {
-    _scroll.dispose();
+    if (_ownsScroll) _scroll.dispose();
     super.dispose();
   }
 

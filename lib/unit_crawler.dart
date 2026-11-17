@@ -183,3 +183,18 @@ String unitCrawlerUrl(String base, String path,
 
 /// 运行按钮文案。
 String unitCrawlerRunLabel(bool running) => running ? '运行中…' : '运行单元库同步';
+
+/// H：从 `/api/nodes` 响应里取「单元库 rel → 是否有可运行爬虫脚本」。
+/// 缺字段时返回空表（调用方按「无脚本」置灰，避免误开同步）。
+Map<String, bool> unitCrawlerFlags(dynamic json) {
+  final out = <String, bool>{};
+  if (json is! Map) return out;
+  final raw = json['crawler'];
+  if (raw is! Map) return out;
+  for (final e in raw.entries) {
+    final rel = '${e.key}'.trim();
+    if (rel.isEmpty) continue;
+    out[rel] = e.value == true;
+  }
+  return out;
+}

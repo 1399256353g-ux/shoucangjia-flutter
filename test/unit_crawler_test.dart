@@ -105,4 +105,11 @@ void main() {
     expect(bad.quickCheck, isTrue);
     expect(bad.intervalLabel, contains('快检'));
   });
+  test('H：/api/nodes 的 crawler 映射解析（缺字段一律按无脚本）', () {
+    expect(unitCrawlerFlags({'crawler': {'(1) A': true, '(2) B': false}}),
+        {'(1) A': true, '(2) B': false});
+    expect(unitCrawlerFlags({'nodes': ['x']}), isEmpty);
+    expect(unitCrawlerFlags(null), isEmpty);
+    expect(unitCrawlerFlags({'crawler': {'x': 1}}), {'x': false});
+  });
 }
