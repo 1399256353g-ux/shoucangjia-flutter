@@ -165,6 +165,27 @@ String libOfMediaPath(String p) {
   return rest.substring(0, at);
 }
 
+/// 第一张作品的封面路径（无播放数据时的兜底，纯函数）：
+/// 优先作品 `th` 缩略图，否则取 `m` 里第一张图片；都没有返回空串。
+String firstWorkCoverPath(List<dynamic> works) {
+  const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+  for (final w in works) {
+    if (w is! Map) continue;
+    final th = '${w['th'] ?? ''}'.trim();
+    if (th.isNotEmpty) return th;
+    final m = w['m'];
+    if (m is List) {
+      for (final e in m) {
+        final p = '${e ?? ''}'.trim();
+        if (p.isEmpty) continue;
+        final low = p.toLowerCase();
+        if (imageExts.any(low.endsWith)) return p;
+      }
+    }
+  }
+  return '';
+}
+
 /// 基础库封面：
 ///  - 有自定义版本 → `_cover/<version>.<ext>`；
 ///  - 否则取本机播放量最高的作品缩略图（[bestThumb]，由 WorkPlaysStore 提供）；
@@ -172,6 +193,7 @@ String libOfMediaPath(String p) {
 CoverPick pickBasicCover({
   required String rel,
   String bestThumb = '',
+  String firstThumb = '',
   String crawlerThumb = '',
   String version = '',
   String ext = 'jpg',
@@ -180,6 +202,9 @@ CoverPick pickBasicCover({
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
   final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
   if (pick.isNotEmpty) return CoverPick(pick);
+  // 无播放数据时的兜底：第一张作品的封面。
+  final fb = firstThumb.trim();
+  if (fb.isNotEmpty) return CoverPick(fb);
   return const CoverPick.none();
 }
 
@@ -190,6 +215,7 @@ CoverPick pickBasicCover({
 CoverPick pickUnitCover({
   required String rel,
   String bestThumb = '',
+  String firstThumb = '',
   String crawlerThumb = '',
   String version = '',
   String ext = 'jpg',
@@ -198,5 +224,8 @@ CoverPick pickUnitCover({
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
   final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
   if (pick.isNotEmpty) return CoverPick(pick);
+  // 无播放数据时的兜底：第一张作品的封面。
+  final fb = firstThumb.trim();
+  if (fb.isNotEmpty) return CoverPick(fb);
   return const CoverPick.none();
 }

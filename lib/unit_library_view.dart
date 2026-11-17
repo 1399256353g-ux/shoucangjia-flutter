@@ -132,6 +132,7 @@ String unitCoverUrl(
   UnitLibrary unit, {
   String customUrl = '',
   String Function(BasicLib basic, String thumb)? thumbUrlOf,
+  String firstThumb = '',
 }) {
   final preset = customUrl.trim();
   // 调用方已解析好的地址（自定义封面，鉴权/路由由调用方掌握）优先。
@@ -150,6 +151,7 @@ String unitCoverUrl(
     version: unit.node.coverVersion,
     ext: unit.node.coverExt,
     bestThumb: top?.thumb ?? '',
+    firstThumb: top == null ? firstThumb : '',
   );
   if (pick.isEmpty) return '';
   final basics = unit.allBasics;
@@ -177,7 +179,7 @@ Map<String, String> unitHeadersOf(
 ///  2. 爬虫脚本抓到的封面（服务端索引 `cv`）；
 ///  3. 本库「App 播放量最高」作品的封面（有图文作品时优先图文图片）；
 ///  4. 空串 → 卡片回退默认图标。
-String basicCoverUrl(BasicLib basic, {String preset = ''}) {
+String basicCoverUrl(BasicLib basic, {String preset = '', String firstThumb = ''}) {
   final p = preset.trim();
   if (p.isNotEmpty) return p;
   final top = topPlayed(WorkPlaysStore.countsFor(basic.id));
@@ -187,6 +189,7 @@ String basicCoverUrl(BasicLib basic, {String preset = ''}) {
     ext: basic.coverExt,
     crawlerThumb: basic.crawlerCover,
     bestThumb: top?.thumb ?? '',
+    firstThumb: top == null ? firstThumb : '',
   );
   if (pick.isEmpty) return '';
   return absoluteMediaUrl(basic.serverBase, lib: basic.id, path: pick.path);

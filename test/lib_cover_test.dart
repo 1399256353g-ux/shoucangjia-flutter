@@ -161,4 +161,39 @@ void main() {
       expect(absoluteMediaUrl('http://nas:8090', lib: 'lib-01', path: ''), '');
     });
   });
+  group('G 第一张作品封面兜底', () {
+    test('firstWorkCoverPath：th 优先，其次 m 里第一张图片', () {
+      expect(firstWorkCoverPath([
+        {'th': 'a.jpg', 'm': ['b.mp4']}
+      ]), 'a.jpg');
+      expect(firstWorkCoverPath([
+        {'th': '', 'm': ['x.mp4', 'y.png']}
+      ]), 'y.png');
+      expect(firstWorkCoverPath([{'th': '', 'm': <dynamic>[]}, 'bad']), '');
+    });
+
+    test('pickBasicCover：无播放数据用第一张作品封面，有播放数据时播放封面优先', () {
+      expect(pickBasicCover(rel: '(8) X', firstThumb: 'f.jpg').path, 'f.jpg');
+      expect(
+          pickBasicCover(
+                  rel: '(8) X', bestThumb: 'top.jpg', firstThumb: 'f.jpg')
+              .path,
+          'top.jpg');
+      final custom = pickBasicCover(
+          rel: '(8) X',
+          version: 'v1',
+          bestThumb: 'top.jpg',
+          firstThumb: 'f.jpg');
+      expect(custom.path, '(8) X/_cover/v1.jpg');
+      expect(custom.custom, isTrue);
+    });
+
+    test('pickUnitCover：同一兜底链', () {
+      expect(pickUnitCover(rel: '(8) X', firstThumb: 'f.jpg').path, 'f.jpg');
+      expect(
+          pickUnitCover(rel: '(8) X', bestThumb: 'top.jpg', firstThumb: 'f.jpg')
+              .path,
+          'top.jpg');
+    });
+  });
 }

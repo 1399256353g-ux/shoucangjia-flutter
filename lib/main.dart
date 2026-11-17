@@ -3561,6 +3561,10 @@ class _LibraryPageState extends State<LibraryPage> {
   /// J3：旧注册表默认收起，只在需要管理时展开。
   bool legacyOpen = false;
 
+  /// G：服务端 `/api/libraries.json` 下发的基础库第一张作品封面（`fc`）。
+  /// 仅作无手动封面/无播放数据时的最后兜底，避免卡片空白。
+  final Map<String, String> _fcByLib = <String, String>{};
+
   @override
   void initState() {
     super.initState();
@@ -3609,6 +3613,8 @@ class _LibraryPageState extends State<LibraryPage> {
       ext: b.coverExt,
       bestThumb: top?.thumb ?? '',
       crawlerThumb: b.crawlerCover,
+      // G：没手动封面、没播放数据时用服务端下发的第一张作品封面。
+      firstThumb: _fcByLib[b.id] ?? '',
     );
     if (pick.isEmpty) {
       // 兜底：只要服务端给了爬虫封面（cv），就直接用它，避免任何挑选逻辑
@@ -3647,6 +3653,7 @@ class _LibraryPageState extends State<LibraryPage> {
       err = null;
       warn = null;
     });
+    _fcByLib.clear();
     try {
       final sp = await SharedPreferences.getInstance();
       final all = migrateLegacy(
@@ -3714,6 +3721,9 @@ class _LibraryPageState extends State<LibraryPage> {
         for (final raw in (treeJson['basicLibraries'] as List?) ?? const []) {
           if (raw is! Map) continue;
           final id = '${raw['id'] ?? ''}'.trim();
+          // G：第一张作品封面（服务端 `fc`，已带 /media/<lib>/ 前缀）。
+          final fc = '${raw['fc'] ?? ''}'.trim();
+          if (id.isNotEmpty && fc.isNotEmpty) _fcByLib[id] = fc;
           final s = byBase['${raw['_serverBase'] ?? ''}'];
           if (id.isEmpty || s == null) continue;
           bindings[id] = {
@@ -3818,6 +3828,15 @@ class _LibraryPageState extends State<LibraryPage> {
   /// L5-C：基础库封面（自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图）。
   String _coverUrlFor(BasicLib b) => _basicCoverUrl(b);
 
+  /// G：单元库子树里第一个非空的 `fc`（第一张作品封面）。
+  ({String lib, String path})? _firstFcOfUnit(UnitLibrary u) {
+    for (final b in u.allBasics) {
+      final fc = (_fcByLib[b.id] ?? '').trim();
+      if (fc.isNotEmpty) return (lib: b.id, path: fc);
+    }
+    return null;
+  }
+
   /// L5-C：单元库封面。
   /// 0.9.35：owner 手动设置的单元库封面（服务端 `unit-covers.json` → `cover.u`）
   /// 优先 > 手动 `_cover/` > 子树最高播放基础库的封面 > 第一个有封面的基础库。
@@ -3829,8 +3848,18 @@ class _LibraryPageState extends State<LibraryPage> {
       if (url.isNotEmpty) return url;
     }
     final custom = pickUnitCover(
-        rel: u.rel, version: u.node.coverVersion, ext: u.node.coverExt);
-    if (!custom.isEmpty) return cfg.mediaUrl(custom.path);
+        rel: u.rel,
+        version: u.node.coverVersion,
+        ext: u.node.coverExt,
+        firstThumb: _firstFcOfUnit(u)?.path ?? '');
+    if (!custom.isEmpty) {
+      // 子树第一张作品封面按所属基础库路由；自定义 `_cover/` 保持原解析。
+      final fc = _firstFcOfUnit(u);
+      return custom.custom
+          ? cfg.mediaUrl(custom.path)
+          : cfg.mediaUrl(custom.path,
+              lib: fc != null && custom.path == fc.path ? fc.lib : null);
+    }
     // 自动生成：整棵子树里本机播放量最高的基础库，走该基础库完整封面链
     // （手动 > 爬虫 > 自动），并按基础库所属连接解析媒体地址。
     final top = _topPlayedBasic(u);
