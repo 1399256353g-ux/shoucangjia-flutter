@@ -91,6 +91,10 @@ String chapterLabel(dynamic chapter, int index) {
 Map<String, dynamic> workWithChapter(dynamic work, int index) {
   if (work is! Map) return <String, dynamic>{};
   final base = Map<String, dynamic>.from(work);
+  // 图片合集（kind=album）本质是「一组图片」，缺 t 时按图片播放。
+  if ('${base['kind'] ?? ''}' == 'album' && '${base['t'] ?? ''}'.isEmpty) {
+    base['t'] = 'p';
+  }
   final chs = workChapters(work);
   if (chs.length <= 1) return base;
   final i = index.clamp(0, chs.length - 1);
@@ -133,7 +137,7 @@ num workTotalDuration(dynamic work) {
 }
 
 /// J6：作者主页作品筛选分类。
-/// 视频=单视频，图文=多图图文，合集=视频合集/图片合集，单图=单张图片。
+/// 视频=单视频，图片=单张图片，合集=视频合集/图片合集，图文=多图图文。
 const String workFilterVideo = 'video';
 const String workFilterPost = 'post';
 const String workFilterCollection = 'collection';
@@ -155,7 +159,7 @@ String workFilterLabel(String type) {
     case workFilterCollection:
       return '合集';
     case workFilterPicture:
-      return '单图';
+      return '图片';
     default:
       return '其他';
   }

@@ -13,6 +13,7 @@ import 'media_priority.dart';
 import 'media_resize.dart';
 import 'thumb_prefetch.dart';
 import 'work_card.dart';
+import 'work_forms.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
 import 'library_badge.dart';
@@ -592,28 +593,12 @@ class _BasicLibPageState extends State<BasicLibPage>
 
   // ---- 作品类型筛选（全部/视频/图文/合集，多选，本地过滤） ----
 
-  static const List<String> _typeOrder = <String>['video', 'post', 'collection'];
+  // 全站统一的类型顺序与文案：视频、图片、合集、图文。
+  static const List<String> _typeOrder = workFilterOrder;
 
-  /// 作品类型：视频 / 图文 / 合集（与卡片右上角标签保持一致）。
-  static String _workType(dynamic w) {
-    if (w is! Map) return 'video';
-    final kind = '${w['kind'] ?? ''}';
-    if (kind == 'chapters' || kind == 'album') return 'collection';
-    if (kind == 'post') return 'post';
-    if ('${w['t']}' == 'p') return 'post';
-    return 'video';
-  }
+  static String _workType(dynamic w) => workFilterType(w);
 
-  static String _typeLabel(String type) {
-    switch (type) {
-      case 'post':
-        return '图文';
-      case 'collection':
-        return '合集';
-      default:
-        return '视频';
-    }
-  }
+  static String _typeLabel(String type) => workFilterLabel(type);
 
   /// 本地过滤后的作品列表；筛选为空时即全部作品。
   List<dynamic> get filtered {

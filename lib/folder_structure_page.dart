@@ -354,6 +354,27 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     ));
   }
 
+  Future<void> _confirmUnlock(_FolderRow r) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('解锁「${r.name}」？'),
+        content: const Text('该目录当前被识别为基础库，锁定为不可设为节点。\n'
+            '强制解锁后可以把它设为节点文件夹（单元库）；'
+            '如果它确实还是基础库，建议不要这样做。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('解锁')),
+        ],
+      ),
+    );
+    if (ok == true && mounted) _forceUnlock(r);
+  }
+
   Widget _buildRow(_FolderRow r) {
     final open = expanded.contains(r.rel);
     final isNode = nodes.contains(r.rel);
@@ -441,6 +462,14 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                   child: const Text('节点',
                       style: TextStyle(
                           fontSize: 10, fontWeight: FontWeight.w600)),
+                ),
+              if (isBasic)
+                IconButton(
+                  key: ValueKey('node-unlock-${r.rel}'),
+                  tooltip: '强制解锁（允许设为节点）',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.lock_open, size: 17),
+                  onPressed: () => _confirmUnlock(r),
                 ),
               Switch(
                 key: ValueKey('node-switch-${r.rel}'),

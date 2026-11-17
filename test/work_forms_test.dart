@@ -130,7 +130,7 @@ void main() {
       expect(workFilterType(works[4]), workFilterPicture);
       expect(workFilterType(works[5]), 'other', reason: '坏数据归为其他');
       expect(workFilterType(null), 'other', reason: '坏数据不抛异常');
-      expect(workFilterLabel(workFilterPicture), '单图');
+      expect(workFilterLabel(workFilterPicture), '图片');
     });
 
     test('空筛选返回全部，多选并集命中', () {
