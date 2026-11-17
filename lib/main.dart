@@ -3059,7 +3059,12 @@ class _LibraryPageState extends State<LibraryPage> {
       bestThumb: top?.thumb ?? '',
       crawlerThumb: b.crawlerCover,
     );
-    if (pick.isEmpty) return '';
+    if (pick.isEmpty) {
+      // 兜底：只要服务端给了爬虫封面（cv），就直接用它，避免任何挑选逻辑
+      // 把封面吞掉后卡片一直显示默认图。
+      final cv = b.crawlerCover.trim();
+      return cv.isEmpty ? '' : cfg.mediaUrl(cv, lib: b.id);
+    }
     return cfg.mediaUrl(pick.path, lib: b.id);
   }
 
@@ -8111,6 +8116,53 @@ class _PlayerPageState extends State<PlayerPage>
     showUi();
   }
 
+  /// 可见的封面入口：把原来的长按菜单项集中到一个底部面板。
+  void _openCoverSheet() {
+    final w = _workAt(cur);
+    final lib = _libFor(w);
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_size_select_actual_outlined),
+            title: const Text('设为该库封面'),
+            subtitle: const Text('用当前作品图片作为基础库封面'),
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _applyCover(CoverRequest.set(
+                  lib: lib, work: '${w['id'] ?? ''}'));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.collections_bookmark_outlined),
+            title: const Text('设为该单元库封面'),
+            subtitle: const Text('用当前作品图片作为所属单元库封面'),
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _applyCover(CoverRequest.set(
+                scope: CoverScope.unit,
+                lib: lib,
+                work: '${w['id'] ?? ''}',
+              ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.restart_alt),
+            title: const Text('恢复自动封面'),
+            subtitle: const Text('清除基础库封面设置，回到自动选择'),
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _confirmClearCover(lib);
+            },
+          ),
+        ]),
+      ),
+    );
+  }
+
   // G11：长按作品信息区弹出播放菜单（视频区域长按仍是 2 倍速）。
   void _showWorkMenu() {
     final w = _workAt(cur);
@@ -8781,6 +8833,14 @@ class _PlayerPageState extends State<PlayerPage>
                               backgroundColor: Colors.black45)),
                       // 深页面统一「返回主页」：从作者页/搜索进播放页也能一步回主页。
                       const HomeOverlayButton(),
+                      // 封面入口做成可见按钮（长按信息区同样可用）
+                      IconButton(
+                          tooltip: '设置封面',
+                          onPressed: _openCoverSheet,
+                          icon: const Icon(Icons.image_outlined,
+                              color: Colors.white70),
+                          style: IconButton.styleFrom(
+                              backgroundColor: Colors.black45)),
                     ]),
                   ),
                 ),
