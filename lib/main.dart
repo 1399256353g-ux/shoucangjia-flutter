@@ -6509,10 +6509,12 @@ class _PlayerPageState extends State<PlayerPage>
   String avatarFor(Map w) {
     final av = '${w['av'] ?? ''}';
     if (av.isNotEmpty) return av;
-    // 离线库没有作者头像（av 为空）时，用该作者作品的缩略图/首图兜底，
-    // 否则播放页永远只显示默认人形。
     final name = '${w['a'] ?? ''}';
     if (name.isEmpty) return '';
+    // 统一头像来源：与作者主页共用 AuthorAvatarStore（同一份作者头像）。
+    // 只有作者确实没有头像时，才退到作品缩略图。
+    final stored = AuthorAvatarStore.instance.pathFor(name);
+    if (stored != null && stored.isNotEmpty) return stored;
     for (final e in widget.works) {
       if (e is! Map || '${e['a'] ?? ''}' != name) continue;
       final t = '${e['th'] ?? ''}';
