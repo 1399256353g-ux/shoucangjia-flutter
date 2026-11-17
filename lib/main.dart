@@ -4378,6 +4378,37 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+/// 作者行的库归属（基础库/大库/单元库）：作者总览与排行榜共用。
+///
+/// 合并索引会给 `libs`（出处）或无头像作者只有 `_lib`，不能只看头像路径，
+/// 否则筛选面板选了库之后会把没有头像的作者全部排除。
+({String basic, String big, String unit}) authorRowIdsFor(
+    Map e, LibMeta? m) {
+  var basic = '${e['_bid'] ?? ''}';
+  final libs = e['libs'];
+  if (basic.isEmpty && libs is List) {
+    for (final x in libs) {
+      final id = '$x';
+      if (m?.basicById(id) != null) {
+        basic = id;
+        break;
+      }
+    }
+  }
+  final av = '${e['avatar'] ?? ''}';
+  if (basic.isEmpty) basic = m?.basicIdForPath(av) ?? '';
+  if (basic.isEmpty) {
+    final l = '${e['_lib'] ?? ''}';
+    if (m?.basicById(l) != null) basic = l;
+  }
+  var unit = basic.isEmpty
+      ? (m?.unitIdFor(av) ?? '')
+      : (m?.basicToUnit[basic] ?? '');
+  var big = m?.basicById(basic)?.bigId ?? '';
+  if (big.isEmpty) big = m?.bigIdFor(av) ?? '';
+  return (basic: basic, big: big, unit: unit);
+}
+
 class RankPage extends StatefulWidget {
   final String? initialLib;
   const RankPage({super.key, this.initialLib});
@@ -4526,12 +4557,12 @@ class _RankPageState extends State<RankPage> {
 
   bool _rowMatches(Map<String, dynamic> e, AuthorFilterState f) {
     final meta = _rowMeta(e);
-    final av = '${e['avatar'] ?? ''}';
+    final ids = authorRowIdsFor(e, meta);
     final name = '${e['name'] ?? ''}';
     return f.matches(
-      basicId: meta?.idFor(av) ?? '',
-      bigId: meta?.bigIdFor(av) ?? '',
-      unitId: meta?.unitIdFor(av) ?? '',
+      basicId: ids.basic,
+      bigId: ids.big,
+      unitId: ids.unit,
       grade: meta?.gradeFor(name, _n(e['works'])) ?? '',
       workTypes: authorTypes[name] ?? const <String>{},
     );
@@ -5536,31 +5567,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   LibMeta? _metaOf(MapEntry<String, Map<String, dynamic>> e) =>
       metas[cfg.lib] ?? (basics.isEmpty ? null : metas.values.first);
 
-  String _basicIdOf(MapEntry<String, Map<String, dynamic>> e) {
-    final m = _metaOf(e);
-    final byAv = m?.basicIdForPath('${e.value['av'] ?? ''}') ?? '';
-    if (byAv.isNotEmpty) return byAv;
-    // 合并索引已给出作者出处；无头像时也能筛选到所属基础库。
-    final l = '${e.value['_lib'] ?? ''}';
-    return l.startsWith('lib-') && m?.basicById(l) != null ? l : '';
-  }
+  String _basicIdOf(MapEntry<String, Map<String, dynamic>> e) =>
+      authorRowIdsFor(e.value, _metaOf(e)).basic;
 
-  String _bigIdOf(MapEntry<String, Map<String, dynamic>> e) {
-    final m = _metaOf(e);
-    final byAv = m?.bigIdFor('${e.value['av'] ?? ''}') ?? '';
-    if (byAv.isNotEmpty) return byAv;
-    final b = m?.basicById(_basicIdOf(e));
-    return b?.bigId ?? '';
-  }
+  String _bigIdOf(MapEntry<String, Map<String, dynamic>> e) =>
+      authorRowIdsFor(e.value, _metaOf(e)).big;
 
   // T2：作者所属单元库 id（顶级 SECRET / 无归属为空）。
-  String _unitIdOf(MapEntry<String, Map<String, dynamic>> e) {
-    final m = _metaOf(e);
-    final byAv = m?.unitIdFor('${e.value['av'] ?? ''}') ?? '';
-    if (byAv.isNotEmpty) return byAv;
-    final b = _basicIdOf(e);
-    return b.isEmpty ? '' : (m?.basicToUnit[b] ?? '');
-  }
+  String _unitIdOf(MapEntry<String, Map<String, dynamic>> e) =>
+      authorRowIdsFor(e.value, _metaOf(e)).unit;
 
   String _gradeOf(MapEntry<String, Map<String, dynamic>> e) =>
       AuthorGrade.gradeFor(
@@ -5878,16 +5893,14 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 ]))
               : Column(children: [
                   // 与排行榜共用同一个快捷条组件；状态即 filter.bigs。
+                  // 与排行榜同一套快捷筛选：按钮文案、选中态、维度都对齐。
                   AuthorQuickChips(
-                    allLabel: '全部基础库',
-                    items: [
-                      for (final b in _filterBigs)
-                        AuthorLibNode(id: b.id, name: b.name)
-                    ],
-                    selected: filter.bigs,
+                    allLabel: '全部单元库',
+                    items: _filterUnits,
+                    selected: filter.units,
                     onPick: (id) {
                       final next = filter.copy();
-                      pickOnlyIn(next.bigs, id);
+                      pickOnlyIn(next.units, id);
                       authorFilter.apply(next);
                     },
                   ),
