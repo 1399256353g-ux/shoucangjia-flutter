@@ -8,16 +8,16 @@ void main() {
       expect(videoFitFor(aspect: 0.7), VideoFit.fill);
     });
 
-    test('横屏/方形源（>= 0.8）自动适应留边', () {
-      expect(videoFitFor(aspect: 16 / 9), VideoFit.contain);
-      expect(videoFitFor(aspect: 1.0), VideoFit.contain);
-      expect(videoFitFor(aspect: 0.8), VideoFit.contain);
+    test('任何比例默认都铺满（视频必须顶到进度条）', () {
+      expect(videoFitFor(aspect: 16 / 9), VideoFit.fill);
+      expect(videoFitFor(aspect: 1.0), VideoFit.fill);
+      expect(videoFitFor(aspect: 0.8), VideoFit.fill);
     });
 
-    test('宽高比缺失/非法时保守适应', () {
-      expect(videoFitFor(aspect: null), VideoFit.contain);
-      expect(videoFitFor(aspect: 0), VideoFit.contain);
-      expect(videoFitFor(aspect: -1.5), VideoFit.contain);
+    test('宽高比缺失/非法时同样铺满', () {
+      expect(videoFitFor(aspect: null), VideoFit.fill);
+      expect(videoFitFor(aspect: 0), VideoFit.fill);
+      expect(videoFitFor(aspect: -1.5), VideoFit.fill);
     });
 
     test('手动覆盖优先于自动判定', () {

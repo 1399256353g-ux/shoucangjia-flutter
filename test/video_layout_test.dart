@@ -74,9 +74,10 @@ void main() {
 
   group('T stageProgressBottomOffset', () {
     test('默认只留内边距；有安全区时叠加', () {
-      expect(stageProgressBottomOffset(), 10);
-      expect(stageProgressBottomOffset(safeBottom: 34), 44);
-      expect(stageProgressBottomOffset(safeBottom: -3), 10);
+      // 进度条就是视频/任务栏分界线：默认不再上浮
+      expect(stageProgressBottomOffset(), 0);
+      expect(stageProgressBottomOffset(safeBottom: 34), 34);
+      expect(stageProgressBottomOffset(safeBottom: -3), 0);
       expect(stageProgressBottomOffset(safeBottom: 20, padding: 0), 20);
     });
 

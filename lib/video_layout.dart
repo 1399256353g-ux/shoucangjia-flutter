@@ -26,8 +26,9 @@ const double portraitAspectThreshold = 0.8;
 /// 横屏/方形留边；宽高比未知时保守地用 contain，避免裁掉画面。
 VideoFit videoFitFor({double? aspect, VideoFit? mode}) {
   if (mode != null) return mode;
-  if (aspect == null || aspect <= 0) return VideoFit.contain;
-  return aspect < portraitAspectThreshold ? VideoFit.fill : VideoFit.contain;
+  // owner 2026-11-18：视频必须顶到进度条（进度条是视频与任务栏的分界线），
+  // 默认一律铺满；比例差异造成的裁切由用户在设置里改「适应」。
+  return VideoFit.fill;
 }
 
 /// 播放视口高度 = 屏幕高 − 底部任务栏高度（含 SafeArea）。
@@ -107,7 +108,8 @@ double stageBottomInset({
 /// `safeBottom: 0`；全屏沉浸式仍需给 iPhone Home 指示条留位置。
 double stageProgressBottomOffset({
   double safeBottom = 0,
-  double padding = 10,
+  // owner 2026-11-18：进度条就是视频与任务栏的分界线，必须贴住舞台底边（0dp）。
+  double padding = 0,
 }) {
   final safe = safeBottom > 0 ? safeBottom : 0.0;
   final p = padding > 0 ? padding : 0.0;

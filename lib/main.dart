@@ -10822,7 +10822,9 @@ class _PlayerPageState extends State<PlayerPage>
         : (active ? Colors.white : kTaskbarInactiveColor);
     // A/T：任务栏实底后，视频舞台内缩到栏上方（首帧栏高未知，测量后校正）；
     // 移动端全屏为沉浸式，任务栏隐藏、舞台铺满屏幕。
-    final hideTaskbar = fs && _mobileStageTap;
+    // 全屏：保留旧的「单击呼出/隐藏」逻辑——任务栏始终渲染为半透明浮层，
+    // 显隐由 ui（及 chromeOpacity）控制；舞台仍铺满整屏不占位。
+    final hideTaskbar = false;
     final stageInset = broken
         ? 0.0
         : stageBottomInset(
@@ -10832,7 +10834,7 @@ class _PlayerPageState extends State<PlayerPage>
                 : taskbarReservedHeight(
                     contentHeight: kTaskbarHeight,
                     safeBottom: pad.bottom),
-            fullscreen: hideTaskbar,
+            fullscreen: fs,
           );
     // T：进度层贴在本页舞台底边（PageView 子页 Stack 内）；作者/标题信息行
     // 在进度层上方避让，避免压住进度条。
@@ -10983,7 +10985,8 @@ class _PlayerPageState extends State<PlayerPage>
                   dragStartBehavior: DragStartBehavior.down,
                   scrollDirection: Axis.vertical,
                   // C：预载相邻页并参与 render，拖动时邻页已挂载。
-                  allowImplicitScrolling: true,
+                  // 稳定性优先：不提前挂载邻页，避免同时存在多个解码器导致 OOM 闪退。
+                  allowImplicitScrolling: false,
                   itemCount: widget.works.length,
                   onPageChanged: (i) {
                     // J-A4：手势滑动中只记下标，等 ScrollEnd 确认后再切；
@@ -11663,7 +11666,10 @@ class _PlayerPageState extends State<PlayerPage>
                         // P1 §4：非全屏 56dp 纯黑 + 1px #1AFFFFFF 顶部分割线；
                         // 全屏保留旧的 10/6 内边距与无分割线外观。
                         decoration: BoxDecoration(
-                          color: fs ? Colors.black : kTaskbarColor,
+                          // 全屏：半透明浮层（保留旧观感）；非全屏：不透明实底。
+                          color: fs
+                              ? Colors.black.withValues(alpha: 0.35)
+                              : kTaskbarColor,
                           border: fs
                               ? null
                               : const Border(
