@@ -62,6 +62,59 @@ class DiziCacheFileSystem implements FileSystem {
   }
 }
 
+/// `?w=` 请求的「超尺寸响应」判定（纯函数，便于测试）。
+///
+/// 服务端缩图首次请求时要现场 ffmpeg 生成，本次只能回原图（带 24h 缓存头）。
+/// 而 flutter_cache_manager 不看服务端缓存头、按 stalePeriod（默认 14 天）存盘，
+/// 于是这张卡在缓存过期前一直下载/解码原图——「封面加载慢」的主因之一。
+/// 判定阈值按目标宽度给足余量：正常缩图远小于 `w * 1200` 字节。
+bool oversizedResizeResponse(String url, int? contentLength) {
+  if (contentLength == null || contentLength <= 0) return false;
+  final m = RegExp(r'[?&]w=(\d{2,4})(?:&|$)').firstMatch(url);
+  if (m == null) return false;
+  final w = int.tryParse(m.group(1)!);
+  if (w == null || w <= 0) return false;
+  final limit = w * 1200;
+  return contentLength > (limit < 150 * 1024 ? 150 * 1024 : limit);
+}
+
+/// 0.9.54：`?w=` 首次未命中时丢弃原图响应，等缩图生成后重取一次。
+/// 只有同一 URL 第一次会重试；重试失败仍返回第一次的响应，不影响显示。
+class ResizeAwareFileService extends FileService {
+  ResizeAwareFileService(this._inner, {Duration? retryDelay})
+      : retryDelay = retryDelay ?? const Duration(milliseconds: 700);
+
+  final FileService _inner;
+  final Duration retryDelay;
+  final Set<String> _retried = <String>{};
+
+  @override
+  int get concurrentFetches => _inner.concurrentFetches;
+
+  @override
+  set concurrentFetches(int v) => _inner.concurrentFetches = v;
+
+  @override
+  Future<FileServiceResponse> get(String url,
+      {Map<String, String>? headers}) async {
+    final first = await _inner.get(url, headers: headers);
+    if (!oversizedResizeResponse(url, first.contentLength)) return first;
+    if (!_retried.add(url)) return first;
+    await Future<void>.delayed(retryDelay);
+    FileServiceResponse second;
+    try {
+      second = await _inner.get(url, headers: headers);
+    } catch (_) {
+      return first;
+    }
+    // 第一次的大图响应不读取，直接取消订阅释放连接，避免白下几百 KB。
+    try {
+      await first.content.listen(null).cancel();
+    } catch (_) {}
+    return second;
+  }
+}
+
 /// 统计下载字节数的文件服务：累计新增 64 MB 触发一次轻量清理。
 class _CountingFileService extends FileService {
   final FileService _inner;
@@ -127,7 +180,8 @@ class DiziCache {
       stalePeriod: Duration(days: keepDays),
       maxNrOfCacheObjects: objectLimit,
       fileSystem: DiziCacheFileSystem(dir),
-      fileService: _CountingFileService(HttpFileService(), _noteBytes),
+      fileService: _CountingFileService(
+          ResizeAwareFileService(HttpFileService()), _noteBytes),
     ));
   }
 
