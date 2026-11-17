@@ -185,13 +185,13 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       nodes
         ..clear()
         ..addAll(serverNodes);
-      // 基础库永远不能是节点：清掉历史误选（保留 saved 原值，让「保存」可落盘）。
-      nodes.removeWhere((e) => basics.contains(normalizeRel(e)));
       saved
         ..clear()
         ..addAll(serverNodes);
       basicRels = basics;
       rows = _parse(((j['folders'] as List?) ?? const []), basics);
+      // 基础库永远不能是节点：按「实时基础库特征」清掉历史误选（保留 saved 原值）。
+      nodes.removeWhere((e) => _isBasicRel(e));
       if (!mounted) return;
       setState(() => loading = false);
     } catch (e) {
@@ -305,8 +305,12 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
 
   bool _isBasicRel(String rel) {
     final n = normalizeRel(rel);
+    // 行存在（本树里）就以「实时基础库特征」为准：作者>0 且未解锁才算基础库。
+    // 用户已把目录改成符合单元库（无 @作者/无作者）后，即使 libraries.json
+    // 里还残留它的 rel，也不再锁定，避免「永远无法设为节点」。
     final row = _findRow(rows, rel);
-    if (row != null && _lockedBasic(row)) return true;
+    if (row != null) return _lockedBasic(row);
+    // 行不存在（例如被截断/嵌套过深）才回落到注册表 rel 集合。
     return basicRels.contains(n) && !unlocked.contains(n);
   }
 
