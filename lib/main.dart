@@ -23,6 +23,7 @@ import 'deleted_monitor.dart';
 import 'concurrency.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
+import 'decode_plan.dart';
 import 'work_cover.dart';
 import 'media_resize.dart';
 import 'recommend_grid.dart';
@@ -14582,11 +14583,19 @@ class _WorkGridState extends State<WorkGrid> {
   late final bool _ownsScroll = widget.controller == null;
   late final ScrollController _scroll = widget.controller ?? ScrollController();
   int _shown = 0;
+  /// 已经为哪一份作品列表预热过首屏封面（按列表实例判定，避免每帧重复发起）。
+  List<dynamic>? _prefetchedFor;
   @override
   void initState() {
     super.initState();
     _shown = initialGridCount(widget.works.length);
     _scroll.addListener(_maybeLoadMore);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _schedulePrefetch();
   }
 
   @override
@@ -14606,6 +14615,67 @@ class _WorkGridState extends State<WorkGrid> {
       }
     }
     if (_shown > widget.works.length) _shown = widget.works.length;
+    _schedulePrefetch();
+  }
+
+  /// 首屏缩略图预热（0.9.68）：作者主页/收藏夹/搜索/推荐共用这个网格，
+  /// 此前只有基础库页和单元库页会预热，这几页首屏仍会先空白再逐张请求。
+  /// 放到帧后执行，不阻塞首帧；provider 与 `WorkCard` 完全一致
+  /// （同 `withImageWidth` URL + 同 `ResizeImage` 宽度），缓存键一致才命中。
+  void _schedulePrefetch() {
+    if (!mounted) return;
+    final works = widget.works;
+    if (works.isEmpty || identical(_prefetchedFor, works)) return;
+    _prefetchedFor = works;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _prefetchFirstScreen();
+    });
+  }
+
+  void _prefetchFirstScreen() {
+    final works = widget.works;
+    if (works.isEmpty) return;
+    final mq = MediaQuery.of(context);
+    final n = firstScreenThumbCount(
+      viewportWidth: mq.size.width,
+      viewportHeight: mq.size.height,
+      maxCrossAxisExtent: 180,
+      padding: 0,
+      crossSpacing: 2,
+      mainSpacing: 2,
+      aspectRatio: WorkCard.aspect,
+    );
+    if (n <= 0) return;
+    final px = workCardDecodeWidth(mq.devicePixelRatio);
+    // 网格可能跨库（收藏夹/搜索/推荐），headers 按作品各自的库取，
+    // 与 `WorkCard.headers` 一致，缓存键才对得上。
+    final headersOfUrl = <String, Map<String, String>>{};
+    for (final w in works.take(n)) {
+      final lib = _libFor(w);
+      final cover = workCoverUrl(
+        w,
+        lib: lib,
+        urls: WorkCoverUrls.standard(
+          mediaUrl: (path) => cfg.mediaUrl(path, lib: lib),
+          rawUrl: (path) => cfg.u(path, lib: lib).toString(),
+        ),
+      );
+      if (cover.isEmpty) continue;
+      headersOfUrl.putIfAbsent(
+          withImageWidth(cover, kWorkImageWidth), () => cfg.headersFor(lib));
+    }
+    if (headersOfUrl.isEmpty) return;
+    ThumbPrefetch.instance.runWith(
+      headersOfUrl.keys,
+      limit: n,
+      fetch: (u) => loadImage(thumbImageProvider(
+        u,
+        decodeWidth: px,
+        headers: headersOfUrl[u] ?? const <String, String>{},
+        cacheManager: DiziCache.manager,
+      )),
+    );
   }
 
   @override
