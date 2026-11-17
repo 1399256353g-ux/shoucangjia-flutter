@@ -6420,6 +6420,11 @@ class _PlayerPageState extends State<PlayerPage>
   int dropDayLeft = 1;
   int dropWeekLeft = 3;
   int dropTotal = 0;
+  // M12b：全站水滴余额（服务端全局计数，默认每日 5 / 每周 15）。
+  int gDropDayLeft = 5;
+  int gDropWeekLeft = 15;
+  int gDropDayLimit = 5;
+  int gDropWeekLimit = 15;
   // H15：本次打开作品后是否已送过水滴（决定图标是否变蓝）与点击弹跳动效
   bool dropGlow = false;
   late final AnimationController _dropAnim = AnimationController(
@@ -7310,6 +7315,10 @@ class _PlayerPageState extends State<PlayerPage>
       dropDayLeft = _intOf(r['dayLeft'], 1);
       dropWeekLeft = _intOf(r['weekLeft'], 3);
       dropTotal = _intOf(r['total'], 0);
+      gDropDayLeft = _intOf(r['gDayLeft'], gDropDayLeft);
+      gDropWeekLeft = _intOf(r['gWeekLeft'], gDropWeekLeft);
+      gDropDayLimit = _intOf(r['gDayLimit'], 5);
+      gDropWeekLimit = _intOf(r['gWeekLimit'], 15);
     });
   }
 
@@ -7329,6 +7338,14 @@ class _PlayerPageState extends State<PlayerPage>
       _toast('本周小水滴已送完（3/3）');
       return;
     }
+    if (gDropDayLeft <= 0) {
+      _toast('今日全站小水滴已送完（$gDropDayLimit/$gDropDayLimit）');
+      return;
+    }
+    if (gDropWeekLeft <= 0) {
+      _toast('本周全站小水滴已送完（$gDropWeekLimit/$gDropWeekLimit）');
+      return;
+    }
     final before = dropTotal;
     // 先本地 +1 并播放动效，失败再回滚
     setState(() {
@@ -7346,6 +7363,10 @@ class _PlayerPageState extends State<PlayerPage>
         dropDayLeft = _intOf(r['dayLeft'], dropDayLeft);
         dropWeekLeft = _intOf(r['weekLeft'], dropWeekLeft);
         dropTotal = _intOf(r['total'], dropTotal);
+        gDropDayLeft = _intOf(r['gDayLeft'], gDropDayLeft);
+        gDropWeekLeft = _intOf(r['gWeekLeft'], gDropWeekLeft);
+        gDropDayLimit = _intOf(r['gDayLimit'], gDropDayLimit);
+        gDropWeekLimit = _intOf(r['gWeekLimit'], gDropWeekLimit);
       } else {
         dropTotal = before;
         dropGlow = false;
@@ -9101,6 +9122,34 @@ class _PlayerPageState extends State<PlayerPage>
                     swipeEdgeWidth(MediaQuery.of(context).size.width), pad),
                 if (_swipeHint) _swipeHintWidget(pad),
               ],
+              // M13：水滴余额胶囊（顶部居中、半透明；pad.top 已避开 iOS 刘海/灵动岛）
+              Positioned(
+                top: pad.top + 6,
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: chromeOpacity,
+                    duration: Duration(milliseconds: chromeMs),
+                    curve: Curves.easeOut,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '💧 今日 $gDropDayLeft/$gDropDayLimit · 本周 $gDropWeekLeft/$gDropWeekLimit',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.white70),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               Positioned(
                 left: pad.left + 8,
                 top: pad.top + 8,
