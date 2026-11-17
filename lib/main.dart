@@ -7040,6 +7040,11 @@ class _PlayerPageState extends State<PlayerPage>
   // M2：是否由播放页主动锁定过屏幕方向（退出时需恢复系统默认）。
   bool _orientationForced = false;
   bool dragging = false;
+  // owner 2026-11-18：呼出式进度条——常态不可见，触底才在指下放大。
+  bool _scrubActive = false;
+  double? _scrubFrac;
+  bool _scrubThin = false;
+  Timer? _scrubThinTimer;
   // H13：简介在任务栏内展开（不再弹独立窗口）
   bool captionOpen = false;
   bool barHover = false;
@@ -9881,6 +9886,7 @@ class _PlayerPageState extends State<PlayerPage>
     _preloadCache.clear();
     pc.dispose();
     focus.dispose();
+    _scrubThinTimer?.cancel();
     super.dispose();
   }
 
@@ -10827,6 +10833,9 @@ class _PlayerPageState extends State<PlayerPage>
     // owner 2026-11-18：只有「单张图的图文」整层隐藏（计数也不显示）；
     // 多图图文仍要分段进度条。视频不受影响。
     if (!isV && pics.length <= 1) return const SizedBox.shrink();
+    // 非全屏视频：呼出式进度条（贴任务栏上缘、极细、不操作时不可见）。
+    // 全屏保留旧进度条，避免破坏沉浸态已有的呼出/隐藏逻辑。
+    if (isV && !fs) return _scrubOverlay(progress: progress);
     final pad = MediaQuery.paddingOf(context);
     final opacity = ChromeFade.opacity(
         uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
@@ -10914,6 +10923,74 @@ class _PlayerPageState extends State<PlayerPage>
   /// P0 §3：非全屏（[spec]）按下即暂停；常态 2dp/白 60%/圆角 1dp，
   /// 按住或拖动 4dp/全白/圆角 2dp；拖动显示 mm:ss 气泡；松手恢复（仅原本在播）。
   /// 全屏（spec=false）保持旧视觉与旧拖动语义。
+  /// 呼出式进度条浮层：底部 28dp 热区，整条宽度可拖。
+  Widget _scrubOverlay({required double progress}) {
+    final keepThin =
+        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    final active = _scrubActive;
+    final frac = active ? (_scrubFrac ?? progress) : progress;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: kScrubHotZoneHeight,
+      child: LayoutBuilder(builder: (_, c) {
+        final width = c.maxWidth;
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (e) => _scrubStart(e.localPosition, width),
+          onPointerMove: (e) => _scrubMove(e.localPosition, width),
+          onPointerUp: (_) => _scrubEnd(),
+          onPointerCancel: (_) => _scrubEnd(),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: ScrubBar(
+              fraction: frac,
+              active: active,
+              visible: active || _scrubThin || keepThin,
+              timeLabel: active && dur.inMilliseconds > 0
+                  ? '${fmt(dur * frac)} / ${fmt(dur)}'
+                  : '',
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  void _scrubStart(Offset p, double width) {
+    if (width <= 0) return;
+    _scrubThinTimer?.cancel();
+    setState(() {
+      _scrubActive = true;
+      _scrubFrac = (p.dx / width).clamp(0.0, 1.0);
+    });
+  }
+
+  void _scrubMove(Offset p, double width) {
+    if (!_scrubActive || width <= 0) return;
+    setState(() => _scrubFrac = (p.dx / width).clamp(0.0, 1.0));
+  }
+
+  /// 松手才跳转：拖动过程不暂停、不 seek，避免解码器被反复拖动。
+  void _scrubEnd() {
+    if (!_scrubActive) return;
+    final f = _scrubFrac;
+    if (f != null && dur.inMilliseconds > 0) {
+      player.seek(dur * f);
+    }
+    setState(() {
+      _scrubActive = false;
+      _scrubFrac = null;
+      _scrubThin = true;
+    });
+    _scrubThinTimer?.cancel();
+    _scrubThinTimer = Timer(const Duration(milliseconds: kScrubThinHoldMs), () {
+      if (!mounted) return;
+      setState(() => _scrubThin = false);
+    });
+  }
+
   Widget _videoProgressBar({
     required double progress,
     required double width,
@@ -11212,11 +11289,14 @@ class _PlayerPageState extends State<PlayerPage>
     // 页内浮层坐标：舞台已让掉任务栏（stageInset），这里不能再加一次。
     // 单图图文没有进度层，信息区直接贴到舞台底部上方 10dp，不留空位。
     final noProgressLayer = !isV && pics.length <= 1;
-    final infoBottomInPage = progressBottom +
-        (noProgressLayer
-            ? 0
-            : stageProgressOverlayHeight(hasChapter: chapterCount > 1)) +
-        10;
+    // 视频非全屏只有 2.5dp 细条，排版不能让出旧的 30dp 时间行高度。
+    final progressLayerH = noProgressLayer
+        ? 0.0
+        : (isV && !fs
+            ? kScrubThinHeight
+            : stageProgressOverlayHeight(hasChapter: chapterCount > 1)
+                .toDouble());
+    final infoBottomInPage = progressBottom + progressLayerH + 10;
     if (!broken) _scheduleTaskbarMeasure();
     // 邻页缓存只保留当前 ±2，避免滑动久后持有过多封面。
     _neighborPages.removeWhere((k, _) {

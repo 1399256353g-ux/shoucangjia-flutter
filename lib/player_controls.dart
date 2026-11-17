@@ -1029,3 +1029,115 @@ String mediaSaveFileName({
   if (name.length > 80) name = name.substring(0, 80);
   return name + mediaSaveExtension(url: url, video: video);
 }
+
+/// 呼出式进度条（owner 2026-11-18）。
+///
+/// 规格：紧跟任务栏上缘、极细；不操作时完全不可见；手指触到底部热区才在
+/// 指下放大并可直接拖动；拖动过程**不暂停**视频，只显示预览时间；松手按
+/// 所选位置跳转，随后缩回细条，3 秒后消失。Windows 端常驻细条。
+const double kScrubHotZoneHeight = 28;
+const double kScrubThinHeight = 2.5;
+const double kScrubActiveHeight = 10;
+const double kScrubKnobRadius = 6;
+const double kScrubBubbleGap = 12;
+const int kScrubThinHoldMs = 3000;
+const int kScrubFadeMs = 180;
+
+const Color kScrubTrackColor = Color(0x40FFFFFF);
+const Color kScrubPlayedColor = Color(0xFFFFFFFF);
+
+/// 滑块中心 x：按比例落在轨道内，并夹住半径，避免半个圆出界。
+double scrubKnobX({
+  required double trackWidth,
+  required double fraction,
+  double knobRadius = kScrubKnobRadius,
+}) {
+  if (trackWidth <= 0) return 0;
+  final f = fraction.isNaN ? 0.0 : fraction.clamp(0.0, 1.0);
+  final r = knobRadius.clamp(0.0, trackWidth / 2);
+  return (trackWidth * f).clamp(r, trackWidth - r);
+}
+
+class ScrubBar extends StatelessWidget {
+  const ScrubBar({
+    super.key,
+    required this.fraction,
+    required this.active,
+    required this.visible,
+    this.timeLabel = '',
+  });
+
+  final double fraction;
+  final bool active;
+  final bool visible;
+  final String timeLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = active ? kScrubActiveHeight : kScrubThinHeight;
+    return AnimatedOpacity(
+      opacity: visible ? 1 : 0,
+      duration: const Duration(milliseconds: kScrubFadeMs),
+      curve: Curves.easeOut,
+      child: SizedBox(
+        height: kScrubHotZoneHeight,
+        child: LayoutBuilder(builder: (_, c) {
+          final w = c.maxWidth;
+          final x = scrubKnobX(trackWidth: w, fraction: fraction);
+          return Stack(clipBehavior: Clip.none, children: [
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                height: h,
+                decoration: const BoxDecoration(color: kScrubTrackColor),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              width: x,
+              bottom: 0,
+              child: Container(
+                height: h,
+                decoration: const BoxDecoration(color: kScrubPlayedColor),
+              ),
+            ),
+            if (active) ...[
+              Positioned(
+                left: x - kScrubKnobRadius,
+                bottom: h / 2 - kScrubKnobRadius,
+                child: Container(
+                  width: kScrubKnobRadius * 2,
+                  height: kScrubKnobRadius * 2,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+              if (timeLabel.isNotEmpty)
+                Positioned(
+                  left: (x - 58).clamp(0.0, (w - 116).clamp(0.0, double.infinity)),
+                  bottom: h + kScrubBubbleGap,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: kSeekBubbleColor,
+                      borderRadius: BorderRadius.circular(kSeekBubbleRadius),
+                    ),
+                    child: Text(timeLabel,
+                        style: kSeekBubbleTextStyle
+                            .copyWith(fontFeatures: const [
+                          FontFeature.tabularFigures()
+                        ])),
+                  ),
+                ),
+            ],
+          ]);
+        }),
+      ),
+    );
+  }
+}
