@@ -5,6 +5,8 @@
 /// 这里把可测试的几何与排序抽出来，页面只缓存一次排序结果即可。
 library;
 
+import 'decode_plan.dart';
+
 /// 作者网格的布局几何。
 class AuthorGridGeometry {
   /// 每行可放多少个作者卡片（至少 1 个）。
@@ -69,13 +71,10 @@ int avatarDecodeWidth({
   required double displaySize,
   required double devicePixelRatio,
   int maxWidth = 384,
-}) {
-  if (displaySize <= 0) return 0;
-  final dpr = devicePixelRatio <= 0 ? 1.0 : devicePixelRatio;
-  final px = (displaySize * dpr).ceil();
-  final cap = maxWidth <= 0 ? 1 : maxWidth;
-  return px < 1 ? 1 : (px > cap ? cap : px);
-}
+}) =>
+    // 与作品卡/库卡片共用同一条「显示尺寸 × 像素比」规则，避免各页各算一套。
+    decodeWidthForDisplay(displaySize, devicePixelRatio,
+        maxWidth: maxWidth <= 0 ? 1 : maxWidth);
 
 /// 按 [metric] 降序排序，同分时按 [works] 降序，再按 [name] 升序保证稳定。
 ///

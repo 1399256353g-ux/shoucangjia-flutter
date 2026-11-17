@@ -5,12 +5,15 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'cover_cache.dart';
+import 'decode_plan.dart';
 import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_tree.dart';
 import 'media_priority.dart';
 import 'media_resize.dart';
+import 'scroll_decode.dart';
+import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'work_card.dart';
 import 'work_forms.dart';
@@ -514,7 +517,9 @@ class _BasicLibPageState extends State<BasicLibPage>
   }
 
   Widget _worksGrid(List<dynamic> filtered) {
-    return GridView.builder(
+    // 滚动时收紧缩略图预取并发（默认 4 → 2），停下立刻恢复。
+    return ScrollDecodeScope(
+      child: GridView.builder(
       controller: _worksScroll,
       padding: const EdgeInsets.all(10),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -543,6 +548,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               widget.onPlay == null ? null : () => widget.onPlay!(filtered, i),
         );
       },
+      ),
     );
   }
 
@@ -569,7 +575,8 @@ class _BasicLibPageState extends State<BasicLibPage>
       aspectRatio: 0.72,
     );
     if (n <= 0) return;
-    final px = (220 * mq.devicePixelRatio).round();
+    // 与 `WorkCard` 用同一个解码宽度（decode_plan），缓存键一致才能命中。
+    final px = workCardDecodeWidth(mq.devicePixelRatio);
     final headers = widget.headersOf(widget.basic.id);
     final urls = <String>[];
     for (final w in filtered.take(n)) {
@@ -579,14 +586,11 @@ class _BasicLibPageState extends State<BasicLibPage>
     ThumbPrefetch.instance.run(
       urls,
       limit: n,
-      provider: (u) => ResizeImage.resizeIfNeeded(
-        px,
-        null,
-        CachedNetworkImageProvider(
-          u,
-          headers: headers,
-          cacheManager: DiziCache.manager,
-        ),
+      provider: (u) => thumbImageProvider(
+        u,
+        decodeWidth: px,
+        headers: headers,
+        cacheManager: DiziCache.manager,
       ),
     );
   }

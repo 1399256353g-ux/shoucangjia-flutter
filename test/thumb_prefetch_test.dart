@@ -29,8 +29,10 @@ void main() {
       );
       expect(n, 12);
       expect(firstScreenThumbCount(viewportWidth: 0, viewportHeight: 800), 0);
-      expect(firstScreenThumbCount(
-        viewportWidth: 400, viewportHeight: 800, maxItems: 0), 0);
+      expect(
+          firstScreenThumbCount(
+              viewportWidth: 400, viewportHeight: 800, maxItems: 0),
+          0);
     });
 
     test('窄屏至少 1 张，参数异常不崩', () {
@@ -101,6 +103,47 @@ void main() {
       expect(p.stats.requested, 4);
       expect(p.stats.loaded, 4);
       expect(p.stats.pending, 0);
+    });
+
+    test('滚动期间收紧并发（默认 4 → 2），停下后恢复', () async {
+      final p = ThumbPrefetch(maxConcurrent: 4, scrollMaxConcurrent: 2);
+      expect(p.effectiveLimit, 4);
+      var active = 0;
+      var peakScrolling = 0;
+      Future<bool> fetch(String u) async {
+        active++;
+        if (p.scrolling && active > peakScrolling) peakScrolling = active;
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        active--;
+        return true;
+      }
+
+      p.setScrolling(true);
+      expect(p.effectiveLimit, 2);
+      final urls = List<String>.generate(8, (i) => 's$i');
+      expect(await p.runWith(urls, fetch: fetch), 8);
+      expect(peakScrolling, lessThanOrEqualTo(2));
+      expect(p.stats.loaded, 8);
+
+      p.setScrolling(false);
+      expect(p.effectiveLimit, 4);
+    });
+
+    test('首屏预热（未滚动）仍按常规并发 4', () async {
+      final p = ThumbPrefetch(maxConcurrent: 4);
+      var active = 0;
+      var peak = 0;
+      Future<bool> fetch(String u) async {
+        active++;
+        if (active > peak) peak = active;
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+        active--;
+        return true;
+      }
+
+      final urls = List<String>.generate(10, (i) => 'f$i');
+      await p.runWith(urls, fetch: fetch);
+      expect(peak, 4);
     });
 
     test('异常按失败计数，不抛出', () async {

@@ -2,12 +2,15 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'cover_cache.dart';
+import 'decode_plan.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'media_resize.dart';
 import 'home_action.dart';
+import 'scroll_decode.dart';
 import 'star_store.dart';
+import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
@@ -271,11 +274,14 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
       headers[url] = unitHeadersOf(u, widget.headersOf);
     }
     if (urls.isEmpty) return;
+    // 与 `_UnitCoverFill` 共用同一个解码宽度，缓存键一致才命中。
+    final px = libCardDecodeWidth(mq.devicePixelRatio);
     ThumbPrefetch.instance.run(
       urls,
       limit: n,
-      provider: (u) => CachedNetworkImageProvider(
+      provider: (u) => thumbImageProvider(
         u,
+        decodeWidth: px,
         headers: headers[u] ?? const <String, String>{},
         cacheManager: DiziCache.manager,
       ),
@@ -446,11 +452,14 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
       headers[url] = unitHeadersOf(u, widget.headersOf);
     }
     if (urls.isEmpty) return;
+    // 与 `_UnitCoverFill` 共用同一个解码宽度，缓存键一致才命中。
+    final px = libCardDecodeWidth(mq.devicePixelRatio);
     ThumbPrefetch.instance.run(
       urls,
       limit: n,
-      provider: (u) => CachedNetworkImageProvider(
+      provider: (u) => thumbImageProvider(
         u,
+        decodeWidth: px,
         headers: headers[u] ?? const <String, String>{},
         cacheManager: DiziCache.manager,
       ),
@@ -477,7 +486,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                 ),
               ),
             )
-          : GridView.builder(
+          : ScrollDecodeScope(
+              child: GridView.builder(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 260,
@@ -497,6 +507,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                   onTap: () => widget.onOpenUnit(u),
                 );
               },
+              ),
             ),
     );
   }
@@ -646,6 +657,10 @@ class _UnitCoverFill extends StatelessWidget {
       // 避免把爬虫/自定义封面的原始大图整张传给客户端。
       imageUrl: withImageWidth(url, kCardImageWidth),
       httpHeaders: headers,
+      // 0.9.44：解码宽度与首屏预热共用 `libCardDecodeWidth`，同一张封面
+      // 不会因解码宽度不同而二次解码。
+      memCacheWidth:
+          libCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
       fit: BoxFit.cover,
       fadeInDuration: Duration.zero,
       errorWidget: (_, __, ___) => fallback,
@@ -810,11 +825,14 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
       }
     }
     if (urls.isEmpty) return;
+    // 与 `_UnitCoverFill` 共用同一个解码宽度，缓存键一致才命中。
+    final px = libCardDecodeWidth(mq.devicePixelRatio);
     ThumbPrefetch.instance.run(
       urls,
       limit: urls.length,
-      provider: (u) => CachedNetworkImageProvider(
+      provider: (u) => thumbImageProvider(
         u,
+        decodeWidth: px,
         headers: headers[u] ?? const <String, String>{},
         cacheManager: DiziCache.manager,
       ),
@@ -869,7 +887,8 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
             onPressed: () => onConfigureUnit(unit),
           ),
       ]),
-      body: ListView(
+      body: ScrollDecodeScope(
+        child: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
           // 进入单元库后不再重复显示自身卡片，直接从下级单元库/基础库开始。
@@ -934,6 +953,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
             ),
           ],
         ],
+        ),
       ),
     );
   }

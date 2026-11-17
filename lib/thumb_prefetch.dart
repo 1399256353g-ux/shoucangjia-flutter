@@ -12,6 +12,8 @@ import 'dart:collection';
 
 import 'package:flutter/widgets.dart';
 
+import 'decode_plan.dart';
+
 /// 首屏需要预热的封面张数。
 ///
 /// [viewportWidth] / [viewportHeight] 为页面可用尺寸；网格参数与
@@ -81,24 +83,44 @@ class ThumbPrefetchStats {
 
 /// 全局预热器：只有一个实例，多页共用去重表与统计。
 class ThumbPrefetch extends ChangeNotifier {
-  ThumbPrefetch({this.maxConcurrent = 4, this.seenLimit = 600})
-      : assert(maxConcurrent > 0),
+  ThumbPrefetch({
+    this.maxConcurrent = 4,
+    this.scrollMaxConcurrent = 2,
+    this.seenLimit = 600,
+  })  : assert(maxConcurrent > 0),
+        assert(scrollMaxConcurrent > 0),
         assert(seenLimit > 0);
 
   static final ThumbPrefetch instance = ThumbPrefetch();
 
   final int maxConcurrent;
+
+  /// 滚动/惯性期间的并发上限（保守值，停下后恢复 [maxConcurrent]）。
+  final int scrollMaxConcurrent;
   final int seenLimit;
 
   final ThumbPrefetchStats stats = ThumbPrefetchStats();
   final Set<String> _seen = <String>{};
   final Queue<String> _seenOrder = Queue<String>();
+  late final DecodeBudget budget = DecodeBudget(
+    limit: maxConcurrent,
+    scrollLimit: scrollMaxConcurrent,
+  );
   int _active = 0;
 
   /// 正在预热的张数（诊断用）。
   int get active => _active;
 
   bool get busy => _active > 0;
+
+  /// 当前是否处于滚动收紧状态（诊断/单测用）。
+  bool get scrolling => budget.scrolling;
+
+  /// 当前实际生效的并发上限。
+  int get effectiveLimit => budget.effectiveLimit;
+
+  /// 由 [ScrollDecodeScope] 上报滚动状态。
+  void setScrolling(bool value) => budget.setScrolling(value);
 
   /// 清掉去重表与统计（仅内存，用于诊断页手动重置）。
   void reset() {
@@ -150,32 +172,29 @@ class ThumbPrefetch extends ChangeNotifier {
     stats.lastRun = DateTime.now();
     notifyListeners();
 
-    var next = 0;
-    final workers = maxConcurrent < todo.length ? maxConcurrent : todo.length;
-    Future<void> worker() async {
-      while (true) {
-        final i = next++;
-        if (i >= todo.length) return;
-        _active++;
-        var ok = false;
-        try {
-          ok = await fetch(todo[i]);
-        } catch (_) {
-          ok = false;
-        } finally {
-          _active--;
-        }
-        if (ok) {
-          stats.loaded++;
-        } else {
-          stats.failed++;
-          // 失败不留在去重表里，下次进页面还能再试。
-          _forget(todo[i]);
-        }
+    Future<void> one(String url) async {
+      _active++;
+      var ok = false;
+      try {
+        ok = await fetch(url);
+      } catch (_) {
+        ok = false;
+      } finally {
+        _active--;
+      }
+      if (ok) {
+        stats.loaded++;
+      } else {
+        stats.failed++;
+        // 失败不留在去重表里，下次进页面还能再试。
+        _forget(url);
       }
     }
 
-    await Future.wait(<Future<void>>[for (var i = 0; i < workers; i++) worker()]);
+    // 并发由 [budget] 统一把关：滚动期间自动收紧，不打断在途请求。
+    await Future.wait(<Future<void>>[
+      for (final url in todo) budget.run(() => one(url)),
+    ]);
     notifyListeners();
     return todo.length;
   }

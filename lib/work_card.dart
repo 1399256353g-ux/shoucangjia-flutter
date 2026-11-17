@@ -1,4 +1,5 @@
 import 'cover_cache.dart';
+import 'decode_plan.dart';
 import 'media_resize.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -74,9 +75,10 @@ class _WorkCardState extends State<WorkCard> {
               // 不再整张原图拉下来再解码（「封面加载慢」的主要来源）。
               imageUrl: withImageWidth(w.coverUrl, kWorkImageWidth),
               httpHeaders: w.headers,
-              // 卡片最大约 180 逻辑像素，按 220×DPR 解码足够清晰且省内存。
+              // 卡片最大约 220 逻辑像素：解码宽度全站统一（见 decode_plan），
+              // 列表卡和预热用同一个值，缓存键一致 → 命中后不再二次解码。
               memCacheWidth:
-                  (220 * MediaQuery.devicePixelRatioOf(context)).round(),
+                  workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
               fit: BoxFit.cover,
               fadeInDuration: Duration.zero,
               errorWidget: (_, __, ___) => Container(color: Colors.black26),

@@ -58,6 +58,7 @@ import 'playback_flow.dart';
 import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'text_fit.dart';
+import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
 import 'ui_fade.dart';
@@ -66,6 +67,7 @@ import 'playback_menu.dart';
 import 'player_controls.dart';
 import 'preload_policy.dart';
 import 'preload_plan.dart';
+import 'video_prefetch.dart';
 import 'swipe_control.dart';
 import 'swipe_physics.dart';
 import 'stage_tap.dart';
@@ -4692,14 +4694,11 @@ class _RankPageState extends State<RankPage> {
     ThumbPrefetch.instance.run(
       urls,
       limit: n,
-      provider: (u) => ResizeImage.resizeIfNeeded(
-        px,
-        null,
-        CachedNetworkImageProvider(
-          u,
-          headers: headers[u] ?? cfg.headers,
-          cacheManager: DiziCache.manager,
-        ),
+      provider: (u) => thumbImageProvider(
+        u,
+        decodeWidth: px,
+        headers: headers[u] ?? cfg.headers,
+        cacheManager: DiziCache.manager,
       ),
     );
   }
@@ -5910,14 +5909,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     ThumbPrefetch.instance.run(
       urls,
       limit: n,
-      provider: (u) => ResizeImage.resizeIfNeeded(
-        px,
-        null,
-        CachedNetworkImageProvider(
-          u,
-          headers: headers[u] ?? cfg.headers,
-          cacheManager: DiziCache.manager,
-        ),
+      provider: (u) => thumbImageProvider(
+        u,
+        decodeWidth: px,
+        headers: headers[u] ?? cfg.headers,
+        cacheManager: DiziCache.manager,
       ),
     );
   }
@@ -6230,6 +6226,9 @@ class _PlayerPageState extends State<PlayerPage>
   Timer? _preloadTimer;
   int _preloadGen = 0;
   bool _preloadRunning = false;
+  // 线③：相邻视频 HTTP Range 预取（只预热 NAS 页缓存，不占播放器槽位）
+  final VideoPrefetcher _videoPrefetch = VideoPrefetcher();
+  Timer? _videoPrefetchTimer;
   // 最近一次滑动/切条方向：1 向下，-1 向上，0 未知
   int _preloadDir = 0;
   final List<StreamSubscription> _playerSubs = <StreamSubscription>[];
@@ -6743,6 +6742,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (!mounted) return;
     _loadTimeout?.cancel();
     _loadTimeout = null;
+    _cancelVideoPrefetch();
     _slowBufferTimer?.cancel();
     _slowBufferTimer = null;
     try {
@@ -6863,6 +6863,51 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  /// 线③：起播稳定后，用 HTTP Range 轻量预热前后相邻视频（最多 2 条）。
+  /// 不做解码、不开播放器；弱网/缓冲中直接跳过。
+  void _scheduleVideoPrefetch() {
+    _cancelVideoPrefetch();
+    if (widget.works.length <= 1) return;
+    final my = _openToken;
+    _videoPrefetchTimer = Timer(videoPrefetchDelay, () {
+      if (!mounted || my != _openToken) return;
+      final w = _workAt(cur);
+      if (!shouldRunVideoPrefetch(
+        isVideo: w['t'] == 'v',
+        buffering: _buffering,
+        slowBuffer: _slowBuffer,
+        loading: loading,
+        enabled: true,
+        count: widget.works.length,
+      )) {
+        return;
+      }
+      final targets = videoPrefetchTargets(
+        index: cur,
+        count: widget.works.length,
+        isVideo: (i) => _workAt(i)['t'] == 'v',
+        mediaPath: (i) => preloadMediaPath(_workAt(i)) ?? '',
+        direction: _preloadDir,
+      );
+      if (targets.isEmpty) return;
+      _videoPrefetch.start(targets.map((t) {
+        final tw = _workAt(t.index);
+        final lib = _libFor(tw);
+        return VideoPrefetchTask(
+          url: cfg.mediaUrl(t.path, lib: lib),
+          headers: cfg.headersFor(lib),
+          key: '$lib|${tw['id'] ?? ''}|${t.path}',
+        );
+      }));
+    });
+  }
+
+  void _cancelVideoPrefetch() {
+    _videoPrefetchTimer?.cancel();
+    _videoPrefetchTimer = null;
+    _videoPrefetch.cancel();
+  }
+
   int get _preloadByteLimit => AppSettings.preloadMemoryMb * 1024 * 1024;
 
   /// 为预加载挑一个槽位：优先淘汰最远的缓存条目并复用其槽位，
@@ -6974,6 +7019,8 @@ class _PlayerPageState extends State<PlayerPage>
     if (widget.works.isEmpty || i < 0 || i >= widget.works.length) return;
     // 切条前先把上一条的进度落盘
     if (saveProgress) _saveWatchProgress(force: true);
+    // 线③：切条/重开时立刻取消上一轮的相邻视频预取
+    _cancelVideoPrefetch();
     // J5：切到其他作品时回到第一集
     if (i != cur) _chapter = 0;
     final w = _workAt(i);
@@ -6983,6 +7030,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 只切到该条并展示占位，PageView 仍可继续上下滑。
     if (!workPlayable(w)) {
       _cancelPreload();
+      _cancelVideoPrefetch();
       autoTimer?.cancel();
       retryTimer?.cancel();
       playGuard?.cancel();
@@ -7218,6 +7266,8 @@ class _PlayerPageState extends State<PlayerPage>
     if (w['t'] != 'v' && !paused) startAuto();
     // G18：起播稳定后再预缓冲下一条，避免和当前条抢带宽
     _schedulePreload();
+    // 线③：同时轻量预热相邻视频头部（HTTP Range，不占播放器）
+    _scheduleVideoPrefetch();
   }
 
   Future<void> _refreshDrop(String id, int token, String lib) async {
@@ -8062,6 +8112,8 @@ class _PlayerPageState extends State<PlayerPage>
     _swipeHintTimer?.cancel();
     _preloadTimer?.cancel();
     _preloadGen++;
+    _cancelVideoPrefetch();
+    _videoPrefetch.dispose();
     // M9：播放页退出时清掉未完成的作者页拖拽控制器
     _authorDrag?.dispose();
     _authorDrag = null;
