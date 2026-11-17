@@ -8490,30 +8490,7 @@ class _PlayerPageState extends State<PlayerPage>
   bool _isLiked(dynamic w) => likedKeys.contains(_likeKeyFor(w));
 
   // P1：非全屏互动栏的收藏标记（本机内存态，暂不写服务端）。
-  final Set<String> _favKeys = <String>{};
 
-  /// P1 §1：右侧互动栏头像。无头像时退回默认人像。
-  Widget _railAvatar(dynamic w) {
-    final av = avatarFor(w);
-    if (av.isEmpty) {
-      return const CircleAvatar(
-          radius: kRailAvatarSize / 2, child: Icon(Icons.person));
-    }
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    return CachedNetworkImage(
-      cacheManager: DiziCache.manager,
-      imageUrl: withImageWidth(
-          cfg.mediaUrl(av, lib: _avatarLibFor(av)), kAvatarImageWidth),
-      httpHeaders: cfg.headersFor(_avatarLibFor(av)),
-      width: kRailAvatarSize,
-      height: kRailAvatarSize,
-      memCacheWidth: (kRailAvatarSize * dpr).round(),
-      fadeInDuration: Duration.zero,
-      fit: BoxFit.cover,
-      errorWidget: (_, __, ___) =>
-          const CircleAvatar(radius: kRailAvatarSize / 2, child: Icon(Icons.person)),
-    );
-  }
 
   /// P1 §2：文案优先用作品简介，没有简介用标题；都为空则不显示。
   String _infoCaptionFor(dynamic w) {
@@ -8522,32 +8499,7 @@ class _PlayerPageState extends State<PlayerPage>
     return '${w['ti'] ?? ''}'.trim();
   }
 
-  /// P1 §2：音乐行没有服务端元数据，用「作者原声」表达（抖音同款语义）。
-  String _infoMusicFor(dynamic w) {
-    final a = '${w['a'] ?? ''}'.trim();
-    return a.isEmpty ? '' : '$a 的原声';
-  }
 
-  void _toggleFavorite(dynamic w) {
-    final key = _likeKeyFor(w);
-    if (key.isEmpty) return;
-    setState(() {
-      if (!_favKeys.remove(key)) _favKeys.add(key);
-    });
-  }
-
-  /// P1 §1：分享兑底——把当前媒体地址复制到剪贴板。
-  Future<void> _shareWork(dynamic w) async {
-    final m = w['m'];
-    final first = (m is List && m.isNotEmpty) ? '${m.first}' : '';
-    final link = first.isEmpty ? '' : cfg.mediaUrl(first, lib: _libFor(w));
-    if (link.isEmpty) {
-      _toast('暂无可分享的链接');
-      return;
-    }
-    await Clipboard.setData(ClipboardData(text: link));
-    _toast('链接已复制');
-  }
 
   // P1b §8：非全屏舞台长按菜单（500ms、位移 ≤12px、不暂停）。
   // 全屏分支不进入以下逻辑。
@@ -8720,27 +8672,6 @@ class _PlayerPageState extends State<PlayerPage>
     if (_commentDragging || !_commentAnim.isAnimating) return _commentFraction;
     final t = Curves.easeOut.transform(_commentAnim.value);
     return _commentAnimFrom + (_commentAnimTo - _commentAnimFrom) * t;
-  }
-
-  void _openComments(dynamic w) {
-    if (_commentVisible) return;
-    _cancelPendingSingleTap();
-    _lpTimer?.cancel();
-    _lpTracker.cancel();
-    _fadeTimer?.cancel();
-    _fadeGen++;
-    try {
-      player.setVolume(0);
-    } catch (_) {}
-    setState(() {
-      _commentVisible = true;
-      _commentFraction = kCommentPanelInitialFraction;
-      _commentAnimFrom = kCommentPanelClosedFraction;
-      _commentAnimTo = kCommentPanelInitialFraction;
-    });
-    _commentAnim.forward(from: 0);
-    // P2：评论面板打开期间不进入沉浸。
-    _scheduleImmersive();
   }
 
   void _animateCommentTo(double target) {
@@ -9632,7 +9563,10 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// P2 §12：当前是否允许进入沉浸——全屏、翻页、面板、拖动、
   /// 拖进度条任一成立时都不允许。
-  bool _immersiveEligible() => ImmersivePolicy.eligible(
+  bool _immersiveEligible() {
+    // owner 2026-11-18：非全屏的头像/简介必须常驻，不允许过几秒自动淡出。
+    if (!fs) return false;
+    return ImmersivePolicy.eligible(
         fullscreen: fs,
         uiVisible: ui,
         pageSwiping: _pageSwiping,
@@ -9640,6 +9574,7 @@ class _PlayerPageState extends State<PlayerPage>
         dragging: dragging,
         seeking: _seeking,
       );
+  }
 
   /// P2 §12：重新排定 3 秒无操作计时；不允许时立即退出沉浸。
   void _scheduleImmersive() {
@@ -9919,14 +9854,18 @@ class _PlayerPageState extends State<PlayerPage>
     required double railOpacity,
     required int railMs,
   }) {
+    // 全屏时任务栏是半透明浮层（占 _taskbarH），信息必须整段让开，
+    // 否则会与任务栏重叠。
+    final overlayBottom = fs
+        ? (_taskbarH > 0 ? _taskbarH : 56 + pad.bottom) + 12
+        : bottom;
     return [
       // P1 §2：非全屏左侧信息区走独立的抖音式面板；全屏保留旧信息行。
-      if (fs)
+      if (!broken)
       Positioned(
         left: pad.left + 14,
         right: pad.right + 80,
-        // T：让位给页内舞台底部的进度层（进度条已随页滑动到这里）。
-        bottom: bottom,
+        bottom: overlayBottom,
         child: IgnorePointer(
           ignoring: !ui,
           child: AnimatedOpacity(
@@ -10129,58 +10068,6 @@ class _PlayerPageState extends State<PlayerPage>
           ),
         ),
       ),
-      // P1 §1/§2：非全屏右侧互动栏 + 左侧信息区。
-      // 两者共用 infoBottom 基线（已让开页内进度层），底部距任务栏 12dp。
-      if (!fs && !broken) ...[
-        Positioned(
-          right: pad.right + kRailRightMargin,
-          bottom: bottom,
-          child: IgnorePointer(
-            // P2：沉浸淡出后不再接收点击，点到的是画面（抬手恢复）。
-            ignoring: !ui || immersiveFade,
-            child: AnimatedOpacity(
-              opacity: railOpacity,
-              duration: Duration(milliseconds: railMs),
-              curve: Curves.easeOut,
-              child: PlayerInteractionRail(
-                avatar: _railAvatar(w),
-                liked: _isLiked(w),
-                favorited: _favKeys.contains(_likeKeyFor(w)),
-                likeCount: _isLiked(w) ? 1 : 0,
-                commentCount: 0,
-                favoriteCount:
-                    _favKeys.contains(_likeKeyFor(w)) ? 1 : 0,
-                onLike: () => _setLiked(w, !_isLiked(w)),
-                onComment: () => _openComments(w),
-                onFavorite: () => _toggleFavorite(w),
-                onShare: () => _shareWork(w),
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          left: pad.left + kInfoLeftMargin,
-          right: pad.right + kRailReservedWidth,
-          bottom: bottom,
-          child: IgnorePointer(
-            ignoring: !ui || immersiveFade,
-            child: AnimatedOpacity(
-              opacity: railOpacity,
-              duration: Duration(milliseconds: railMs),
-              curve: Curves.easeOut,
-              child: PlayerInfoPanel(
-                author: '${w['a'] ?? ''}',
-                caption: _infoCaptionFor(w),
-                music: _infoMusicFor(w),
-                maxWidth: infoAreaMaxWidth(viewSize.width),
-                expanded: captionOpen,
-                onToggleExpand: toggleCaption,
-                onAuthorTap: openAuthor,
-              ),
-            ),
-          ),
-        ),
-      ],
     ];
   }
 
@@ -10835,7 +10722,11 @@ class _PlayerPageState extends State<PlayerPage>
     if (!isV && pics.length <= 1) return const SizedBox.shrink();
     // 非全屏视频：呼出式进度条（贴任务栏上缘、极细、不操作时不可见）。
     // 全屏保留旧进度条，避免破坏沉浸态已有的呼出/隐藏逻辑。
-    if (isV && !fs) return _scrubOverlay(progress: progress);
+    if (isV) {
+      // 全屏时任务栏是浮层，进度条贴它的上缘，而不是屏幕最底。
+      return _scrubOverlay(
+          progress: progress, lift: fs ? _taskbarH : 0.0);
+    }
     final pad = MediaQuery.paddingOf(context);
     final opacity = ChromeFade.opacity(
         uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
@@ -10924,7 +10815,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 按住或拖动 4dp/全白/圆角 2dp；拖动显示 mm:ss 气泡；松手恢复（仅原本在播）。
   /// 全屏（spec=false）保持旧视觉与旧拖动语义。
   /// 呼出式进度条浮层：底部 28dp 热区，整条宽度可拖。
-  Widget _scrubOverlay({required double progress}) {
+  Widget _scrubOverlay({required double progress, double lift = 0}) {
     final keepThin =
         Platform.isWindows || Platform.isLinux || Platform.isMacOS;
     final active = _scrubActive;
@@ -10932,7 +10823,7 @@ class _PlayerPageState extends State<PlayerPage>
     return Positioned(
       left: 0,
       right: 0,
-      bottom: 0,
+      bottom: lift,
       height: kScrubHotZoneHeight,
       child: LayoutBuilder(builder: (_, c) {
         final width = c.maxWidth;
