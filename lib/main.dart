@@ -11168,10 +11168,9 @@ class _WorkGridState extends State<WorkGrid> {
 
   @override
   Widget build(BuildContext context) {
-    // G10：监听本地观看记录，完成后角标与进度条自动刷新
-    return ValueListenableBuilder<int>(
-        valueListenable: WatchProgressStore.revision,
-        builder: (context, _, __) => _buildGrid(context));
+    // G10：观看记录由每张卡片的 `_WatchProgressLayer` 局部监听（work_card.dart），
+    // 进度 tick 不再重建整个网格与全部卡片。
+    return _buildGrid(context);
   }
 
   Widget _buildGrid(BuildContext context) {
@@ -11193,8 +11192,6 @@ class _WorkGridState extends State<WorkGrid> {
       itemBuilder: (_, i) {
         final w = works[i];
         final lib = _libFor(w);
-        final wp =
-            WatchProgressStore.of(lib, '${(w is Map ? w['id'] : null) ?? ''}');
         // 封面统一走 work_cover：th → 图文首图 → 视频抽帧（带版本参数避开旧缓存）
         final cover = workCoverUrl(
           w,
@@ -11211,8 +11208,8 @@ class _WorkGridState extends State<WorkGrid> {
           coverUrl: cover,
           headers: cfg.headersFor(_libFor(w)),
           badge: workCoverBadge(w),
-          done: wp != null && wp.done,
-          progress: (wp != null && !wp.done) ? wp.fraction : 0,
+          watchLib: lib,
+          watchId: '${(w is Map ? w['id'] : null) ?? ''}',
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
                   PlayerPage(works: works, start: i, lib: _libFor(w)))),

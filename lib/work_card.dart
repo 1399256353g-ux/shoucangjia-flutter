@@ -1,6 +1,7 @@
 import 'cover_cache.dart';
 import 'decode_plan.dart';
 import 'media_resize.dart';
+import 'watch_progress.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -25,10 +26,10 @@ class WorkCard extends StatefulWidget {
   final VoidCallback? onTap;
   /// 右下角：时长 / 图片张数。
   final String? badge;
-  /// 左上角：已看完。
-  final bool done;
-  /// 底部进度条：0–1；<=0 不显示。
-  final double progress;
+  /// 关注的库/作品 id：传入后卡片内的进度角标与进度条
+  /// 只在 `WatchProgressStore.revision` 变化时局部重建，不重建整卡。
+  final String? watchLib;
+  final String? watchId;
 
   const WorkCard({
     super.key,
@@ -38,8 +39,8 @@ class WorkCard extends StatefulWidget {
     this.headers = const {},
     this.onTap,
     this.badge,
-    this.done = false,
-    this.progress = 0,
+    this.watchLib,
+    this.watchId,
   });
 
   @override
@@ -52,7 +53,8 @@ class _WorkCardState extends State<WorkCard> {
   @override
   Widget build(BuildContext context) {
     final w = widget;
-    return MouseRegion(
+    return RepaintBoundary(
+      child: MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -134,34 +136,14 @@ class _WorkCardState extends State<WorkCard> {
                   style: const TextStyle(
                       fontSize: 10, color: Colors.white70)),
             ),
-          if (w.done)
-            Positioned(
-              left: 4,
-              top: 4,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(4)),
-                child: const Text('已看完',
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600)),
-              ),
-            ),
-          if (w.progress > 0.01)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: SizedBox(
-                height: 2,
-                child: LinearProgressIndicator(
-                    value: w.progress,
-                    backgroundColor: Colors.black26,
-                    minHeight: 2),
+          // G10：进度角标/进度条单独监听观看记录，只重建这一小块。
+          if (w.watchId != null && w.watchId!.isNotEmpty)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: _WatchProgressLayer(
+                  lib: w.watchLib ?? '',
+                  id: w.watchId!,
+                ),
               ),
             ),
           // 桌面端悬停指示：只画一圈描边，不覆盖信息区
@@ -180,6 +162,61 @@ class _WorkCardState extends State<WorkCard> {
             ),
         ]),
       ),
-    ));
+      ),
+      ),
+    );
+  }
+}
+
+/// 卡片内的观看进度层：只有 `WatchProgressStore.revision` 变化才重建。
+class _WatchProgressLayer extends StatelessWidget {
+  final String lib;
+  final String id;
+
+  const _WatchProgressLayer({required this.lib, required this.id});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: WatchProgressStore.revision,
+      builder: (context, _) {
+        final wp = WatchProgressStore.of(lib, id);
+        final done = wp?.done ?? false;
+        final progress = (wp != null && !wp.done) ? wp.fraction : 0.0;
+        if (!done && progress <= 0.01) return const SizedBox.shrink();
+        return Stack(fit: StackFit.expand, children: [
+          if (done)
+            Positioned(
+              left: 4,
+              top: 4,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(4)),
+                child: const Text('已看完',
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ),
+          if (progress > 0.01)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SizedBox(
+                height: 2,
+                child: LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: Colors.black26,
+                    minHeight: 2),
+              ),
+            ),
+        ]);
+      },
+    );
   }
 }
