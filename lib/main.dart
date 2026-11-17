@@ -3097,6 +3097,23 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         ]),
         const Text('超出上限时优先淘汰离当前条目最远的缓存，正在播放的条目不受影响。',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const Divider(height: 32),
+        const Text('视频填充', style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, children: [
+          for (final m in VideoFit.values)
+            ChoiceChip(
+              // 默认（未手动覆盖）在竖屏内容上等同于铺满。
+              label: Text(m == VideoFit.fill ? '铺满' : '适应'),
+              selected: (AppSettings.videoFitOverride ?? VideoFit.fill) == m,
+              onSelected: (_) {
+                setState(() => AppSettings.videoFitOverride = m);
+                _persist();
+              },
+            ),
+        ]),
+        const Text('铺满：竖屏视频裁剪填满屏幕（默认）；适应：始终按源比例完整显示，横屏/方形视频自动留黑边。手动选择后优先于按比例自动判定。',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
       ]),
     );
   }
@@ -6727,6 +6744,53 @@ class _EdgeVerticalDragRecognizer extends VerticalDragGestureRecognizer {
   }
 }
 
+/// C：PageView 邻页（预载页）。独立 StatefulWidget，State 与已解码封面
+/// 在父级 setState 时保留；封面未就绪时用纯黑占位，绝不黑屏闪烁。
+class _NeighborPage extends StatefulWidget {
+  const _NeighborPage({
+    required this.index,
+    required this.imageUrl,
+    required this.headers,
+    required this.memCacheWidth,
+  });
+
+  final int index;
+  final String imageUrl;
+  final Map<String, String> headers;
+  final int memCacheWidth;
+
+  @override
+  State<_NeighborPage> createState() => _NeighborPageState();
+}
+
+class _NeighborPageState extends State<_NeighborPage> {
+  @override
+  void initState() {
+    super.initState();
+    // 轻量日志：验证拖动前邻页已挂载（tag=page:mount）。
+    debugPrint('[page:mount] index=${widget.index}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const fallback = ColoredBox(color: Colors.black);
+    if (widget.imageUrl.isEmpty) return fallback;
+    return ClipRect(
+      child: CachedNetworkImage(
+        cacheManager: DiziCache.manager,
+        // 滑动中的相邻页只是占位：720px 缩图足够，按屏幕宽度解码。
+        imageUrl: widget.imageUrl,
+        httpHeaders: widget.headers,
+        memCacheWidth: widget.memCacheWidth,
+        fit: BoxFit.cover,
+        fadeInDuration: Duration.zero,
+        placeholder: (_, __) => fallback,
+        errorWidget: (_, __, ___) => fallback,
+      ),
+    );
+  }
+}
+
 class PlayerPage extends StatefulWidget {
   final List works;
   final int start;
@@ -6861,6 +6925,14 @@ class _PlayerPageState extends State<PlayerPage>
   /// O4：当前视频宽高比（来自播放器 videoParams），用于把手机端任务栏
   /// 贴到画面下沿；拿不到时退回屏幕底部。
   double? _videoAspect;
+
+  // A：底部任务栏改为不透明实底；视频视口按其高度内缩，避免遮住画面。
+  // 栏高在布局完成后测量（简介展开/安全区都会影响）。
+  final GlobalKey _taskbarKey = GlobalKey();
+  double _taskbarH = 0;
+  bool _taskbarMeasureScheduled = false;
+  // C：邻页 widget 复用缓存：同一实例返回给 PageView，setState 时不重建。
+  final Map<String, Widget> _neighborPages = <String, Widget>{};
   /// O3：iOS 启动 1.5 秒内未真正播放时只重开一次，避免循环重开。
   Timer? _startupGuard;
   bool _startupReopened = false;
@@ -9064,6 +9136,13 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   Widget videoView() {
+    // B：按源比例自适应；fill 时 cover + ClipRect 铺满，contain 留黑边。
+    final fit = videoFitFor(
+                aspect: _videoAspect,
+                mode: AppSettings.videoFitOverride) ==
+            VideoFit.fill
+        ? BoxFit.cover
+        : BoxFit.contain;
     return LayoutBuilder(builder: (_, c) {
       if (c.maxWidth < 2 || c.maxHeight < 2) {
         return const ColoredBox(color: Colors.black);
@@ -9074,8 +9153,43 @@ class _PlayerPageState extends State<PlayerPage>
           child: Video(
               key: ValueKey('video-${_active.tag}-$_videoGen'),
               controller: vc,
+              fit: fit,
               controls: NoVideoControls),
         ),
+      );
+    });
+  }
+
+  /// 布局完成后测量底部任务栏真实高度（随简介展开/安全区变化）。
+  void _scheduleTaskbarMeasure() {
+    if (_taskbarMeasureScheduled) return;
+    _taskbarMeasureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _taskbarMeasureScheduled = false;
+      if (!mounted) return;
+      final h = _taskbarKey.currentContext?.size?.height ?? 0;
+      if (h > 0 && (h - _taskbarH).abs() > 0.5) {
+        setState(() => _taskbarH = h);
+      }
+    });
+  }
+
+  /// C：邻页封面页。按 index/封面/解码宽度缓存 widget 实例，
+  /// 播放页 setState 时返回同一实例，Element 直接跳过重建。
+  Widget _neighborPageFor(int i) {
+    final it = _workAt(i);
+    final lib = _libFor(it);
+    final th = (it['th'] ?? '').toString();
+    final memW = _posterDecodeWidth(context);
+    final key = '$i|${it['id'] ?? ''}|$lib|$th|$memW';
+    return _neighborPages.putIfAbsent(key, () {
+      return _NeighborPage(
+        index: i,
+        imageUrl: th.isEmpty
+            ? ''
+            : withImageWidth(cfg.mediaUrl(th, lib: lib), kPlayerPreloadWidth),
+        headers: cfg.headersFor(lib),
+        memCacheWidth: memW,
       );
     });
   }
@@ -9678,6 +9792,19 @@ class _PlayerPageState extends State<PlayerPage>
     // 但返回键、图文圆点、作者/标题信息、音量面板与底部控制栏都要避开安全区。
     final pad = MediaQuery.of(context).padding;
     final viewSize = MediaQuery.sizeOf(context);
+    // A：任务栏实底后，视频视口内缩到栏上方（首帧栏高未知，测量后校正）。
+    final stageInset = broken
+        ? 0.0
+        : (_taskbarH > 0
+            ? _taskbarH
+            : taskbarReservedHeight(safeBottom: pad.bottom));
+    if (!broken) _scheduleTaskbarMeasure();
+    // 邻页缓存只保留当前 ±2，避免滑动久后持有过多封面。
+    _neighborPages.removeWhere((k, _) {
+      final bar = k.indexOf('|');
+      final idx = bar < 0 ? -1 : (int.tryParse(k.substring(0, bar)) ?? -1);
+      return idx < cur - 2 || idx > cur + 2;
+    });
     return Focus(
       focusNode: focus,
       autofocus: true,
@@ -9749,9 +9876,10 @@ class _PlayerPageState extends State<PlayerPage>
               if (d > 1.5) showUi();
             },
             child: Stack(children: [
-              // M5：捕获垂直翻页（同一条视频列表）的拖拽生命周期，
-              // 只在「真实拖拽开始 → 滚动结束」之间淡化功能区。
-              NotificationListener<ScrollNotification>(
+              // A：播放视口不含底部实底任务栏。
+              Padding(
+                padding: EdgeInsets.only(bottom: stageInset),
+                child: NotificationListener<ScrollNotification>(
                 onNotification: (n) {
                   if (n.depth != 0) return false;
                   if (n is ScrollStartNotification && n.dragDetails != null) {
@@ -9776,11 +9904,14 @@ class _PlayerPageState extends State<PlayerPage>
                           Platform.isLinux ||
                           Platform.isMacOS)
                       ? const NeverScrollableScrollPhysics()
-                      : const DiziPageScrollPhysics(
-                          parent: ClampingScrollPhysics()),
+                      : DiziPageScrollPhysics(
+                          parent: const ClampingScrollPhysics(),
+                          fromPage: cur.toDouble()),
                   // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
                   dragStartBehavior: DragStartBehavior.down,
                   scrollDirection: Axis.vertical,
+                  // C：预载相邻页并参与 render，拖动时邻页已挂载。
+                  allowImplicitScrolling: true,
                   itemCount: widget.works.length,
                   onPageChanged: (i) {
                     // J-A4：手势滑动中只记下标，等 ScrollEnd 确认后再切；
@@ -9795,19 +9926,9 @@ class _PlayerPageState extends State<PlayerPage>
                     final it = _workAt(i);
                     if (!workPlayable(it)) return _brokenWorkView(it);
                     if (i != cur) {
-                      return (it['th'] ?? '').toString().isEmpty
-                          ? Container(color: Colors.black)
-                          : CachedNetworkImage(
-                              cacheManager: DiziCache.manager,
-                              // 滑动中的相邻页只是占位：720px 缩图足够，
-                              // 按屏幕宽度解码，不再整张原图进内存。
-                              imageUrl: withImageWidth(
-                                  cfg.mediaUrl(it['th'].toString(),
-                                      lib: _libFor(it)),
-                                  kPlayerPreloadWidth),
-                              httpHeaders: cfg.headersFor(_libFor(it)),
-                              memCacheWidth: _posterDecodeWidth(context),
-                              fit: BoxFit.contain);
+                      // C：邻页拆成独立子组件并复用实例；预载页先铺封面，
+                      // setState 时 Element 不重建，拖动进页不黑屏。
+                      return _neighborPageFor(i);
                     }
                     if (it['t'] == 'v') {
                       return GestureDetector(
@@ -9833,7 +9954,14 @@ class _PlayerPageState extends State<PlayerPage>
                                     kPlayerImageWidth),
                                 httpHeaders: cfg.headersFor(_libFor(it)),
                                 memCacheWidth: _posterDecodeWidth(context),
-                                fit: BoxFit.contain),
+                                // B：海报与视频同模式，fill 时裁剪铺满。
+                                fit: videoFitFor(
+                                            aspect: _videoAspect,
+                                            mode:
+                                                AppSettings.videoFitOverride) ==
+                                        VideoFit.fill
+                                    ? BoxFit.cover
+                                    : BoxFit.contain),
                           videoView(),
                           // J-A5：加载圈移到右上角，垂直中线与左侧返回键图标对齐；
                           // 错误/重试仍由中央的 _failureOverlay 展示。
@@ -9923,6 +10051,7 @@ class _PlayerPageState extends State<PlayerPage>
                     );
                   },
                 ),
+              ),
               ),
               // G12：弱网缓冲提示（延迟出现，避免正常起播闪烁）
               if (_slowBuffer && _failure == null && !loading)
@@ -10016,7 +10145,7 @@ class _PlayerPageState extends State<PlayerPage>
                           icon: const Icon(Icons.arrow_back,
                               color: Colors.white70),
                           style: IconButton.styleFrom(
-                              backgroundColor: Colors.black45)),
+                              overlayColor: Colors.white24)),
                       // 深页面统一「返回主页」：从作者页/搜索进播放页也能一步回主页。
                       const HomeOverlayButton(),
                       // 封面入口做成可见按钮（长按信息区同样可用）
@@ -10026,7 +10155,7 @@ class _PlayerPageState extends State<PlayerPage>
                           icon: const Icon(Icons.image_outlined,
                               color: Colors.white70),
                           style: IconButton.styleFrom(
-                              backgroundColor: Colors.black45)),
+                              overlayColor: Colors.white24)),
                     ]),
                   ),
                 ),
@@ -10339,12 +10468,8 @@ class _PlayerPageState extends State<PlayerPage>
                 Positioned(
                   left: 0,
                   right: 0,
-                  // O4：手机端任务栏贴视频画面下沿；全屏/桌面仍贴屏幕底。
-                  bottom: taskbarBottomInset(
-                    box: viewSize,
-                    aspect: _videoAspect,
-                    fullscreen: fs || !_mobileStageTap,
-                  ),
+                  // A：实底任务栏贴屏幕底；视频视口已按其高度内缩。
+                  bottom: 0,
                   child: IgnorePointer(
                     ignoring: !ui,
                     child: AnimatedOpacity(
@@ -10352,11 +10477,9 @@ class _PlayerPageState extends State<PlayerPage>
                       duration: Duration(milliseconds: chromeMs),
                       curve: Curves.easeOut,
                       child: Container(
-                        decoration: const BoxDecoration(
-                            gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [Colors.transparent, Colors.black87])),
+                        key: _taskbarKey,
+                        // 不透明纯黑实底：内容叠在实底上，视频不会被透出干扰。
+                        color: Colors.black,
                         padding: EdgeInsets.only(
                             left: pad.left + 12,
                             right: pad.right + 12,

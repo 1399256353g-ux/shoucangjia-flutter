@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'preload_policy.dart';
+import 'video_layout.dart';
 
 /// 播放器可重绑定的动作（桌面端，尤其 Windows）。
 enum PlayerAction { next, prev, playPause, mute, fullscreen, forward, back }
@@ -50,6 +51,10 @@ class AppSettings {
   /// 播放页双击点赞（G9）。关闭后双击不再点赞，两次单击按单击处理。
   static bool doubleTapLike = true;
 
+  /// 视频填充模式覆盖：null = 按源比例自动（竖屏铺满 / 横屏适应），
+  /// 用户手动选择后优先于自动判定。默认自动即竖屏「铺满」。
+  static VideoFit? videoFitOverride;
+
   static final Map<PlayerAction, int> keyIds =
       Map<PlayerAction, int>.from(_defaultKeyIds);
 
@@ -61,6 +66,7 @@ class AppSettings {
         'preloadMemory': preloadMemoryMb,
         'stripIndex': stripLibIndex,
         'doubleTapLike': doubleTapLike,
+        'videoFit': videoFitOverride?.name,
         'keys': {
           for (final e in keyIds.entries) e.key.name: e.value,
         },
@@ -83,6 +89,15 @@ class AppSettings {
     if (si is bool) stripLibIndex = si;
     final dt = j['doubleTapLike'];
     if (dt is bool) doubleTapLike = dt;
+    final vf = j['videoFit'];
+    if (vf is String) {
+      for (final m in VideoFit.values) {
+        if (m.name == vf) {
+          videoFitOverride = m;
+          break;
+        }
+      }
+    }
     final keys = j['keys'];
     if (keys is Map) {
       for (final a in PlayerAction.values) {
@@ -100,6 +115,7 @@ class AppSettings {
     preloadMemoryMb = preloadDefaultMemoryMb;
     stripLibIndex = true;
     doubleTapLike = true;
+    videoFitOverride = null;
     keyIds
       ..clear()
       ..addAll(_defaultKeyIds);

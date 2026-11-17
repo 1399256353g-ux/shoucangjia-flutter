@@ -26,7 +26,8 @@ class HomeOverlayButton extends StatelessWidget {
       tooltip: '返回主页',
       onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst),
       icon: const Icon(Icons.home_outlined, color: Colors.white70),
-      style: IconButton.styleFrom(backgroundColor: Colors.black45),
+      // R：去掉常驻半透明圆圈，仅保留按下时的短暂高亮。
+      style: IconButton.styleFrom(overlayColor: Colors.white24),
     );
   }
 }

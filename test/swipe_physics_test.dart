@@ -37,36 +37,45 @@ void main() {
     });
   });
 
-  group('snapTargetPage', () {
-    test('无速度时吸附最近整页', () {
-      expect(snapTargetPage(page: 1.2, velocity: 0), 1);
-      expect(snapTargetPage(page: 1.7, velocity: 0), 2);
+  group('pageSwipeTarget（Q 阈值）', () {
+    test('轻拖 1/5 页即翻页', () {
+      expect(pageSwipeTarget(page: 1.2, fromPage: 1, velocity: 0), 2);
+      expect(pageSwipeTarget(page: 0.8, fromPage: 1, velocity: 0), 0);
     });
 
-    test('向上甩动加半页后吸附到下一页', () {
-      // velocity 为负表示向下一页（放大 page？）——按惯性方向加半页
-      expect(snapTargetPage(page: 1.1, velocity: 600), 2);
-      expect(snapTargetPage(page: 1.9, velocity: -600), 1);
+    test('拖 1/10 页回弹到起点页', () {
+      expect(pageSwipeTarget(page: 1.1, fromPage: 1, velocity: 0), 1);
+      expect(pageSwipeTarget(page: 0.9, fromPage: 1, velocity: 0), 1);
     });
 
-    test('速度不足阈值时不额外推进', () {
-      expect(snapTargetPage(page: 1.1, velocity: 0.2), 1);
+    test('速度 >120 且方向一致才翻页', () {
+      expect(pageSwipeTarget(page: 1.1, fromPage: 1, velocity: 600), 2);
+      expect(pageSwipeTarget(page: 1.0, fromPage: 1, velocity: 600), 2);
+      // 方向相反：回弹
+      expect(pageSwipeTarget(page: 1.1, fromPage: 1, velocity: -600), 1);
+      // 速度不够：回弹
+      expect(pageSwipeTarget(page: 1.1, fromPage: 1, velocity: 80), 1);
+    });
+
+    test('快滑也只翻一页，不连翻两条', () {
+      expect(pageSwipeTarget(page: 1.1, fromPage: 1, velocity: 4000), 2);
+      expect(pageSwipeTarget(page: 1.6, fromPage: 1, velocity: 4000), 2);
     });
 
     test('目标页夹在 0–末页之间', () {
-      expect(snapTargetPage(page: 0.1, velocity: -600), 0);
-      expect(snapTargetPage(page: 4.9, velocity: 600, maxPage: 4), 4);
-      expect(snapTargetPage(page: 2.2, velocity: 0, maxPage: 1), 1);
+      expect(pageSwipeTarget(page: 0.1, fromPage: 0, velocity: -600), 0);
+      expect(pageSwipeTarget(page: 4.9, fromPage: 4, velocity: 600, maxPage: 4), 4);
     });
   });
 
   group('DiziPageScrollPhysics', () {
     test('applyTo 保留自定义弹簧参数', () {
-      const p = DiziPageScrollPhysics(stiffness: 500, dampingRatio: 0.9);
+      const p = DiziPageScrollPhysics(stiffness: 500, dampingRatio: 0.9, fromPage: 3);
       final q = p.applyTo(const ClampingScrollPhysics());
       expect(q, isA<DiziPageScrollPhysics>());
       expect(q.stiffness, 500);
       expect(q.dampingRatio, 0.9);
+      expect(q.fromPage, 3);
       expect(q.parent, isA<ClampingScrollPhysics>());
     });
 
@@ -87,7 +96,7 @@ void main() {
     });
 
     test('已在整页且静止时不产生多余动画', () {
-      const physics = DiziPageScrollPhysics();
+      const physics = DiziPageScrollPhysics(fromPage: 2);
       final m = _Metrics(pixels: 800, max: 800);
       expect(physics.createBallisticSimulation(m, 0), isNull);
     });

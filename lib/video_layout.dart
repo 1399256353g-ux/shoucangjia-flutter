@@ -8,6 +8,44 @@ library;
 
 import 'dart:ui' show Offset, Rect, Size;
 
+/// 视频显示模式。`fill` = 铺满（BoxFit.cover + 裁剪），
+/// `contain` = 适应（BoxFit.contain，留黑边）。
+enum VideoFit { fill, contain }
+
+/// 竖屏判定阈值：源宽高比（宽/高）小于此值视为竖屏。
+const double portraitAspectThreshold = 0.8;
+
+/// 按源比例与用户覆盖设置决定填充模式。
+///
+/// [mode] 非空时手动覆盖优先；[aspect] 为源的宽/高，竖屏（<0.8）铺满，
+/// 横屏/方形留边；宽高比未知时保守地用 contain，避免裁掉画面。
+VideoFit videoFitFor({double? aspect, VideoFit? mode}) {
+  if (mode != null) return mode;
+  if (aspect == null || aspect <= 0) return VideoFit.contain;
+  return aspect < portraitAspectThreshold ? VideoFit.fill : VideoFit.contain;
+}
+
+/// 播放视口高度 = 屏幕高 − 底部任务栏高度（含 SafeArea）。
+/// 结果夹在 [0, screenHeight] 内，异常尺寸时退化为 0。
+double videoViewportHeight({
+  required double screenHeight,
+  required double taskbarHeight,
+}) {
+  if (screenHeight <= 0) return 0;
+  final bar = taskbarHeight > 0 ? taskbarHeight : 0.0;
+  return (screenHeight - bar).clamp(0.0, screenHeight).toDouble();
+}
+
+/// 首次布局前对任务栏高度的保守估算：内容高 + 底部安全区。
+/// 实际高度由播放页测量后覆盖，这里只用于避免首帧跳动。
+double taskbarReservedHeight({
+  double contentHeight = 78,
+  double safeBottom = 0,
+}) {
+  final b = safeBottom > 0 ? safeBottom : 0.0;
+  return (contentHeight > 0 ? contentHeight : 0.0) + b;
+}
+
 /// 按容器尺寸与视频宽高比计算 `BoxFit.contain` 后的画面矩形。
 /// [aspect] 非法（<=0）时退回整个容器。
 Rect videoContentRect(Size box, double? aspect) {
