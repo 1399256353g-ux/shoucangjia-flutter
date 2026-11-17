@@ -25,6 +25,10 @@ class LibNode {
   /// L5-C：自定义封面版本（`_cover/<version>.<ext>`）；空串表示无自定义封面。
   final String coverVersion;
   final String coverExt;
+
+  /// 0.9.35：单元库自定义封面（服务端 `unit-covers.json` 下发的 `cover.u`，
+  /// 形如 `/media/<基础库>/<库内相对路径>`）；空串表示没设过。
+  final String coverUrl;
   final String serverId;
   final String serverBase;
   final String serverLabel;
@@ -35,6 +39,7 @@ class LibNode {
     required this.name,
     this.coverVersion = '',
     this.coverExt = 'jpg',
+    this.coverUrl = '',
     this.serverId = '',
     this.serverBase = '',
     this.serverLabel = '',
@@ -272,6 +277,7 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
       name: name.isEmpty ? splitRel(rel).last : name,
       coverVersion: coverPointerOf(raw['cover']).version,
       coverExt: coverPointerOf(raw['cover']).ext,
+      coverUrl: coverUrlOf(raw['cover']),
       serverId: '${raw['_serverId'] ?? ''}'.trim(),
       serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
       serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),

@@ -3239,8 +3239,16 @@ class _LibraryPageState extends State<LibraryPage> {
   /// L5-C：基础库封面（自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图）。
   String _coverUrlFor(BasicLib b) => _basicCoverUrl(b);
 
-  /// L5-C：单元库封面。手动 `_cover/` > 子树最高播放基础库的封面 > 默认图。
+  /// L5-C：单元库封面。
+  /// 0.9.35：owner 手动设置的单元库封面（服务端 `unit-covers.json` → `cover.u`）
+  /// 优先 > 手动 `_cover/` > 子树最高播放基础库的封面 > 第一个有封面的基础库。
   String _unitCoverUrl(UnitLibrary u) {
+    final pick = u.node.coverUrl.trim();
+    if (pick.isNotEmpty) {
+      final ownLib = libOfMediaPath(pick);
+      final url = cfg.mediaUrl(pick, lib: ownLib.isEmpty ? null : ownLib);
+      if (url.isNotEmpty) return url;
+    }
     final custom = pickUnitCover(
         rel: u.rel, version: u.node.coverVersion, ext: u.node.coverExt);
     if (!custom.isEmpty) return cfg.mediaUrl(custom.path);
@@ -8149,6 +8157,29 @@ class _PlayerPageState extends State<PlayerPage>
                 _confirmClearCover(_libFor(w));
               },
             ),
+            // 0.9.35：单元库（上级文件夹）封面——指针存服务端 unit-covers.json。
+            ListTile(
+              leading: const Icon(Icons.folder_special_outlined),
+              title: const Text('设为该单元库封面'),
+              subtitle: const Text('上级单元库卡片改用这张图，不动作品原图'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _applyCover(CoverRequest.set(
+                  scope: CoverScope.unit,
+                  lib: _libFor(w),
+                  work: '${w['id'] ?? ''}',
+                ));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.folder_off_outlined),
+              title: const Text('清除单元库封面'),
+              subtitle: const Text('恢复该单元库的自动封面'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _confirmClearCover(_libFor(w), scope: CoverScope.unit);
+              },
+            ),
             if (menu.canResume)
               ListTile(
                 leading: const Icon(Icons.play_circle_outline),
@@ -8187,13 +8218,17 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   // 0.9.29：清除自定义封面前先确认（服务端只删指针，封面文件保留可回滚）。
-  Future<void> _confirmClearCover(String lib) async {
+  Future<void> _confirmClearCover(String lib, {CoverScope scope = CoverScope.basic}) async {
+    final unit = scope == CoverScope.unit;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清除自定义封面？'),
-        content: const Text('会恢复该库的自动封面（爬虫封面 → 最高播放作品）。'
-            '已生成的封面图片仍保留在库里，之后再设回来不会丢。'),
+        title: Text(unit ? '清除单元库封面？' : '清除自定义封面？'),
+        content: Text(unit
+            ? '该单元库会恢复自动封面（子树最高播放基础库 → 第一个有封面的基础库）。'
+                '作品原图不受影响。'
+            : '会恢复该库的自动封面（爬虫封面 → 最高播放作品）。'
+                '已生成的封面图片仍保留在库里，之后再设回来不会丢。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),
@@ -8205,10 +8240,11 @@ class _PlayerPageState extends State<PlayerPage>
       ),
     );
     if (ok != true || !mounted) return;
-    await _applyCover(CoverRequest.clear(lib: lib));
+    await _applyCover(CoverRequest.clear(lib: lib, scope: scope));
   }
 
-  // 0.9.19/0.9.29：自定义封面设置与清除（服务端只新增文件或改 `_cover/current` 指针）。
+  // 0.9.19/0.9.29/0.9.35：自定义封面设置与清除（服务端只新增文件、改指针，
+  // 单元库封面只改 unit-covers.json：都不动作品原图）。
   Future<void> _applyCover(CoverRequest req) async {
     if (!req.valid) {
       _toast('${req.failText}：缺少库或作品标识');
@@ -8217,7 +8253,7 @@ class _PlayerPageState extends State<PlayerPage>
     final lib = req.lib;
     try {
       final r = await http.post(
-        cfg.u('/api/cover/set', lib: lib),
+        cfg.u(req.scope.path, lib: lib),
         headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
         body: jsonEncode(req.toBody()),
       );

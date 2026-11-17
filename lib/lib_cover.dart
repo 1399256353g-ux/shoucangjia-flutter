@@ -141,6 +141,30 @@ String absoluteMediaUrl(
   return '$b$p';
 }
 
+/// 单元库自定义封面的媒体路径（`cover: {u: "/media/<lib>/..."}`）。
+///
+/// 0.9.35：服务端把 owner 选定的单元库封面指针存在
+/// `LIBDIR/unit-covers.json`，随 `/api/nodes`、`/api/libraries.json` 的节点
+/// `cover.u` 下发（不改媒体目录、不动作品原图）。这里只做取值与校验：
+/// 非 `/media/` 开头的一律当作没有，避免半截路径被当封面去请求。
+String coverUrlOf(dynamic raw) {
+  if (raw is! Map) return '';
+  final u = '${raw['u'] ?? raw['url'] ?? ''}'.trim();
+  if (u.isEmpty) return '';
+  return u.startsWith('/media/') ? u : '';
+}
+
+/// 媒体路径里的库 id：`/media/lib-008/a/b.jpg` → `lib-008`；不是媒体路径返回空串。
+/// 用于把「单元库封面」按其所归属的基础库路由到对应服务器。
+String libOfMediaPath(String p) {
+  final path = p.trim();
+  if (!path.startsWith('/media/')) return '';
+  final rest = path.substring(7);
+  final at = rest.indexOf('/');
+  if (at <= 0) return '';
+  return rest.substring(0, at);
+}
+
 /// 基础库封面：
 ///  - 有自定义版本 → `_cover/<version>.<ext>`；
 ///  - 否则取本机播放量最高的作品缩略图（[bestThumb]，由 WorkPlaysStore 提供）；

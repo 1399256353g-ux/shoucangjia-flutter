@@ -115,11 +115,13 @@ class LibCardInfo extends StatelessWidget {
   return best;
 }
 
-/// 单元库封面 URL（优先级高 → 低，交给 [pickUnitCover] 判定）：
-///  1. 自定义 `_cover/<version>.<ext>`（节点带版本指针时自行拼；否则用
-///     调用方解析好的 [customUrl]）；
-///  2. 子树内「App 播放量最高」作品的封面（含下级单元库）；
-///  3. 空串 → 卡片回退默认图标。
+/// 单元库封面 URL（优先级高 → 低）：
+///  1. 调用方解析好的 [customUrl]（主页/单元库页的完整封面链）；
+///  2. owner 手动设置且已解析到当前服务器的封面（零散调用处只能拿相对
+///     媒体路径时，用节点自带 serverBase 拼）；
+///  3. 自定义 `_cover/<version>.<ext>`；
+///  4. 子树内「App 播放量最高」作品的封面（含下级单元库）；
+///  5. 空串 → 卡片回退默认图标。
 String unitCoverUrl(
   UnitLibrary unit, {
   String customUrl = '',
@@ -128,6 +130,14 @@ String unitCoverUrl(
   final preset = customUrl.trim();
   // 调用方已解析好的地址（自定义封面，鉴权/路由由调用方掌握）优先。
   if (preset.isNotEmpty) return preset;
+  // 0.9.35：owner 手动设的单元库封面（服务端 `cover.u`）。
+  final manual = unit.node.coverUrl.trim();
+  if (manual.isNotEmpty) {
+    final base = unit.node.serverBase.trim();
+    if (base.isNotEmpty) {
+      return '${base.replaceFirst(RegExp(r'/+$'), '')}$manual';
+    }
+  }
   final top = topPlayedInUnit(unit);
   final pick = pickUnitCover(
     rel: unit.rel,

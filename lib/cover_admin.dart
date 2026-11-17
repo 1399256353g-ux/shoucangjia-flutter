@@ -9,6 +9,20 @@
 /// 服务端只新增/改指针，不动作品原图。本文件不碰网络与文件系统。
 library;
 
+/// 封面作用域：基础库封面（`_cover/`）与单元库封面（`unit-covers.json` 指针）。
+///
+/// 两者请求体形状一致（`{lib, work}` / `{lib, clear:true}`），只是接口与文案不同：
+/// 单元库封面接口会自己从基础库路径反推单元库 rel，客户端只传基础库与作品。
+enum CoverScope {
+  basic('/api/cover/set'),
+  unit('/api/cover/unit');
+
+  const CoverScope(this.path);
+
+  /// 接口路径（POST）。
+  final String path;
+}
+
 /// 封面操作类型。
 enum CoverOp { set, clear }
 
@@ -17,11 +31,15 @@ class CoverRequest {
   final String lib;
   final String work;
   final CoverOp op;
+  final CoverScope scope;
 
-  const CoverRequest.set({required this.lib, required this.work})
-      : op = CoverOp.set;
+  const CoverRequest.set({
+    required this.lib,
+    required this.work,
+    this.scope = CoverScope.basic,
+  }) : op = CoverOp.set;
 
-  const CoverRequest.clear({required this.lib})
+  const CoverRequest.clear({required this.lib, this.scope = CoverScope.basic})
       : work = '',
         op = CoverOp.clear;
 
@@ -35,12 +53,24 @@ class CoverRequest {
       lib.trim().isNotEmpty && (op == CoverOp.clear || work.trim().isNotEmpty);
 
   /// 成功后的提示文案。
-  String get doneText => op == CoverOp.clear
-      ? '已清除自定义封面，恢复自动封面'
-      : '已设为该库封面（返回主页刷新即可看到）';
+  String get doneText {
+    if (scope == CoverScope.unit) {
+      return op == CoverOp.clear
+          ? '已清除该单元库封面，恢复自动封面'
+          : '已设为该单元库封面（返回主页刷新即可看到）';
+    }
+    return op == CoverOp.clear
+        ? '已清除自定义封面，恢复自动封面'
+        : '已设为该库封面（返回主页刷新即可看到）';
+  }
 
   /// 失败提示前缀。
-  String get failText => op == CoverOp.clear ? '清除封面失败' : '设置封面失败';
+  String get failText {
+    if (scope == CoverScope.unit) {
+      return op == CoverOp.clear ? '清除单元库封面失败' : '设置单元库封面失败';
+    }
+    return op == CoverOp.clear ? '清除封面失败' : '设置封面失败';
+  }
 }
 
 /// 把 HTTP 状态码翻成可读原因；未知状态码只报数字。
