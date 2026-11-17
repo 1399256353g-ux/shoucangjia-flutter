@@ -22,6 +22,7 @@ jobs:
       # 模板测试会被 flutter create 重新生成且无法编译，删除后再跑测试闸门
       # drop the regenerated counter template test before the test gate
       - name: Drop template test
+        shell: bash
         run: rm -f test/widget_test.dart; ls test | head -5
       - name: Rename window title
         shell: pwsh
