@@ -89,7 +89,7 @@ void main() {
 
     final unitInfo = t.widget<LibCardInfo>(find.byType(LibCardInfo));
     expect(unitInfo.dense, isFalse);
-    final unitTitle = t.widget<Text>(find.text('(1) A')).style!.fontSize!;
+    final unitTitle = t.widget<Text>(find.text('A')).style!.fontSize!;
     final unitStats =
         t.widget<Text>(find.textContaining('3 作者 · 30 作品')).style!.fontSize!;
 

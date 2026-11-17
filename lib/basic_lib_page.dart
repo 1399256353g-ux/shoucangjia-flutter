@@ -282,7 +282,8 @@ class _BasicLibPageState extends State<BasicLibPage>
     final b = widget.basic;
     return Scaffold(
       appBar: AppBar(
-        title: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        title: Text(LibraryBadge.stripIndex(b.name),
+            maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           const HomeAction(),
           IconButton(

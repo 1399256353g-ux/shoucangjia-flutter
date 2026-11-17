@@ -1290,7 +1290,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   Widget _libTile(UnitLibrary u) {
     final id = u.id;
     final name = u.name.isEmpty ? id : u.name;
-    final color = LibraryBadge.colorFor(id, order: _order);
+    // D1：自定义色可能以 rel / node:rel 任一形式落盘，统一用归一化查询，
+    // 避免状态显示「自定义」但色块仍是自动色。
+    final color = LibraryBadge.colorForUnit(id, order: _order);
     final emoji = LibraryBadge.emojiFor(id);
     return ListTile(
       leading: Container(
@@ -1380,6 +1382,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     var current = LibraryBadge.customColorFor(id) ?? autoColor;
     var hsv = HSVColor.fromColor(Color(current));
     var currentEmoji = LibraryBadge.emojiFor(id);
+    // D1：点「恢复自动」后必须真的清掉自定义色，而不是把当前自动色存成自定义。
+    var reset = false;
     final emojiEdit = TextEditingController(text: currentEmoji);
     return showDialog<_BadgeDraft>(
       context: context,
@@ -1406,6 +1410,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                     GestureDetector(
                       onTap: () => setLocal(() {
                         current = LibraryBadge.palette[i];
+                        reset = false;
                       }),
                       child: Container(
                         width: 34,
@@ -1445,6 +1450,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   onChanged: (v) => setLocal(() {
                     hsv = hsv.withHue(v);
                     current = hsv.toColor().toARGB32();
+                    reset = false;
                   }),
                 ),
                 _hsvSlider(
@@ -1458,6 +1464,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   onChanged: (v) => setLocal(() {
                     hsv = hsv.withSaturation(v);
                     current = hsv.toColor().toARGB32();
+                    reset = false;
                   }),
                 ),
                 _hsvSlider(
@@ -1471,6 +1478,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   onChanged: (v) => setLocal(() {
                     hsv = hsv.withValue(v);
                     current = hsv.toColor().toARGB32();
+                    reset = false;
                   }),
                 ),
                 const SizedBox(height: 14),
@@ -1487,8 +1495,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                     hintText: '输入或粘贴任意 emoji',
                     border: OutlineInputBorder(),
                   ),
-                  onChanged: (v) => setLocal(() =>
-                      currentEmoji = LibraryBadge.sanitizeEmoji(v)),
+                  onChanged: (v) => setLocal(() {
+                    currentEmoji = LibraryBadge.sanitizeEmoji(v);
+                    reset = false;
+                  }),
                 ),
                 const SizedBox(height: 6),
                 Wrap(spacing: 8, runSpacing: 8, children: [
@@ -1497,6 +1507,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       onTap: () => setLocal(() {
                         currentEmoji = currentEmoji == e ? '' : e;
                         emojiEdit.text = currentEmoji;
+                        reset = false;
                       }),
                       child: Container(
                         width: 34,
@@ -1525,6 +1536,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       hsv = HSVColor.fromColor(Color(autoColor));
                       currentEmoji = '';
                       emojiEdit.text = '';
+                      reset = true;
                     }),
                     icon: const Icon(Icons.restart_alt, size: 18),
                     label: const Text('恢复自动（颜色 + 后缀）'),
@@ -1539,7 +1551,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 child: const Text('取消')),
             FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(_BadgeDraft(
-                    color: current, emoji: currentEmoji, reset: false)),
+                    color: current, emoji: currentEmoji, reset: reset)),
                 child: const Text('保存')),
           ],
         ),

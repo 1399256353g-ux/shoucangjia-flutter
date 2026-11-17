@@ -63,6 +63,8 @@ class LibCardInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // D2：所有库卡片标题统一去掉目录名前的排序序号（受「省略编号」开关控制）。
+    final titleText = LibraryBadge.stripIndex(title);
     return Container(
       padding: dense
           ? const EdgeInsets.fromLTRB(10, 22, 10, 8)
@@ -76,7 +78,7 @@ class LibCardInfo extends StatelessWidget {
             badge!,
             const SizedBox(height: 4),
           ],
-          Text(title,
+          Text(titleText,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -877,7 +879,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
 
     walkOwners(unit);
     return Scaffold(
-      appBar: AppBar(title: Text(unit.name), actions: [
+      appBar: AppBar(title: Text(LibraryBadge.stripIndex(unit.name)), actions: [
         const HomeAction(),
         if (onConfigureUnit != null && UnitLibraryCard.canConfigure(unit))
           IconButton(

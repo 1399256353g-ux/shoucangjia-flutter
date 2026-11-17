@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shoucangjia/app_settings.dart';
 import 'package:shoucangjia/library_tree.dart';
 import 'package:shoucangjia/unit_library.dart';
 import 'package:shoucangjia/unit_library_view.dart';
@@ -17,6 +18,8 @@ BasicLib basic(String id, String rel, {int authors = 1, int works = 10}) =>
 Widget host(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
+  // D2：卡片标题统一去序号，测试固定开关状态。
+  AppSettings.stripLibIndex = true;
   final tree = buildUnitTree(
     nodes: const [
       LibNode(id: 'big-01', rel: '(1) A', name: '(1) A'),
@@ -50,7 +53,7 @@ void main() {
   testWidgets('单元库卡片：标题 + 作者/作品数', (t) async {
     await t.pumpWidget(host(UnitLibraryCard(unit: unit, onTap: () {})));
     // 不再贴来源词条：只显示一次名称，统计与基础库数量合并一行。
-    expect(find.text('(1) A'), findsOneWidget);
+    expect(find.text('A'), findsOneWidget);
     expect(find.textContaining('3 作者 · 30 作品'), findsOneWidget);
   });
 
