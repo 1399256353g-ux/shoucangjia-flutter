@@ -2050,10 +2050,40 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   bool loading = true;
   String? err;
 
+  bool checking = false;
+
   @override
   void initState() {
     super.initState();
     load();
+  }
+
+  /// 触发爬虫脚本（dy_prune.js）立即扫描平台已删除的作品。
+  Future<void> _runCheck() async {
+    if (checking) return;
+    setState(() => checking = true);
+    try {
+      final r = await http
+          .post(cfg.u('/api/deleted/check'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 15));
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
+        throw (j is Map && j['error'] != null)
+            ? '${j['error']}'
+            : 'HTTP ${r.statusCode}';
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已开始检测平台删除的作品，完成后自动刷新')));
+      await Future<void>.delayed(const Duration(seconds: 5));
+      if (mounted) await load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('检测启动失败：$e')));
+    } finally {
+      if (mounted) setState(() => checking = false);
+    }
   }
 
   Future<void> load() async {
@@ -2116,6 +2146,15 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('删除监测'), actions: [
+        IconButton(
+            tooltip: '立即检测（爬虫扫描平台已删除作品）',
+            onPressed: checking ? null : _runCheck,
+            icon: checking
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.travel_explore)),
         IconButton(
             tooltip: '刷新',
             onPressed: loading ? null : load,
