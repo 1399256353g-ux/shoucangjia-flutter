@@ -44,6 +44,23 @@ int firstScreenThumbCount({
   return n > maxItems ? maxItems : n;
 }
 
+/// 列表（非网格）首屏需要预热的行数。
+///
+/// 排行榜这类 `ListTile` 列表按固定行高估算：默认预热 2 屏、上限 [maxItems] 行。
+/// [rowExtent] 取一行（含分隔线）的实际逻辑高度。
+int firstScreenRowCount({
+  required double viewportHeight,
+  double rowExtent = 72,
+  int screens = 2,
+  int maxItems = 12,
+}) {
+  if (maxItems <= 0 || viewportHeight <= 0 || rowExtent <= 0) return 0;
+  final h = viewportHeight * (screens < 1 ? 1 : screens);
+  final n = (h / rowExtent).ceil();
+  if (n < 1) return 1;
+  return n > maxItems ? maxItems : n;
+}
+
 /// 预热统计（诊断信息页读取）。
 class ThumbPrefetchStats {
   int requested = 0;

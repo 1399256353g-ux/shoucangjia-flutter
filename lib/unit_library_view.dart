@@ -8,6 +8,7 @@ import 'lib_cover.dart';
 import 'media_resize.dart';
 import 'home_action.dart';
 import 'star_store.dart';
+import 'thumb_prefetch.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
 
@@ -179,7 +180,7 @@ String basicCoverUrl(BasicLib basic, {String preset = ''}) {
 ///
 /// 主页只铺「单元库」卡片 + 一个「星标基础库」入口；
 /// 点进单元库才看到它的下级单元库与基础库卡片。
-class UnitLibraryHomeView extends StatelessWidget {
+class UnitLibraryHomeView extends StatefulWidget {
   final UnitLibrary tree;
   final Set<String> stars;
   final void Function(UnitLibrary unit) onOpenUnit;
@@ -204,6 +205,74 @@ class UnitLibraryHomeView extends StatelessWidget {
   });
 
   @override
+  State<UnitLibraryHomeView> createState() => _UnitLibraryHomeViewState();
+}
+
+class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
+  @override
+  void initState() {
+    super.initState();
+    _schedulePrefetch();
+  }
+
+  @override
+  void didUpdateWidget(covariant UnitLibraryHomeView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.tree, widget.tree) ||
+        old.unitCoverOf != widget.unitCoverOf) {
+      _schedulePrefetch();
+    }
+  }
+
+  void _schedulePrefetch() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _prefetchCovers());
+  }
+
+  /// 0.9.30：主页单元库首屏封面预热。
+  ///
+  /// 卡片封面按 480px 取图（服务端已预热），但首屏仍是逐张请求，卡片会先露
+  /// 底色/图标。数据一到就按网格几何预热首页可见的几张，provider 与
+  /// `_UnitCoverFill` 完全一致，失败交给卡片自己重试。
+  void _prefetchCovers() {
+    if (!mounted) return;
+    final units = widget.tree.children;
+    if (units.isEmpty) return;
+    final mq = MediaQuery.maybeOf(context);
+    if (mq == null) return;
+    final n = firstScreenThumbCount(
+      viewportWidth: mq.size.width,
+      viewportHeight: mq.size.height,
+      maxCrossAxisExtent: 260,
+      padding: kLibGridPadding.left,
+      crossSpacing: kLibGridSpacing,
+      mainSpacing: kLibGridSpacing,
+      aspectRatio: 1.02,
+      screens: 1,
+      maxItems: 8,
+    );
+    if (n <= 0) return;
+    final urls = <String>[];
+    final headers = <String, Map<String, String>>{};
+    for (final u in units.take(n)) {
+      final cover = widget.unitCoverOf?.call(u) ?? '';
+      if (cover.isEmpty) continue;
+      final url = withImageWidth(cover, kCardImageWidth);
+      urls.add(url);
+      headers[url] = unitHeadersOf(u, widget.headersOf);
+    }
+    if (urls.isEmpty) return;
+    ThumbPrefetch.instance.run(
+      urls,
+      limit: n,
+      provider: (u) => CachedNetworkImageProvider(
+        u,
+        headers: headers[u] ?? const <String, String>{},
+        cacheManager: DiziCache.manager,
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     // 0.9.6：星标数量/点亮状态与 StarStore 保持一致。
     return AnimatedBuilder(
@@ -213,8 +282,8 @@ class UnitLibraryHomeView extends StatelessWidget {
   }
 
   Widget _buildView(BuildContext context) {
-    final liveStars = StarStore.instance.ready ? StarStore.instance.ids : stars;
-    final units = tree.children;
+    final liveStars = StarStore.instance.ready ? StarStore.instance.ids : widget.stars;
+    final units = widget.tree.children;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -230,7 +299,7 @@ class UnitLibraryHomeView extends StatelessWidget {
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ]),
         ),
-        StarredEntryCard(count: liveStars.length, onTap: onOpenStars),
+        StarredEntryCard(count: liveStars.length, onTap: widget.onOpenStars),
         if (units.isEmpty)
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 24, 16, 24),
@@ -254,11 +323,11 @@ class UnitLibraryHomeView extends StatelessWidget {
               final u = units[i];
               return UnitLibraryCard(
                 unit: u,
-                coverUrl: unitCoverOf?.call(u) ?? '',
-                headers: unitHeadersOf(u, headersOf),
+                coverUrl: widget.unitCoverOf?.call(u) ?? '',
+                headers: unitHeadersOf(u, widget.headersOf),
                 starred: liveStars.contains(u.id),
-                onToggleStar: () => onToggleUnitStar(u),
-                onTap: () => onOpenUnit(u),
+                onToggleStar: () => widget.onToggleUnitStar(u),
+                onTap: () => widget.onOpenUnit(u),
               );
             },
           ),

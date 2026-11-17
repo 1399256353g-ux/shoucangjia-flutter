@@ -4187,7 +4187,10 @@ class _RankPageState extends State<RankPage> {
   }
 
   void _onSharedFilter() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _prefetchRankAvatars();
+    }
   }
 
   @override
@@ -4228,6 +4231,7 @@ class _RankPageState extends State<RankPage> {
         rows = list;
         loading = false;
       });
+      _prefetchRankAvatars();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -4239,6 +4243,50 @@ class _RankPageState extends State<RankPage> {
   }
 
   int _n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+
+  /// 0.9.30：排行榜首屏头像预热。
+  ///
+  /// 榜单每行都是 `AuthorRankTile`（头像 42），头像本身已在服务端预热过缩图，
+  /// 但客户端仍要逐行发请求才会出图。这里先把首屏可见行的头像按显示尺寸拉进
+  /// 缓存，provider 与 [AuthorAvatar] 完全一致（同 URL + 同 `ResizeImage` 宽度
+  /// + 同鉴权头），滚动到该行时直接命中。失败不重试，交给头像自己再取一次。
+  void _prefetchRankAvatars() {
+    if (!mounted) return;
+    final visibleRows = _visibleRows;
+    if (visibleRows.isEmpty) return;
+    final mq = MediaQuery.of(context);
+    final n = firstScreenRowCount(viewportHeight: mq.size.height);
+    if (n <= 0) return;
+    final px = avatarDecodeWidth(
+      displaySize: AuthorAvatar.rankSize,
+      devicePixelRatio: mq.devicePixelRatio,
+    );
+    final urls = <String>[];
+    final headers = <String, Map<String, String>>{};
+    for (final e in visibleRows.take(n)) {
+      final av = '${e['avatar'] ?? ''}';
+      if (av.isEmpty) continue;
+      final lib =
+          sel == 'all' ? '${e['lib'] ?? cfg.lib}' : (sel.isEmpty ? cfg.lib : sel);
+      final u = withImageWidth(cfg.mediaUrl(av, lib: lib), kAvatarImageWidth);
+      urls.add(u);
+      headers[u] = cfg.headersFor(lib);
+    }
+    if (urls.isEmpty) return;
+    ThumbPrefetch.instance.run(
+      urls,
+      limit: n,
+      provider: (u) => ResizeImage.resizeIfNeeded(
+        px,
+        null,
+        CachedNetworkImageProvider(
+          u,
+          headers: headers[u] ?? cfg.headers,
+          cacheManager: DiziCache.manager,
+        ),
+      ),
+    );
+  }
 
   Map<String, dynamic> _rowMap(dynamic e) =>
       e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{};

@@ -41,6 +41,20 @@ void main() {
     });
   });
 
+  group('firstScreenRowCount', () {
+    test('手机竖屏：两屏行数，受 maxItems 限制', () {
+      expect(firstScreenRowCount(viewportHeight: 800), 12);
+      expect(firstScreenRowCount(viewportHeight: 400, screens: 1), 6);
+    });
+
+    test('参数异常不崩，至少 1 行', () {
+      expect(firstScreenRowCount(viewportHeight: 10), 1);
+      expect(firstScreenRowCount(viewportHeight: 0), 0);
+      expect(firstScreenRowCount(viewportHeight: 800, maxItems: 0), 0);
+      expect(firstScreenRowCount(viewportHeight: 800, rowExtent: 0), 0);
+    });
+  });
+
   group('ThumbPrefetch', () {
     test('去重：同一 URL 第二次进入跳过，失败的下次还能重试', () async {
       final p = ThumbPrefetch(maxConcurrent: 2);
