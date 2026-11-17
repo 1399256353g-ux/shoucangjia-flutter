@@ -94,6 +94,26 @@ void main() {
     expect(UnitLibraryCard.canConfigure(unit), isTrue);
   });
 
+  // 0.9.55：网格滚动性能——两张库卡片外层都要有重绘边界。
+  testWidgets('单元库/基础库卡片各自带 RepaintBoundary', (t) async {
+    await t.pumpWidget(host(UnitLibraryCard(unit: unit, onTap: () {})));
+    expect(
+      find.ancestor(
+          of: find.byKey(ValueKey('unit-card-${unit.id}')),
+          matching: find.byType(RepaintBoundary)),
+      findsWidgets,
+    );
+
+    final b = unit.basics.isNotEmpty ? unit.basics.first : unit.allBasics.first;
+    await t.pumpWidget(host(BasicLibCard(basic: b, onTap: () {})));
+    expect(
+      find.ancestor(
+          of: find.byKey(ValueKey('basic-card-${b.id}')),
+          matching: find.byType(RepaintBoundary)),
+      findsWidgets,
+    );
+  });
+
   testWidgets('进入单元库后不再显示自身卡片，爬虫入口在标题栏', (t) async {
     String? opened;
     await t.pumpWidget(host(UnitLibraryPage(
