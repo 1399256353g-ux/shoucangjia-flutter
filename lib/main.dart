@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 import 'dart:math' show Random, max, min;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
@@ -69,6 +70,7 @@ import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
 import 'ui_fade.dart';
+import 'immersive.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'player_controls.dart';
@@ -6945,6 +6947,14 @@ class _PlayerPageState extends State<PlayerPage>
   bool fs = false;
   // M5：非全屏上下拖拽切条期间，功能区整体淡化（松手恢复）。
   bool _pageSwiping = false;
+  // P2 §12：非全屏沉浸（3 秒无操作淡出互动栏/信息区，进度条保留）。
+  // 与全屏的 UiAutoHidePolicy 完全独立，全屏分支不读这里的任何状态。
+  final ImmersiveCycle _imm = ImmersiveCycle();
+  Timer? _immTimer;
+  // 按下瞬间是否处于沉浸：抬起后单击只负责恢复，不再触发暂停/点赞。
+  bool _immAtDown = false;
+  // P2 §13：翻页成功轻震动去重（每次翻页只一次）。
+  final SwitchHapticGate _switchHaptic = SwitchHapticGate();
   // J-A2：播放页统一顶部提示（不随功能区淡出，约 3 秒自动消失）。
   String? _noticeText;
   Timer? _noticeTimer;
@@ -7088,6 +7098,27 @@ class _PlayerPageState extends State<PlayerPage>
   // P0（非全屏）：暂停时只显示播放图标，0.8s / easeOut 淡出。
   late final AnimationController _playHintAnim = AnimationController(
       vsync: this, duration: const Duration(milliseconds: kPlayHintFadeMs));
+  // P1b §8：长按菜单（不暂停）。500ms / 位移 ≤12px，只作用于非全屏视频舞台。
+  final StageLongPressTracker _lpTracker = StageLongPressTracker();
+  Timer? _lpTimer;
+  bool _suppressStageTap = false;
+  bool _menuVisible = false;
+  late final AnimationController _menuAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: kOverlayAnimMs),
+      value: 1);
+  // P1b §9：评论半屏面板（60% → 全屏 → 关闭）。打开时静音，关闭恢复。
+  bool _commentVisible = false;
+  bool _commentDragging = false;
+  double _commentFraction = kCommentPanelClosedFraction;
+  double _commentAnimFrom = 0;
+  double _commentAnimTo = 0;
+  late final AnimationController _commentAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: kOverlayAnimMs),
+      value: 1);
+  // 本机「不感兴趣」集合（写入 hidden_works_v1，刷新列表后不再出现）。
+  final Set<String> _hiddenKeys = <String>{};
   // P0 §3：进度条是否处于「按住/拖动」态（与拖动 seek 合并为一次按下）。
   bool _seeking = false;
   double speed = 1.0;
@@ -7132,6 +7163,8 @@ class _PlayerPageState extends State<PlayerPage>
       PerfDiagnostics.instance.endSpan('page:player',
           <String, Object?>{'works': widget.works.length});
       open(widget.start);
+      // P2：进入非全屏播放页即开始沉浸计时。
+      _scheduleImmersive();
     });
   }
 
@@ -7873,6 +7906,15 @@ class _PlayerPageState extends State<PlayerPage>
     final switching = i != cur;
     _stallTimer?.cancel();
     _startupGuard?.cancel();
+    if (switching) _resetOverlaysOnSwitch();
+    // P2 §13：翻页成功轻震动一次——仅非全屏、仅移动端，且同一目标不重复。
+    if (switching &&
+        !fs &&
+        hapticAllowedFor(
+            isAndroid: Platform.isAndroid, isIOS: Platform.isIOS) &&
+        _switchHaptic.allow(i)) {
+      hapticTap();
+    }
     if (switching) {
       _stallAttempts = 0;
       _startupReopened = false;
@@ -7951,6 +7993,9 @@ class _PlayerPageState extends State<PlayerPage>
       // 缓存命中说明首帧已就绪，直接显示画面，不闪加载圈
       loading = !canUsePreload;
       paused = false;
+      // P2 §11：新页进度归零，绝不用上一条的进度渲染进度条。
+      pos = Duration.zero;
+      dur = Duration.zero;
       _failure = null;
       _buffering = false;
       _slowBuffer = false;
@@ -8359,6 +8404,490 @@ class _PlayerPageState extends State<PlayerPage>
 
   bool _isLiked(dynamic w) => likedKeys.contains(_likeKeyFor(w));
 
+  // P1：非全屏互动栏的收藏标记（本机内存态，暂不写服务端）。
+  final Set<String> _favKeys = <String>{};
+
+  /// P1 §1：右侧互动栏头像。无头像时退回默认人像。
+  Widget _railAvatar(dynamic w) {
+    final av = avatarFor(w);
+    if (av.isEmpty) {
+      return const CircleAvatar(
+          radius: kRailAvatarSize / 2, child: Icon(Icons.person));
+    }
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return CachedNetworkImage(
+      cacheManager: DiziCache.manager,
+      imageUrl: withImageWidth(
+          cfg.mediaUrl(av, lib: _avatarLibFor(av)), kAvatarImageWidth),
+      httpHeaders: cfg.headersFor(_avatarLibFor(av)),
+      width: kRailAvatarSize,
+      height: kRailAvatarSize,
+      memCacheWidth: (kRailAvatarSize * dpr).round(),
+      fadeInDuration: Duration.zero,
+      fit: BoxFit.cover,
+      errorWidget: (_, __, ___) =>
+          const CircleAvatar(radius: kRailAvatarSize / 2, child: Icon(Icons.person)),
+    );
+  }
+
+  /// P1 §2：文案优先用作品简介，没有简介用标题；都为空则不显示。
+  String _infoCaptionFor(dynamic w) {
+    final desc = '${w['desc'] ?? ''}'.trim();
+    if (desc.isNotEmpty) return desc;
+    return '${w['ti'] ?? ''}'.trim();
+  }
+
+  /// P1 §2：音乐行没有服务端元数据，用「作者原声」表达（抖音同款语义）。
+  String _infoMusicFor(dynamic w) {
+    final a = '${w['a'] ?? ''}'.trim();
+    return a.isEmpty ? '' : '$a 的原声';
+  }
+
+  void _toggleFavorite(dynamic w) {
+    final key = _likeKeyFor(w);
+    if (key.isEmpty) return;
+    setState(() {
+      if (!_favKeys.remove(key)) _favKeys.add(key);
+    });
+  }
+
+  /// P1 §1：分享兑底——把当前媒体地址复制到剪贴板。
+  Future<void> _shareWork(dynamic w) async {
+    final m = w['m'];
+    final first = (m is List && m.isNotEmpty) ? '${m.first}' : '';
+    final link = first.isEmpty ? '' : cfg.mediaUrl(first, lib: _libFor(w));
+    if (link.isEmpty) {
+      _toast('暂无可分享的链接');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: link));
+    _toast('链接已复制');
+  }
+
+  // P1b §8：非全屏舞台长按菜单（500ms、位移 ≤12px、不暂停）。
+  // 全屏分支不进入以下逻辑。
+  // ---------------------------------------------------------------------
+
+  void _stageLongPressDown(PointerDownEvent e) {
+    if (fs || _menuVisible || _commentVisible) return;
+    final w = _workAt(cur);
+    if (w['t'] != 'v') return; // 图文沿用 G11/G14 的既有长按菜单
+    final size = MediaQuery.sizeOf(context);
+    final pad = MediaQuery.paddingOf(context);
+    if (!stageLongPressAllowed(
+      position: e.localPosition,
+      stageSize: size,
+      topInset: pad.top,
+      bottomInset: pad.bottom + 88,
+      rightInset: kRailReservedWidth,
+      fullscreen: fs,
+    )) {
+      return;
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _lpTracker.begin(nowMs: now, pos: e.localPosition);
+    _lpTimer?.cancel();
+    _lpTimer =
+        Timer(const Duration(milliseconds: kStageLongPressMs), _fireLongPress);
+  }
+
+  void _stageLongPressMove(PointerMoveEvent e) {
+    if (!_lpTracker.tracking) return;
+    if (!_lpTracker.update(e.localPosition)) _lpTimer?.cancel();
+  }
+
+  void _stageLongPressUp() {
+    final fired = _lpTracker.fired;
+    _lpTracker.cancel();
+    _lpTimer?.cancel();
+    // 长按已弹菜单：这次抬起不再当作单击（否则会误暂停）。
+    if (fired) _suppressStageTap = true;
+  }
+
+  void _fireLongPress() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!mounted || !_lpTracker.shouldFire(now)) return;
+    _lpTracker.fire();
+    // 触发长按即取消待定单击；长按期间与菜单打开后都不暂停。
+    _cancelPendingSingleTap();
+    _suppressStageTap = true;
+    hapticTap();
+    _openStageMenu();
+  }
+
+  void _openStageMenu() {
+    if (fs) return;
+    _menuAnim.forward(from: 0);
+    setState(() => _menuVisible = true);
+    // P2：菜单打开期间不进入沉浸。
+    _scheduleImmersive();
+  }
+
+  void _closeStageMenu() {
+    if (!_menuVisible) return;
+    _menuAnim.reverse().whenComplete(() {
+      if (mounted && _menuAnim.value == 0) {
+        setState(() => _menuVisible = false);
+        _scheduleImmersive();
+      }
+    });
+  }
+
+  /// §8 菜单项：只在本地生效，不上传任何数据。
+  Future<void> _onStageMenuAction(String label) async {
+    _closeStageMenu();
+    final w = _workAt(cur);
+    switch (label) {
+      case '不感兴趣':
+        await _hideCurrentWork(w);
+        break;
+      case '保存到本机':
+        await _saveCurrentMedia(w);
+        break;
+      case '复制文案':
+        final text = _infoCaptionFor(w);
+        if (text.isEmpty) {
+          _toast('当前作品没有文案');
+          break;
+        }
+        await Clipboard.setData(ClipboardData(text: text));
+        _toast('文案已复制');
+        break;
+      case '举报':
+        // 举报只做本地记录，不联网、不上报服务端。
+        debugPrint('[report] local-only work=${_likeKeyFor(w)}');
+        _toast('已记录举报（仅本地，未联网）');
+        break;
+    }
+  }
+
+  /// 不感兴趣：写入本机集合 `hidden_works_v1`，刷新列表后生效；
+  /// 当前会话内直接跳到下一条，抖音同款手感。
+  Future<void> _hideCurrentWork(dynamic w) async {
+    final key = _likeKeyFor(w);
+    if (key.isEmpty) {
+      _toast('缺少作品标识，无法隐藏');
+      return;
+    }
+    setState(() => _hiddenKeys.add(key));
+    _toast('已隐藏该作品');
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final list = <String>{...sp.getStringList('hidden_works_v1') ?? const []}
+        ..add(key);
+      await sp.setStringList('hidden_works_v1', list.toList());
+    } catch (_) {}
+    if (mounted && cur < widget.works.length - 1) _step(1);
+  }
+
+  /// 保存到本机：桌面端把当前媒体原文件落到系统下载目录（不写 NAS）；
+  /// Android/iOS 暂无下载目录权限，提示暂不可用。
+  Future<void> _saveCurrentMedia(dynamic w) async {
+    if (!mediaDownloadSupported(
+        android: Platform.isAndroid, ios: Platform.isIOS)) {
+      _toast('移动端暂不支持保存到本机');
+      return;
+    }
+    final m = w['m'];
+    final first = (m is List && m.isNotEmpty) ? '${m.first}' : '';
+    if (first.isEmpty) {
+      _toast('暂无可保存的媒体');
+      return;
+    }
+    final isVideo = w['t'] == 'v';
+    final url = cfg.mediaUrl(first, lib: _libFor(w));
+    if (url.isEmpty) {
+      _toast('暂无可保存的媒体');
+      return;
+    }
+    if (url.toLowerCase().contains('.m3u8')) {
+      _toast('流媒体暂不支持保存');
+      return;
+    }
+    _toast('正在保存…');
+    try {
+      final dir = await getDownloadsDirectory() ??
+          await getApplicationDocumentsDirectory();
+      final base = '${w['ti'] ?? ''}'.trim().isEmpty
+          ? '${w['id'] ?? 'dizi'}'
+          : '${w['ti']}';
+      final name = mediaSaveFileName(base: base, url: url, video: isVideo);
+      final file = File('${dir.path}${Platform.pathSeparator}$name');
+      final resp =
+          await http.get(Uri.parse(url), headers: cfg.headersFor(_libFor(w)));
+      if (resp.statusCode != 200) {
+        _toast('保存失败：HTTP ${resp.statusCode}');
+        return;
+      }
+      await file.writeAsBytes(resp.bodyBytes, flush: true);
+      _toast('已保存到 ${file.path}');
+    } catch (e) {
+      _toast('保存失败：$e');
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // P1b §9：评论半屏面板。打开 = 60% 屏高并静音；再次上滑 = 全屏；
+  // 下滑 = 关闭并恢复原音量。面板在顶层手势域，不影响 PageView 翻页。
+  // ---------------------------------------------------------------------
+
+  double get _commentFractionNow {
+    if (_commentDragging || !_commentAnim.isAnimating) return _commentFraction;
+    final t = Curves.easeOut.transform(_commentAnim.value);
+    return _commentAnimFrom + (_commentAnimTo - _commentAnimFrom) * t;
+  }
+
+  void _openComments(dynamic w) {
+    if (_commentVisible) return;
+    _cancelPendingSingleTap();
+    _lpTimer?.cancel();
+    _lpTracker.cancel();
+    _fadeTimer?.cancel();
+    _fadeGen++;
+    try {
+      player.setVolume(0);
+    } catch (_) {}
+    setState(() {
+      _commentVisible = true;
+      _commentFraction = kCommentPanelInitialFraction;
+      _commentAnimFrom = kCommentPanelClosedFraction;
+      _commentAnimTo = kCommentPanelInitialFraction;
+    });
+    _commentAnim.forward(from: 0);
+    // P2：评论面板打开期间不进入沉浸。
+    _scheduleImmersive();
+  }
+
+  void _animateCommentTo(double target) {
+    _commentAnimFrom = _commentFractionNow;
+    _commentAnimTo = target;
+    _commentAnim.forward(from: 0).whenComplete(() {
+      if (!mounted) return;
+      setState(() {
+        _commentFraction = target;
+        if (target <= 0) _commentVisible = false;
+      });
+      if (target <= 0) {
+        try {
+          player.setVolume(volume);
+        } catch (_) {}
+      }
+      // P2：评论面板收起后重新开始沉浸计时。
+      _scheduleImmersive();
+    });
+  }
+
+  void _commentDragUpdate(DragUpdateDetails d, double screenH) {
+    if (screenH <= 0) return;
+    _commentDragging = true;
+    _commentAnim.stop();
+    setState(() {
+      _commentFraction =
+          (_commentFractionNow - d.delta.dy / screenH).clamp(0.0, 1.0);
+    });
+  }
+
+  void _commentDragEnd(DragEndDetails d, double screenH) {
+    _commentDragging = false;
+    final target = commentPanelSnap(
+      fraction: _commentFraction,
+      velocity: d.primaryVelocity ?? 0,
+    );
+    _animateCommentTo(target);
+  }
+
+  /// 切条时收起评论面板/长按菜单，避免带到下一条。
+  void _resetOverlaysOnSwitch() {
+    if (_commentVisible) {
+      _commentVisible = false;
+      _commentFraction = kCommentPanelClosedFraction;
+      try {
+        player.setVolume(volume);
+      } catch (_) {}
+    }
+    // P2：即使面板正在上滑动画中也立即收起，不带进下一条。
+    _commentAnim.stop();
+    _commentAnim.value = 0;
+    _commentDragging = false;
+    if (_menuVisible) {
+      _menuVisible = false;
+      _menuAnim.stop();
+      _menuAnim.value = 0;
+    }
+    // P2 §11：爱心/双击判定不带进下一条。
+    _heartPos = null;
+    _heartAnim.stop();
+    _heartAnim.value = 0;
+    _lastStageTapAt = 0;
+    _stageTapArbiter.clear();
+    _cancelPendingSingleTap();
+    _lpTimer?.cancel();
+    _lpTracker.cancel();
+    // P2 §12：新页从可见功能区开始，重新计时。
+    _imm.cancel();
+    _scheduleImmersive();
+  }
+
+  /// §8 底部菜单弹层：半透明黑底 + 取消钮，200ms easeOut 上滑，
+  /// 背景遮罩黑 40%。只在非全屏舞台最上层渲染。
+  Widget _stageMenuOverlay() {
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _menuAnim,
+        builder: (_, __) {
+          final t = Curves.easeOut.transform(_menuAnim.value.clamp(0.0, 1.0));
+          return Stack(fit: StackFit.expand, children: [
+            GestureDetector(
+              key: const Key('stage-menu-scrim'),
+              behavior: HitTestBehavior.opaque,
+              onTap: _closeStageMenu,
+              child: ColoredBox(
+                  color: kStageScrimColor.withValues(alpha: 0.4 * t)),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Transform.translate(
+                offset: Offset(0, (1 - t) * 320),
+                child: GestureDetector(
+                  // 吞掉面板内空白处点击，避免误关
+                  onTap: () {},
+                  child: Container(
+                    key: const Key('stage-menu'),
+                    width: double.infinity,
+                    decoration: const BoxDecoration(
+                      color: kStageMenuBackground,
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(16)),
+                    ),
+                    child: SafeArea(
+                      top: false,
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        Container(
+                          width: 36,
+                          height: 4,
+                          margin: const EdgeInsets.only(top: 8, bottom: 4),
+                          decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(2)),
+                        ),
+                        for (final label in kStageMenuLabels)
+                          ListTile(
+                            key: Key('stage-menu-$label'),
+                            dense: true,
+                            title: Text(label,
+                                style: const TextStyle(
+                                    fontSize: 15, color: Colors.white)),
+                            onTap: () => _onStageMenuAction(label),
+                          ),
+                        const Divider(height: 1, color: Colors.white12),
+                        ListTile(
+                          key: const Key('stage-menu-cancel'),
+                          dense: true,
+                          title: const Center(
+                            child: Text('取消',
+                                style: TextStyle(
+                                    fontSize: 15, color: Colors.white70)),
+                          ),
+                          onTap: _closeStageMenu,
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ]);
+        },
+      ),
+    );
+  }
+
+  /// §9 评论半屏面板：高度 = 屏高 × 当前比例（0.6 / 1.0），
+  /// 打开动画 200ms easeOut；拖动时跟手，松手按速度 snap。
+  Widget _commentPanelOverlay(Size viewSize) {
+    return Positioned.fill(
+      child: AnimatedBuilder(
+        animation: _commentAnim,
+        builder: (_, __) {
+          final frac = _commentFractionNow;
+          final h =
+              commentPanelHeight(fraction: frac, screenHeight: viewSize.height);
+          if (h <= 0.5) return const SizedBox.shrink();
+          final scrim = (frac / kCommentPanelInitialFraction).clamp(0.0, 1.0);
+          return Stack(fit: StackFit.expand, children: [
+            GestureDetector(
+              key: const Key('comment-scrim'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _animateCommentTo(kCommentPanelClosedFraction),
+              child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.4 * scrim)),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: h,
+              child: GestureDetector(
+                key: const Key('comment-panel'),
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragStart: (_) => _commentDragging = true,
+                onVerticalDragUpdate: (d) =>
+                    _commentDragUpdate(d, viewSize.height),
+                onVerticalDragEnd: (d) => _commentDragEnd(d, viewSize.height),
+                onVerticalDragCancel: () =>
+                    _animateCommentTo(kCommentPanelInitialFraction),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1C1C1E),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(16)),
+                  ),
+                  child: Column(children: [
+                    Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(top: 8, bottom: 6),
+                      decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 8, 6),
+                      child: Row(children: [
+                        const Text('评论 0',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white)),
+                        const Spacer(),
+                        IconButton(
+                          key: const Key('comment-close'),
+                          tooltip: '关闭评论',
+                          onPressed: () =>
+                              _animateCommentTo(kCommentPanelClosedFraction),
+                          icon: const Icon(Icons.close,
+                              size: 22, color: Colors.white70),
+                        ),
+                      ]),
+                    ),
+                    const Divider(height: 1, color: Colors.white12),
+                    const Expanded(
+                      child: Center(
+                        child: Text('评论功能待接入',
+                            style:
+                                TextStyle(fontSize: 13, color: Colors.white38)),
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          ]);
+        },
+      ),
+    );
+  }
+
   Future<void> _loadLikes() async {
     try {
       final sp = await SharedPreferences.getInstance();
@@ -8398,6 +8927,15 @@ class _PlayerPageState extends State<PlayerPage>
     // P0：非全屏走抖音式仲裁（250ms 单击判定，双击只点赞不暂停）；
     // 全屏分支完全保持原行为，不进入下面的新逻辑。
     if (!fs) {
+      // P2：沉浸态下第一次点按只恢复功能区，不暂停/点赞。
+      final fromImmersive = _immAtDown;
+      _immAtDown = false;
+      if (fromImmersive) {
+        _immersiveTouch();
+        showUi();
+        return;
+      }
+      _immersiveTouch();
       _onStageTapNonFullscreen(pos);
       return;
     }
@@ -8460,6 +8998,12 @@ class _PlayerPageState extends State<PlayerPage>
   /// 双击只点赞（位置=点击点）、不暂停，也不恢复任何暂停状态。
   void _onStageTapNonFullscreen(Offset? pos) {
     focus.requestFocus();
+    // P1b：长按已弹菜单/评论面板时，抬起不当作单击（不暂停）。
+    if (_suppressStageTap) {
+      _suppressStageTap = false;
+      _cancelPendingSingleTap();
+      return;
+    }
     final at = pos ?? Offset.zero;
     // G14：图片放大时单击只恢复原始大小
     if (_picZoom.isZoomed) {
@@ -8699,6 +9243,7 @@ class _PlayerPageState extends State<PlayerPage>
   // H14：统一设置音量（0–100），静音状态跟随音量归零/恢复。
   /// I3：从 0 分步抬到当前音量。token 失效、切条或用户手动调音量时作废。
   void _startAudioFade(int token) {
+    if (_commentVisible) return; // P1b：评论面板打开时保持静音
     final steps = fadeInSteps(volume);
     if (steps.isEmpty) {
       try {
@@ -8737,7 +9282,8 @@ class _PlayerPageState extends State<PlayerPage>
       muted = nv == 0;
       if (nv > 0) lastVol = nv;
     });
-    player.setVolume(nv);
+    // P1b：评论面板打开期间保持静音，关闭时由面板逻辑恢复。
+    player.setVolume(_commentVisible ? 0 : nv);
   }
 
   // 长按/横向拖动喇叭调音量：以按下时的音量为基准累加位移。
@@ -8964,6 +9510,8 @@ class _PlayerPageState extends State<PlayerPage>
           } catch (_) {}
         }
         setState(() => ui = true);
+        // P2：退出全屏后重新开始非全屏沉浸计时。
+        _scheduleImmersive();
       }
     } finally {
       // 窗口管理器切换需要一点时间，防抖避免快速连点导致的窗口状态错乱/崩溃
@@ -8977,6 +9525,8 @@ class _PlayerPageState extends State<PlayerPage>
     setState(() => ui = true);
     hideTimer?.cancel();
     hideTimer = null;
+    // P2：任何呼出功能区都重置非全屏沉浸计时（全屏内部会取消）。
+    _scheduleImmersive();
     if (!UiAutoHidePolicy.shouldSchedule(fullscreen: fs, uiVisible: ui)) return;
     hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
       hideTimer = null;
@@ -8995,18 +9545,73 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  /// P2 §12：当前是否允许进入沉浸——全屏、翻页、面板、拖动、
+  /// 拖进度条任一成立时都不允许。
+  bool _immersiveEligible() => ImmersivePolicy.eligible(
+        fullscreen: fs,
+        uiVisible: ui,
+        pageSwiping: _pageSwiping,
+        overlayOpen: _commentVisible || _menuVisible,
+        dragging: dragging,
+        seeking: _seeking,
+      );
+
+  /// P2 §12：重新排定 3 秒无操作计时；不允许时立即退出沉浸。
+  void _scheduleImmersive() {
+    _immTimer?.cancel();
+    _immTimer = null;
+    if (!mounted) return;
+    if (!_immersiveEligible()) {
+      if (_imm.immersive) {
+        setState(_imm.cancel);
+      } else {
+        _imm.cancel();
+      }
+      return;
+    }
+    _imm.schedule(DateTime.now().millisecondsSinceEpoch);
+    _immTimer = Timer(kImmersiveIdle, () {
+      _immTimer = null;
+      if (!mounted) return;
+      if (_imm.tick(DateTime.now().millisecondsSinceEpoch,
+          eligible: _immersiveEligible())) {
+        setState(() {});
+      }
+    });
+  }
+
+  /// P2 §12：点击/滑动/按键都立即退出沉浸并重新计时。
+  void _immersiveTouch() {
+    if (!mounted) return;
+    final was = _imm.immersive;
+    _imm.touch();
+    if (was) setState(() {});
+    _scheduleImmersive();
+  }
+
   /// M5：只在状态真正变化时重建，避免滚动通知每帧触发 setState。
   void _setPageSwiping(bool value) {
     // P0：一旦开始翻页手势，取消尚未触发的单击判定，避免拖完再跳一次暂停。
     if (value) _cancelPendingSingleTap();
+    // P2：翻页中立即退出沉浸，松手后重新计时。
+    if (value) {
+      _immTimer?.cancel();
+      _immTimer = null;
+      if (_imm.immersive) {
+        _imm.touch();
+      }
+    }
     if (!mounted || _pageSwiping == value) return;
     setState(() => _pageSwiping = value);
+    if (!value) _scheduleImmersive();
   }
 
   void onWheel(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
     final dy = e.scrollDelta.dy;
     if (dy == 0) return;
+    // P2：滚轮/触控板滚动静默视为操作，恢复非全屏沉浸。
+    if (!fs) _immersiveTouch();
     // 一次翻页后短暂锁定，滚轮惯性/触控板连续事件不会连续跳过多个作品
     if (_wheelLock) return;
     _wheelAcc += dy;
@@ -9077,6 +9682,8 @@ class _PlayerPageState extends State<PlayerPage>
     final down = e is KeyDownEvent;
     final repeat = e is KeyRepeatEvent;
     if (!down && !repeat) return KeyEventResult.ignored;
+    // P2：任何按键都先恢复非全屏沉浸（全屏逻辑不动）。
+    if (down && !fs) _immersiveTouch();
     // 自定义键位只在按下时触发一次，长按重复不再连发
     if (down) {
       final bound = AppSettings.actionFor(k);
@@ -9138,9 +9745,13 @@ class _PlayerPageState extends State<PlayerPage>
     _dropAnim.dispose();
     _heartAnim.dispose();
     _playHintAnim.dispose();
+    _menuAnim.dispose();
+    _commentAnim.dispose();
+    _lpTimer?.cancel();
     _singleTapTimer?.cancel();
     autoTimer?.cancel();
     hideTimer?.cancel();
+    _immTimer?.cancel();
     retryTimer?.cancel();
     _loadTimeout?.cancel();
     _slowBufferTimer?.cancel();
@@ -10183,6 +10794,13 @@ class _PlayerPageState extends State<PlayerPage>
     final chromeOpacity = ChromeFade.opacity(
         uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
     final chromeMs = ChromeFade.durationMs(swiping: _pageSwiping);
+    // P2 §12：非全屏沉浸只淡出右侧互动栏与左侧信息区（200ms easeOut），
+    // 页内进度条不参与；全屏不受影响。
+    final immersiveFade = !fs && _imm.immersive;
+    final railOpacity = chromeOpacity *
+        ImmersivePolicy.opacity(uiVisible: ui, immersive: immersiveFade);
+    final railMs = ImmersivePolicy.durationMs(
+        immersive: immersiveFade, fallbackMs: chromeMs);
     // 圆点历史上不受 ui 控制（清屏时仍显示），M5 只叠加滑动淡化，避免改变全屏行为。
     final dotsOpacity = ChromeFade.opacity(
         uiVisible: true, fullscreen: fs, swiping: _pageSwiping);
@@ -10196,6 +10814,12 @@ class _PlayerPageState extends State<PlayerPage>
     // 但返回键、图文圆点、作者/标题信息、音量面板与底部控制栏都要避开安全区。
     final pad = MediaQuery.of(context).padding;
     final viewSize = MediaQuery.sizeOf(context);
+    // P1 §4：非全屏任务栏控件间距（320dp 窄屏压到 20dp）；全屏保持旧值不动。
+    final tbSpacing = taskbarSpacingFor(viewSize.width);
+    final tbBtnW = kTaskbarIconSize + tbSpacing;
+    Color tbColor(bool active) => fs
+        ? (active ? Colors.white70 : Colors.white24)
+        : (active ? Colors.white : kTaskbarInactiveColor);
     // A/T：任务栏实底后，视频舞台内缩到栏上方（首帧栏高未知，测量后校正）；
     // 移动端全屏为沉浸式，任务栏隐藏、舞台铺满屏幕。
     final hideTaskbar = fs && _mobileStageTap;
@@ -10205,7 +10829,9 @@ class _PlayerPageState extends State<PlayerPage>
             screenHeight: viewSize.height,
             taskbarHeight: _taskbarH > 0
                 ? _taskbarH
-                : taskbarReservedHeight(safeBottom: pad.bottom),
+                : taskbarReservedHeight(
+                    contentHeight: kTaskbarHeight,
+                    safeBottom: pad.bottom),
             fullscreen: hideTaskbar,
           );
     // T：进度层贴在本页舞台底边（PageView 子页 Stack 内）；作者/标题信息行
@@ -10237,6 +10863,17 @@ class _PlayerPageState extends State<PlayerPage>
           onPointerDown: (e) {
             // 点击画面时确保键盘焦点仍在播放页，避免模拟器丢焦点后方向键失效
             if (!focus.hasFocus) focus.requestFocus();
+            // P2：记下按下瞬间的沉浸态；暂停计时，抬起后统一恢复。
+            if (!fs) {
+              _immAtDown = _imm.immersive;
+              _immTimer?.cancel();
+              _immTimer = null;
+            }
+            // P1b：非全屏视频舞台长按（500ms / 位移 ≤12px）候选起点。
+            if (pointers == 0) {
+              _suppressStageTap = false;
+              _stageLongPressDown(e);
+            }
             pointers++;
             _stagePointers[e.pointer] = e.localPosition;
             if (pointers == 2) {
@@ -10248,6 +10885,7 @@ class _PlayerPageState extends State<PlayerPage>
             }
           },
           onPointerMove: (e) {
+            _stageLongPressMove(e);
             final start = _twoFingerStarts[e.pointer];
             if (start != null && pointers >= 2) {
               // 与按下时的位置比较，缓慢拖动也能识别为「移动」而非轻触
@@ -10258,7 +10896,16 @@ class _PlayerPageState extends State<PlayerPage>
             _stagePointers[e.pointer] = e.localPosition;
           },
           onPointerUp: (e) {
+            _stageLongPressUp();
             _stagePointers.remove(e.pointer);
+            // P2：任何一次抬手都恢复互动栏/信息区并重新计时。
+            if (!fs) {
+              if (_imm.immersive) {
+                _imm.touch();
+                if (mounted) setState(() {});
+              }
+              _scheduleImmersive();
+            }
             if (pointers == 2) {
               final at = _twoFingerAt;
               final isTap = at != null &&
@@ -10280,7 +10927,13 @@ class _PlayerPageState extends State<PlayerPage>
             if (pointers > 0) pointers--;
           },
           onPointerCancel: (e) {
+            _lpTracker.cancel();
+            _lpTimer?.cancel();
             _stagePointers.remove(e.pointer);
+            if (!fs) {
+              _immAtDown = false;
+              _scheduleImmersive();
+            }
             _twoFingerAt = null;
             _twoFingerStarts.clear();
             if (pointers > 0) pointers--;
@@ -10360,8 +11013,11 @@ class _PlayerPageState extends State<PlayerPage>
                         onHorizontalDragEnd: (d) =>
                             _authorDragEnd(d.primaryVelocity ?? 0),
                         onHorizontalDragCancel: _authorDragCancel,
-                        onLongPressStart: (_) => player.setRate(2.0),
-                        onLongPressEnd: (_) => player.setRate(speed),
+                        // G2：2 倍速只在全屏保留；非全屏长按改为 §8 菜单
+                        // （500ms / 位移 ≤12px，由舞台 Listener 统一判定，不暂停）。
+                        onLongPressStart:
+                            fs ? (_) => player.setRate(2.0) : null,
+                        onLongPressEnd: fs ? (_) => player.setRate(speed) : null,
                         child: Stack(fit: StackFit.expand, children: [
                           if ((it['th'] ?? '').toString().isNotEmpty)
                             CachedNetworkImage(
@@ -10628,6 +11284,8 @@ class _PlayerPageState extends State<PlayerPage>
                         Icon(Icons.play_arrow, size: 76, color: Colors.white30),
                   ),
                 ),
+              // P1 §2：非全屏左侧信息区走独立的抖音式面板；全屏保留旧信息行。
+              if (fs)
               Positioned(
                 left: pad.left + 14,
                 right: pad.right + 80,
@@ -10835,6 +11493,58 @@ class _PlayerPageState extends State<PlayerPage>
                   ),
                 ),
               ),
+              // P1 §1/§2：非全屏右侧互动栏 + 左侧信息区。
+              // 两者共用 infoBottom 基线（已让开页内进度层），底部距任务栏 12dp。
+              if (!fs && !broken) ...[
+                Positioned(
+                  right: pad.right + kRailRightMargin,
+                  bottom: infoBottom,
+                  child: IgnorePointer(
+                    // P2：沉浸淡出后不再接收点击，点到的是画面（抬手恢复）。
+                    ignoring: !ui || immersiveFade,
+                    child: AnimatedOpacity(
+                      opacity: railOpacity,
+                      duration: Duration(milliseconds: railMs),
+                      curve: Curves.easeOut,
+                      child: PlayerInteractionRail(
+                        avatar: _railAvatar(w),
+                        liked: _isLiked(w),
+                        favorited: _favKeys.contains(_likeKeyFor(w)),
+                        likeCount: _isLiked(w) ? 1 : 0,
+                        commentCount: 0,
+                        favoriteCount:
+                            _favKeys.contains(_likeKeyFor(w)) ? 1 : 0,
+                        onLike: () => _setLiked(w, !_isLiked(w)),
+                        onComment: () => _openComments(w),
+                        onFavorite: () => _toggleFavorite(w),
+                        onShare: () => _shareWork(w),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: pad.left + kInfoLeftMargin,
+                  right: pad.right + kRailReservedWidth,
+                  bottom: infoBottom,
+                  child: IgnorePointer(
+                    ignoring: !ui || immersiveFade,
+                    child: AnimatedOpacity(
+                      opacity: railOpacity,
+                      duration: Duration(milliseconds: railMs),
+                      curve: Curves.easeOut,
+                      child: PlayerInfoPanel(
+                        author: '${w['a'] ?? ''}',
+                        caption: _infoCaptionFor(w),
+                        music: _infoMusicFor(w),
+                        maxWidth: infoAreaMaxWidth(viewSize.width),
+                        expanded: captionOpen,
+                        onToggleExpand: toggleCaption,
+                        onAuthorTap: openAuthor,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
               // O2：手机端中央大号播放/暂停圆钮，随控制层淡入淡出。
               // P0：中央大圆钮只在全屏出现；非全屏暂停只显示 0.8s 播放图标。
@@ -10950,15 +11660,30 @@ class _PlayerPageState extends State<PlayerPage>
                       curve: Curves.easeOut,
                       child: Container(
                         key: _taskbarKey,
-                        // 不透明纯黑实底：内容叠在实底上，视频不会被透出干扰。
-                        color: Colors.black,
+                        // P1 §4：非全屏 56dp 纯黑 + 1px #1AFFFFFF 顶部分割线；
+                        // 全屏保留旧的 10/6 内边距与无分割线外观。
+                        decoration: BoxDecoration(
+                          color: fs ? Colors.black : kTaskbarColor,
+                          border: fs
+                              ? null
+                              : const Border(
+                                  top: BorderSide(
+                                      color: kTaskbarDividerColor, width: 1)),
+                        ),
                         padding: EdgeInsets.only(
-                            left: pad.left + 12,
-                            right: pad.right + 12,
-                            top: 10,
-                            bottom: 6 + pad.bottom),
-                        child:
-                            Column(mainAxisSize: MainAxisSize.min, children: [
+                            left: pad.left + (fs ? 12 : kTaskbarSidePadding),
+                            right: pad.right + (fs ? 12 : kTaskbarSidePadding),
+                            top: fs ? 10 : 0,
+                            bottom: fs ? 6 + pad.bottom : pad.bottom),
+                        child: SizedBox(
+                          height: fs ? null : kTaskbarHeight - 1,
+                          child: Column(
+                            mainAxisSize:
+                                fs ? MainAxisSize.min : MainAxisSize.max,
+                            mainAxisAlignment: fs
+                                ? MainAxisAlignment.start
+                                : MainAxisAlignment.center,
+                            children: [
                           Row(children: [
                             // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
                             // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
@@ -10986,7 +11711,7 @@ class _PlayerPageState extends State<PlayerPage>
                                           child: Tooltip(
                                             message: '点击静音 / 长按拖动调音量',
                                             child: SizedBox(
-                                              width: 48,
+                                              width: fs ? 48 : tbBtnW,
                                               height: 48,
                                               child: Icon(
                                                   muted || volume == 0
@@ -10994,7 +11719,10 @@ class _PlayerPageState extends State<PlayerPage>
                                                       : (volume < 50
                                                           ? Icons.volume_down
                                                           : Icons.volume_up),
-                                                  color: Colors.white70),
+                                                  size: fs
+                                                      ? null
+                                                      : kTaskbarIconSize,
+                                                  color: tbColor(true)),
                                             ),
                                           ),
                                         ),
@@ -11049,17 +11777,19 @@ class _PlayerPageState extends State<PlayerPage>
                                           child: Tooltip(
                                             message: '选集',
                                             child: SizedBox(
-                                              width: 46,
+                                              width: fs ? 46 : tbBtnW,
                                               height: 48,
                                               child: Column(
                                                 mainAxisAlignment:
                                                     MainAxisAlignment.center,
                                                 children: [
-                                                  const Icon(
+                                                  Icon(
                                                       Icons
                                                           .video_library_outlined,
-                                                      size: 19,
-                                                      color: Colors.white70),
+                                                      size: fs
+                                                          ? 19
+                                                          : kTaskbarIconSize,
+                                                      color: tbColor(true)),
                                                   const SizedBox(height: 1),
                                                   Text(
                                                       '${_chapter + 1}/${workChapterCount(w)}',
@@ -11080,21 +11810,42 @@ class _PlayerPageState extends State<PlayerPage>
                                             paused: paused,
                                             onPressed: togglePause),
                                       IconButton(
+                                          constraints: fs
+                                              ? null
+                                              : BoxConstraints(
+                                                  minWidth: tbBtnW,
+                                                  minHeight: 48,
+                                                  maxHeight: 48),
                                           onPressed: cycleSpeed,
                                           icon: Text('${speed}x',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                   fontSize: 11,
-                                                  color: Colors.white70))),
+                                                  color: tbColor(true)))),
                                       IconButton(
+                                          constraints: fs
+                                              ? null
+                                              : BoxConstraints(
+                                                  minWidth: tbBtnW,
+                                                  minHeight: 48,
+                                                  maxHeight: 48),
                                           onPressed: toggleShuffle,
                                           tooltip: shuffle
                                               ? '乱序播放（当前库内随机）'
                                               : '顺序播放',
                                           icon: Icon(Icons.shuffle,
+                                              size: fs
+                                                  ? null
+                                                  : kTaskbarIconSize,
                                               color: shuffle
                                                   ? Colors.lightBlueAccent
-                                                  : Colors.white24)),
+                                                  : tbColor(false))),
                                       IconButton(
+                                          constraints: fs
+                                              ? null
+                                              : BoxConstraints(
+                                                  minWidth: tbBtnW,
+                                                  minHeight: 48,
+                                                  maxHeight: 48),
                                           // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
                                           onPressed:
                                               loopOne ? null : toggleAutoplay,
@@ -11102,16 +11853,28 @@ class _PlayerPageState extends State<PlayerPage>
                                               ? '单条循环开启时自动连播不可用'
                                               : '自动连播',
                                           icon: Icon(Icons.skip_next,
+                                              size: fs
+                                                  ? null
+                                                  : kTaskbarIconSize,
                                               color: autoplay
-                                                  ? Colors.white70
-                                                  : Colors.white24)),
+                                                  ? tbColor(true)
+                                                  : tbColor(false))),
                                       IconButton(
+                                          constraints: fs
+                                              ? null
+                                              : BoxConstraints(
+                                                  minWidth: tbBtnW,
+                                                  minHeight: 48,
+                                                  maxHeight: 48),
                                           onPressed: toggleLoop,
                                           tooltip: '单条循环',
                                           icon: Icon(Icons.repeat_one,
+                                              size: fs
+                                                  ? null
+                                                  : kTaskbarIconSize,
                                               color: loopOne
-                                                  ? Colors.white70
-                                                  : Colors.white24)),
+                                                  ? tbColor(true)
+                                                  : tbColor(false))),
                                       // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
                                       Tooltip(
                                         message: '送一颗小水滴',
@@ -11123,7 +11886,7 @@ class _PlayerPageState extends State<PlayerPage>
                                               ? null
                                               : _sendDrop,
                                           child: SizedBox(
-                                            width: 46,
+                                            width: fs ? 46 : tbBtnW,
                                             height: 48,
                                             child: ScaleTransition(
                                               scale: _dropScale,
@@ -11142,7 +11905,9 @@ class _PlayerPageState extends State<PlayerPage>
                                                                     .white54))
                                                   else
                                                     Icon(Icons.water_drop,
-                                                        size: 20,
+                                                        size: fs
+                                                            ? 20
+                                                            : kTaskbarIconSize,
                                                         color: dropGlow &&
                                                                 dropDayLeft >= 0
                                                             ? Colors
@@ -11151,9 +11916,9 @@ class _PlayerPageState extends State<PlayerPage>
                                                                         0 &&
                                                                     dropWeekLeft >
                                                                         0
-                                                                ? Colors.white38
-                                                                : Colors
-                                                                    .white24)),
+                                                                ? tbColor(true)
+                                                                : tbColor(
+                                                                    false))),
                                                 ],
                                               ),
                                             ),
@@ -11170,14 +11935,22 @@ class _PlayerPageState extends State<PlayerPage>
                               ),
                             ),
                             IconButton(
+                                constraints: fs
+                                    ? null
+                                    : const BoxConstraints(
+                                        minWidth: 44,
+                                        minHeight: 48,
+                                        maxHeight: 48),
                                 onPressed: toggleFs,
                                 icon: Icon(
                                     fs
                                         ? Icons.fullscreen_exit
                                         : Icons.fullscreen,
-                                    color: Colors.white70)),
+                                    size: fs ? null : kTaskbarIconSize,
+                                    color: tbColor(true))),
                           ]),
                         ]),
+                        ),
                       ),
                     ),
                   ),
@@ -11186,6 +11959,10 @@ class _PlayerPageState extends State<PlayerPage>
               // 不随功能区淡出，也绝不进入底部任务栏区域）。
               if (_noticeText != null)
                 _PlayerTopNotice(text: _noticeText!, pad: pad),
+              // P1b：评论半屏面板与长按菜单在舞台最顶层（覆盖任务栏），
+              // 自带手势域，不与 PageView 竖向翻页抢手势。
+              if (_commentVisible) _commentPanelOverlay(viewSize),
+              if (_menuVisible) _stageMenuOverlay(),
             ]),
           ),
         ),
