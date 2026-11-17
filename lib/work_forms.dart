@@ -7,7 +7,27 @@
 /// 视频合集额外提供 `ch`，播放页按章节切换 `m`/`du` 即可。
 library;
 
+/// 章节是否为图片（混合合集里图片章节排在最后）。
+bool chapterIsImage(dynamic chapter) {
+  if (chapter is! Map) return false;
+  final t = '${chapter['t'] ?? ''}'.trim();
+  if (t == 'p' || t == 'i') return true;
+  if (t == 'v') return false;
+  final m = chapter['m'];
+  if (m is List && m.isNotEmpty) {
+    final u = '${m.first}'.toLowerCase();
+    return !(u.endsWith('.mp4') ||
+        u.endsWith('.webm') ||
+        u.endsWith('.mov') ||
+        u.endsWith('.m4v'));
+  }
+  return false;
+}
+
 /// 章节列表；没有合集时返回空列表。
+///
+/// 同一作品文件夹同时有视频和图片时按「合集」处理，视频章节在前、
+/// 图片章节排在最后（owner 2026-11-17 规则）。
 List<Map<String, dynamic>> workChapters(dynamic work) {
   if (work is! Map) return const <Map<String, dynamic>>[];
   final raw = work['ch'];
@@ -15,6 +35,14 @@ List<Map<String, dynamic>> workChapters(dynamic work) {
   final out = <Map<String, dynamic>>[];
   for (final e in raw) {
     if (e is Map) out.add(Map<String, dynamic>.from(e));
+  }
+  if (out.length > 1) {
+    final vids = <Map<String, dynamic>>[];
+    final pics = <Map<String, dynamic>>[];
+    for (final c in out) {
+      (chapterIsImage(c) ? pics : vids).add(c);
+    }
+    return <Map<String, dynamic>>[...vids, ...pics];
   }
   return out;
 }
@@ -67,6 +95,9 @@ Map<String, dynamic> workWithChapter(dynamic work, int index) {
   if (chs.length <= 1) return base;
   final i = index.clamp(0, chs.length - 1);
   final c = chs[i];
+  // 混合合集：图片章节切回图片模式，视频章节切回视频模式。
+  final ct = '${c['t'] ?? ''}'.trim();
+  if (ct == 'p' || ct == 'v') base['t'] = ct;
   final m = c['m'];
   if (m is List && m.isNotEmpty) base['m'] = m;
   if (c['du'] != null) base['du'] = c['du'];

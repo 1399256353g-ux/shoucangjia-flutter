@@ -401,6 +401,52 @@ class StarredUnitsPage extends StatefulWidget {
 class _StarredUnitsPageState extends State<StarredUnitsPage> {
   late List<UnitLibrary> units = List<UnitLibrary>.from(widget.units);
 
+  @override
+  void initState() {
+    super.initState();
+    // 0.9.32：星标页首屏封面预热。网格几何与主页单元库卡片一致，
+    // 只预热一屏，provider/鉴权头与 `UnitLibraryCard` 完全相同。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _prefetchCovers());
+  }
+
+  void _prefetchCovers() {
+    if (!mounted || units.isEmpty) return;
+    final mq = MediaQuery.maybeOf(context);
+    if (mq == null) return;
+    final n = firstScreenThumbCount(
+      viewportWidth: mq.size.width,
+      viewportHeight: mq.size.height,
+      maxCrossAxisExtent: 260,
+      padding: 12,
+      crossSpacing: kLibGridSpacing,
+      mainSpacing: kLibGridSpacing,
+      aspectRatio: 1.02,
+      screens: 1,
+      maxItems: 8,
+    );
+    if (n <= 0) return;
+    final urls = <String>[];
+    final headers = <String, Map<String, String>>{};
+    for (final u in units.take(n)) {
+      final cover = widget.unitCoverOf?.call(u) ?? '';
+      if (cover.isEmpty) continue;
+      final url = withImageWidth(cover, kCardImageWidth);
+      if (urls.contains(url)) continue;
+      urls.add(url);
+      headers[url] = unitHeadersOf(u, widget.headersOf);
+    }
+    if (urls.isEmpty) return;
+    ThumbPrefetch.instance.run(
+      urls,
+      limit: n,
+      provider: (u) => CachedNetworkImageProvider(
+        u,
+        headers: headers[u] ?? const <String, String>{},
+        cacheManager: DiziCache.manager,
+      ),
+    );
+  }
+
   void _toggle(UnitLibrary u) {
     setState(() => units.removeWhere((e) => e.id == u.id));
     widget.onToggleUnitStar(u);
