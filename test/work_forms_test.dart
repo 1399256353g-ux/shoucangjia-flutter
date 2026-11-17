@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/work_forms.dart';
+import 'package:shoucangjia/work_safety.dart';
 
 Map<String, dynamic> _ch(int i, String path) => {
       'ti': '第 $i 集',
@@ -46,7 +47,8 @@ void main() {
 
     test('标签覆盖四类形态', () {
       expect(workTypeLabel({'kind': 'chapters', 't': 'v'}), '合集');
-      expect(workTypeLabel({'kind': 'album', 't': 'p'}), '图片');
+      expect(workTypeLabel({'kind': 'album', 't': 'p'}), '合集',
+          reason: 'E2：album 与筛选口径一致，统一显示「合集」');
       expect(workTypeLabel({'kind': 'post', 't': 'p'}), '图文');
       expect(workTypeLabel({'kind': 'single', 't': 'v'}), '视频');
       expect(workTypeLabel({'kind': 'single', 't': 'p'}), '图片');
@@ -133,6 +135,19 @@ void main() {
       expect(workFilterLabel(workFilterPicture), '图片');
     });
 
+    test('筛选顺序与文案统一（E2）', () {
+      expect(workFilterOrder, [
+        workFilterVideo,
+        workFilterPicture,
+        workFilterCollection,
+        workFilterPost,
+      ]);
+      expect(workFilterOrder.map(workFilterLabel).toList(),
+          ['视频', '图片', '合集', '图文']);
+      expect(workFilterLabel(workFilterCollection), '合集');
+      expect(workFilterLabel('bogus'), '其他');
+    });
+
     test('空筛选返回全部，多选并集命中', () {
       expect(filterWorksByType(works, {}).length, works.length);
       final video = filterWorksByType(works, {workFilterVideo});
@@ -183,5 +198,33 @@ void main() {
   test('章节没写 t 时按扩展名识别图片', () {
     expect(chapterIsImage({'m': ['/x/a.png']}), isTrue);
     expect(chapterIsImage({'m': ['/x/a.MP4']}), isFalse);
+  });
+
+  group('E1 图片合集边界', () {
+    test('album 无 t 时补成图片并保留全部图片', () {
+      final w = {'kind': 'album', 'm': ['/1.jpg', '/2.jpg', '/3.jpg']};
+      expect(workKind(w), 'album');
+      final out = workWithChapter(w, 0);
+      expect(out['t'], 'p');
+      expect(out['m'], ['/1.jpg', '/2.jpg', '/3.jpg']);
+      expect(workMediaPaths(out).length, 3);
+      expect(workPlayable(out), isTrue);
+    });
+
+    test('album 带 t=p 多图时不被章节覆盖', () {
+      final w = {'kind': 'album', 't': 'p', 'm': ['/1.jpg', '/2.jpg']};
+      final out = workWithChapter(w, 5);
+      expect(out['t'], 'p');
+      expect(out['m'], ['/1.jpg', '/2.jpg']);
+      expect(workChapterCount(w), 0);
+    });
+
+    test('album 计入合集筛选与计数', () {
+      final w = {'id': 'a', 't': 'p', 'kind': 'album', 'm': ['/1.jpg', '/2.jpg']};
+      expect(workFilterType(w), workFilterCollection);
+      expect(filterWorksByType([w], {workFilterCollection}), hasLength(1));
+      expect(filterWorksByType([w], {workFilterPicture}), isEmpty);
+      expect(workTypeCounts([w])[workFilterCollection], 1);
+    });
   });
 }

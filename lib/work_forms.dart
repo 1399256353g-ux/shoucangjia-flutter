@@ -69,7 +69,8 @@ String workTypeLabel(dynamic work) {
     case 'chapters':
       return '合集';
     case 'album':
-      return '图片';
+      // E2：图片合集与筛选口径一致，统一显示「合集」（不再单独写「图片」）。
+      return '合集';
     case 'post':
       return '图文';
     default:
