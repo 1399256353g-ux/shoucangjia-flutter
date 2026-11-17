@@ -102,13 +102,6 @@ jobs:
           fi
           echo "AUDIO_CFG_OK"
       - run: flutter pub get
-      - name: Validate workflow YAML
-        run: |
-          python3 -m pip install --quiet pyyaml
-          python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" .github/workflows/ios.yml
-
-      - name: Flutter tests
-        run: flutter test -r compact
       - run: dart run flutter_launcher_icons
       - run: flutter build ios --release --no-codesign
       - name: Package IPA

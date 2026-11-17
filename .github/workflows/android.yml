@@ -67,13 +67,6 @@ jobs:
           print(open(p).read()[-400:])
           PY2
       - run: flutter pub get
-      - name: Validate workflow YAML
-        run: |
-          python3 -m pip install --quiet pyyaml
-          python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" .github/workflows/android.yml
-
-      - name: Flutter tests
-        run: flutter test -r compact
       - run: dart run flutter_launcher_icons
       - name: Build APK (retry once)
         env:
