@@ -28,6 +28,7 @@ import 'app_theme.dart';
 import 'author_filter.dart';
 import 'author_drag.dart';
 import 'author_avatar.dart';
+import 'author_avatar_store.dart';
 import 'author_filter_bar.dart';
 import 'author_filter_ui.dart';
 import 'author_grid.dart';
@@ -92,6 +93,8 @@ Future<void> main() async {
   await WorkPlaysStore.ensureLoaded();
   // T4：封面缓存落 E 盘（Windows），启动时清理过期/超限条目
   await DiziCache.init();
+  // 0.9.41：本机「手动作者头像」覆盖，首帧头像就按覆盖显示
+  await AuthorAvatarStore.instance.load();
   // 退到后台/退出前再轻量清理一次（不阻塞退出）
   AppLifecycleListener(
     onPause: DiziCache.sweepOnExit,
@@ -1643,7 +1646,22 @@ class AuthorAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 0.9.41：手动设置的本机头像优先于爬虫/自动结果（owner 指定优先级）。
+    return AnimatedBuilder(
+      animation: AuthorAvatarStore.instance,
+      builder: (context, _) => _buildWith(context,
+          override: AuthorAvatarStore.instance.pathFor(name) ?? ''),
+    );
+  }
+
+  Widget _buildWith(BuildContext context, {required String override}) {
     final letter = name.isEmpty ? '?' : name[0];
+    // 覆盖图可能来自别的基础库：按路径里的库前缀路由/取鉴权，避免拼错地址。
+    final overLib = override.isEmpty ? '' : libOfMediaPath(override);
+    final src = override.isNotEmpty ? override : mediaPath;
+    final srcLib = override.isNotEmpty
+        ? (overLib.isEmpty ? lib : overLib)
+        : lib;
     final placeholder = Container(
       width: size,
       height: size,
@@ -1655,14 +1673,14 @@ class AuthorAvatar extends StatelessWidget {
       child: SizedBox(
         width: size,
         height: size,
-        child: mediaPath.isEmpty
+        child: src.isEmpty
             ? placeholder
             : CachedNetworkImage(
                 cacheManager: DiziCache.manager,
                 // 头像最大显示 64dp：要 200px 缩图即可（服务端 `w=`）。
                 imageUrl: withImageWidth(
-                    cfg.mediaUrl(mediaPath, lib: lib), kAvatarImageWidth),
-                httpHeaders: cfg.headersFor(lib),
+                    cfg.mediaUrl(src, lib: srcLib), kAvatarImageWidth),
+                httpHeaders: cfg.headersFor(srcLib),
                 fit: BoxFit.cover,
                 // 按实际显示尺寸 × 像素比解码，避免整张大图进内存
                 memCacheWidth: avatarDecodeWidth(
@@ -10322,6 +10340,115 @@ class _AuthorPageState extends State<AuthorPage> {
 
   String get displayAv => av.isNotEmpty ? av : fallbackAv;
 
+  /// 0.9.41：本机手动头像（作者主页长按头像设置）。
+  String get manualAv => AuthorAvatarStore.instance.pathFor(widget.name) ?? '';
+
+  /// 真正用于展示/放大的头像：手动 > 爬虫 av > 自动兜底。
+  String get effectiveAv => manualAv.isNotEmpty ? manualAv : displayAv;
+
+  Future<void> _showAvatarMenu(BuildContext context) async {
+    final has = manualAv.isNotEmpty;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library_outlined),
+            title: const Text('从作品里挑一张作头像'),
+            subtitle: const Text('只存本机，不改媒体文件与服务端数据',
+                style: TextStyle(fontSize: 11)),
+            onTap: () => Navigator.of(ctx).pop('pick'),
+          ),
+          if (has)
+            ListTile(
+              leading: const Icon(Icons.restart_alt),
+              title: const Text('清除手动头像（回到自动）'),
+              onTap: () => Navigator.of(ctx).pop('clear'),
+            ),
+        ]),
+      ),
+    );
+    if (!mounted) return;
+    if (choice == 'clear') {
+      await AuthorAvatarStore.instance.clear(widget.name);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('已清除手动头像')));
+    } else if (choice == 'pick') {
+      _pickAvatarImage(context);
+    }
+  }
+
+  void _pickAvatarImage(BuildContext context) {
+    final cands = <String>[];
+    for (final c in avatarCandidatesFromWorks(works.whereType<Map>())) {
+      if (!c.valid) continue;
+      if (cands.contains(c.path)) continue;
+      cands.add(c.path);
+      if (cands.length >= 36) break;
+    }
+    if (cands.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('该作者还没有可用作品图')));
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选一张作头像'),
+        content: SizedBox(
+          width: 420,
+          height: 420,
+          child: GridView.builder(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3, mainAxisSpacing: 6, crossAxisSpacing: 6),
+            itemCount: cands.length,
+            itemBuilder: (_, i) {
+              final p = cands[i];
+              final l = libOfMediaPath(p).isEmpty
+                  ? (primaryLib.isEmpty ? null : primaryLib)
+                  : libOfMediaPath(p);
+              return InkWell(
+                onTap: () async {
+                  final ok =
+                      await AuthorAvatarStore.instance.setPath(widget.name, p);
+                  if (!ctx.mounted) return;
+                  Navigator.of(ctx).pop();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(SnackBar(
+                        content: Text(ok ? '已设为该作者头像' : '这张图不能作头像')));
+                },
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedNetworkImage(
+                    cacheManager: DiziCache.manager,
+                    imageUrl: withImageWidth(
+                        cfg.mediaUrl(p, lib: l), kAvatarImageWidth),
+                    httpHeaders: cfg.headersFor(l),
+                    fit: BoxFit.cover,
+                    fadeInDuration: Duration.zero,
+                    memCacheWidth: avatarDecodeWidth(
+                        displaySize: 96,
+                        devicePixelRatio:
+                            MediaQuery.devicePixelRatioOf(context)),
+                    errorWidget: (_, __, ___) => const ColoredBox(
+                        color: Colors.black26,
+                        child: Icon(Icons.broken_image_outlined,
+                            color: Colors.white38, size: 18)),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 简介只保留正文：去掉与作者名重复的行、以及单独一行的日期。
   String get _bioText {
     final text = bio.trim();
@@ -10497,10 +10624,13 @@ class _AuthorPageState extends State<AuthorPage> {
     });
   }
 
-  // 点击头像放大查看（可双指缩放，点任意处关闭）
+  // 点击头像放大查看（可双指缩放，点任意处关闭）；长按设置/清除手动头像。
   void _showAvatar(BuildContext context) {
-    final src = displayAv;
+    final src = effectiveAv;
     if (src.isEmpty) return;
+    final srcLib = libOfMediaPath(src).isEmpty
+        ? primaryLib
+        : libOfMediaPath(src);
     showDialog(
       context: context,
       barrierColor: Colors.black87,
@@ -10513,9 +10643,8 @@ class _AuthorPageState extends State<AuthorPage> {
             child: CachedNetworkImage(
               cacheManager: DiziCache.manager,
               imageUrl: cfg.mediaUrl(src,
-                  lib: primaryLib.isEmpty ? null : primaryLib),
-              httpHeaders:
-                  cfg.headersFor(primaryLib.isEmpty ? null : primaryLib),
+                  lib: srcLib.isEmpty ? null : srcLib),
+              httpHeaders: cfg.headersFor(srcLib.isEmpty ? null : srcLib),
               fit: BoxFit.contain,
               placeholder: (_, __) =>
                   const CircularProgressIndicator(color: Colors.white38),
@@ -10552,6 +10681,7 @@ class _AuthorPageState extends State<AuthorPage> {
                     children: [
                       GestureDetector(
                         onTap: () => _showAvatar(context),
+                        onLongPress: () => _showAvatarMenu(context),
                         child: AuthorAvatar(
                           name: widget.name,
                           mediaPath: displayAv,
