@@ -84,6 +84,56 @@ void main() {
     });
   });
 
+  group('手动节点模式（/api/nodes）下的单元库封面', () {
+    test('nodes 字符串列表 + covers 映射 → 节点带 coverUrl 与 serverBase', () {
+      final nodes = nodesFromMarks(
+        const ['(1) A', '(1) A/(2) B', '(3) C'],
+        covers: const {
+          '(1) A': '/media/lib-008/a/cover.jpg',
+          '(3) C': 'lib-009/x.jpg',
+        },
+        serverBase: 'http://192.168.2.4:8090/',
+      );
+      expect(nodes.map((n) => n.rel),
+          ['(1) A', '(1) A/(2) B', '(3) C']);
+      expect(nodes[0].coverUrl, '/media/lib-008/a/cover.jpg');
+      expect(nodes[0].serverBase, 'http://192.168.2.4:8090/');
+      // 没设过封面 / 非媒体路径 → 不当封面，避免半截地址被请求。
+      expect(nodes[1].coverUrl, '');
+      expect(nodes[2].coverUrl, '');
+    });
+
+    test('不带 covers 时与旧行为一致（全部空封面）', () {
+      final nodes = nodesFromMarks(const ['(1) A', '(2) B']);
+      expect(nodes.length, 2);
+      expect(nodes.every((n) => n.coverUrl.isEmpty), isTrue);
+      expect(nodes.every((n) => n.serverBase.isEmpty), isTrue);
+    });
+
+    test('手动模式节点经 buildUnitTree 后，自定义封面仍优先于自动封面', () {
+      final tree = buildUnitTree(
+        nodes: nodesFromMarks(
+          const ['(1) A'],
+          covers: const {'(1) A': '/media/lib-008/a/cover.jpg'},
+          serverBase: 'http://192.168.2.4:8090',
+        ),
+        basics: const [
+          BasicLib(
+              id: 'l1',
+              name: 'A',
+              rel: '(1) A/a',
+              bigId: '',
+              authors: 1,
+              works: 2,
+              serverBase: 'http://192.168.2.4:8090'),
+        ],
+      )!;
+      final unit = tree.children.first;
+      expect(unitCoverUrl(unit),
+          'http://192.168.2.4:8090/media/lib-008/a/cover.jpg');
+    });
+  });
+
   group('单元库封面请求', () {
     test('设置走 /api/cover/unit，请求体与基础库同形', () {
       const r = CoverRequest.set(

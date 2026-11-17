@@ -339,6 +339,7 @@ class LibMeta {
               // 单元库＝owner 在「文件结构」里勾选的节点文件夹（/api/nodes），
               // 与主页使用同一份来源；只有节点为空时才退回 v2 分组。
               final marks = <String>[];
+              final markCovers = <String, String>{};
               if (rs[3].statusCode == 200) {
                 try {
                   final nj = jsonDecode(utf8.decode(rs[3].bodyBytes));
@@ -353,11 +354,23 @@ class LibMeta {
                       if (s.isNotEmpty) marks.add(s);
                     }
                   }
+                  // 0.9.36：手动节点模式下单元库封面指针也随 /api/nodes 下发
+                  // （`covers: {rel: "/media/..."}`），按 rel 收进映射表。
+                  final cm = nj is Map ? nj['covers'] : null;
+                  if (cm is Map) {
+                    for (final e in cm.entries) {
+                      final k = '${e.key}'.trim();
+                      final v = '${e.value ?? ''}'.trim();
+                      if (k.isEmpty || v.isEmpty) continue;
+                      markCovers[k] = v;
+                    }
+                  }
                 } catch (_) {}
               }
               final nodes = marks.isEmpty
                   ? nodesFromV2(ljm, root: base)
-                  : nodesFromMarks(marks);
+                  : nodesFromMarks(marks,
+                      covers: markCovers, serverBase: cfg.base);
               final tree = buildUnitTree(nodes: nodes, basics: unitBasics);
               if (tree != null) {
                 unitTree = tree;

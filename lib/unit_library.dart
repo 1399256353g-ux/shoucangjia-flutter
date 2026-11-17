@@ -335,13 +335,30 @@ String formatCount(int n) {
 
 /// 手动模式的节点列表：`/api/nodes` 的相对路径 → 单元库节点。
 /// 空数组表示只有顶级 SECRET（不生成任何下级节点）。
-List<LibNode> nodesFromMarks(Iterable<String> marks) {
+///
+/// 0.9.36：`/api/nodes` 现在同时下发 `covers: {rel: "/media/..."}`（owner 设过的
+/// 单元库封面指针）。手动节点模式下单元库节点原本是纯字符串，拿不到 `cover.u`，
+/// 自定义封面在该模式下不显示；这里把指针带进节点，`serverBase` 用于零散调用处
+/// 自行拼绝对地址（主页/单元库页仍走调用方解析好的封面链）。
+List<LibNode> nodesFromMarks(
+  Iterable<String> marks, {
+  Map<String, String> covers = const <String, String>{},
+  String serverBase = '',
+}) {
   final out = <LibNode>[];
   final seen = <String>{};
+  final base = serverBase.trim();
   for (final raw in marks) {
     final rel = splitRel(raw).join('/');
     if (rel.isEmpty || !seen.add(rel)) continue;
-    out.add(LibNode(id: rel, rel: rel, name: splitRel(rel).last));
+    final u = '${covers[rel] ?? covers[raw] ?? ''}'.trim();
+    out.add(LibNode(
+      id: rel,
+      rel: rel,
+      name: splitRel(rel).last,
+      coverUrl: u.startsWith('/media/') ? u : '',
+      serverBase: base,
+    ));
   }
   return out;
 }
