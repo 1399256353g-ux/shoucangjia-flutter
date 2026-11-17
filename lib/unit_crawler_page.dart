@@ -38,6 +38,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
   UnitCrawlerConfig config = const UnitCrawlerConfig();
   List<UnitCrawlerScript> scripts = const [];
 
+  /// M7：服务端下发的运行记录（上次/下次/最近结果）。
+  Map<String, dynamic> schedule = const {};
+
   http.Client get _client => widget.client ?? http.Client();
 
   String get _configUrl => unitCrawlerUrl(widget.base, '/api/unit/crawler',
@@ -77,6 +80,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         config = UnitCrawlerConfig.fromJson(j['crawler'] as Map?);
         scripts = UnitCrawlerScript.listFrom(j['scripts']);
         running = (j['running'] as Map?)?['running'] == true;
+        schedule = (j['schedule'] is Map)
+            ? Map<String, dynamic>.from(j['schedule'] as Map)
+            : const {};
       });
     } catch (e) {
       if (mounted) setState(() => err = '$e');
@@ -193,6 +199,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     ),
                     const SizedBox(height: 8),
                     // 同步频率：快检只扫新增/删除，全量才完整抓取。
+                    _ScheduleSummary(schedule: schedule),
                     SwitchListTile(
                       key: const ValueKey('unit-crawler-quick'),
                       contentPadding: EdgeInsets.zero,
@@ -373,6 +380,54 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ),
       ],
+    );
+  }
+}
+
+/// M7：同步配置页顶部的运行记录摘要（上次/下次 + 最近结果）。
+class _ScheduleSummary extends StatelessWidget {
+  final Map<String, dynamic> schedule;
+  const _ScheduleSummary({required this.schedule});
+
+  static String _t(dynamic v) {
+    final ms = (v is num) ? v.toInt() : int.tryParse('${v ?? ''}') ?? 0;
+    if (ms <= 0) return '—';
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    String two(int x) => x.toString().padLeft(2, '0');
+    return '${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (schedule.isEmpty) return const SizedBox.shrink();
+    final mode = '${schedule['lastMode'] ?? ''}';
+    final exit = schedule['lastExit'];
+    final qh = schedule['quickRunsHour'] is num
+        ? (schedule['quickRunsHour'] as num).toInt()
+        : 0;
+    final style = TextStyle(
+        fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          '上次运行 ${_t(schedule['lastRun'])}'
+          '${mode.isEmpty ? '' : ' · ${mode == 'quick' ? '快检' : '全量'}'}'
+          '${exit == null ? '' : ' · exit $exit'}',
+          style: style,
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '下次快检 ${_t(schedule['nextQuick'])} · 下次全量 ${_t(schedule['nextFull'])}'
+          ' · 本小时快检 $qh/3',
+          style: style,
+        ),
+      ]),
     );
   }
 }

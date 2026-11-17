@@ -106,6 +106,9 @@ ThemeData buildThemeData(AppThemeSpec spec) {
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: spec.background,
+    // 简体中文默认字体（内置 NotoSansSC）：避免「门」等字被系统字体
+    // 回退成繁体/部首形状；emoji 仍走 fontFamilyFallback。
+    fontFamily: 'NotoSansSC',
     fontFamilyFallback: kEmojiFontFallback,
     appBarTheme: AppBarTheme(
       backgroundColor: spec.background,
