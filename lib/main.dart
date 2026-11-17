@@ -14,6 +14,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'cover_admin.dart';
 import 'cover_cache.dart';
+import 'cover_memo.dart';
 import 'cover_upload.dart';
 import 'deleted_monitor.dart';
 import 'concurrency.dart';
@@ -3240,8 +3241,13 @@ class _LibraryPageState extends State<LibraryPage> {
 
   // L5-C：有新的本机播放记录时刷新封面
   void _onPlaysChanged() {
+    // 0.9.53：播放次数会影响「子树最高播放基础库」，缓存必须一起失效。
+    _unitCoverMemo.clear();
     if (mounted) setState(() {});
   }
+
+  /// 0.9.53：单元库封面链的记忆化缓存（键含播放/封面修订号）。
+  final CoverMemo _unitCoverMemo = CoverMemo();
 
   /// L5-C：基础库封面 URL。手动 `_cover/` > 爬虫封面（`cv`）> 自动封面
   /// （本机播放量最高的作品，有图文作品时优先图文图片）。
@@ -3268,9 +3274,8 @@ class _LibraryPageState extends State<LibraryPage> {
     BasicLib? best;
     var bestPlays = -1;
     for (final b in u.allBasics) {
-      final plays = WorkPlaysStore.countsFor(b.id)
-          .values
-          .fold<int>(0, (n, p) => n + p.count);
+      // 0.9.53：O(1) 取整库播放总数，不再每次扫全部播放记录。
+      final plays = WorkPlaysStore.playsInLib(b.id);
       if (plays > bestPlays) {
         bestPlays = plays;
         best = b;
@@ -3456,6 +3461,17 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 0.9.35：owner 手动设置的单元库封面（服务端 `unit-covers.json` → `cover.u`）
   /// 优先 > 手动 `_cover/` > 子树最高播放基础库的封面 > 第一个有封面的基础库。
   String _unitCoverUrl(UnitLibrary u) {
+    // 0.9.53：同一单元库 + 同一播放/封面状态只算一次；滚动重建时直接命中。
+    return _unitCoverMemo.resolve(
+      '${u.id}\u0001${u.node.coverUrl}\u0001${u.node.coverVersion}'
+      '\u0001${u.node.coverExt}\u0001${WorkPlaysStore.revision.value}'
+      '\u0001${coverRevision.value}\u0001${cfg.base}',
+      () => _resolveUnitCover(u),
+    );
+  }
+
+  /// 单元库封面链的真实计算（被 [_unitCoverUrl] 记忆化包裹）。
+  String _resolveUnitCover(UnitLibrary u) {
     final pick = u.node.coverUrl.trim();
     if (pick.isNotEmpty) {
       final ownLib = libOfMediaPath(pick);
