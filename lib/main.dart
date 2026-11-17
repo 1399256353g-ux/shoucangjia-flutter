@@ -1312,10 +1312,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
           if (emoji.isNotEmpty)
             Text(emoji, style: const TextStyle(fontSize: 16, height: 1.1)),
           Text(
-            LibraryBadge.custom[id] == null ? '自动' : '自定义',
+            LibraryBadge.customColorFor(id) == null ? '自动' : '自定义',
             style: TextStyle(
                 fontSize: 12,
-                color: LibraryBadge.custom[id] == null
+                color: LibraryBadge.customColorFor(id) == null
                     ? Colors.grey
                     : Colors.lightBlueAccent),
           ),
@@ -1336,11 +1336,49 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     );
   }
 
+  Widget _hsvSlider({
+    required String label,
+    required double value,
+    required double max,
+    required List<Color> colors,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(children: [
+      SizedBox(
+          width: 48,
+          child: Text(label,
+              style: const TextStyle(fontSize: 11, color: Colors.grey))),
+      Expanded(
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 10,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+          ),
+          child: Slider(
+            value: value.clamp(0, max),
+            max: max,
+            activeColor: Colors.white24,
+            inactiveColor: Colors.white10,
+            onChanged: onChanged,
+          ),
+        ),
+      ),
+      SizedBox(
+        width: 40,
+        child: Text(value.toStringAsFixed(max > 1 ? 0 : 2),
+            textAlign: TextAlign.right,
+            style: const TextStyle(fontSize: 10, color: Colors.grey)),
+      ),
+    ]);
+  }
+
   /// 词条样式（颜色 + emoji 后缀）编辑；返回 null 表示取消。
   Future<_BadgeDraft?> _showBadgeDialog(
       String name, String id, int autoColor) async {
-    var current = LibraryBadge.custom[id] ?? autoColor;
+    var current = LibraryBadge.customColorFor(id) ?? autoColor;
+    var hsv = HSVColor.fromColor(Color(current));
     var currentEmoji = LibraryBadge.emojiFor(id);
+    final emojiEdit = TextEditingController(text: currentEmoji);
     return showDialog<_BadgeDraft>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -1387,11 +1425,68 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       ),
                     ),
                 ]),
+                const SizedBox(height: 10),
+                // 全色盘：色相 / 饱和度 / 明度，任意颜色都能调出来。
+                _hsvSlider(
+                  label: '色相',
+                  value: hsv.hue,
+                  max: 360,
+                  colors: const [
+                    Color(0xFFFF0000),
+                    Color(0xFFFFFF00),
+                    Color(0xFF00FF00),
+                    Color(0xFF00FFFF),
+                    Color(0xFF0000FF),
+                    Color(0xFFFF00FF),
+                    Color(0xFFFF0000),
+                  ],
+                  onChanged: (v) => setLocal(() {
+                    hsv = hsv.withHue(v);
+                    current = hsv.toColor().toARGB32();
+                  }),
+                ),
+                _hsvSlider(
+                  label: '饱和度',
+                  value: hsv.saturation,
+                  max: 1,
+                  colors: [
+                    HSVColor.fromAHSV(1, hsv.hue, 0, hsv.value).toColor(),
+                    HSVColor.fromAHSV(1, hsv.hue, 1, hsv.value).toColor(),
+                  ],
+                  onChanged: (v) => setLocal(() {
+                    hsv = hsv.withSaturation(v);
+                    current = hsv.toColor().toARGB32();
+                  }),
+                ),
+                _hsvSlider(
+                  label: '明度',
+                  value: hsv.value,
+                  max: 1,
+                  colors: [
+                    HSVColor.fromAHSV(1, hsv.hue, hsv.saturation, 0).toColor(),
+                    HSVColor.fromAHSV(1, hsv.hue, hsv.saturation, 1).toColor(),
+                  ],
+                  onChanged: (v) => setLocal(() {
+                    hsv = hsv.withValue(v);
+                    current = hsv.toColor().toARGB32();
+                  }),
+                ),
                 const SizedBox(height: 14),
                 const Align(
                   alignment: Alignment.centerLeft,
-                  child: Text('emoji 后缀（可留空）',
+                  child: Text('emoji 后缀（可留空；支持任意标准 emoji，可直接输入）',
                       style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: emojiEdit,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: '输入或粘贴任意 emoji',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (v) => setLocal(() =>
+                      currentEmoji = LibraryBadge.sanitizeEmoji(v)),
                 ),
                 const SizedBox(height: 6),
                 Wrap(spacing: 8, runSpacing: 8, children: [
@@ -1399,6 +1494,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                     GestureDetector(
                       onTap: () => setLocal(() {
                         currentEmoji = currentEmoji == e ? '' : e;
+                        emojiEdit.text = currentEmoji;
                       }),
                       child: Container(
                         width: 34,
@@ -1424,7 +1520,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   child: TextButton.icon(
                     onPressed: () => setLocal(() {
                       current = autoColor;
+                      hsv = HSVColor.fromColor(Color(autoColor));
                       currentEmoji = '';
+                      emojiEdit.text = '';
                     }),
                     icon: const Icon(Icons.restart_alt, size: 18),
                     label: const Text('恢复自动（颜色 + 后缀）'),
@@ -6334,8 +6432,39 @@ class _PlayerPageState extends State<PlayerPage>
   /// 播放页头像：作品自带 `av` 优先；离线库没有作者头像时，
   /// 用该作者任一作品的封面图兜底，避免永远显示默认人形图标。
   String avatarFor(Map w) {
-    // 作者头像只使用作者自己的头像；不再拿作品缩略图冒充作者头像。
-    return '${w['av'] ?? ''}';
+    final av = '${w['av'] ?? ''}';
+    if (av.isNotEmpty) return av;
+    // 离线库没有作者头像（av 为空）时，用该作者作品的缩略图/首图兜底，
+    // 否则播放页永远只显示默认人形。
+    final name = '${w['a'] ?? ''}';
+    if (name.isEmpty) return '';
+    for (final e in widget.works) {
+      if (e is! Map || '${e['a'] ?? ''}' != name) continue;
+      final t = '${e['th'] ?? ''}';
+      if (t.isNotEmpty) return t;
+      final m = e['m'];
+      if (m is List) {
+        for (final x in m) {
+          final u = '$x';
+          if (u.isEmpty) continue;
+          final low = u.toLowerCase();
+          if (low.endsWith('.mp4') ||
+              low.endsWith('.webm') ||
+              low.endsWith('.mov') ||
+              low.endsWith('.m4v')) {
+            continue;
+          }
+          return u;
+        }
+      }
+    }
+    return '';
+  }
+
+  /// 头像/兜底图归属的库：优先用媒体路径里的库 id，取不到再用当前库。
+  String _avatarLibFor(String path) {
+    final lib = libOfMediaPath(path);
+    return lib.isEmpty ? _curLib : lib;
   }
 
   /// G18：监听当前活动槽位。切换预缓冲槽位时先解绑旧槽位，避免
@@ -8906,11 +9035,14 @@ class _PlayerPageState extends State<PlayerPage>
                               child: CachedNetworkImage(
                                   cacheManager: DiziCache.manager,
                                   // 播放页头像 38dp：取 200px 缩图即可。
+                                  // 兜底图可能来自作者所在的基础库，按图片自身
+                                  // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
                                   imageUrl: withImageWidth(
                                       cfg.mediaUrl(avatarFor(w),
-                                          lib: _curLib),
+                                          lib: _avatarLibFor(avatarFor(w))),
                                       kAvatarImageWidth),
-                                  httpHeaders: cfg.headersFor(_curLib),
+                                  httpHeaders:
+                                      cfg.headersFor(_avatarLibFor(avatarFor(w))),
                                   width: 38,
                                   height: 38,
                                   memCacheWidth: (38 *

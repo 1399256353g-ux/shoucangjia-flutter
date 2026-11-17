@@ -40,8 +40,18 @@ class LibraryBadge {
 
   /// 词条 emoji 可选集合（设置页一键选择，也允许键盘输入其它 emoji）。
   static const List<String> emojiChoices = <String>[
-    '🔥', '⭐', '💧', '🎬', '📷', '🍀', '🌙', '🎵',
-    '🐾', '🎯', '🍭', '💎', '🌊', '🧿', '🪩', '🦶',
+    // 常用 / 标记
+    '🔥', '⭐', '🌟', '✨', '💧', '💎', '🎯', '✅', '❗', '❓',
+    // 媒体
+    '🎬', '📷', '🎞️', '📺', '🎧', '🎵', '🎮', '🖼️',
+    // 自然 / 动物
+    '🌟', '🌙', '☀️', '🌈', '🍀', '🌊', '🌸', '🍁', '🐾', '🐱', '🐶', '🦋',
+    // 物件 / 情绪
+    '🎁', '🍭', '🍓', '☕', '🧿', '🪩', '🕯️', '🔮', '💡', '📌', '🧩', '🛡️',
+    // 人物 / 手势
+    '😀', '😎', '🥳', '😍', '🤍', '❤️', '💙', '💜', '👍', '👀', '🙌', '👑',
+    // 其他常用
+    '🦶', '🐻', '🦊', '🐼', '🍺', '🍷', '🧊', '🚀', '🏆', '🎨', '📚', '🗂️',
   ];
 
   static int autoColorAt(int index) {
@@ -225,12 +235,24 @@ class LibraryBadge {
     } catch (_) {}
   }
 
+  /// 单元库自定义颜色的当前值（`rel` / `node:rel` 两种形式都认）。
+  /// 设置页用它判断「自动 / 自定义」，避免只删一种 id 后仍显示自定义色。
+  static int? customColorFor(String unitId) {
+    if (unitId.isEmpty) return null;
+    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    return custom[unitId] ?? custom[rel] ?? custom['node:$rel'];
+  }
+
+  /// 设置或清除单元库自定义颜色。
+  /// 清除时把同一单元库的 `rel` / `node:rel` 两种键一起删掉。
   static Future<void> setColor(String libId, int? argb) async {
-    if (argb == null) {
-      custom.remove(libId);
-    } else {
-      custom[libId] = argb;
-    }
+    if (libId.isEmpty) return;
+    final rel = libId.startsWith('node:') ? libId.substring(5) : libId;
+    custom
+      ..remove(libId)
+      ..remove(rel)
+      ..remove('node:$rel');
+    if (argb != null) custom[libId] = argb;
     await save();
   }
 

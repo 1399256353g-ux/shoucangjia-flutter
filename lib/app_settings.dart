@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -108,9 +109,17 @@ class AppSettings {
     try {
       final sp = await SharedPreferences.getInstance();
       final raw = sp.getString(prefsKey);
-      if (raw == null || raw.isEmpty) return;
-      final j = jsonDecode(raw);
-      if (j is Map<String, dynamic>) applyJson(j);
+      if (raw != null && raw.isNotEmpty) {
+        final j = jsonDecode(raw);
+        if (j is Map<String, dynamic>) applyJson(j);
+      }
+      // Windows 上多路视频预载会让整机明显卡顿：老配置一次性降为「不预载」，
+      // 用户仍可在「播放参数」里手动开回来。
+      if (Platform.isWindows && sp.getBool('lowload_migrated_v1') != true) {
+        preloadPerSide = 0;
+        await save();
+        await sp.setBool('lowload_migrated_v1', true);
+      }
     } catch (_) {
       // 设置损坏时保留默认值，不影响启动
     }
