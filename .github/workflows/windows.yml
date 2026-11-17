@@ -24,6 +24,11 @@ jobs:
       - name: Drop template test
         shell: bash
         run: rm -f test/widget_test.dart; ls test | head -5
+      # 测试闸门：三端统一用 bash（Windows runner 也走 git-bash），
+      # 只跑自己的套件、输出精简，避免 pwsh/代码页把中文输出读崩。
+      - name: Flutter tests
+        shell: bash
+        run: flutter test -r compact
       - name: Rename window title
         shell: pwsh
         run: |
