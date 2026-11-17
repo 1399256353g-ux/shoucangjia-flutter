@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_action.dart';
 
@@ -54,6 +55,10 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   final Set<String> saved = <String>{};
   /// 基础库 rel 集合（来自 `/api/libraries.json` 的 `basicLibraries`）。
   Set<String> basicRels = <String>{};
+
+  /// 手动强制解锁的基础库目录（持久化）：允许把它们设为节点文件夹。
+  final Set<String> unlocked = <String>{};
+  static const String _unlockedKey = 'folder_unlocked_v1';
   bool loading = true;
   bool saving = false;
   String? err;
@@ -121,7 +126,39 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   @override
   void initState() {
     super.initState();
+    _loadUnlocked();
     _load();
+  }
+
+  Future<void> _loadUnlocked() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final list = sp.getStringList(_unlockedKey) ?? const <String>[];
+      if (!mounted) return;
+      setState(() => unlocked
+        ..clear()
+        ..addAll(list.map(normalizeRel).where((e) => e.isNotEmpty)));
+    } catch (_) {}
+  }
+
+  Future<void> _saveUnlocked() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setStringList(_unlockedKey, unlocked.toList());
+    } catch (_) {}
+  }
+
+  /// 有效「基础库锁定」：目录仍具基础库特征（有作者）且未被手动解锁。
+  /// 已经没有作者（不再具备基础库特征）的目录自动解锁。
+  bool _lockedBasic(_FolderRow r) =>
+      r.isBasic && r.authors > 0 && !unlocked.contains(normalizeRel(r.rel));
+
+  void _forceUnlock(_FolderRow r) {
+    final n = normalizeRel(r.rel);
+    setState(() => unlocked.add(n));
+    _saveUnlocked();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('已解锁「${r.name}」，可设为节点文件夹')));
   }
 
   Future<void> _load() async {
@@ -268,8 +305,9 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
 
   bool _isBasicRel(String rel) {
     final n = normalizeRel(rel);
-    if (basicRels.contains(n)) return true;
-    return _findRow(rows, rel)?.isBasic ?? false;
+    final row = _findRow(rows, rel);
+    if (row != null && _lockedBasic(row)) return true;
+    return basicRels.contains(n) && !unlocked.contains(n);
   }
 
   _FolderRow? _findRow(List<_FolderRow> list, String rel) {
@@ -286,7 +324,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     final out = <String>[];
     void walk(List<_FolderRow> list) {
       for (final r in list) {
-        if (!r.isBasic && r.children.isNotEmpty) out.add(r.rel);
+        if (!_lockedBasic(r) && r.children.isNotEmpty) out.add(r.rel);
         walk(r.children);
       }
     }
@@ -320,7 +358,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     final open = expanded.contains(r.rel);
     final isNode = nodes.contains(r.rel);
     final hasKids = r.children.isNotEmpty;
-    final isBasic = r.isBasic;
+    final isBasic = _lockedBasic(r);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

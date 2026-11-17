@@ -6293,17 +6293,8 @@ class _PlayerPageState extends State<PlayerPage>
   /// 播放页头像：作品自带 `av` 优先；离线库没有作者头像时，
   /// 用该作者任一作品的封面图兜底，避免永远显示默认人形图标。
   String avatarFor(Map w) {
-    final av = '${w['av'] ?? ''}';
-    if (av.isNotEmpty) return av;
-    final name = '${w['a'] ?? ''}';
-    if (name.isEmpty) return '';
-    for (final e in widget.works) {
-      if (e is Map && '${e['a'] ?? ''}' == name) {
-        final t = '${e['th'] ?? ''}';
-        if (t.isNotEmpty) return t;
-      }
-    }
-    return '';
+    // 作者头像只使用作者自己的头像；不再拿作品缩略图冒充作者头像。
+    return '${w['av'] ?? ''}';
   }
 
   /// G18：监听当前活动槽位。切换预缓冲槽位时先解绑旧槽位，避免
@@ -10299,6 +10290,24 @@ class _AuthorPageState extends State<AuthorPage> {
 
   String get displayAv => av.isNotEmpty ? av : fallbackAv;
 
+  /// 简介只保留正文：去掉与作者名重复的行、以及单独一行的日期。
+  String get _bioText {
+    final text = bio.trim();
+    if (text.isEmpty) return '（暂无简介）';
+    final name = widget.name.trim();
+    final out = <String>[];
+    for (final raw in text.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      if (line == name || line == '@$name' || line == name.replaceAll('@', '')) {
+        continue;
+      }
+      if (RegExp(r'^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$').hasMatch(line)) continue;
+      out.add(line);
+    }
+    return out.isEmpty ? '（暂无简介）' : out.join('\n');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -10539,7 +10548,7 @@ class _AuthorPageState extends State<AuthorPage> {
                                 style: TextStyle(
                                     fontSize: 12, color: Colors.grey)),
                             const SizedBox(height: 6),
-                            Text(bio.isEmpty ? '（暂无简介）' : bio,
+                            Text(_bioText,
                                 maxLines: 6,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontSize: 13)),
