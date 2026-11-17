@@ -14,6 +14,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'cover_admin.dart';
 import 'cover_cache.dart';
+import 'cover_upload.dart';
 import 'deleted_monitor.dart';
 import 'concurrency.dart';
 import 'crash_guard.dart';
@@ -198,6 +199,21 @@ final navKey = GlobalKey<NavigatorState>();
 
 /// 封面设置成功后的刷新信号：主页库卡片据此重新拉取封面索引。
 final ValueNotifier<int> coverRevision = ValueNotifier<int>(0);
+
+/// C2：卡片上的「本地选图作封面」。拼当前库连接与鉴权，成功后通知刷新。
+Future<CoverUploadResult> uploadCoverFromPicker({
+  required String libId,
+  String unitRel = '',
+}) async {
+  final r = await pickAndUploadCover(
+    url: cfg.u('/api/cover/upload', lib: libId).toString(),
+    headers: cfg.headersFor(libId),
+    libId: libId,
+    unitRel: unitRel,
+  );
+  if (r.ok) coverRevision.value++;
+  return r;
+}
 
 /// J9：作者来源词条所需的基础库映射与统计。
 /// 一次加载后按库缓存，词条显示「基础库」名称（如「🦶」），不是大库名。
@@ -3483,6 +3499,7 @@ class _LibraryPageState extends State<LibraryPage> {
         onOpenUnit: _openUnit,
         onToggleUnitStar: _toggleUnitStar,
         unitCoverOf: _unitCoverUrl,
+        coverUploader: uploadCoverFromPicker,
       ),
     ));
   }
@@ -3570,6 +3587,7 @@ class _LibraryPageState extends State<LibraryPage> {
             coverOf: _coverUrlFor,
             unitCoverOf: _unitCoverUrl,
             onConfigureUnit: _openUnitCrawler,
+            coverUploader: uploadCoverFromPicker,
           ),
         )),
         onToggleUnitStar: _toggleUnitStar,
@@ -3577,6 +3595,7 @@ class _LibraryPageState extends State<LibraryPage> {
         coverOf: _coverUrlFor,
         unitCoverOf: _unitCoverUrl,
         onConfigureUnit: _openUnitCrawler,
+        coverUploader: uploadCoverFromPicker,
       ),
     ));
   }
@@ -3877,6 +3896,7 @@ class _LibraryPageState extends State<LibraryPage> {
             onTapBasic: _showBasic,
             onOpenStars: _openStars,
             unitCoverOf: (u) => _unitCoverUrl(u),
+            coverUploader: uploadCoverFromPicker,
           )
         else
           const Padding(

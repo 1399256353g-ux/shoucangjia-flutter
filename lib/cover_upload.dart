@@ -1,0 +1,99 @@
+import 'dart:convert';
+
+import 'package:file_selector/file_selector.dart';
+import 'package:http/http.dart' as http;
+
+/// C2：库卡片「本地选图上传封面」的结果。
+class CoverUploadResult {
+  final bool ok;
+  final bool cancelled;
+  final String message;
+
+  const CoverUploadResult(this.ok, this.message, {this.cancelled = false});
+
+  const CoverUploadResult.cancelled()
+      : ok = false,
+        cancelled = true,
+        message = '已取消';
+}
+
+/// 由宿主页面注入的上传入口：负责拼 URL/鉴权，并在成功后触发封面刷新。
+typedef CoverUploader = Future<CoverUploadResult> Function({
+  required String libId,
+  String unitRel,
+});
+
+/// 与服务端 `/api/cover/upload` 保持一致的单图上限。
+const int kCoverUploadMaxBytes = 12 * 1024 * 1024;
+
+/// 只放行服务端支持的三种图片魔数（JPG/PNG/WebP）。
+bool isSupportedCoverBytes(List<int> b) {
+  if (b.length < 12) return false;
+  if (b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return true;
+  if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+    return true;
+  }
+  final riff = String.fromCharCodes(b.sublist(0, 4)) == 'RIFF';
+  final webp = String.fromCharCodes(b.sublist(8, 12)) == 'WEBP';
+  return riff && webp;
+}
+
+/// 打开本地文件选择器挑一张图片，base64 POST 到 `/api/cover/upload`。
+///
+/// 只上传图片字节，不改作品原图与已有封面文件；`unitRel` 非空时表示
+/// 该单元库的自定义封面（服务端写 unit-covers.json 指针）。
+Future<CoverUploadResult> pickAndUploadCover({
+  required String url,
+  required Map<String, String> headers,
+  required String libId,
+  String unitRel = '',
+}) async {
+  XFile? picked;
+  try {
+    picked = await openFile(acceptedTypeGroups: const [
+      XTypeGroup(label: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp']),
+    ]);
+  } catch (e) {
+    return CoverUploadResult(false, '打开文件选择器失败：$e');
+  }
+  if (picked == null) return const CoverUploadResult.cancelled();
+
+  List<int> bytes;
+  try {
+    bytes = await picked.readAsBytes();
+  } catch (e) {
+    return CoverUploadResult(false, '读取图片失败：$e');
+  }
+  if (bytes.isEmpty) return const CoverUploadResult(false, '图片为空');
+  if (bytes.length > kCoverUploadMaxBytes) {
+    return const CoverUploadResult(false, '图片超过 12MB，请先压缩');
+  }
+  if (!isSupportedCoverBytes(bytes)) {
+    return const CoverUploadResult(false, '只支持 JPG/PNG/WebP 图片');
+  }
+
+  http.Response r;
+  try {
+    r = await http.post(
+      Uri.parse(url),
+      headers: {...headers, 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'lib': libId,
+        if (unitRel.isNotEmpty) 'unitRel': unitRel,
+        'data': base64Encode(bytes),
+      }),
+    );
+  } catch (e) {
+    return CoverUploadResult(false, '上传失败：$e');
+  }
+  if (r.statusCode != 200) {
+    var msg = 'HTTP ${r.statusCode}';
+    try {
+      final j = jsonDecode(r.body);
+      if (j is Map && j['error'] is String) msg = j['error'] as String;
+    } catch (_) {}
+    return CoverUploadResult(false, '上传失败：$msg');
+  }
+  return CoverUploadResult(
+      true, unitRel.isEmpty ? '封面已更新' : '单元库封面已更新');
+}

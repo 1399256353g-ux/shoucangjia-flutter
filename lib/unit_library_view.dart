@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'cover_cache.dart';
+import 'cover_upload.dart';
 import 'decode_plan.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
@@ -207,6 +208,9 @@ class UnitLibraryHomeView extends StatefulWidget {
   /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
   final Map<String, String> Function([String? lib])? headersOf;
 
+  /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
+  final CoverUploader? coverUploader;
+
   const UnitLibraryHomeView({
     super.key,
     required this.tree,
@@ -217,6 +221,7 @@ class UnitLibraryHomeView extends StatefulWidget {
     required this.onOpenStars,
     this.unitCoverOf,
     this.headersOf,
+    this.coverUploader,
   });
 
   @override
@@ -228,6 +233,16 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
   void initState() {
     super.initState();
     _schedulePrefetch();
+  }
+
+  /// C2：选本地图上传单元库封面，结果用 SnackBar 提示。
+  Future<void> _pickCover(String libId, String unitRel) async {
+    final up = widget.coverUploader;
+    if (up == null) return;
+    final r = await up(libId: libId, unitRel: unitRel);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(r.message)));
   }
 
   @override
@@ -339,6 +354,8 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
             itemCount: units.length,
             itemBuilder: (_, i) {
               final u = units[i];
+              final coverLib =
+                  u.allBasics.isNotEmpty ? u.allBasics.first.id : '';
               return UnitLibraryCard(
                 unit: u,
                 coverUrl: widget.unitCoverOf?.call(u) ?? '',
@@ -346,6 +363,10 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
                 starred: liveStars.contains(u.id),
                 onToggleStar: () => widget.onToggleUnitStar(u),
                 onTap: () => widget.onOpenUnit(u),
+                onSetCover:
+                    widget.coverUploader == null || coverLib.isEmpty
+                        ? null
+                        : () => _pickCover(coverLib, u.rel),
               );
             },
           ),
@@ -403,6 +424,9 @@ class StarredUnitsPage extends StatefulWidget {
   /// 鉴权头（按基础库 id）；为空时封面请求不带头（公开媒体）。
   final Map<String, String> Function([String? lib])? headersOf;
 
+  /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
+  final CoverUploader? coverUploader;
+
   const StarredUnitsPage({
     super.key,
     required this.units,
@@ -410,6 +434,7 @@ class StarredUnitsPage extends StatefulWidget {
     required this.onToggleUnitStar,
     this.unitCoverOf,
     this.headersOf,
+    this.coverUploader,
   });
 
   @override
@@ -425,6 +450,16 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
     // 0.9.32：星标页首屏封面预热。网格几何与主页单元库卡片一致，
     // 只预热一屏，provider/鉴权头与 `UnitLibraryCard` 完全相同。
     WidgetsBinding.instance.addPostFrameCallback((_) => _prefetchCovers());
+  }
+
+  /// C2：选本地图上传封面（单元库或基础库），结果用 SnackBar 提示。
+  Future<void> _pickCover(String libId, String unitRel) async {
+    final up = widget.coverUploader;
+    if (up == null) return;
+    final r = await up(libId: libId, unitRel: unitRel);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(r.message)));
   }
 
   void _prefetchCovers() {
@@ -500,6 +535,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
               itemCount: units.length,
               itemBuilder: (_, i) {
                 final u = units[i];
+                final coverLib =
+                    u.allBasics.isNotEmpty ? u.allBasics.first.id : '';
                 return UnitLibraryCard(
                   unit: u,
                   coverUrl: widget.unitCoverOf?.call(u) ?? '',
@@ -507,6 +544,10 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                   starred: true,
                   onToggleStar: () => _toggle(u),
                   onTap: () => widget.onOpenUnit(u),
+                  onSetCover:
+                      widget.coverUploader == null || coverLib.isEmpty
+                          ? null
+                          : () => _pickCover(coverLib, u.rel),
                 );
               },
               ),
@@ -543,6 +584,9 @@ class UnitLibraryCard extends StatelessWidget {
   /// 右上角爬虫配置入口：只有非顶级单元库才显示。
   final VoidCallback? onConfigure;
 
+  /// C2：本地选图上传封面（为空不显示按钮）。
+  final VoidCallback? onSetCover;
+
   const UnitLibraryCard({
     super.key,
     required this.unit,
@@ -552,6 +596,7 @@ class UnitLibraryCard extends StatelessWidget {
     this.starred = false,
     this.onToggleStar,
     this.onConfigure,
+    this.onSetCover,
   });
 
   /// 顶级单元库（SECRET，rel 为空）没有独立爬虫配置；只有下级单元库才有。
@@ -604,6 +649,18 @@ class UnitLibraryCard extends StatelessWidget {
               top: 6,
               right: 6,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (onSetCover != null)
+                  IconButton(
+                    key: ValueKey('unit-cover-btn-${unit.id}'),
+                    tooltip: '本地选图作封面',
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 30, height: 30),
+                    icon: const Icon(Icons.image_outlined),
+                    onPressed: onSetCover,
+                  ),
                 if (showCrawler)
                   IconButton(
                     key: ValueKey('unit-crawler-${unit.id}'),
@@ -727,6 +784,9 @@ class UnitLibraryPage extends StatefulWidget {
   /// L5-D：非顶级单元库可配置独立爬虫（SECRET 顶级不显示入口）。
   final void Function(UnitLibrary unit)? onConfigureUnit;
 
+  /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
+  final CoverUploader? coverUploader;
+
   const UnitLibraryPage({
     super.key,
     required this.unit,
@@ -738,6 +798,7 @@ class UnitLibraryPage extends StatefulWidget {
     this.unitCoverOf,
     this.headersOf,
     this.onConfigureUnit,
+    this.coverUploader,
   });
 
   @override
@@ -749,6 +810,16 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
   void initState() {
     super.initState();
     _schedulePrefetch();
+  }
+
+  /// C2：选本地图上传封面（单元库/基础库），结果用 SnackBar 提示。
+  Future<void> _pickCover(String libId, String unitRel) async {
+    final up = widget.coverUploader;
+    if (up == null) return;
+    final r = await up(libId: libId, unitRel: unitRel);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(r.message)));
   }
 
   @override
@@ -913,6 +984,8 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
               itemCount: unit.children.length,
               itemBuilder: (c, i) {
                 final sub = unit.children[i];
+                final coverLib =
+                    sub.allBasics.isNotEmpty ? sub.allBasics.first.id : '';
                 return UnitLibraryCard(
                   unit: sub,
                   coverUrl: unitCoverOf?.call(sub) ?? '',
@@ -923,6 +996,9 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                   onConfigure: onConfigureUnit == null
                       ? null
                       : () => onConfigureUnit(sub),
+                  onSetCover: widget.coverUploader == null || coverLib.isEmpty
+                      ? null
+                      : () => _pickCover(coverLib, sub.rel),
                 );
               },
             ),
@@ -951,6 +1027,10 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                 unitLabel: unit.name,
                 unitKey: unit.id,
                 onTap: () => onTapBasic(sorted[i]),
+                onSetCover: widget.coverUploader == null
+                    ? null
+                    : () => _pickCover(
+                        sorted[i].id, ownerKey[sorted[i].id] ?? ''),
               ),
             ),
           ],
@@ -975,6 +1055,9 @@ class BasicLibCard extends StatelessWidget {
   final String unitLabel;
   final String unitKey;
 
+  /// C2：本地选图上传封面（为空不显示按钮）。
+  final VoidCallback? onSetCover;
+
   const BasicLibCard({
     super.key,
     required this.basic,
@@ -983,6 +1066,7 @@ class BasicLibCard extends StatelessWidget {
     this.headers = const <String, String>{},
     this.unitLabel = '',
     this.unitKey = '',
+    this.onSetCover,
   });
 
   /// 词条文本：与作者词条共用同一套「去序号」规则。
@@ -1052,6 +1136,22 @@ class BasicLibCard extends StatelessWidget {
               dense: true,
             ),
           ),
+          if (onSetCover != null)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: IconButton(
+                key: ValueKey('basic-cover-btn-${basic.id}'),
+                tooltip: '本地选图作封面',
+                iconSize: 18,
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints:
+                    const BoxConstraints.tightFor(width: 30, height: 30),
+                icon: const Icon(Icons.image_outlined),
+                onPressed: onSetCover,
+              ),
+            ),
         ]),
       ),
     );
