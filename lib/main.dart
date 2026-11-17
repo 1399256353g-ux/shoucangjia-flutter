@@ -10824,6 +10824,9 @@ class _PlayerPageState extends State<PlayerPage>
     required int idx,
     required double progress,
   }) {
+    // owner 2026-11-18：只有「单张图的图文」整层隐藏（计数也不显示）；
+    // 多图图文仍要分段进度条。视频不受影响。
+    if (!isV && pics.length <= 1) return const SizedBox.shrink();
     final pad = MediaQuery.paddingOf(context);
     final opacity = ChromeFade.opacity(
         uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
@@ -11207,8 +11210,12 @@ class _PlayerPageState extends State<PlayerPage>
         stageProgressBottomOffset(safeBottom: fs ? pad.bottom : 0);
     final chapterCount = workChapterCount(w);
     // 页内浮层坐标：舞台已让掉任务栏（stageInset），这里不能再加一次。
+    // 单图图文没有进度层，信息区直接贴到舞台底部上方 10dp，不留空位。
+    final noProgressLayer = !isV && pics.length <= 1;
     final infoBottomInPage = progressBottom +
-        stageProgressOverlayHeight(hasChapter: chapterCount > 1) +
+        (noProgressLayer
+            ? 0
+            : stageProgressOverlayHeight(hasChapter: chapterCount > 1)) +
         10;
     if (!broken) _scheduleTaskbarMeasure();
     // 邻页缓存只保留当前 ±2，避免滑动久后持有过多封面。

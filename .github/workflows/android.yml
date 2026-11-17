@@ -3,7 +3,7 @@ permissions:
   contents: write
 concurrency:
   group: ${{ github.workflow }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 on:
   push:
     branches: [ main ]
