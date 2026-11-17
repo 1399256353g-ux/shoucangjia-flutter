@@ -11368,7 +11368,26 @@ class _PlayerPageState extends State<PlayerPage>
                     if (i != cur) {
                       // C：邻页拆成独立子组件并复用实例；预载页先铺封面，
                       // setState 时 Element 不重建，拖动进页不黑屏。
-                      return _neighborPageFor(i);
+                      final page = _neighborPageFor(i);
+                      // 拖动时把信息层也挂到邻页上：头像/文案跟画面一起滑进来，
+                      // 落页后不再「凭空冒出一段文字」。不拖动时不建，省开销。
+                      if (!_pageSwiping) return page;
+                      return Stack(fit: StackFit.expand, children: [
+                        page,
+                        ..._stageOverlayChildren(
+                          w: it,
+                          fs: fs,
+                          broken: false,
+                          pad: pad,
+                          bottom: infoBottomInPage,
+                          viewSize: viewSize,
+                          chromeOpacity: chromeOpacity,
+                          chromeMs: chromeMs,
+                          immersiveFade: immersiveFade,
+                          railOpacity: railOpacity,
+                          railMs: railMs,
+                        ),
+                      ]);
                     }
                     if (it['t'] == 'v') {
                       return GestureDetector(
