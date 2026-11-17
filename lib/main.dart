@@ -3251,6 +3251,14 @@ class _LibraryPageState extends State<LibraryPage> {
       final fallback = _basicCoverUrl(top);
       if (fallback.isNotEmpty) return fallback;
     }
+    // 新设备/没播放记录时 `_topPlayedBasic` 会给出一个空封面；
+    // 继续在子树里找第一个真的有封面的基础库（自定义/爬虫/作品图），
+    // 否则单元库卡片会一直是默认图标。
+    for (final b in u.allBasics) {
+      if (identical(b, top)) continue;
+      final fallback = _basicCoverUrl(b);
+      if (fallback.isNotEmpty) return fallback;
+    }
     return '';
   }
 

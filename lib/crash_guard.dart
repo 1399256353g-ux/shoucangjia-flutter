@@ -5,6 +5,8 @@
 //  - 未捕获的异步异常不再让界面「无声无息」停住，记下来继续跑；
 //  - 记录只在内存里（最多 50 条，同名错误合并计数），供「设置 → 诊断信息」查看，
 //    不写文件、不上传，符合 NAS 隐私红线。
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -72,7 +74,30 @@ class CrashLog extends ChangeNotifier {
         _entries.removeRange(maxEntries, _entries.length);
       }
     }
+    _appendFile(_entries.first);
     notifyListeners();
+  }
+
+  /// 崩溃日志落盘路径：Windows 固定 E 盘（不写 C 盘），其它平台临时目录。
+  static String get logDir =>
+      Platform.isWindows ? r'E:\Dizi\logs' : '${Directory.systemTemp.path}/dizi_logs';
+  static String get logPath => '$logDir/crash.log';
+
+  /// 追加一条到本地日志文件；超过 2 MB 先截断，避免无限增长。
+  void _appendFile(CrashEntry e) {
+    try {
+      final d = Directory(logDir);
+      if (!d.existsSync()) d.createSync(recursive: true);
+      final f = File(logPath);
+      if (f.existsSync() && f.lengthSync() > 2 * 1024 * 1024) {
+        f.writeAsStringSync('', mode: FileMode.write);
+      }
+      f.writeAsStringSync(
+          '${e.at.toIso8601String()} [${e.kindLabel}]'
+          '${e.hits > 1 ? ' x${e.hits}' : ''} ${e.message}\n'
+          '${e.stack.trim().isEmpty ? '' : '${e.stack}\n'}',
+          mode: FileMode.append);
+    } catch (_) {}
   }
 
   void clear() {
