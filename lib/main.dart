@@ -54,6 +54,7 @@ import 'playback_flow.dart';
 import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'text_fit.dart';
+import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
 import 'ui_fade.dart';
 import 'volume_control.dart';
@@ -5033,6 +5034,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   void _onSharedFilter() {
     if (!mounted) return;
     setState(() => _applyOrder());
+    _prefetchAvatars();
   }
 
   Future<void> _syncAuthors() async {
@@ -5197,6 +5199,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         _applyOrder(resetShown: !keepScroll);
         loading = false;
       });
+      _prefetchAvatars();
     } catch (e) {
       if (mounted) {
         // 静默刷新失败时保留现有列表，不打扰用户
@@ -5416,6 +5419,52 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     } else if (_shown > _ordered.length) {
       _shown = _ordered.length;
     }
+  }
+
+  /// 0.9.27：首屏作者头像预热。
+  ///
+  /// 列表数据一到就先按显示尺寸拉首屏可见头像，provider 与 [AuthorAvatar]
+  /// 完全一致（同 URL + 同 `ResizeImage` 宽度），格子渲染时直接命中缓存，
+  /// 不再先出首字母占位再逐张替换。只预热有 `av` 的作者，失败由卡片自己重试。
+  void _prefetchAvatars() {
+    if (!mounted || _ordered.isEmpty) return;
+    final mq = MediaQuery.of(context);
+    final n = firstScreenThumbCount(
+      viewportWidth: mq.size.width,
+      viewportHeight: mq.size.height,
+      maxCrossAxisExtent: 150,
+      aspectRatio: 150 / 170,
+    );
+    if (n <= 0) return;
+    final px = avatarDecodeWidth(
+      displaySize: AuthorAvatar.gridSize,
+      devicePixelRatio: mq.devicePixelRatio,
+    );
+    final urls = <String>[];
+    final headers = <String, Map<String, String>>{};
+    for (final e in _ordered.take(n)) {
+      final av = '${e.value['av'] ?? ''}';
+      if (av.isEmpty) continue;
+      final lib =
+          '${e.value['_lib'] ?? (_quickBig == 'all' ? cfg.lib : _quickBig)}';
+      final u = withImageWidth(cfg.mediaUrl(av, lib: lib), kAvatarImageWidth);
+      urls.add(u);
+      headers[u] = cfg.headersFor(lib);
+    }
+    if (urls.isEmpty) return;
+    ThumbPrefetch.instance.run(
+      urls,
+      limit: n,
+      provider: (u) => ResizeImage.resizeIfNeeded(
+        px,
+        null,
+        CachedNetworkImageProvider(
+          u,
+          headers: headers[u] ?? cfg.headers,
+          cacheManager: DiziCache.manager,
+        ),
+      ),
+    );
   }
 
   String _fmtDate(int sec) {
