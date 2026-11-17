@@ -6754,6 +6754,7 @@ class _NeighborPage extends StatefulWidget {
     required this.imageUrl,
     required this.headers,
     required this.memCacheWidth,
+    this.onAspect,
   });
 
   final int index;
@@ -6761,33 +6762,86 @@ class _NeighborPage extends StatefulWidget {
   final Map<String, String> headers;
   final int memCacheWidth;
 
+  /// 封面解析出比例后回填给播放页缓存：滑到它之前比例就已就绪，
+  /// 落页时不再有「先铺满、再留边」的重排。
+  final ValueChanged<double>? onAspect;
+
   @override
   State<_NeighborPage> createState() => _NeighborPageState();
 }
 
 class _NeighborPageState extends State<_NeighborPage> {
+  /// 封面像素宽/高。封面截自视频帧，比例与视频一致——用它来判定这一页
+  /// 是铺满还是留边，保证和落页后的播放器矩形完全重合。
+  double? _aspect;
+  ImageStream? _stream;
+  ImageStreamListener? _listener;
+
   @override
   void initState() {
     super.initState();
     // 轻量日志：验证拖动前邻页已挂载（tag=page:mount）。
     debugPrint('[page:mount] index=${widget.index}');
+    _resolveAspect();
+  }
+
+  void _resolveAspect() {
+    if (widget.imageUrl.isEmpty) return;
+    try {
+      final provider = CachedNetworkImageProvider(
+        widget.imageUrl,
+        headers: widget.headers,
+        cacheManager: DiziCache.manager,
+        maxWidth: widget.memCacheWidth,
+      );
+      final listener = ImageStreamListener((info, _) {
+        final img = info.image;
+        if (!mounted || img.height <= 0) return;
+        final a = img.width / img.height;
+        if (a <= 0) return;
+        widget.onAspect?.call(a);
+        if (_aspect != null && (_aspect! - a).abs() < 0.001) return;
+        setState(() => _aspect = a);
+      });
+      _listener = listener;
+      _stream = provider.resolve(const ImageConfiguration());
+      _stream!.addListener(listener);
+    } catch (_) {
+      // 解析失败保持默认铺满，不影响滑动。
+    }
+  }
+
+  @override
+  void dispose() {
+    final s = _stream;
+    final l = _listener;
+    if (s != null && l != null) s.removeListener(l);
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     const fallback = ColoredBox(color: Colors.black);
     if (widget.imageUrl.isEmpty) return fallback;
-    return ClipRect(
-      child: CachedNetworkImage(
-        cacheManager: DiziCache.manager,
-        // 滑动中的相邻页只是占位：720px 缩图足够，按屏幕宽度解码。
-        imageUrl: widget.imageUrl,
-        httpHeaders: widget.headers,
-        memCacheWidth: widget.memCacheWidth,
-        fit: BoxFit.cover,
-        fadeInDuration: Duration.zero,
-        placeholder: (_, __) => fallback,
-        errorWidget: (_, __, ___) => fallback,
+    // 与播放页同一套判定：竖屏铺满、横板留边；用户手动覆盖优先。
+    // 留边时黑底属于本页，滑动中整页一起位移，接缝是黑接黑。
+    final fill =
+        videoFitFor(aspect: _aspect, mode: AppSettings.videoFitOverride) ==
+            VideoFit.fill;
+    return ColoredBox(
+      color: Colors.black,
+      child: ClipRect(
+        child: CachedNetworkImage(
+          cacheManager: DiziCache.manager,
+          // 滑动中的相邻页只是占位：720px 缩图足够，按屏幕宽度解码。
+          imageUrl: widget.imageUrl,
+          httpHeaders: widget.headers,
+          memCacheWidth: widget.memCacheWidth,
+          fit: fill ? BoxFit.cover : BoxFit.contain,
+          fadeInDuration: Duration.zero,
+          placeholder: (_, __) => fallback,
+          errorWidget: (_, __, ___) => fallback,
+        ),
       ),
     );
   }
@@ -6927,6 +6981,28 @@ class _PlayerPageState extends State<PlayerPage>
   /// O4：当前视频宽高比（来自播放器 videoParams），用于把手机端任务栏
   /// 贴到画面下沿；拿不到时退回屏幕底部。
   double? _videoAspect;
+
+  /// 按作品缓存显示比例（键与点赞一致）。
+  ///
+  /// 切条时 `_videoAspect` 会重置，若只依赖它，新视频会先按“铺满”画、
+  /// 等解码器报出比例再改成“留边”——那一下就是抽搐。
+  /// 这里按作品记住比例（邻页封面解析时也会回填），落页直接是最终矩形。
+  final Map<String, double> _aspectByWork = {};
+
+  double? _aspectFor(dynamic w) {
+    final cached = _aspectByWork[_likeKeyFor(w)];
+    if (cached != null && cached > 0) return cached;
+    return _videoAspect;
+  }
+
+  /// 记住比例；与已有值相差 <2% 时不覆盖，避免封面与解码器来回抢。
+  void _rememberAspect(dynamic w, double a) {
+    if (a <= 0 || !a.isFinite) return;
+    final key = _likeKeyFor(w);
+    final old = _aspectByWork[key];
+    if (old != null && old > 0 && (old - a).abs() / old < 0.02) return;
+    _aspectByWork[key] = a;
+  }
 
   // A：底部任务栏改为不透明实底；视频视口按其高度内缩，避免遮住画面。
   // 栏高在布局完成后测量（简介展开/安全区都会影响）。
@@ -7373,7 +7449,11 @@ class _PlayerPageState extends State<PlayerPage>
               ? vp.dw! / vp.dh!
               : null);
       if (a == null || a <= 0) return;
-      if (_videoAspect != null && (_videoAspect! - a).abs() < 0.001) return;
+      final curWork = _workAt(cur);
+      final before = _aspectFor(curWork);
+      _rememberAspect(curWork, a);
+      // 已是同一比例（或只在 2% 内摆动）就不重排，避免像素级跳动。
+      if (before != null && (before - a).abs() / before < 0.02) return;
       setState(() => _videoAspect = a);
     }));
   }
@@ -9814,10 +9894,294 @@ class _PlayerPageState extends State<PlayerPage>
     return (size.width * dpr).round().clamp(360, 2160);
   }
 
+
+  /// 页内浮层：作者头像/文案/音乐 + 右侧互动栏（含全屏旧信息行）。
+  ///
+  /// 放进每一页自己的 Stack，滑动时随视频整页位移——抖音的文案是跟着
+  /// 视频一起滑的，钉在外层就会「画面滑走、文字不动」。
+  /// [bottom] 用页内坐标（不含 stageInset），避免重复扣一次任务栏高度。
+  List<Widget> _stageOverlayChildren({
+    required dynamic w,
+    required bool fs,
+    required bool broken,
+    required EdgeInsets pad,
+    required double bottom,
+    required Size viewSize,
+    required double chromeOpacity,
+    required int chromeMs,
+    required bool immersiveFade,
+    required double railOpacity,
+    required int railMs,
+  }) {
+    return [
+      // P1 §2：非全屏左侧信息区走独立的抖音式面板；全屏保留旧信息行。
+      if (fs)
+      Positioned(
+        left: pad.left + 14,
+        right: pad.right + 80,
+        // T：让位给页内舞台底部的进度层（进度条已随页滑动到这里）。
+        bottom: bottom,
+        child: IgnorePointer(
+          ignoring: !ui,
+          child: AnimatedOpacity(
+            opacity: chromeOpacity,
+            duration: Duration(milliseconds: chromeMs),
+            curve: Curves.easeOut,
+            child: GestureDetector(
+              onTap: openAuthor,
+              // G11：长按信息区弹出播放菜单（视频区长按仍是 2 倍速）
+              onLongPress: _showWorkMenu,
+              child: Row(children: [
+                if (avatarFor(w).isNotEmpty)
+                  ClipOval(
+                      child: CachedNetworkImage(
+                          cacheManager: DiziCache.manager,
+                          // 播放页头像 38dp：取 200px 缩图即可。
+                          // 兜底图可能来自作者所在的基础库，按图片自身
+                          // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
+                          imageUrl: withImageWidth(
+                              cfg.mediaUrl(avatarFor(w),
+                                  lib: _avatarLibFor(avatarFor(w))),
+                              kAvatarImageWidth),
+                          httpHeaders:
+                              cfg.headersFor(_avatarLibFor(avatarFor(w))),
+                          width: 38,
+                          height: 38,
+                          memCacheWidth: (38 *
+                                  MediaQuery.devicePixelRatioOf(
+                                      context))
+                              .round(),
+                          fadeInDuration: Duration.zero,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) =>
+                              const CircleAvatar(
+                                  radius: 19,
+                                  child: Icon(Icons.person))))
+                else
+                  const CircleAvatar(
+                      radius: 19, child: Icon(Icons.person)),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Row(children: [
+                        Flexible(
+                          child: Text('@${w['a']}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                        ),
+                        if (('${w['d'] ?? ''}').isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          Text('${w['d']}',
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.white54)),
+                        ],
+                        // G9：本地喜欢标记，点红心可取消
+                        if (_isLiked(w)) ...[
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: () => _setLiked(w, false),
+                            child: const Icon(Icons.favorite,
+                                size: 14, color: Color(0xFFFF3B5C)),
+                          ),
+                        ],
+                      ]),
+                      // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
+                      if (_meta != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Opacity(
+                            opacity: 0.7,
+                            child: AuthorBadges(
+                              meta: _meta,
+                              name: '${w['a'] ?? ''}',
+                              mediaPath: avatarFor(w),
+                              // 作品条目自带基础库 id 时直接用它归属单元库
+                              basicId:
+                                  '${w['_bid'] ?? w['basicId'] ?? ''}',
+                              fallbackId: _curLib,
+                              // 0.9.6：不再回退库名文案，无归属显示 SECRET
+                              fallbackName: '',
+                              works: widget.works
+                                  .where((e) =>
+                                      e is Map && e['a'] == w['a'])
+                                  .length,
+                            ),
+                          ),
+                        ),
+                      // 作品/合集文件夹里的 txt 简介（服务端下发 desc）
+                      if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 3),
+                          child: Text('${w['desc']}'.trim(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 11, color: Colors.white70)),
+                        ),
+                      // T：集数标签已移入页内舞台底部的进度层（随页位移），
+                      // 信息行不再重复展示。
+                      Row(children: [
+                        Expanded(
+                          child: LayoutBuilder(builder: (context, c) {
+                            const style = TextStyle(
+                                fontSize: 12, color: Colors.white70);
+                            const expandWidth = 22.0;
+                            final title = '${w['ti'] ?? ''}';
+                            // F33：按可用宽度实际测量，只有真的截断才
+                            // 显示展开按钮（原按字符数猜测会误判）。
+                            final needsExpand = willOverflowText(
+                                title, style, c.maxWidth - expandWidth,
+                                textScaler:
+                                    MediaQuery.textScalerOf(context),
+                                locale: Localizations.maybeLocaleOf(
+                                    context));
+                            // H13：展开后任务栏向上拉长，显示缩略全文，
+                            // 不弹独立窗口；再点一次收起。
+                            if (captionOpen) {
+                              return GestureDetector(
+                                // 吸收点击，避免误触进入作者主页
+                                onTap: () {},
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.fromLTRB(
+                                      10, 8, 10, 6),
+                                  decoration: BoxDecoration(
+                                      color: Colors.black45,
+                                      borderRadius:
+                                          BorderRadius.circular(12)),
+                                  constraints: BoxConstraints(
+                                      maxHeight:
+                                          MediaQuery.sizeOf(context)
+                                                  .height *
+                                              0.42),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Flexible(
+                                        child: SingleChildScrollView(
+                                          child: SelectableText(title,
+                                              style: style.copyWith(
+                                                  fontSize: 13,
+                                                  height: 1.5,
+                                                  color: Colors.white)),
+                                        ),
+                                      ),
+                                      Align(
+                                        alignment:
+                                            Alignment.centerRight,
+                                        child: GestureDetector(
+                                          onTap: toggleCaption,
+                                          child: const Padding(
+                                            padding: EdgeInsets.only(
+                                                left: 6,
+                                                top: 4,
+                                                bottom: 2),
+                                            child: Icon(
+                                                Icons.unfold_less,
+                                                size: 16,
+                                                color: Colors.white54),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+                            return Row(children: [
+                              Expanded(
+                                child: Text(title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: style),
+                              ),
+                              if (needsExpand)
+                                GestureDetector(
+                                  onTap: toggleCaption,
+                                  child: const Padding(
+                                    padding: EdgeInsets.only(
+                                        left: 6, top: 2, bottom: 2),
+                                    child: Icon(Icons.unfold_more,
+                                        size: 16,
+                                        color: Colors.white54),
+                                  ),
+                                ),
+                            ]);
+                          }),
+                        ),
+                      ]),
+                    ])),
+              ]),
+            ),
+          ),
+        ),
+      ),
+      // P1 §1/§2：非全屏右侧互动栏 + 左侧信息区。
+      // 两者共用 infoBottom 基线（已让开页内进度层），底部距任务栏 12dp。
+      if (!fs && !broken) ...[
+        Positioned(
+          right: pad.right + kRailRightMargin,
+          bottom: bottom,
+          child: IgnorePointer(
+            // P2：沉浸淡出后不再接收点击，点到的是画面（抬手恢复）。
+            ignoring: !ui || immersiveFade,
+            child: AnimatedOpacity(
+              opacity: railOpacity,
+              duration: Duration(milliseconds: railMs),
+              curve: Curves.easeOut,
+              child: PlayerInteractionRail(
+                avatar: _railAvatar(w),
+                liked: _isLiked(w),
+                favorited: _favKeys.contains(_likeKeyFor(w)),
+                likeCount: _isLiked(w) ? 1 : 0,
+                commentCount: 0,
+                favoriteCount:
+                    _favKeys.contains(_likeKeyFor(w)) ? 1 : 0,
+                onLike: () => _setLiked(w, !_isLiked(w)),
+                onComment: () => _openComments(w),
+                onFavorite: () => _toggleFavorite(w),
+                onShare: () => _shareWork(w),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          left: pad.left + kInfoLeftMargin,
+          right: pad.right + kRailReservedWidth,
+          bottom: bottom,
+          child: IgnorePointer(
+            ignoring: !ui || immersiveFade,
+            child: AnimatedOpacity(
+              opacity: railOpacity,
+              duration: Duration(milliseconds: railMs),
+              curve: Curves.easeOut,
+              child: PlayerInfoPanel(
+                author: '${w['a'] ?? ''}',
+                caption: _infoCaptionFor(w),
+                music: _infoMusicFor(w),
+                maxWidth: infoAreaMaxWidth(viewSize.width),
+                expanded: captionOpen,
+                onToggleExpand: toggleCaption,
+                onAuthorTap: openAuthor,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ];
+  }
+
   Widget videoView() {
     // B：按源比例自适应；fill 时 cover + ClipRect 铺满，contain 留黑边。
     final fit = videoFitFor(
-                aspect: _videoAspect,
+                aspect: _aspectFor(_workAt(cur)),
                 mode: AppSettings.videoFitOverride) ==
             VideoFit.fill
         ? BoxFit.cover
@@ -9869,6 +10233,7 @@ class _PlayerPageState extends State<PlayerPage>
             : withImageWidth(cfg.mediaUrl(th, lib: lib), kPlayerPreloadWidth),
         headers: cfg.headersFor(lib),
         memCacheWidth: memW,
+        onAspect: (a) => _rememberAspect(it, a),
       );
     });
   }
@@ -10841,8 +11206,8 @@ class _PlayerPageState extends State<PlayerPage>
     final progressBottom =
         stageProgressBottomOffset(safeBottom: fs ? pad.bottom : 0);
     final chapterCount = workChapterCount(w);
-    final infoBottom = stageInset +
-        progressBottom +
+    // 页内浮层坐标：舞台已让掉任务栏（stageInset），这里不能再加一次。
+    final infoBottomInPage = progressBottom +
         stageProgressOverlayHeight(hasChapter: chapterCount > 1) +
         10;
     if (!broken) _scheduleTaskbarMeasure();
@@ -11034,7 +11399,7 @@ class _PlayerPageState extends State<PlayerPage>
                                 memCacheWidth: _posterDecodeWidth(context),
                                 // B：海报与视频同模式，fill 时裁剪铺满。
                                 fit: videoFitFor(
-                                            aspect: _videoAspect,
+                                            aspect: _aspectFor(it),
                                             mode:
                                                 AppSettings.videoFitOverride) ==
                                         VideoFit.fill
@@ -11065,6 +11430,14 @@ class _PlayerPageState extends State<PlayerPage>
                             idx: 0,
                             progress: progress,
                           ),
+                          ..._stageOverlayChildren(
+                            w: it,
+                            fs: fs,
+                            broken: false,
+                            pad: pad,
+                            bottom: infoBottomInPage,
+                            viewSize: viewSize,
+                              chromeOpacity: chromeOpacity,                              chromeMs: chromeMs,                              immersiveFade: immersiveFade,                              railOpacity: railOpacity,                              railMs: railMs,                          ),
                         ]),
                       );
                     }
@@ -11142,6 +11515,14 @@ class _PlayerPageState extends State<PlayerPage>
                             idx: idx,
                             progress: progress,
                           ),
+                        ..._stageOverlayChildren(
+                          w: it,
+                          fs: fs,
+                          broken: false,
+                          pad: pad,
+                          bottom: infoBottomInPage,
+                          viewSize: viewSize,
+                            chromeOpacity: chromeOpacity,                            chromeMs: chromeMs,                            immersiveFade: immersiveFade,                            railOpacity: railOpacity,                            railMs: railMs,                        ),
                       ]),
                     );
                   },
@@ -11287,267 +11668,6 @@ class _PlayerPageState extends State<PlayerPage>
                         Icon(Icons.play_arrow, size: 76, color: Colors.white30),
                   ),
                 ),
-              // P1 §2：非全屏左侧信息区走独立的抖音式面板；全屏保留旧信息行。
-              if (fs)
-              Positioned(
-                left: pad.left + 14,
-                right: pad.right + 80,
-                // T：让位给页内舞台底部的进度层（进度条已随页滑动到这里）。
-                bottom: infoBottom,
-                child: IgnorePointer(
-                  ignoring: !ui,
-                  child: AnimatedOpacity(
-                    opacity: chromeOpacity,
-                    duration: Duration(milliseconds: chromeMs),
-                    curve: Curves.easeOut,
-                    child: GestureDetector(
-                      onTap: openAuthor,
-                      // G11：长按信息区弹出播放菜单（视频区长按仍是 2 倍速）
-                      onLongPress: _showWorkMenu,
-                      child: Row(children: [
-                        if (avatarFor(w).isNotEmpty)
-                          ClipOval(
-                              child: CachedNetworkImage(
-                                  cacheManager: DiziCache.manager,
-                                  // 播放页头像 38dp：取 200px 缩图即可。
-                                  // 兜底图可能来自作者所在的基础库，按图片自身
-                                  // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
-                                  imageUrl: withImageWidth(
-                                      cfg.mediaUrl(avatarFor(w),
-                                          lib: _avatarLibFor(avatarFor(w))),
-                                      kAvatarImageWidth),
-                                  httpHeaders:
-                                      cfg.headersFor(_avatarLibFor(avatarFor(w))),
-                                  width: 38,
-                                  height: 38,
-                                  memCacheWidth: (38 *
-                                          MediaQuery.devicePixelRatioOf(
-                                              context))
-                                      .round(),
-                                  fadeInDuration: Duration.zero,
-                                  fit: BoxFit.cover,
-                                  errorWidget: (_, __, ___) =>
-                                      const CircleAvatar(
-                                          radius: 19,
-                                          child: Icon(Icons.person))))
-                        else
-                          const CircleAvatar(
-                              radius: 19, child: Icon(Icons.person)),
-                        const SizedBox(width: 8),
-                        Expanded(
-                            child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                              Row(children: [
-                                Flexible(
-                                  child: Text('@${w['a']}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                ),
-                                if (('${w['d'] ?? ''}').isNotEmpty) ...[
-                                  const SizedBox(width: 8),
-                                  Text('${w['d']}',
-                                      style: const TextStyle(
-                                          fontSize: 11, color: Colors.white54)),
-                                ],
-                                // G9：本地喜欢标记，点红心可取消
-                                if (_isLiked(w)) ...[
-                                  const SizedBox(width: 6),
-                                  GestureDetector(
-                                    onTap: () => _setLiked(w, false),
-                                    child: const Icon(Icons.favorite,
-                                        size: 14, color: Color(0xFFFF3B5C)),
-                                  ),
-                                ],
-                              ]),
-                              // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
-                              if (_meta != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 2),
-                                  child: Opacity(
-                                    opacity: 0.7,
-                                    child: AuthorBadges(
-                                      meta: _meta,
-                                      name: '${w['a'] ?? ''}',
-                                      mediaPath: avatarFor(w),
-                                      // 作品条目自带基础库 id 时直接用它归属单元库
-                                      basicId:
-                                          '${w['_bid'] ?? w['basicId'] ?? ''}',
-                                      fallbackId: _curLib,
-                                      // 0.9.6：不再回退库名文案，无归属显示 SECRET
-                                      fallbackName: '',
-                                      works: widget.works
-                                          .where((e) =>
-                                              e is Map && e['a'] == w['a'])
-                                          .length,
-                                    ),
-                                  ),
-                                ),
-                              // 作品/合集文件夹里的 txt 简介（服务端下发 desc）
-                              if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 3),
-                                  child: Text('${w['desc']}'.trim(),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 11, color: Colors.white70)),
-                                ),
-                              // T：集数标签已移入页内舞台底部的进度层（随页位移），
-                              // 信息行不再重复展示。
-                              Row(children: [
-                                Expanded(
-                                  child: LayoutBuilder(builder: (context, c) {
-                                    const style = TextStyle(
-                                        fontSize: 12, color: Colors.white70);
-                                    const expandWidth = 22.0;
-                                    final title = '${w['ti'] ?? ''}';
-                                    // F33：按可用宽度实际测量，只有真的截断才
-                                    // 显示展开按钮（原按字符数猜测会误判）。
-                                    final needsExpand = willOverflowText(
-                                        title, style, c.maxWidth - expandWidth,
-                                        textScaler:
-                                            MediaQuery.textScalerOf(context),
-                                        locale: Localizations.maybeLocaleOf(
-                                            context));
-                                    // H13：展开后任务栏向上拉长，显示缩略全文，
-                                    // 不弹独立窗口；再点一次收起。
-                                    if (captionOpen) {
-                                      return GestureDetector(
-                                        // 吸收点击，避免误触进入作者主页
-                                        onTap: () {},
-                                        child: Container(
-                                          width: double.infinity,
-                                          padding: const EdgeInsets.fromLTRB(
-                                              10, 8, 10, 6),
-                                          decoration: BoxDecoration(
-                                              color: Colors.black45,
-                                              borderRadius:
-                                                  BorderRadius.circular(12)),
-                                          constraints: BoxConstraints(
-                                              maxHeight:
-                                                  MediaQuery.sizeOf(context)
-                                                          .height *
-                                                      0.42),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.min,
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Flexible(
-                                                child: SingleChildScrollView(
-                                                  child: SelectableText(title,
-                                                      style: style.copyWith(
-                                                          fontSize: 13,
-                                                          height: 1.5,
-                                                          color: Colors.white)),
-                                                ),
-                                              ),
-                                              Align(
-                                                alignment:
-                                                    Alignment.centerRight,
-                                                child: GestureDetector(
-                                                  onTap: toggleCaption,
-                                                  child: const Padding(
-                                                    padding: EdgeInsets.only(
-                                                        left: 6,
-                                                        top: 4,
-                                                        bottom: 2),
-                                                    child: Icon(
-                                                        Icons.unfold_less,
-                                                        size: 16,
-                                                        color: Colors.white54),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                    return Row(children: [
-                                      Expanded(
-                                        child: Text(title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: style),
-                                      ),
-                                      if (needsExpand)
-                                        GestureDetector(
-                                          onTap: toggleCaption,
-                                          child: const Padding(
-                                            padding: EdgeInsets.only(
-                                                left: 6, top: 2, bottom: 2),
-                                            child: Icon(Icons.unfold_more,
-                                                size: 16,
-                                                color: Colors.white54),
-                                          ),
-                                        ),
-                                    ]);
-                                  }),
-                                ),
-                              ]),
-                            ])),
-                      ]),
-                    ),
-                  ),
-                ),
-              ),
-              // P1 §1/§2：非全屏右侧互动栏 + 左侧信息区。
-              // 两者共用 infoBottom 基线（已让开页内进度层），底部距任务栏 12dp。
-              if (!fs && !broken) ...[
-                Positioned(
-                  right: pad.right + kRailRightMargin,
-                  bottom: infoBottom,
-                  child: IgnorePointer(
-                    // P2：沉浸淡出后不再接收点击，点到的是画面（抬手恢复）。
-                    ignoring: !ui || immersiveFade,
-                    child: AnimatedOpacity(
-                      opacity: railOpacity,
-                      duration: Duration(milliseconds: railMs),
-                      curve: Curves.easeOut,
-                      child: PlayerInteractionRail(
-                        avatar: _railAvatar(w),
-                        liked: _isLiked(w),
-                        favorited: _favKeys.contains(_likeKeyFor(w)),
-                        likeCount: _isLiked(w) ? 1 : 0,
-                        commentCount: 0,
-                        favoriteCount:
-                            _favKeys.contains(_likeKeyFor(w)) ? 1 : 0,
-                        onLike: () => _setLiked(w, !_isLiked(w)),
-                        onComment: () => _openComments(w),
-                        onFavorite: () => _toggleFavorite(w),
-                        onShare: () => _shareWork(w),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: pad.left + kInfoLeftMargin,
-                  right: pad.right + kRailReservedWidth,
-                  bottom: infoBottom,
-                  child: IgnorePointer(
-                    ignoring: !ui || immersiveFade,
-                    child: AnimatedOpacity(
-                      opacity: railOpacity,
-                      duration: Duration(milliseconds: railMs),
-                      curve: Curves.easeOut,
-                      child: PlayerInfoPanel(
-                        author: '${w['a'] ?? ''}',
-                        caption: _infoCaptionFor(w),
-                        music: _infoMusicFor(w),
-                        maxWidth: infoAreaMaxWidth(viewSize.width),
-                        expanded: captionOpen,
-                        onToggleExpand: toggleCaption,
-                        onAuthorTap: openAuthor,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
               // O2：手机端中央大号播放/暂停圆钮，随控制层淡入淡出。
               // P0：中央大圆钮只在全屏出现；非全屏暂停只显示 0.8s 播放图标。

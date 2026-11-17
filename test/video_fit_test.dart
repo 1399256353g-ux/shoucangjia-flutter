@@ -8,10 +8,17 @@ void main() {
       expect(videoFitFor(aspect: 0.7), VideoFit.fill);
     });
 
-    test('任何比例默认都铺满（视频必须顶到进度条）', () {
-      expect(videoFitFor(aspect: 16 / 9), VideoFit.fill);
-      expect(videoFitFor(aspect: 1.0), VideoFit.fill);
+    test('竖屏边界 0.8 仍铺满，刚好等于阈值不上浮', () {
       expect(videoFitFor(aspect: 0.8), VideoFit.fill);
+    });
+
+    test('横板/方形保持完整画面，不裁不拉伸', () {
+      // 9:16 舞台里 cover 16:9 要左右各裁 ~68%，会毁掉画面
+      expect(videoFitFor(aspect: 16 / 9), VideoFit.contain);
+      expect(videoFitFor(aspect: 21 / 9), VideoFit.contain);
+      expect(videoFitFor(aspect: 4 / 3), VideoFit.contain);
+      expect(videoFitFor(aspect: 1.0), VideoFit.contain);
+      expect(videoFitFor(aspect: 0.81), VideoFit.contain);
     });
 
     test('宽高比缺失/非法时同样铺满', () {

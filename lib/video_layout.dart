@@ -22,13 +22,20 @@ const double portraitAspectThreshold = 0.8;
 
 /// 按源比例与用户覆盖设置决定填充模式。
 ///
-/// [mode] 非空时手动覆盖优先；[aspect] 为源的宽/高，竖屏（<0.8）铺满，
-/// 横屏/方形留边；宽高比未知时保守地用 contain，避免裁掉画面。
+/// owner 2026-11-18 规则：
+/// - 竖屏（宽/高 ≤ [portraitAspectThreshold]，含 3:4）→ 铺满，画面下缘正好
+///   压在进度条上缘，进度条就是视频与任务栏的分界线；
+/// - 横板（宽/高 > 阈值，如 16:9 / 21:9）→ 必须保持完整画面，**不裁不拉伸**，
+///   水平撑满、垂直居中，上下留黑（抖音频道的横屏视频也是画面很小）；
+///   此时视频下缘不贴进度条，中间是黑区；
+/// - 宽高比未知（首帧未就绪）→ 铺满，避免先闪一圈黑边再跳。
+///
+/// 为什么横板不能铺满：9:16 舞台里 cover 一个 16:9 源，需要把宽度撑到
+/// 28.4 个舞台宽度，左右各裁掉约 68%，画面基本被毁。
 VideoFit videoFitFor({double? aspect, VideoFit? mode}) {
   if (mode != null) return mode;
-  // owner 2026-11-18：视频必须顶到进度条（进度条是视频与任务栏的分界线），
-  // 默认一律铺满；比例差异造成的裁切由用户在设置里改「适应」。
-  return VideoFit.fill;
+  if (aspect == null || aspect <= 0) return VideoFit.fill;
+  return aspect > portraitAspectThreshold ? VideoFit.contain : VideoFit.fill;
 }
 
 /// 播放视口高度 = 屏幕高 − 底部任务栏高度（含 SafeArea）。
