@@ -38,6 +38,30 @@ jobs:
           open(p,'w').write(s)
           print(s[:400])
           PY
+      - name: Disable AGP lintVital (lint detector crash inside plugin modules)
+        run: |
+          python3 - <<'PY2'
+          import os
+          p = 'android/build.gradle' if os.path.exists('android/build.gradle') else 'android/build.gradle.kts'
+          s = open(p).read()
+          groovy = """
+          subprojects { sp ->
+              sp.tasks.configureEach { t ->
+                  if (t.name.toLowerCase().contains('lintvital')) { t.enabled = false }
+              }
+          }
+          """
+          kts = """
+          subprojects {
+              tasks.matching { it.name.contains("lintVital", ignoreCase = true) }.configureEach { enabled = false }
+          }
+          """
+          block = groovy if p.endswith('.gradle') else kts
+          if 'lintvital' not in s.lower():
+              s = s.rstrip() + '\n' + block + '\n'
+              open(p, 'w').write(s)
+          print(open(p).read()[-400:])
+          PY2
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
       - run: flutter build apk --release
