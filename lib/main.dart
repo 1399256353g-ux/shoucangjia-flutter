@@ -11,6 +11,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'cover_admin.dart';
 import 'cover_cache.dart';
 import 'concurrency.dart';
 import 'crash_guard.dart';
@@ -7849,7 +7850,17 @@ class _PlayerPageState extends State<PlayerPage>
               subtitle: const Text('用当前作品图片作为基础库封面，不影响原文件'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _setLibCover(w);
+                _applyCover(CoverRequest.set(lib: _libFor(w), work: '${w['id'] ?? ''}'));
+              },
+            ),
+            // 0.9.29：自定义封面可撤销——只删 `_cover/current` 指针，已生成封面文件保留。
+            ListTile(
+              leading: const Icon(Icons.hide_image_outlined),
+              title: const Text('清除自定义封面'),
+              subtitle: const Text('恢复自动封面（爬虫封面 → 最高播放作品）'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _confirmClearCover(_libFor(w));
               },
             ),
             if (menu.canResume)
@@ -7889,26 +7900,48 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  // 0.9.19：把当前作品图片设为基础库自定义封面（服务端复制到 `<库>/_cover/`）。
-  Future<void> _setLibCover(dynamic w) async {
-    final lib = _libFor(w);
-    final id = '${(w is Map ? w['id'] : null) ?? ''}';
+  // 0.9.29：清除自定义封面前先确认（服务端只删指针，封面文件保留可回滚）。
+  Future<void> _confirmClearCover(String lib) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清除自定义封面？'),
+        content: const Text('会恢复该库的自动封面（爬虫封面 → 最高播放作品）。'
+            '已生成的封面图片仍保留在库里，之后再设回来不会丢。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('清除')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _applyCover(CoverRequest.clear(lib: lib));
+  }
+
+  // 0.9.19/0.9.29：自定义封面设置与清除（服务端只新增文件或改 `_cover/current` 指针）。
+  Future<void> _applyCover(CoverRequest req) async {
+    if (!req.valid) {
+      _toast('${req.failText}：缺少库或作品标识');
+      return;
+    }
+    final lib = req.lib;
     try {
       final r = await http.post(
         cfg.u('/api/cover/set', lib: lib),
         headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
-        body: jsonEncode({'lib': lib, 'work': id}),
+        body: jsonEncode(req.toBody()),
       );
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已设为该库封面（返回主页刷新即可看到）')));
+      if (r.statusCode != 200) {
+        _toast('${req.failText}：${coverErrorText(r.statusCode)}');
+        return;
       }
+      _toast(req.doneText);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('设置封面失败：$e')));
-      }
+      _toast('${req.failText}：$e');
     }
   }
 
