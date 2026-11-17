@@ -15,6 +15,13 @@ const int preloadMaxPerSide = 4;
 /// 缓存单条的估算内存（媒体缓冲 + 解码器常驻）。
 const int preloadEntryBytes = 48 * 1024 * 1024;
 
+/// 播放器槽位总数上限（含当前播放槽位）。
+///
+/// owner 约束：预载槽位默认 2 个（当前 + 前后各一），上限 2–3。
+/// 槽位越多，系统里同时存在的解码器/缓冲区越多，长时间播放更容易被
+/// 系统回收解码器而「随机停住」，因此总槽位固定上限 3。
+const int preloadMaxSlots = 3;
+
 /// 默认内存上限（MB）。
 const int preloadDefaultMemoryMb = 256;
 
@@ -35,10 +42,10 @@ int clampPreloadPerSide(int v) => v.clamp(0, preloadMaxPerSide);
 int clampPreloadMemoryMb(int v) => v.clamp(128, 768);
 
 /// 由内存上限换算可同时存在的播放器槽位（含当前播放槽位）。
-/// 至少 2 个（当前 + 正/反各一条的最基本体验），最多 9 个。
+/// 至少 2 个（当前 + 正/反各一条的最基本体验），最多 [preloadMaxSlots] 个。
 int preloadSlotBudget(int memoryMb) =>
     (clampPreloadMemoryMb(memoryMb) * 1024 * 1024 ~/ preloadEntryBytes)
-        .clamp(2, 9);
+        .clamp(2, preloadMaxSlots);
 
 /// 预载候选序号，按优先级从高到低。
 ///

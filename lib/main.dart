@@ -69,6 +69,7 @@ import 'ui_fade.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'player_controls.dart';
+import 'pause_trace.dart';
 import 'preload_policy.dart';
 import 'preload_plan.dart';
 import 'video_prefetch.dart';
@@ -6656,7 +6657,8 @@ class _PlayerPageState extends State<PlayerPage>
   // M6：预加载账本 + 运行状态
   final PreloadCache _preloadCache =
       PreloadCache(maxEntries: preloadMaxPerSide * 2);
-  final Map<int, String> _preloadBusy = <int, String>{};
+  // 预载占用的槽位（按对象身份，避免 sid 复用后误判）。
+  final Map<_PlaybackSlot, String> _preloadBusy = <_PlaybackSlot, String>{};
   Timer? _preloadTimer;
   int _preloadGen = 0;
   bool _preloadRunning = false;
@@ -6686,6 +6688,14 @@ class _PlayerPageState extends State<PlayerPage>
   bool paused = false;
   // G16：是否因切后台而暂停（回前台时只恢复这种暂停）
   bool _pausedByBackground = false;
+  // 「随机自动暂停」修复：区分「用户主动暂停」与「播放器/系统造成的停止」。
+  // 只有用户操作、切后台、判失败才允许把 paused 置真；播放器自己报
+  // playing=false（卡顿、解码器被回收、音频设备切换）走自救流程。
+  bool _userPaused = false;
+  bool _appForeground = true;
+  int _stallAttempts = 0;
+  static const int _stallMaxAttempts = 3;
+  Timer? _stallTimer;
   bool loading = true;
   bool muted = false;
   double volume = 100;
@@ -7004,9 +7014,32 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.playing.listen((v) {
       if (!identical(p, player)) return;
       if (!mounted || _opening) return;
-      if (_workAt(cur)['t'] == 'v' && v != !paused) {
-        setState(() => paused = !v);
+      if (_workAt(cur)['t'] != 'v') return;
+      if (v) {
+        // 真正恢复播放：清空自救计数，并把残留的「暂停」显示纠正回来。
+        _stallTimer?.cancel();
+        _stallAttempts = 0;
+        if (paused &&
+            !_userPaused &&
+            !_pausedByBackground &&
+            _failure == null) {
+          setState(() => paused = false);
+        }
+        return;
       }
+      // 播放器报「不在播放」≠ 用户想暂停。只有用户/后台/失败意图才采信，
+      // 其余（弱网卡顿、解码器被系统回收、音频设备切换）走自救流程，
+      // 避免界面被静默改成暂停后卡死。
+      if (shouldAdoptPlayerPause(
+          userPaused: _userPaused,
+          backgroundPaused: _pausedByBackground,
+          failed: _failure != null,
+          opening: _opening)) {
+        if (!paused) setState(() => paused = true);
+        return;
+      }
+      PauseTrace.mark('stall:playing=false');
+      _scheduleStallCheck();
     }));
     subPos = p.stream.position.listen((position) {
       if (!identical(p, player)) return;
@@ -7081,16 +7114,88 @@ class _PlayerPageState extends State<PlayerPage>
     }));
   }
 
+  /// 播放器报「不在播放」后，等一小段确认是真空转，再决定是否自救。
+  ///
+  /// 很多暂停是瞬时的（切清晰度、音频设备重连、NAS 一次读超时），
+  /// 立刻重开会打断正在缓冲的播放器，所以先等 1.2s；期间恢复播放则取消。
+  void _scheduleStallCheck() {
+    _stallTimer?.cancel();
+    final my = _openToken;
+    _stallTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted || my != _openToken) return;
+      if (_opening || _failure != null) return;
+      if (_workAt(cur)['t'] != 'v') return;
+      if (_userPaused || _pausedByBackground || !_appForeground) return;
+      var playing = false;
+      var hasMedia = dur.inMilliseconds > 0 || pos.inMilliseconds > 0;
+      try {
+        playing = player.state.playing;
+        hasMedia = hasMedia ||
+            player.state.duration.inMilliseconds > 0 ||
+            player.state.position.inMilliseconds > 0;
+      } catch (_) {}
+      if (playing) return;
+      _applyStallRecovery(
+        stallRecoveryAction(
+          userPaused: _userPaused,
+          backgroundPaused: _pausedByBackground,
+          failed: _failure != null,
+          opening: _opening,
+          appForeground: _appForeground,
+          playerPlaying: playing,
+          hasMedia: hasMedia,
+          attempts: _stallAttempts,
+          maxAttempts: _stallMaxAttempts,
+        ),
+      );
+    });
+  }
+
+  /// 执行自救：先补 play，再重开当前媒体，最多 [_stallMaxAttempts] 次。
+  Future<void> _applyStallRecovery(StallRecoveryAction action) async {
+    switch (action) {
+      case StallRecoveryAction.none:
+        if (_stallAttempts >= _stallMaxAttempts && !_userPaused) {
+          // 自救用尽：不再静默停住，给出明确可重试的失败态。
+          PauseTrace.mark('stall:giveup');
+          _showFailure(unknownFailure);
+        }
+        return;
+      case StallRecoveryAction.retryPlay:
+        _stallAttempts++;
+        PauseTrace.mark('stall:retryPlay#$_stallAttempts');
+        if (paused) setState(() => paused = false);
+        try {
+          final at = pos.inMilliseconds > 800 ? pos : player.state.position;
+          if (at.inMilliseconds > 800) await player.seek(at);
+          await player.setRate(speed);
+          await player.play();
+        } catch (_) {}
+        return;
+      case StallRecoveryAction.reopen:
+        _stallAttempts++;
+        PauseTrace.mark('stall:reopen#$_stallAttempts');
+        if (_stallAttempts > _stallMaxAttempts) return;
+        await open(cur, saveProgress: false);
+        return;
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // G16：切后台/最小化/来电时自动暂停（先落盘位置），回前台再恢复；
     // 移动端 inactive 就暂停，桌面端仅最小化/隐藏暂停（失去焦点不打断）。
     final isMobile = Platform.isAndroid || Platform.isIOS;
     if (shouldPauseInBackground(state: state.name, isMobile: isMobile)) {
-      _pauseForBackground();
+      _appForeground = false;
+      _stallTimer?.cancel();
+      _pauseForBackground(reason: state.name);
       return;
     }
     if (state == AppLifecycleState.resumed && mounted) {
+      _appForeground = true;
+      _stallAttempts = 0;
+      PauseTrace.mark('lifecycle:resumed');
       // 从后台/模拟器切回时焦点可能丢失，方向键会失效；恢复时重新拿回焦点
       focus.requestFocus();
       if (shouldResumeFromBackground(
@@ -7111,14 +7216,18 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// G16：切后台自动暂停，并强制写入观看位置。
-  void _pauseForBackground() {
+  ///
+  /// [reason] 为生命周期状态名，写进暂停轨迹便于区分「最小化」与「来电」。
+  void _pauseForBackground({String reason = 'unknown'}) {
     // G10：切后台/最小化前落盘，避免异常退出丢进度
     _saveWatchProgress(force: true);
     if (widget.works.isEmpty || _failure != null) return;
     // 用户自己暂停的保持原状，回前台不自动播放
     if (paused) return;
     _pausedByBackground = true;
+    _userPaused = false;
     pauseAuto();
+    PauseTrace.mark('background:$reason');
     try {
       player.pause();
     } catch (_) {}
@@ -7129,6 +7238,7 @@ class _PlayerPageState extends State<PlayerPage>
   void _resumeFromBackground() {
     _pausedByBackground = false;
     if (!mounted) return;
+    PauseTrace.mark('background:resume');
     final isV = _workAt(cur)['t'] == 'v';
     setState(() => paused = false);
     try {
@@ -7194,6 +7304,7 @@ class _PlayerPageState extends State<PlayerPage>
     _cancelVideoPrefetch();
     _slowBufferTimer?.cancel();
     _slowBufferTimer = null;
+    PauseTrace.mark('failure:${f.kind.name}');
     try {
       player.pause();
     } catch (_) {}
@@ -7220,10 +7331,14 @@ class _PlayerPageState extends State<PlayerPage>
   /// 只在硬件解码报解码错误时触发一次，坏文件不会反复重建播放器。
   Future<void> _retryWithSoftwareDecode() async {
     if (_softwareDecodeRetried || _decodeMode == DecodeMode.software) return;
+    PauseTrace.mark('decode:rebuild-software');
     _softwareDecodeRetried = true;
     _decodeMode = DecodeMode.software;
     final old = List<_PlaybackSlot>.from(_slots);
     _cancelPreload();
+    _preloadBusy.clear();
+    _stallTimer?.cancel();
+    _stallAttempts = 0;
     for (final s in _playerSubs) {
       s.cancel();
     }
@@ -7276,8 +7391,10 @@ class _PlayerPageState extends State<PlayerPage>
     _invalidatePreload();
     if (!stopIdle) return;
     for (final s in _slots) {
-      if (s.sid == _active.sid) continue;
+      // 用对象身份判断，避免 sid 复用（解码重建/槽位回收）时误停正在播放的槽位。
+      if (identical(s, _active)) continue;
       _preloadCache.removeSlot(s.sid);
+      PauseTrace.mark('preload:stop-idle(sid=${s.sid})');
       try {
         s.player.stop();
       } catch (_) {}
@@ -7371,7 +7488,11 @@ class _PlayerPageState extends State<PlayerPage>
     if (victim != null) {
       final slot = _slotBySid(victim);
       _preloadCache.removeSlot(victim);
-      if (slot != null) return slot;
+      if (slot != null &&
+          !identical(slot, _active) &&
+          !_preloadBusy.containsKey(slot)) {
+        return slot;
+      }
     }
     final maxSlots = preloadSlotBudget(AppSettings.preloadMemoryMb);
     if (_slots.length < maxSlots &&
@@ -7383,8 +7504,9 @@ class _PlayerPageState extends State<PlayerPage>
     }
     // 预算已满但也没有可淘汰条目：复用空闲的非活动槽位。
     for (final s in _slots) {
+      if (identical(s, _active)) continue;
       if (s.sid == _active.sid) continue;
-      if (_preloadBusy.containsKey(s.sid)) continue;
+      if (_preloadBusy.containsKey(s)) continue;
       _preloadCache.removeSlot(s.sid);
       return s;
     }
@@ -7392,18 +7514,37 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 在槽位中静音打开目标媒体，等到解封装/首帧就绪后登记缓存。
+  /// 安全约束：预载绝不能动正在播放的槽位（按对象身份判断）；每个 await
+  /// 之后都复查 generation/epoch/活动槽位，迟到的预载任务直接放弃。
   Future<bool> _preloadInto(
       _PlaybackSlot slot, int idx, String key, int gen, String path) async {
     final lib = _libFor(_workAt(idx));
-    _preloadBusy[slot.sid] = key;
+    if (identical(slot, _active)) {
+      PauseTrace.mark('preload:skip-active');
+      return false;
+    }
+    _preloadBusy[slot] = key;
     final epoch = ++slot.epoch;
     try {
+      PauseTrace.mark('preload:stop-idle(sid=${slot.sid})');
       await slot.player.stop();
+      if (!mounted ||
+          gen != _preloadGen ||
+          slot.epoch != epoch ||
+          identical(slot, _active)) {
+        return false;
+      }
       await slot.player.setVolume(0);
       await slot.player.open(
         Media(cfg.mediaUrl(path, lib: lib), httpHeaders: cfg.headersFor(lib)),
         play: false,
       );
+      if (!mounted ||
+          gen != _preloadGen ||
+          slot.epoch != epoch ||
+          identical(slot, _active)) {
+        return false;
+      }
       var ready = false;
       for (var i = 0; i < preloadReadyAttempts; i++) {
         if (!mounted || gen != _preloadGen || slot.epoch != epoch) return false;
@@ -7420,7 +7561,12 @@ class _PlayerPageState extends State<PlayerPage>
       if (!ready) return false;
       // 再给解码器一点时间铺好首帧，命中时直接出画面。
       await Future<void>.delayed(preloadFirstFrameDelay);
-      if (!mounted || gen != _preloadGen || slot.epoch != epoch) return false;
+      if (!mounted ||
+          gen != _preloadGen ||
+          slot.epoch != epoch ||
+          identical(slot, _active)) {
+        return false;
+      }
       _preloadCache.put(PreloadEntry(slot: slot.sid, index: idx, key: key));
       return true;
     } catch (_) {
@@ -7429,7 +7575,7 @@ class _PlayerPageState extends State<PlayerPage>
       } catch (_) {}
       return false;
     } finally {
-      _preloadBusy.remove(slot.sid);
+      _preloadBusy.remove(slot);
     }
   }
 
@@ -7466,6 +7612,12 @@ class _PlayerPageState extends State<PlayerPage>
 
   Future<void> open(int i, {bool saveProgress = true}) async {
     if (widget.works.isEmpty || i < 0 || i >= widget.works.length) return;
+    // 非用户暂停自救：正常切条/重开时重置计数；自救触发的 reopen 保留计数，
+    // 否则「重开 → 又停 → 再重开」会无限循环。
+    final switching = i != cur;
+    _stallTimer?.cancel();
+    if (switching) _stallAttempts = 0;
+    _userPaused = false;
     // 切条前先把上一条的进度落盘
     if (saveProgress) _saveWatchProgress(force: true);
     // 线③：切条/重开时立刻取消上一轮的相邻视频预取
@@ -7492,6 +7644,7 @@ class _PlayerPageState extends State<PlayerPage>
       _pendingPage = null;
       _mediaToken = -1;
       _pausedByBackground = false;
+      PauseTrace.mark('open:stop-current(broken)');
       try {
         await player.stop();
       } catch (_) {}
@@ -7561,6 +7714,7 @@ class _PlayerPageState extends State<PlayerPage>
       _slotActive = _slots.indexOf(target);
       _preloadCache.removeSlot(target.sid);
       _bindPlayer();
+      PauseTrace.mark('open:stop-old-slot(sid=${old.sid})');
       try {
         await old.player.stop();
       } catch (_) {}
@@ -7571,6 +7725,7 @@ class _PlayerPageState extends State<PlayerPage>
         dur = d0.inMilliseconds > 0 ? d0 : Duration.zero;
       });
     } else {
+      PauseTrace.mark('open:stop-current');
       try {
         await player.stop();
       } catch (_) {}
@@ -8007,13 +8162,16 @@ class _PlayerPageState extends State<PlayerPage>
   // 因此这里直接按点击前状态强制对齐，不依赖 paused 是否已刷新）。
   void _restorePauseAfterTap(bool wasPaused) {
     final isV = _workAt(cur)['t'] == 'v';
+    _userPaused = wasPaused;
     setState(() => paused = wasPaused);
     if (wasPaused) {
       pauseAuto();
+      PauseTrace.mark('user:double-tap-restore');
       try {
         player.pause();
       } catch (_) {}
     } else {
+      _stallAttempts = 0;
       try {
         player.setRate(speed);
         player.play();
@@ -8035,6 +8193,8 @@ class _PlayerPageState extends State<PlayerPage>
     _authorDragDx = 0;
     _authorDragClosing = false;
     _authorDragResume = !paused;
+    _userPaused = true;
+    PauseTrace.mark('user:author-drag');
     try {
       player.pause();
     } catch (_) {}
@@ -8049,6 +8209,8 @@ class _PlayerPageState extends State<PlayerPage>
       _authorDrag = null;
       ac?.dispose();
       if (_authorDragResume && mounted && !fs) {
+        _userPaused = false;
+        _stallAttempts = 0;
         try {
           player.play();
         } catch (_) {}
@@ -8094,12 +8256,16 @@ class _PlayerPageState extends State<PlayerPage>
     final name = '${_workAt(cur)['a'] ?? ''}';
     if (name.isEmpty) return;
     final resume = !paused;
+    _userPaused = true;
+    PauseTrace.mark('user:open-author');
     try {
       player.pause();
     } catch (_) {}
     await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => AuthorPage(name: name, libs: [_curLib])));
     if (resume && mounted && !fs) {
+      _userPaused = false;
+      _stallAttempts = 0;
       try {
         player.play();
       } catch (_) {}
@@ -8121,11 +8287,15 @@ class _PlayerPageState extends State<PlayerPage>
     final isV = _workAt(cur)['t'] == 'v';
     // 用户手动操作后不再视为后台暂停，避免回前台被自动恢复
     _pausedByBackground = false;
+    _stallTimer?.cancel();
+    _stallAttempts = 0;
     if (!isV) {
       final willPause = !paused;
+      _userPaused = willPause;
       setState(() => paused = willPause);
       if (willPause) {
         pauseAuto();
+        PauseTrace.mark('user:toggle');
         player.pause();
       } else {
         player.play();
@@ -8134,12 +8304,17 @@ class _PlayerPageState extends State<PlayerPage>
       return;
     }
     if (paused) {
+      _userPaused = false;
       try {
         player.setRate(speed);
       } catch (_) {}
       player.play();
+      setState(() => paused = false);
     } else {
+      _userPaused = true;
+      PauseTrace.mark('user:toggle');
       player.pause();
+      setState(() => paused = true);
     }
   }
 
@@ -8580,6 +8755,8 @@ class _PlayerPageState extends State<PlayerPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    PauseTrace.mark('page:dispose');
+    _stallTimer?.cancel();
     // G10：退出播放页前落盘当前进度
     _saveWatchProgress(force: true);
     WatchProgressStore.flush();
@@ -8708,6 +8885,9 @@ class _PlayerPageState extends State<PlayerPage>
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path, {String? lib}) {
     final url = cfg.mediaUrl(path, lib: lib);
+    // 原图可能几千像素宽，按屏幕宽度解码，避免大图整张进内存导致卡顿/闪退。
+    final screenW = MediaQuery.sizeOf(context).width;
+    final decodeW = (screenW * MediaQuery.devicePixelRatioOf(context)).round();
     // G12：图片加载失败（弱网/文件损坏）给出重试，而不是空白
     Widget retryBox() => _MediaRetryBox(
           message: '图片加载失败',
@@ -8722,6 +8902,8 @@ class _PlayerPageState extends State<PlayerPage>
       return Image.network(url,
           key: ValueKey('gif-$cur-$img-$_imgReload'),
           headers: cfg.headers,
+          // 动图同样按屏幕宽度解码；解码尺寸不影响帧动画播放。
+          cacheWidth: decodeW,
           fit: BoxFit.contain,
           gaplessPlayback: true,
           loadingBuilder: (c, child, p) => p == null
@@ -8730,9 +8912,6 @@ class _PlayerPageState extends State<PlayerPage>
                   child: CircularProgressIndicator(color: Colors.white38)),
           errorBuilder: (_, __, ___) => retryBox());
     }
-    // 原图可能几千像素宽，按屏幕宽度解码，避免大图整张进内存导致卡顿/闪退。
-    final screenW = MediaQuery.sizeOf(context).width;
-    final decodeW = (screenW * MediaQuery.devicePixelRatioOf(context)).round();
     return CachedNetworkImage(
         cacheManager: DiziCache.manager,
         key: ValueKey('pic-$cur-$img-$_imgReload'),
@@ -10032,7 +10211,11 @@ class _PlayerPageState extends State<PlayerPage>
                                   onTapUp: (d) => seekAt(d.localPosition),
                                   onHorizontalDragStart: (_) {
                                     resumeAfterDrag = !paused;
-                                    if (!paused) player.pause();
+                                    if (!paused) {
+                                      _userPaused = true;
+                                      PauseTrace.mark('user:seek-drag');
+                                      player.pause();
+                                    }
                                     setState(() {
                                       dragging = true;
                                       dragFrac = progress;
@@ -10048,7 +10231,11 @@ class _PlayerPageState extends State<PlayerPage>
                                     final f = dragFrac ?? progress;
                                     if (isV && dur.inMilliseconds > 0) {
                                       player.seek(dur * f);
-                                      if (resumeAfterDrag) player.play();
+                                      if (resumeAfterDrag) {
+                                        _userPaused = false;
+                                        _stallAttempts = 0;
+                                        player.play();
+                                      }
                                     } else if (!isV && pics.isNotEmpty) {
                                       setState(() => _setPicIndex(
                                           (f * (pics.length - 1))

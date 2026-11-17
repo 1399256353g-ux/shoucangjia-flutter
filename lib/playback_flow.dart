@@ -60,3 +60,52 @@ int picIndexAtFraction(double fraction, int count) {
   final f = fraction.clamp(0.0, 1.0);
   return (f * count).floor().clamp(0, count - 1);
 }
+
+/// 暂停后的自救动作。
+enum StallRecoveryAction { none, retryPlay, reopen }
+
+/// 播放器「不在播放」时，是否应该把界面状态改成暂停。
+///
+/// 只有用户暂停、切后台暂停、已判失败时才采信播放器的停止事件；
+/// 其余情况（弱网卡顿、解码器被系统回收、音频设备切换）属于**非用户暂停**，
+/// 不能直接把 `paused` 置真，否则会静默停在暂停态、连播链路断掉。
+bool shouldAdoptPlayerPause({
+  required bool userPaused,
+  required bool backgroundPaused,
+  required bool failed,
+  required bool opening,
+}) =>
+    opening || failed || userPaused || backgroundPaused;
+
+/// 非用户暂停的自救策略（纯函数，便于单测/防循环）。
+///
+/// - 用户/后台/失败/切条中/不在前台 → 不动作；
+/// - 播放器仍在播或没有媒体 → 不动作；
+/// - 前两次尝试 `play()` 续播（卡顿、管线掉线）；
+/// - 之后按 `reopen` 重开当前媒体（解码器被系统回收的兜底）；
+/// - 达到 [maxAttempts] 次仍失败 → 不再循环，交给故障提示/用户操作。
+StallRecoveryAction stallRecoveryAction({
+  required bool userPaused,
+  required bool backgroundPaused,
+  required bool failed,
+  required bool opening,
+  required bool appForeground,
+  required bool playerPlaying,
+  required bool hasMedia,
+  required int attempts,
+  int maxAttempts = 3,
+}) {
+  if (userPaused ||
+      backgroundPaused ||
+      failed ||
+      opening ||
+      !appForeground ||
+      playerPlaying ||
+      !hasMedia ||
+      attempts >= maxAttempts) {
+    return StallRecoveryAction.none;
+  }
+  return attempts < 2
+      ? StallRecoveryAction.retryPlay
+      : StallRecoveryAction.reopen;
+}
