@@ -10900,12 +10900,16 @@ class _PlayerPageState extends State<PlayerPage>
             if (!_scrubHover) return;
             setState(() => _scrubHover = false);
           },
-          child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: (e) => _scrubStart(e.localPosition, width),
-          onPointerMove: (e) => _scrubMove(e.localPosition, width),
-          onPointerUp: (_) => _scrubEnd(),
-          onPointerCancel: (_) => _scrubEnd(),
+          child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
+          onTapDown: (d) => _scrubStart(d.localPosition, width),
+          onTapUp: (_) => _scrubEnd(),
+          onTapCancel: () => _scrubEnd(),
+          onHorizontalDragStart: (d) => _scrubStart(d.localPosition, width),
+          onHorizontalDragUpdate: (d) => _scrubMove(d.localPosition, width),
+          onHorizontalDragEnd: (_) => _scrubEnd(),
+          onHorizontalDragCancel: () => _scrubEnd(),
           child: Align(
             alignment: Alignment.bottomCenter,
             child: ScrubBar(
@@ -10924,7 +10928,7 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _scrubStart(Offset p, double width) {
-    if (width <= 0) return;
+    if (!mounted || width <= 0) return;
     _scrubThinTimer?.cancel();
     setState(() {
       _scrubActive = true;
@@ -10933,16 +10937,25 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _scrubMove(Offset p, double width) {
-    if (!_scrubActive || width <= 0) return;
-    setState(() => _scrubFrac = (p.dx / width).clamp(0.0, 1.0));
+    if (!mounted || !_scrubActive || width <= 0) return;
+    final next = (p.dx / width).clamp(0.0, 1.0);
+    final prev = _scrubFrac;
+    // 拖动时每帧都会回调，位置几乎没变就不重建，避免整页 setState 风暴。
+    if (prev != null && (prev - next).abs() < 0.002) return;
+    setState(() => _scrubFrac = next);
   }
 
   /// 松手才跳转：拖动过程不暂停、不 seek，避免解码器被反复拖动。
   void _scrubEnd() {
-    if (!_scrubActive) return;
+    if (!mounted || !_scrubActive) return;
     final f = _scrubFrac;
     if (f != null && dur.inMilliseconds > 0) {
-      player.seek(dur * f);
+      // 页面可能正在切走，播放器已释放；seek 失败不能让整个 App 崩。
+      try {
+        player.seek(dur * f);
+      } catch (e) {
+        debugPrint('[scrub] seek failed: $e');
+      }
     }
     setState(() {
       _scrubActive = false;
