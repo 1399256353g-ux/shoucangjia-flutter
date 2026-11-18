@@ -7277,6 +7277,8 @@ class _PlayerPageState extends State<PlayerPage>
   final Map<String, String> _avatarFallbackCache = <String, String>{};
   Map<String, String>? _avatarFallbackIndex;
   int _avatarFallbackLen = -1;
+  // 0.9.76：已建索引的作品条数。分页追加时只补新批次，避免每页都全量重扫。
+  int _avatarFallbackBuilt = 0;
 
   /// 播放页头像：作品自带 `av` 优先；离线库没有作者头像时，
   /// 用该作者任一作品的封面图兜底，避免永远显示默认人形图标。
@@ -7296,8 +7298,22 @@ class _PlayerPageState extends State<PlayerPage>
     if (cached != null && cached.isNotEmpty) return cached;
     if (_avatarFallbackIndex == null ||
         _avatarFallbackLen != widget.works.length) {
-      _avatarFallbackIndex = authorFallbackThumbs(widget.works);
+      // 作品数变多（分页追加载入）只补新批次；变少或首次则全量重建。
+      if (_avatarFallbackIndex == null ||
+          widget.works.length < _avatarFallbackBuilt) {
+        _avatarFallbackIndex = authorFallbackThumbs(widget.works);
+        _avatarFallbackBuilt = widget.works.length;
+      } else if (widget.works.length > _avatarFallbackBuilt) {
+        addFirstThumbPerAuthor(
+          _avatarFallbackIndex!,
+          widget.works.skip(_avatarFallbackBuilt),
+          thumbOf: workAvatarFallbackPath,
+        );
+        _avatarFallbackBuilt = widget.works.length;
+      }
       _avatarFallbackLen = widget.works.length;
+      // 新作者可能补进了兜底图，清掉旧缓存让下次取到新值。
+      _avatarFallbackCache.clear();
     }
     final fb = _avatarFallbackIndex![name] ?? '';
     if (fb.isNotEmpty) _avatarFallbackCache[name] = fb;
