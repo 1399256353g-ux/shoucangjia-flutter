@@ -1,7 +1,7 @@
 name: shoucangjia
 description: Local media library client
 publish_to: 'none'
-version: 0.9.82+85
+version: 0.9.83+86
 environment:
   sdk: '>=3.4.0 <4.0.0'
 

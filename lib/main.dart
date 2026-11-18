@@ -7103,6 +7103,8 @@ class _PlayerPageState extends State<PlayerPage>
   double? _scrubFrac;
   /// 拖动中的比例：只驱动进度条自身重绘，不触发整页 setState。
   final ValueNotifier<double> _scrubFracVN = ValueNotifier<double>(0);
+  /// 图文拖动中的目标段：同样只驱动分段条自身重绘。
+  final ValueNotifier<int?> _picDragVN = ValueNotifier<int?>(null);
   bool _scrubThin = false;
   Timer? _scrubThinTimer;
   // H13：简介在任务栏内展开（不再弹独立窗口）
@@ -9976,6 +9978,7 @@ class _PlayerPageState extends State<PlayerPage>
     _scrubThinTimer?.cancel();
     _winResizeTimer?.cancel();
     _scrubFracVN.dispose();
+    _picDragVN.dispose();
     super.dispose();
   }
 
@@ -11293,63 +11296,65 @@ class _PlayerPageState extends State<PlayerPage>
           },
           onHorizontalDragStart: (d) {
             stopAuto();
-            final k = picAt(d.localPosition, width);
-            setState(() {
-              dragging = true;
-              dragPic = k;
-            });
+            _picDragVN.value = picAt(d.localPosition, width);
             hapticTap();
           },
           onHorizontalDragUpdate: (d) {
             final k = picAt(d.localPosition, width);
-            if (k != dragPic) hapticSelect();
-            setState(() => dragPic = k);
+            if (k != _picDragVN.value) hapticSelect();
+            // 只让分段条重绘；整页 setState 会在拖动中重建播放器树，
+            // 是图文拖动闪退的直接原因。
+            _picDragVN.value = k;
           },
           onHorizontalDragEnd: (_) {
-            final k = dragPic;
+            final k = _picDragVN.value;
+            _picDragVN.value = null;
             setState(() {
               if (k != null) _setPicIndex(k);
-              dragging = false;
-              dragPic = null;
             });
           },
           onHorizontalDragCancel: () {
-            setState(() {
-              dragging = false;
-              dragPic = null;
-            });
+            _picDragVN.value = null;
           },
           // owner 2026-11-18：全屏清屏时图文/图片合集的进度条必须跟任务栏
           // 一起消失；非全屏与拖动中保持可见。
-          child: IgnorePointer(
-            ignoring: fs && !ui && !dragging,
-            child: AnimatedOpacity(
-              opacity: (!fs || ui || dragging) ? 1 : 0,
-              duration: const Duration(milliseconds: kScrubFadeMs),
-              curve: Curves.easeOut,
-              child: Align(
-            alignment: Alignment.bottomCenter,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(pics.length, (k) {
-                final selected = k == (dragging ? dragPic : idx);
-                final active = k <= (dragging ? (dragPic ?? idx) : idx);
-                return Expanded(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 120),
-                    height: dragging ? (selected ? 6 : 3) : kScrubThinHeight,
-                    margin: const EdgeInsets.symmetric(horizontal: 1),
-                    decoration: BoxDecoration(
-                      color: active
-                          ? (selected ? Colors.white : Colors.white70)
-                          : Colors.white24,
+          child: ValueListenableBuilder<int?>(
+            valueListenable: _picDragVN,
+            builder: (_, drag, __) {
+              final draggingNow = drag != null;
+              return IgnorePointer(
+                ignoring: fs && !ui && !draggingNow,
+                child: AnimatedOpacity(
+                  opacity: (!fs || ui || draggingNow) ? 1 : 0,
+                  duration: const Duration(milliseconds: kScrubFadeMs),
+                  curve: Curves.easeOut,
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: List.generate(pics.length, (k) {
+                        final selected = k == (drag ?? idx);
+                        final active = k <= (drag ?? idx);
+                        return Expanded(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 120),
+                            height: draggingNow
+                                ? (selected ? 6 : 3)
+                                : kScrubThinHeight,
+                            margin: const EdgeInsets.symmetric(horizontal: 1),
+                            decoration: BoxDecoration(
+                              color: active
+                                  ? (selected ? Colors.white : Colors.white70)
+                                  : Colors.white24,
+                            ),
+                          ),
+                        );
+                      }),
                     ),
                   ),
-                );
-              }),
-            ),
-          ),
-            ),
+                ),
+              );
+            },
           ),
         );
       }),
