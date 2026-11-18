@@ -5,6 +5,7 @@
 /// 出现横竖屏按钮。这里把纯逻辑与两个按钮拆出来，便于单元/组件测试。
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -1040,6 +1041,8 @@ const double kScrubThinHeight = 2.5;
 const double kScrubActiveHeight = 10;
 const double kScrubKnobRadius = 6;
 const double kScrubBubbleGap = 12;
+/// 气泡预留高度：气泡本身 + 间距，热区总高度要把它算进去，否则会被裁掉。
+const double kScrubBubbleSpace = 34;
 const int kScrubThinHoldMs = 3000;
 const int kScrubFadeMs = 180;
 
@@ -1064,13 +1067,15 @@ class ScrubBar extends StatelessWidget {
     required this.fraction,
     required this.active,
     required this.visible,
-    this.timeLabel = '',
+    this.labelFor,
   });
 
-  final double fraction;
+  final ValueListenable<double> fraction;
   final bool active;
   final bool visible;
-  final String timeLabel;
+
+  /// 按当前比例生成时间文案（拖动时实时更新）。
+  final String Function(double)? labelFor;
 
   @override
   Widget build(BuildContext context) {
@@ -1080,10 +1085,14 @@ class ScrubBar extends StatelessWidget {
       duration: const Duration(milliseconds: kScrubFadeMs),
       curve: Curves.easeOut,
       child: SizedBox(
-        height: kScrubHotZoneHeight,
-        child: LayoutBuilder(builder: (_, c) {
+        // 高度包含气泡空间：气泡画在进度条上方，不能被父级裁剪。
+        height: kScrubHotZoneHeight + kScrubBubbleSpace,
+        child: ValueListenableBuilder<double>(
+          valueListenable: fraction,
+          builder: (_, f, __) => LayoutBuilder(builder: (_, c) {
           final w = c.maxWidth;
-          final x = scrubKnobX(trackWidth: w, fraction: fraction);
+          final x = scrubKnobX(trackWidth: w, fraction: f);
+          final timeLabel = labelFor?.call(f) ?? '';
           return Stack(clipBehavior: Clip.none, children: [
             Positioned(
               left: 0,
@@ -1140,6 +1149,7 @@ class ScrubBar extends StatelessWidget {
             ],
           ]);
         }),
+        ),
       ),
     );
   }

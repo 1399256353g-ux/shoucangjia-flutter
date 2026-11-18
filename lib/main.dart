@@ -96,6 +96,8 @@ Future<void> main() async {
   final perf = PerfDiagnostics.instance..markAppStart();
   // 0.9.23：先装崩溃兜底，后面任何初始化出错都能记下来而不是整屏灰掉
   installCrashGuard();
+  // 作者头像索引：卡片、作者主页、播放页共用同一份兜底数据。
+  ensureAuthorAvatarsLoaded();
   perf.step('crash_guard');
   MediaKit.ensureInitialized();
   perf.step('media_kit');
@@ -2051,7 +2053,14 @@ class AuthorAvatar extends StatelessWidget {
   Widget _buildWith(BuildContext context, {required String override}) {
     // 覆盖图可能来自别的基础库：按路径里的库前缀路由/取鉴权，避免拼错地址。
     final overLib = override.isEmpty ? '' : libOfMediaPath(override);
-    final src = override.isNotEmpty ? override : mediaPath;
+    // owner 2026-11-18：作者主页/作者总览也要吃「作者级头像」兜底——
+    // 卡片上能显示的头像，播放页与主页必须一致，不再只依赖调用方传入。
+    final authorAv = override.isEmpty && mediaPath.isEmpty
+        ? (authorAvatarIndex[name] ?? '')
+        : '';
+    final src = override.isNotEmpty
+        ? override
+        : (mediaPath.isNotEmpty ? mediaPath : authorAv);
     final srcLib = override.isNotEmpty
         ? (overLib.isEmpty ? lib : overLib)
         : lib;
@@ -7091,6 +7100,8 @@ class _PlayerPageState extends State<PlayerPage>
   // 桌面端鼠标悬停：细条放大成可拖状态（owner 2026-11-18）。
   bool _scrubHover = false;
   double? _scrubFrac;
+  /// 拖动中的比例：只驱动进度条自身重绘，不触发整页 setState。
+  final ValueNotifier<double> _scrubFracVN = ValueNotifier<double>(0);
   bool _scrubThin = false;
   Timer? _scrubThinTimer;
   // H13：简介在任务栏内展开（不再弹独立窗口）
@@ -9963,6 +9974,7 @@ class _PlayerPageState extends State<PlayerPage>
     focus.dispose();
     _scrubThinTimer?.cancel();
     _winResizeTimer?.cancel();
+    _scrubFracVN.dispose();
     super.dispose();
   }
 
@@ -10988,12 +11000,12 @@ class _PlayerPageState extends State<PlayerPage>
     // 全屏时进度条要跟功能区一起随时间隐藏；非全屏桌面端才常驻细条。
     final persistent = desktop && (!fs || ui);
     final active = _scrubActive || (_scrubHover && (!fs || ui));
-    final frac = _scrubActive ? (_scrubFrac ?? progress) : progress;
     return Positioned(
       left: 0,
       right: 0,
       bottom: lift,
-      height: kScrubHotZoneHeight,
+      // 高度包含气泡空间，气泡画在进度条正上方居中。
+      height: kScrubHotZoneHeight + kScrubBubbleSpace,
       child: LayoutBuilder(builder: (_, c) {
         final width = c.maxWidth;
         return MouseRegion(
@@ -11020,11 +11032,11 @@ class _PlayerPageState extends State<PlayerPage>
           child: Align(
             alignment: Alignment.bottomCenter,
             child: ScrubBar(
-              fraction: frac,
+              fraction: _scrubFracVN,
               active: active,
               visible: active || _scrubThin || persistent,
-              timeLabel: active && dur.inMilliseconds > 0
-                  ? '${fmt(dur * frac)} / ${fmt(dur)}'
+              labelFor: (f) => dur.inMilliseconds > 0
+                  ? '${fmt(dur * f)} / ${fmt(dur)}'
                   : '',
             ),
           ),
@@ -11037,19 +11049,20 @@ class _PlayerPageState extends State<PlayerPage>
   void _scrubStart(Offset p, double width) {
     if (!mounted || width <= 0) return;
     _scrubThinTimer?.cancel();
-    setState(() {
-      _scrubActive = true;
-      _scrubFrac = (p.dx / width).clamp(0.0, 1.0);
-    });
+    final f = (p.dx / width).clamp(0.0, 1.0);
+    _scrubFrac = f;
+    _scrubFracVN.value = f;
+    setState(() => _scrubActive = true);
   }
 
   void _scrubMove(Offset p, double width) {
     if (!mounted || !_scrubActive || width <= 0) return;
     final next = (p.dx / width).clamp(0.0, 1.0);
     final prev = _scrubFrac;
-    // 拖动时每帧都会回调，位置几乎没变就不重建，避免整页 setState 风暴。
     if (prev != null && (prev - next).abs() < 0.002) return;
-    setState(() => _scrubFrac = next);
+    _scrubFrac = next;
+    // 只让进度条重绘；整页 setState 会让播放器/视频树跟着重建，拖动时容易崩。
+    _scrubFracVN.value = next;
   }
 
   /// 松手才跳转：拖动过程不暂停、不 seek，避免解码器被反复拖动。
@@ -11698,14 +11711,6 @@ class _PlayerPageState extends State<PlayerPage>
                                 ),
                               ),
                             ),
-                          // T：进度条/集数标签贴本页舞台底边，随 PageView 位移。
-                          _stageProgressOverlay(
-                            w: it,
-                            isV: true,
-                            pics: const <String>[],
-                            idx: 0,
-                            progress: progress,
-                          ),
                           ..._stageOverlayChildren(
                             w: it,
                             fs: fs,
@@ -11714,6 +11719,14 @@ class _PlayerPageState extends State<PlayerPage>
                             bottom: infoBottomInPage,
                             viewSize: viewSize,
                               chromeOpacity: chromeOpacity,                              chromeMs: chromeMs,                              immersiveFade: immersiveFade,                              railOpacity: railOpacity,                              railMs: railMs,                          ),
+                          // T：进度条/集数标签贴本页舞台底边，随 PageView 位移。
+                          _stageProgressOverlay(
+                            w: it,
+                            isV: true,
+                            pics: const <String>[],
+                            idx: 0,
+                            progress: progress,
+                          ),
                         ]),
                       );
                     }
