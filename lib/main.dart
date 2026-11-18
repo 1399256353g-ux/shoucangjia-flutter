@@ -7703,6 +7703,7 @@ class _PlayerPageState extends State<PlayerPage>
     pauseAuto();
     PauseTrace.mark('background:$reason');
     try {
+      Breadcrumb.mark('player:pause', 'L7706');
       player.pause();
     } catch (_) {}
     if (mounted) setState(() => paused = true);
@@ -7780,6 +7781,7 @@ class _PlayerPageState extends State<PlayerPage>
     _slowBufferTimer = null;
     PauseTrace.mark('failure:${f.kind.name}');
     try {
+      Breadcrumb.mark('player:pause', 'L7783');
       player.pause();
     } catch (_) {}
     setState(() {
@@ -9212,6 +9214,7 @@ class _PlayerPageState extends State<PlayerPage>
       pauseAuto();
       PauseTrace.mark('user:double-tap-restore');
       try {
+        Breadcrumb.mark('player:pause', 'L9215');
         player.pause();
       } catch (_) {}
     } else {
@@ -9242,6 +9245,7 @@ class _PlayerPageState extends State<PlayerPage>
     _userPaused = true;
     PauseTrace.mark('user:author-drag');
     try {
+      Breadcrumb.mark('player:pause', 'L9245');
       player.pause();
     } catch (_) {}
     final c = AuthorDragController(vsync: this);
@@ -9305,6 +9309,7 @@ class _PlayerPageState extends State<PlayerPage>
     _userPaused = true;
     PauseTrace.mark('user:open-author');
     try {
+      Breadcrumb.mark('player:pause', 'L9308');
       player.pause();
     } catch (_) {}
     await Navigator.of(context).push(MaterialPageRoute(
@@ -9342,6 +9347,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (willPause) {
         pauseAuto();
         PauseTrace.mark('user:toggle');
+        Breadcrumb.mark('player:pause', 'L9345');
         player.pause();
       } else {
         player.play();
@@ -9359,6 +9365,7 @@ class _PlayerPageState extends State<PlayerPage>
     } else {
       _userPaused = true;
       PauseTrace.mark('user:toggle');
+      Breadcrumb.mark('player:pause', 'L9362');
       player.pause();
       setState(() => paused = true);
     }
@@ -11199,6 +11206,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (!paused) {
         _userPaused = true;
         PauseTrace.mark('user:seek-press');
+        Breadcrumb.mark('player:pause', 'L11202');
         player.pause();
       }
       setState(() {
@@ -11262,6 +11270,7 @@ class _PlayerPageState extends State<PlayerPage>
         if (!paused) {
           _userPaused = true;
           PauseTrace.mark('user:seek-drag');
+          Breadcrumb.mark('player:pause', 'L11265');
           player.pause();
         }
         setState(() {
