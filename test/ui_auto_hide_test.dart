@@ -86,4 +86,44 @@ void main() {
       );
     });
   });
+
+  // 0.9.72：桌面端鼠标移动高频调用 showUi，只推进截止时刻、不重建 Timer。
+  group('HideDeadline', () {
+    final t0 = DateTime(2026, 11, 18, 11, 0, 0);
+
+    test('未排定时剩余为零、不可排定', () {
+      final d = HideDeadline();
+      expect(d.isScheduled, isFalse);
+      expect(d.remaining(t0), Duration.zero);
+    });
+
+    test('extend 从给定时刻顺延指定秒数', () {
+      final d = HideDeadline()..extend(t0, 3);
+      expect(d.isScheduled, isTrue);
+      expect(d.at, t0.add(const Duration(seconds: 3)));
+      expect(d.remaining(t0), const Duration(seconds: 3));
+      expect(d.remaining(t0.add(const Duration(seconds: 1))),
+          const Duration(seconds: 2));
+    });
+
+    test('连续 extend 只把截止时刻往后推（高频鼠标移动）', () {
+      final d = HideDeadline()..extend(t0, 3);
+      d.extend(t0.add(const Duration(milliseconds: 500)), 3);
+      expect(d.at, t0.add(const Duration(milliseconds: 3500)));
+      expect(d.remaining(t0.add(const Duration(seconds: 1))),
+          const Duration(milliseconds: 2500));
+    });
+
+    test('过了截止时刻剩余钳到零（计时器到点即可隐藏）', () {
+      final d = HideDeadline()..extend(t0, 3);
+      expect(d.remaining(t0.add(const Duration(seconds: 5))), Duration.zero);
+    });
+
+    test('clear 后不再排定', () {
+      final d = HideDeadline()..extend(t0, 3);
+      d.clear();
+      expect(d.isScheduled, isFalse);
+      expect(d.remaining(t0), Duration.zero);
+    });
+  });
 }

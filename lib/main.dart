@@ -7210,6 +7210,8 @@ class _PlayerPageState extends State<PlayerPage>
   Duration dur = Duration.zero;
   Timer? autoTimer;
   Timer? hideTimer;
+  /// 0.9.72：功能区自动隐藏的截止时刻（见 [HideDeadline]）。
+  final HideDeadline _hideDeadline = HideDeadline();
   Timer? retryTimer;
   // I3：起播静音淡入（定时器 + 代数，用户调音量/切条时立即作废）
   Timer? _fadeTimer;
@@ -9076,6 +9078,7 @@ class _PlayerPageState extends State<PlayerPage>
   void hideUiNow() {
     hideTimer?.cancel();
     hideTimer = null;
+    _hideDeadline.clear();
     if (!mounted) return;
     setState(() => ui = false);
   }
@@ -9523,6 +9526,7 @@ class _PlayerPageState extends State<PlayerPage>
         // 仍会把非全屏的功能区隐藏掉。
         hideTimer?.cancel();
         hideTimer = null;
+        _hideDeadline.clear();
         if (Platform.isWindows) {
           try {
             await windowManager.setFullScreen(false);
@@ -9541,14 +9545,37 @@ class _PlayerPageState extends State<PlayerPage>
 
   void showUi() {
     if (!mounted) return;
-    setState(() => ui = true);
-    hideTimer?.cancel();
-    hideTimer = null;
+    // 0.9.72：桌面端每个 pointer move 都会调用这里（见 MouseRegion.onHover）。
+    // 旧实现无条件 setState，鼠标划过播放页时整页（视频舞台 + 功能区子树）
+    // 每秒重建上百次，是 owner 反馈「电脑卡顿」的一处直接来源。功能区已
+    // 可见时不再重建，只顺延自动隐藏的截止时刻。
+    if (!ui) setState(() => ui = true);
     // P2：任何呼出功能区都重置非全屏沉浸计时（全屏内部会取消）。
     _scheduleImmersive();
-    if (!UiAutoHidePolicy.shouldSchedule(fullscreen: fs, uiVisible: ui)) return;
-    hideTimer = Timer(Duration(seconds: AppSettings.hideUiSec), () {
+    if (!UiAutoHidePolicy.shouldSchedule(fullscreen: fs, uiVisible: ui)) {
+      hideTimer?.cancel();
       hideTimer = null;
+      _hideDeadline.clear();
+      return;
+    }
+    _hideDeadline.extend(DateTime.now(), AppSettings.hideUiSec);
+    _armHideTimer();
+  }
+
+  /// 只保留一个待触发的隐藏计时器；期间再次 [showUi] 仅推进截止时刻，
+  /// 到点后按剩余时间重排，避免鼠标移动时高频 cancel/新建 Timer。
+  void _armHideTimer() {
+    if (hideTimer != null) return;
+
+    void fire() {
+      hideTimer = null;
+      if (!mounted) return;
+      final left = _hideDeadline.remaining(DateTime.now());
+      if (left > Duration.zero) {
+        hideTimer = Timer(left, fire);
+        return;
+      }
+      _hideDeadline.clear();
       // M4：任何时刻都已退出全屏就不再隐藏；拖动/悬停则重新计时。
       // L15：全屏下鼠标静止也隐藏；仅拖动进度条时保持显示（不再因悬停而不隐藏）
       if (!UiAutoHidePolicy.shouldHide(
@@ -9561,7 +9588,14 @@ class _PlayerPageState extends State<PlayerPage>
         return;
       }
       setState(() => ui = false);
-    });
+    }
+
+    final left = _hideDeadline.remaining(DateTime.now());
+    hideTimer = Timer(
+        left > Duration.zero
+            ? left
+            : Duration(seconds: AppSettings.hideUiSec),
+        fire);
   }
 
   /// P2 §12：当前是否允许进入沉浸——全屏、翻页、面板、拖动、
@@ -11275,6 +11309,8 @@ class _PlayerPageState extends State<PlayerPage>
                 hapticTap();
                 if (ui) {
                   hideTimer?.cancel();
+                  hideTimer = null;
+                  _hideDeadline.clear();
                   setState(() => ui = false);
                 } else {
                   showUi();

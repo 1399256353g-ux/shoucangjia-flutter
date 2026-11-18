@@ -23,3 +23,36 @@ class UiAutoHidePolicy {
   }) =>
       mounted && fullscreen && !dragging && !barHover;
 }
+
+/// 0.9.72：自动隐藏「截止时刻」的可变状态。
+///
+/// 桌面端每个 pointer move 都会调用 [showUi]（鼠标划过播放页可达每秒上百
+/// 次）。旧实现每次 cancel + 新建 `hideTimer`，同时无条件 `setState` 重建
+/// 整页。现在交互只推进截止时刻，计时器到期后再按剩余时间重排，因此
+/// [remaining] 与 [extend]/[clear] 的语义单独抽出来做回归测试。
+class HideDeadline {
+  DateTime? _at;
+
+  /// 当前截止时刻（未排定则为 null）。
+  DateTime? get at => _at;
+
+  bool get isScheduled => _at != null;
+
+  /// 从 [now] 起顺延 [seconds] 秒作为新的截止时刻。
+  void extend(DateTime now, int seconds) {
+    _at = now.add(Duration(seconds: seconds));
+  }
+
+  /// 取消排定（隐藏已执行或被外部收起）。
+  void clear() {
+    _at = null;
+  }
+
+  /// 距截止还剩多久；未排定或已到期都返回 [Duration.zero]。
+  Duration remaining(DateTime now) {
+    final at = _at;
+    if (at == null) return Duration.zero;
+    final left = at.difference(now);
+    return left.isNegative ? Duration.zero : left;
+  }
+}
