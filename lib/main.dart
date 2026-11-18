@@ -7043,6 +7043,8 @@ class _PlayerPageState extends State<PlayerPage>
   bool dragging = false;
   // owner 2026-11-18：呼出式进度条——常态不可见，触底才在指下放大。
   bool _scrubActive = false;
+  // 桌面端鼠标悬停：细条放大成可拖状态（owner 2026-11-18）。
+  bool _scrubHover = false;
   double? _scrubFrac;
   bool _scrubThin = false;
   Timer? _scrubThinTimer;
@@ -10819,8 +10821,8 @@ class _PlayerPageState extends State<PlayerPage>
   Widget _scrubOverlay({required double progress, double lift = 0}) {
     final keepThin =
         Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-    final active = _scrubActive;
-    final frac = active ? (_scrubFrac ?? progress) : progress;
+    final active = _scrubActive || _scrubHover;
+    final frac = _scrubActive ? (_scrubFrac ?? progress) : progress;
     return Positioned(
       left: 0,
       right: 0,
@@ -10828,7 +10830,17 @@ class _PlayerPageState extends State<PlayerPage>
       height: kScrubHotZoneHeight,
       child: LayoutBuilder(builder: (_, c) {
         final width = c.maxWidth;
-        return Listener(
+        return MouseRegion(
+          // 桌面端：指针进入热区即放大成可拖状态，移出恢复细条。
+          onEnter: (_) {
+            if (_scrubHover) return;
+            setState(() => _scrubHover = true);
+          },
+          onExit: (_) {
+            if (!_scrubHover) return;
+            setState(() => _scrubHover = false);
+          },
+          child: Listener(
           behavior: HitTestBehavior.translucent,
           onPointerDown: (e) => _scrubStart(e.localPosition, width),
           onPointerMove: (e) => _scrubMove(e.localPosition, width),
@@ -10845,6 +10857,7 @@ class _PlayerPageState extends State<PlayerPage>
                   : '',
             ),
           ),
+        ),
         );
       }),
     );
