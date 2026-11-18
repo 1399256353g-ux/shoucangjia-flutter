@@ -10026,12 +10026,14 @@ class _PlayerPageState extends State<PlayerPage>
             duration: Duration(milliseconds: chromeMs),
             curve: Curves.easeOut,
             child: GestureDetector(
-              onTap: openAuthor,
-              // G11：长按信息区弹出播放菜单（视频区长按仍是 2 倍速）
+              // owner 2026-11-18：只有头像和作者名可进作者页；简介区域与
+              // 进度条上方空白不再误触发跳转。
               onLongPress: _showWorkMenu,
               child: Row(children: [
                 if (avatarFor(w).isNotEmpty)
-                  ClipOval(
+                  GestureDetector(
+                    onTap: openAuthor,
+                    child: ClipOval(
                       child: CachedNetworkImage(
                           cacheManager: DiziCache.manager,
                           // 播放页头像 38dp：取 200px 缩图即可。
@@ -10055,9 +10057,12 @@ class _PlayerPageState extends State<PlayerPage>
                               const CircleAvatar(
                                   radius: 19,
                                   child: Icon(Icons.person))))
+                  )
                 else
-                  const CircleAvatar(
-                      radius: 19, child: Icon(Icons.person)),
+                  GestureDetector(
+                      onTap: openAuthor,
+                      child: const CircleAvatar(
+                          radius: 19, child: Icon(Icons.person))),
                 const SizedBox(width: 8),
                 Expanded(
                     child: Column(
@@ -10066,11 +10071,14 @@ class _PlayerPageState extends State<PlayerPage>
                         children: [
                       Row(children: [
                         Flexible(
-                          child: Text('@${w['a']}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold)),
+                          child: GestureDetector(
+                            onTap: openAuthor,
+                            child: Text('@${w['a']}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                          ),
                         ),
                         if (('${w['d'] ?? ''}').isNotEmpty) ...[
                           const SizedBox(width: 8),
