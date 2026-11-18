@@ -7063,6 +7063,7 @@ class _PlayerPageState extends State<PlayerPage>
   // 变化中重排纹理导致原生崩溃；尺寸稳定后重建 Video 元素。
   bool _winResizing = false;
   Timer? _winResizeTimer;
+
   bool _taskbarMeasureScheduled = false;
   // C：邻页 widget 复用缓存：同一实例返回给 PageView，setState 时不重建。
   final Map<String, Widget> _neighborPages = <String, Widget>{};
@@ -10233,11 +10234,6 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   Widget videoView() {
-    // Windows 缩放/最大化过程中不挂视频纹理：此时媒体纹理正在跟着窗口
-    // 重排，继续渲染会触发原生崩溃。海报在下层，视觉上仍有画面。
-    if (Platform.isWindows && _winResizing) {
-      return const ColoredBox(color: Colors.black);
-    }
     // B：按源比例自适应；比例差超过 8% 一律适应，保原比例不裁切。
     return LayoutBuilder(builder: (_, c) {
       if (c.maxWidth < 2 || c.maxHeight < 2) {
@@ -10250,14 +10246,30 @@ class _PlayerPageState extends State<PlayerPage>
               VideoFit.fill
           ? BoxFit.cover
           : BoxFit.contain;
+      // 关键：纹理按「视频自身比例」的固定基准尺寸渲染，窗口缩放/最大化/
+      // 切全屏时由合成器缩放这张已渲染的画面，而不是让 media_kit 重建纹理。
+      // 基准框按视频比例算，避免换比例视频时被拉伸；只在比例变化时重建一次。
+      final baseH = 720.0;
+      final aspectNow = _aspectFor(_workAt(cur));
+      final baseW = (aspectNow != null && aspectNow > 0)
+          ? (baseH * aspectNow).clamp(64.0, 8192.0)
+          : c.maxWidth;
       return ClipRect(
-        child: RepaintBoundary(
-          // key 随槽位变化：预缓冲切换后必须重建 Video，才能挂到新控制器
-          child: Video(
-              key: ValueKey('video-${_active.tag}-$_videoGen'),
-              controller: vc,
-              fit: fit,
-              controls: NoVideoControls),
+        child: FittedBox(
+          fit: fit,
+          alignment: Alignment.center,
+          child: SizedBox(
+            width: baseW,
+            height: baseH,
+            child: RepaintBoundary(
+              // key 随槽位变化：预缓冲切换后必须重建 Video，才能挂到新控制器
+              child: Video(
+                  key: ValueKey('video-${_active.tag}-$_videoGen'),
+                  controller: vc,
+                  fit: BoxFit.fill,
+                  controls: NoVideoControls),
+            ),
+          ),
         ),
       );
     });
