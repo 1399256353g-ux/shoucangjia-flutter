@@ -10775,6 +10775,11 @@ class _PlayerPageState extends State<PlayerPage>
     // owner 2026-11-18：只有「单张图的图文」整层隐藏（计数也不显示）；
     // 多图图文仍要分段进度条。视频不受影响。
     if (!isV && pics.length <= 1) return const SizedBox.shrink();
+    if (!isV) {
+      // owner 2026-11-18：图文的分段进度条也紧贴任务栏上缘（通栏细条）。
+      return _picProgressFlush(
+          pics: pics, idx: idx, lift: fs ? _taskbarH : 0.0);
+    }
     // 非全屏视频：呼出式进度条（贴任务栏上缘、极细、不操作时不可见）。
     // 全屏保留旧进度条，避免破坏沉浸态已有的呼出/隐藏逻辑。
     if (isV) {
@@ -11108,6 +11113,86 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 图文分段进度：按图片数量分段，当前张高亮；拖动跨段震动、松手才切图。
+  /// 图文分段进度条（贴任务栏上缘、通栏、细条）。
+  ///
+  /// 与视频的呼出式进度条同一位置基准：常态 2.5dp，手指按住放大到 6dp，
+  /// 左右拖动切图，松手落定。
+  Widget _picProgressFlush({
+    required List<String> pics,
+    required int idx,
+    double lift = 0,
+  }) {
+    int picAt(Offset p, double width) =>
+        picIndexAtFraction(width <= 0 ? 0 : p.dx / width, pics.length);
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: lift,
+      height: kScrubHotZoneHeight,
+      child: LayoutBuilder(builder: (_, c) {
+        final width = c.maxWidth;
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (d) {
+            stopAuto();
+            setState(() => _setPicIndex(picAt(d.localPosition, width)));
+            hapticTap();
+          },
+          onHorizontalDragStart: (d) {
+            stopAuto();
+            final k = picAt(d.localPosition, width);
+            setState(() {
+              dragging = true;
+              dragPic = k;
+            });
+            hapticTap();
+          },
+          onHorizontalDragUpdate: (d) {
+            final k = picAt(d.localPosition, width);
+            if (k != dragPic) hapticSelect();
+            setState(() => dragPic = k);
+          },
+          onHorizontalDragEnd: (_) {
+            final k = dragPic;
+            setState(() {
+              if (k != null) _setPicIndex(k);
+              dragging = false;
+              dragPic = null;
+            });
+          },
+          onHorizontalDragCancel: () {
+            setState(() {
+              dragging = false;
+              dragPic = null;
+            });
+          },
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(pics.length, (k) {
+                final selected = k == (dragging ? dragPic : idx);
+                final active = k <= (dragging ? (dragPic ?? idx) : idx);
+                return Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    height: dragging ? (selected ? 6 : 3) : kScrubThinHeight,
+                    margin: const EdgeInsets.symmetric(horizontal: 1),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? (selected ? Colors.white : Colors.white70)
+                          : Colors.white24,
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
   Widget _picProgressBar({
     required List<String> pics,
     required int idx,
@@ -11252,7 +11337,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 视频非全屏只有 2.5dp 细条，排版不能让出旧的 30dp 时间行高度。
     final progressLayerH = noProgressLayer
         ? 0.0
-        : (isV && !fs
+        : (!fs
             ? kScrubThinHeight
             : stageProgressOverlayHeight(hasChapter: chapterCount > 1)
                 .toDouble());
