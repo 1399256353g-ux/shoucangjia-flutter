@@ -146,6 +146,29 @@ class WatchProgressStore {
   /// 每次变更自增，列表用 ValueListenableBuilder 监听即可刷新角标。
   static final ValueNotifier<int> revision = ValueNotifier<int>(0);
 
+  /// 每条作品单独的通知（0.9.71）：卡片进度层只监听自己那条记录。
+  ///
+  /// 旧实现每张卡都监听全局 `revision`，而播放中每 3 秒就 `record()` 一次，
+  /// 网格里所有卡片的进度层（含没有观看记录的）都会被一起重建——
+  /// 桌面端列表页在后台时也在白重绘。现在只有被写入的那条会收到通知。
+  static final Map<String, ValueNotifier<int>> _keyRev =
+      <String, ValueNotifier<int>>{};
+
+  /// 取某条作品的变更通知；键为空时退回全局 [revision]。
+  ///
+  /// 通知器按作品 id 惰性创建并随会话保留（单个对象极小，数量上限即浏览过的
+  /// 作品数），卡片卸载时 AnimatedBuilder 会自行摘掉监听。
+  static ValueListenable<int> listenable(String lib, String id) {
+    final key = watchProgressKey(lib: lib, id: id);
+    if (key.isEmpty) return revision;
+    return _keyRev.putIfAbsent(key, () => ValueNotifier<int>(0));
+  }
+
+  static void _bumpKey(String key) {
+    if (key.isEmpty) return;
+    _keyRev[key]?.value++;
+  }
+
   static Map<String, WatchProgress> _items = <String, WatchProgress>{};
   static bool _loaded = false;
   static Timer? _flush;
@@ -200,6 +223,8 @@ class WatchProgressStore {
       done: watchedDone(positionMs: positionMs, durationMs: durationMs),
       updatedAt: now,
     );
+    // 先更新数据再发通知，监听者重建时读到的是新值。
+    _bumpKey(key);
     revision.value++;
     _scheduleFlush();
   }
@@ -216,6 +241,7 @@ class WatchProgressStore {
       done: true,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
     );
+    _bumpKey(key);
     revision.value++;
     _scheduleFlush(immediate: true);
   }
@@ -225,6 +251,7 @@ class WatchProgressStore {
     final key = watchProgressKey(lib: lib, id: id);
     if (key.isEmpty || !_items.containsKey(key)) return;
     _items.remove(key);
+    _bumpKey(key);
     revision.value++;
     _scheduleFlush();
   }
@@ -255,6 +282,7 @@ class WatchProgressStore {
   @visibleForTesting
   static void resetForTest() {
     _items = <String, WatchProgress>{};
+    _keyRev.clear();
     _loaded = false;
     _lastWriteAt.clear();
     _flush?.cancel();

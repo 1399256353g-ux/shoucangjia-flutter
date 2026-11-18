@@ -185,7 +185,11 @@ class _WorkCardState extends State<WorkCard> {
   }
 }
 
-/// 卡片内的观看进度层：只有 `WatchProgressStore.revision` 变化才重建。
+/// 卡片内的观看进度层：只监听**这条作品**的变更通知。
+///
+/// 0.9.71：旧实现监听全局 `revision`，播放中每 3 秒一次 `record()` 会让
+/// 网格里所有卡片（包括没有观看记录的）重建进度层；现在按作品 id 取
+/// 各自的 [WatchProgressStore.listenable]，互不影响。
 class _WatchProgressLayer extends StatelessWidget {
   final String lib;
   final String id;
@@ -195,7 +199,7 @@ class _WatchProgressLayer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: WatchProgressStore.revision,
+      animation: WatchProgressStore.listenable(lib, id),
       builder: (context, _) {
         final wp = WatchProgressStore.of(lib, id);
         final done = wp?.done ?? false;
