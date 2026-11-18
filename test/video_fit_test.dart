@@ -47,16 +47,20 @@ void main() {
       );
     });
 
-    test('比例差在 8% 以内才允许裁切铺满', () {
-      // 0.5625 → 0.60 的差异约 6%，可以铺满
+    test('竖屏源 + 竖屏容器：不论裁切多少都铺满（对齐抖音观感）', () {
+      // iPhone 9:19.5 屏放 9:16 视频：铺满只横向裁约 15%，观感是满屏；
+      // 改适应会上下留黑边、被灵动岛切一块，所以这里必须仍为铺满。
       expect(
         videoFitFor(aspect: 0.60, containerAspect: 0.5625),
         VideoFit.fill,
       );
-      // 0.5625 → 0.70 的差异约 20%，必须适应
       expect(
         videoFitFor(aspect: 0.70, containerAspect: 0.5625),
-        VideoFit.contain,
+        VideoFit.fill,
+      );
+      expect(
+        videoFitFor(aspect: 9 / 16, containerAspect: 0.478),
+        VideoFit.fill,
       );
     });
 

@@ -18,7 +18,8 @@ const Curve pageTurnCurve = Curves.easeOutCubic;
 const double kOverscrollDamping = 0.28;
 
 /// 松手吸附弹簧刚度，越高收尾越快。
-const double kSnapStiffness = 420;
+// owner 2026-11-18：滑动要「干脆」，提高回弹刚度让落页更快。
+const double kSnapStiffness = 620;
 
 /// Q：翻页阈值——拖过视口高度的该比例即翻页。
 const double kPageSwipeFraction = 0.18;

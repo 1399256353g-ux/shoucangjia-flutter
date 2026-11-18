@@ -105,6 +105,18 @@ Future<void> main() async {
       kind: 'native',
     );
   }
+  // owner 2026-11-18：非全屏也要铺到屏幕最顶端，与灵动岛融为一体。
+  // 透明状态栏 + edge-to-edge，播放页舞台本身不加顶部内边距。
+  if (Platform.isAndroid || Platform.isIOS) {
+    try {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+      ));
+    } catch (_) {}
+  }
   // 作者头像索引：卡片、作者主页、播放页共用同一份兜底数据。
   ensureAuthorAvatarsLoaded();
   perf.step('crash_guard');
@@ -7091,7 +7103,6 @@ class _PlayerPageState extends State<PlayerPage>
   // 按下瞬间是否处于沉浸：抬起后单击只负责恢复，不再触发暂停/点赞。
   bool _immAtDown = false;
   // P2 §13：翻页成功轻震动去重（每次翻页只一次）。
-  final SwitchHapticGate _switchHaptic = SwitchHapticGate();
   // J-A2：播放页统一顶部提示（不随功能区淡出，约 3 秒自动消失）。
   String? _noticeText;
   Timer? _noticeTimer;
@@ -8118,14 +8129,6 @@ class _PlayerPageState extends State<PlayerPage>
     _stallTimer?.cancel();
     _startupGuard?.cancel();
     if (switching) _resetOverlaysOnSwitch();
-    // P2 §13：翻页成功轻震动一次——仅非全屏、仅移动端，且同一目标不重复。
-    if (switching &&
-        !fs &&
-        hapticAllowedFor(
-            isAndroid: Platform.isAndroid, isIOS: Platform.isIOS) &&
-        _switchHaptic.allow(i)) {
-      hapticTap();
-    }
     if (switching) {
       _stallAttempts = 0;
       _startupReopened = false;

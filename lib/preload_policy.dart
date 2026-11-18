@@ -15,7 +15,9 @@ const int preloadDefaultPerSide = 2;
 /// 「当前 + 前后各 1」三个原生播放器常驻就会吃光内存，表现为 App 直接
 /// 消失且 Dart 层没有任何日志——这正是长期修不好的闪退来源。
 /// 桌面端内存宽裕，维持原来的 2。
-int preloadDefaultPerSideFor({required bool mobile}) => 0;
+// owner 2026-11-18：预载恢复（滑动时上下黑屏体验差），但每侧只保留 1 条，
+// 兼顾内存：一条预载 = 一整只 mpv 实例，2 条以上在移动端容易 OOM。
+int preloadDefaultPerSideFor({required bool mobile}) => 1;
 
 /// 设置允许的每侧条数范围（0 表示关闭预加载）。
 const int preloadMaxPerSide = 4;

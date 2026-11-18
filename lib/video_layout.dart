@@ -37,9 +37,14 @@ const double maxFillCrop = 0.08;
 /// 28.4 个舞台宽度，左右各裁掉约 68%，画面基本被毁。
 VideoFit videoFitFor({double? aspect, VideoFit? mode, double? containerAspect}) {
   if (mode != null) return mode;
-  // 关键：裁剪量要按「源比例 vs 容器比例」算，而不是只看源。
-  // 竖屏视频放进宽窗口时，cover 会把上下裁掉只剩中间一条，看起来像横板画面。
+  // owner 2026-11-18：竖屏源在竖屏容器里一律「铺满」（与抖音一致）。
+  // iPhone 9:19.5 屏幕放 9:16 视频时，铺满只横向裁掉约 15%，观感是满屏；
+  // 按 8% 阈值改适应反而上下留黑边、被灵动岛切一块，很难看。
+  // 只有「竖屏源 + 宽容器」（如 Windows 宽窗口）才保比例，避免裁成横条。
   if (aspect != null && aspect > 0 && containerAspect != null && containerAspect > 0) {
+    if (aspect <= portraitAspectThreshold && containerAspect <= portraitAspectThreshold) {
+      return VideoFit.fill;
+    }
     final cropW = aspect > containerAspect ? 1 - containerAspect / aspect : 0.0;
     final cropH = aspect < containerAspect ? 1 - aspect / containerAspect : 0.0;
     final crop = cropW > cropH ? cropW : cropH;

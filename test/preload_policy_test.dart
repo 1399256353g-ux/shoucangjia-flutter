@@ -115,9 +115,9 @@ void main() {
       AppSettings.preloadMemoryMb = 384;
       final j = AppSettings.toJson();
       AppSettings.resetDefaults();
-      // 0.9.87：默认关闭邻页预载（每个预载都是一整只 mpv 实例，
-      // 是移动端 OOM 与 Windows 卡顿/崩溃的主要来源）。设置里仍可手动开启。
-      expect(AppSettings.preloadPerSide, 0);
+      // 0.9.89：预载恢复为每侧 1 条（滑动时全黑体验差），但不再默认 2 条，
+      // 每多一条就多一整只 mpv 实例，移动端容易 OOM。
+      expect(AppSettings.preloadPerSide, 1);
       expect(AppSettings.preloadMemoryMb, 256);
       AppSettings.applyJson(j);
       expect(AppSettings.preloadPerSide, 3);
