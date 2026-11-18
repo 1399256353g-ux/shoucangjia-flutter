@@ -7012,6 +7012,10 @@ class _PlayerPageState extends State<PlayerPage>
   // 最近两次测量值，用于识别全屏切换期间的来回震荡。
   double _taskbarSwingA = 0;
   double _taskbarSwingB = 0;
+  // Windows：窗口缩放/最大化期间先摘掉视频纹理，避免 media_kit 在尺寸
+  // 变化中重排纹理导致原生崩溃；尺寸稳定后重建 Video 元素。
+  bool _winResizing = false;
+  Timer? _winResizeTimer;
   bool _taskbarMeasureScheduled = false;
   // C：邻页 widget 复用缓存：同一实例返回给 PageView，setState 时不重建。
   final Map<String, Widget> _neighborPages = <String, Widget>{};
@@ -7539,6 +7543,22 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   @override
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (!Platform.isWindows) return;
+    if (!_winResizing) setState(() => _winResizing = true);
+    _winResizeTimer?.cancel();
+    _winResizeTimer = Timer(const Duration(milliseconds: 320), () {
+      if (!mounted) return;
+      setState(() {
+        _winResizing = false;
+        // 尺寸已稳定：换一个 key，强制重建 Video 并挂到新的纹理尺寸。
+        _videoGen++;
+      });
+    });
+  }
+
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // G16：切后台/最小化时自动暂停（先落盘位置），回前台再恢复；
     // O3：移动端仅 paused 暂停——iOS 的 inactive 会被控制中心、通知横幅、
@@ -9862,6 +9882,7 @@ class _PlayerPageState extends State<PlayerPage>
     pc.dispose();
     focus.dispose();
     _scrubThinTimer?.cancel();
+    _winResizeTimer?.cancel();
     super.dispose();
   }
 
@@ -10112,6 +10133,11 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   Widget videoView() {
+    // Windows 缩放/最大化过程中不挂视频纹理：此时媒体纹理正在跟着窗口
+    // 重排，继续渲染会触发原生崩溃。海报在下层，视觉上仍有画面。
+    if (Platform.isWindows && _winResizing) {
+      return const ColoredBox(color: Colors.black);
+    }
     // B：按源比例自适应；fill 时 cover + ClipRect 铺满，contain 留黑边。
     final fit = videoFitFor(
                 aspect: _aspectFor(_workAt(cur)),
