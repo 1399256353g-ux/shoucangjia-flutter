@@ -7383,23 +7383,28 @@ class _PlayerPageState extends State<PlayerPage>
     return i < 0 ? '' : fp.substring(i + 1);
   }
 
-  /// 播放页头像：作品自带 `av` 优先；离线库没有作者头像时，
-  /// 用该作者任一作品的封面图兜底，避免永远显示默认人形图标。
+  /// 播放页头像优先级（B3）：手动覆盖 > 作品自带 `av`/作者级头像 > 作品缩略图兜底。
   ///
   /// 兜底索引按「作者 → 首张可用图」预建一次，只在作品列表变化时重建/补新批次；
   /// 结果按作者名缓存，单次 build 内的多次调用都是 O(1)。
   String avatarFor(Map w) {
-    final av = '${w['av'] ?? ''}';
-    if (av.isNotEmpty) return av;
     final name = '${w['a'] ?? ''}';
-    if (name.isEmpty) return '';
+    final av = '${w['av'] ?? ''}';
+    // 作品没带作者名时无从查手动/作者级头像，只能用作品自带 `av`。
+    if (name.isEmpty) return av;
     // 统一头像来源：与作者主页共用 AuthorAvatarStore（同一份作者头像）。
     // 只有作者确实没有头像时，才退到作品缩略图。
     final stored = AuthorAvatarStore.instance.pathFor(name);
-    if (stored != null && stored.isNotEmpty) return stored;
+    final manual = (stored != null && stored.isNotEmpty) ? stored : '';
+    // B3：手动头像必须压过作品自带 `av`（爬虫结果），否则手动挑选会失效。
+    if (manual.isNotEmpty) return manual;
     // 作者级头像（authors.json）：作品条目没带 av 时用它兜底。
     final byAuthor = authorAvatarIndex[name];
-    if (byAuthor != null && byAuthor.isNotEmpty) return byAuthor;
+    final crawled = av.isNotEmpty
+        ? av
+        : ((byAuthor != null && byAuthor.isNotEmpty) ? byAuthor : '');
+    // 有爬虫/作品自带头像就不用建兜底索引（避免为了兜底白扫一遍全部作品）。
+    if (crawled.isNotEmpty) return crawled;
     // 先确保索引与当前作品列表一致，再查缓存：否则列表换了一批后
     // 旧缓存会先命中，索引永远不会被纠正（0.9.77 修复）。
     final fp = _worksFingerprint();
@@ -7424,10 +7429,12 @@ class _PlayerPageState extends State<PlayerPage>
       _avatarFallbackKey = fp;
     }
     final cached = _avatarFallbackCache[name];
-    if (cached != null && cached.isNotEmpty) return cached;
-    final fb = _avatarFallbackIndex![name] ?? '';
-    if (fb.isNotEmpty) _avatarFallbackCache[name] = fb;
-    return fb;
+    var fb = (cached != null && cached.isNotEmpty) ? cached : '';
+    if (fb.isEmpty) {
+      fb = _avatarFallbackIndex![name] ?? '';
+      if (fb.isNotEmpty) _avatarFallbackCache[name] = fb;
+    }
+    return resolveAuthorAvatarPath(fallback: fb);
   }
 
   /// 头像/兜底图归属的库：优先用媒体路径里的库 id，取不到再用当前库。

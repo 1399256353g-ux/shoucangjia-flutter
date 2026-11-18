@@ -65,6 +65,24 @@ String encodeAuthorAvatarOverrides(Map<String, String> m) {
   return jsonEncode(out);
 }
 
+/// 作者头像来源优先级：手动覆盖 > 作品自带 `av`/爬虫作者头像 > 自动兜底图。
+///
+/// B3（owner 2026-11-19）：此前播放页先看作品自带 `av` 再看手动覆盖，
+/// 手动挑的头像会被爬虫结果盖回去。这里把优先级收成一个纯函数，
+/// 播放页与其它入口共用，避免两处口径再次分叉。
+/// 空串/null 视为「没有」，直接看下一档。
+String resolveAuthorAvatarPath({
+  String? manual,
+  String? crawled,
+  String? fallback,
+}) {
+  for (final v in <String?>[manual, crawled, fallback]) {
+    final s = v?.trim() ?? '';
+    if (s.isNotEmpty) return s;
+  }
+  return '';
+}
+
 /// 手动头像全局状态：`ChangeNotifier`，三处作者头像都监听它即时刷新。
 class AuthorAvatarStore extends ChangeNotifier {
   AuthorAvatarStore._();
