@@ -221,6 +221,40 @@ class Cfg {
 }
 
 final cfg = Cfg();
+
+/// 全局作者头像索引：作者名 → `av` 路径（来自 `/api/authors.json`）。
+///
+/// 作品的 `av` 只有部分条目带；没有时 `avatarFor` 之前会直接落到默认头像。
+/// 作者级头像在 authors.json 里是全的，这里补一层兜底。
+final Map<String, String> authorAvatarIndex = <String, String>{};
+bool _authorAvatarLoading = false;
+bool _authorAvatarLoaded = false;
+
+Future<void> ensureAuthorAvatarsLoaded() async {
+  if (_authorAvatarLoaded || _authorAvatarLoading) return;
+  _authorAvatarLoading = true;
+  try {
+    final r = await http
+        .get(cfg.u('/api/authors.json', lib: 'all'), headers: cfg.headers)
+        .timeout(const Duration(seconds: 20));
+    if (r.statusCode == 200) {
+      final m = jsonDecode(utf8.decode(r.bodyBytes));
+      if (m is Map) {
+        for (final e in m.entries) {
+          final v = e.value;
+          if (v is! Map) continue;
+          final av = '${v['av'] ?? ''}'.trim();
+          if (av.isNotEmpty) authorAvatarIndex['${e.key}'] = av;
+        }
+        _authorAvatarLoaded = true;
+      }
+    }
+  } catch (_) {
+    // 失败保持未加载，下次进播放页再试。
+  } finally {
+    _authorAvatarLoading = false;
+  }
+}
 final navKey = GlobalKey<NavigatorState>();
 
 /// 封面设置成功后的刷新信号：主页库卡片据此重新拉取封面索引。
@@ -7257,6 +7291,8 @@ class _PlayerPageState extends State<PlayerPage>
       PerfDiagnostics.instance.endSpan('page:player',
           <String, Object?>{'works': widget.works.length});
       open(widget.start);
+      // 预热作者头像索引：作品没带 av 时用作者级头像兜底。
+      ensureAuthorAvatarsLoaded();
       // P2：进入非全屏播放页即开始沉浸计时。
       _scheduleImmersive();
     });
@@ -7294,6 +7330,9 @@ class _PlayerPageState extends State<PlayerPage>
     // 只有作者确实没有头像时，才退到作品缩略图。
     final stored = AuthorAvatarStore.instance.pathFor(name);
     if (stored != null && stored.isNotEmpty) return stored;
+    // 作者级头像（authors.json）：作品条目没带 av 时用它兜底。
+    final byAuthor = authorAvatarIndex[name];
+    if (byAuthor != null && byAuthor.isNotEmpty) return byAuthor;
     final cached = _avatarFallbackCache[name];
     if (cached != null && cached.isNotEmpty) return cached;
     if (_avatarFallbackIndex == null ||
