@@ -7683,6 +7683,14 @@ class _PlayerPageState extends State<PlayerPage>
       _appForeground = false;
       _stallTimer?.cancel();
       _pauseForBackground(reason: state.name);
+      // L13：退出/关闭进程时 pause 不一定来得及生效，直接停掉所有槽位避免尾音。
+      if (state.name == 'detached') {
+        for (final s in _slots) {
+          try {
+            s.player.stop();
+          } catch (_) {}
+        }
+      }
       return;
     }
     if (state == AppLifecycleState.resumed && mounted) {
@@ -9869,6 +9877,10 @@ class _PlayerPageState extends State<PlayerPage>
     }
     _playerSubs.clear();
     for (final s in _slots) {
+      // L13：dispose 只是释放原生资源，先显式 stop 确保退出播放页立刻静音。
+      try {
+        s.player.stop();
+      } catch (_) {}
       s.player.dispose();
     }
     PerfDiagnostics.instance.slotsReleased(_slots.length);
