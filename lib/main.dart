@@ -3608,7 +3608,8 @@ class _LibraryPageState extends State<LibraryPage> {
   @override
   void initState() {
     super.initState();
-    WorkPlaysStore.revision.addListener(_onPlaysChanged);
+    // 0.9.75：不再监听全局播放量 revision——库卡片的封面由卡片自己按库
+    // 监听并重算（coverUrlOf），整页 setState 会把整个网格重建一遍。
     // 0.9.6：星标是全局状态，任何页面切换后本页都要跟着刷新。
     StarStore.instance.addListener(_onStarsChanged);
     // 封面设置成功后立即刷新库卡片，不必等手动刷新/重启。
@@ -3618,7 +3619,6 @@ class _LibraryPageState extends State<LibraryPage> {
 
   @override
   void dispose() {
-    WorkPlaysStore.revision.removeListener(_onPlaysChanged);
     StarStore.instance.removeListener(_onStarsChanged);
     coverRevision.removeListener(_onCoverChanged);
     super.dispose();
@@ -3636,11 +3636,6 @@ class _LibraryPageState extends State<LibraryPage> {
       return;
     }
     setState(() => stars = next);
-  }
-
-  // L5-C：有新的本机播放记录时刷新封面
-  void _onPlaysChanged() {
-    if (mounted) setState(() {});
   }
 
   /// L5-C：基础库封面 URL。手动 `_cover/` > 爬虫封面（`cv`）> 自动封面

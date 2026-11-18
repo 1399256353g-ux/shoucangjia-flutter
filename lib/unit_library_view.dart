@@ -369,6 +369,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
               return UnitLibraryCard(
                 unit: u,
                 coverUrl: widget.unitCoverOf?.call(u) ?? '',
+                coverUrlOf: widget.unitCoverOf,
                 headers: unitHeadersOf(u, widget.headersOf),
                 starred: liveStars.contains(u.id),
                 onToggleStar: () => widget.onToggleUnitStar(u),
@@ -554,6 +555,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                 return UnitLibraryCard(
                   unit: u,
                   coverUrl: widget.unitCoverOf?.call(u) ?? '',
+                  coverUrlOf: widget.unitCoverOf,
                   headers: unitHeadersOf(u, widget.headersOf),
                   starred: true,
                   onToggleStar: () => _toggle(u),
@@ -592,6 +594,12 @@ class UnitLibraryCard extends StatelessWidget {
   final VoidCallback? onTap;
   final String coverUrl;
 
+  /// 0.9.75：封面地址按需计算（优先级见 [unitCoverUrl]）。
+  ///
+  /// 传入时优先于 [coverUrl]，并在卡片自己的播放量监听里重新求值——
+  /// 播放某个库后只有这张卡重算封面，不必让整页 `setState` 重建网格。
+  final String Function(UnitLibrary unit)? coverUrlOf;
+
   /// 封面请求的鉴权头（媒体接口需要 Basic 认证）。
   final Map<String, String> headers;
 
@@ -610,6 +618,7 @@ class UnitLibraryCard extends StatelessWidget {
     required this.unit,
     this.onTap,
     this.coverUrl = '',
+    this.coverUrlOf,
     this.headers = const <String, String>{},
     this.starred = false,
     this.onToggleStar,
@@ -651,7 +660,10 @@ class UnitLibraryCard extends StatelessWidget {
                     WorkPlaysStore.libsListenable(unit.allBasics.map((b) => b.id)),
                 builder: (_, __, ___) => _UnitCoverFill(
                   key: ValueKey('unit-cover-${unit.id}'),
-                  url: unitCoverUrl(unit, customUrl: coverUrl),
+                  url: unitCoverUrl(
+                    unit,
+                    customUrl: coverUrlOf?.call(unit) ?? coverUrl,
+                  ),
                   headers: headers,
                   fallbackIcon: Icons.folder_copy_outlined,
                 ),
@@ -1018,6 +1030,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                 return UnitLibraryCard(
                   unit: sub,
                   coverUrl: unitCoverOf?.call(sub) ?? '',
+                  coverUrlOf: unitCoverOf,
                   headers: unitHeadersOf(sub, headersOf),
                   starred: liveStars.contains(sub.id),
                   onToggleStar: () => onToggleUnitStar(sub),
@@ -1052,6 +1065,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
               itemBuilder: (c, i) => BasicLibCard(
                 basic: sorted[i],
                 coverUrl: coverOf?.call(sorted[i]) ?? '',
+                coverUrlOf: coverOf,
                 headers: headersOf?.call(sorted[i].id) ?? const {},
                 unitLabel: unit.name,
                 unitKey: unit.id,
@@ -1076,6 +1090,12 @@ class BasicLibCard extends StatelessWidget {
   final VoidCallback onTap;
   final String coverUrl;
 
+  /// 0.9.75：封面地址按需计算（优先级见 [basicCoverUrl]）。
+  ///
+  /// 传入时优先于 [coverUrl]；卡片在自己的播放量监听里重新求值，
+  /// 播放某个基础库后只有这张卡重算封面，网格其余卡片不重建。
+  final String Function(BasicLib basic)? coverUrlOf;
+
   /// 封面请求的鉴权头（媒体接口需要 Basic 认证）。
   final Map<String, String> headers;
 
@@ -1092,6 +1112,7 @@ class BasicLibCard extends StatelessWidget {
     required this.basic,
     required this.onTap,
     this.coverUrl = '',
+    this.coverUrlOf,
     this.headers = const <String, String>{},
     this.unitLabel = '',
     this.unitKey = '',
@@ -1154,7 +1175,10 @@ class BasicLibCard extends StatelessWidget {
             valueListenable: WorkPlaysStore.libListenable(basic.id),
             builder: (_, __, ___) => _UnitCoverFill(
               key: ValueKey('basic-cover-${basic.id}'),
-              url: basicCoverUrl(basic, preset: coverUrl),
+              url: basicCoverUrl(
+                basic,
+                preset: coverUrlOf?.call(basic) ?? coverUrl,
+              ),
               headers: headers,
               fallbackIcon: Icons.folder_outlined,
             ),
