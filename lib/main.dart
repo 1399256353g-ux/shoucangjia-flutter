@@ -262,6 +262,12 @@ final Map<String, String> authorAvatarIndex = <String, String>{};
 bool _authorAvatarLoading = false;
 bool _authorAvatarLoaded = false;
 
+/// B2：作者头像索引是异步补进来的，索引到位后通知已渲染的头像/播放页重建。
+///
+/// 之前的实现只在启动时 fire-and-forget 拉一次，网络慢于首帧时，
+/// 卡片和播放页会一直停在默认人形占位，直到别的状态变化才刷新。
+final ValueNotifier<int> authorAvatarRevision = ValueNotifier<int>(0);
+
 Future<void> ensureAuthorAvatarsLoaded() async {
   if (_authorAvatarLoaded || _authorAvatarLoading) return;
   _authorAvatarLoading = true;
@@ -285,6 +291,8 @@ Future<void> ensureAuthorAvatarsLoaded() async {
     // 失败保持未加载，下次进播放页再试。
   } finally {
     _authorAvatarLoading = false;
+    // 索引有变化才通知，避免无谓重建。
+    if (_authorAvatarLoaded) authorAvatarRevision.value++;
   }
 }
 final navKey = GlobalKey<NavigatorState>();
@@ -2086,7 +2094,9 @@ class AuthorAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     // 0.9.41：手动设置的本机头像优先于爬虫/自动结果（owner 指定优先级）。
     return AnimatedBuilder(
-      animation: AuthorAvatarStore.instance,
+      // B2：作者级头像索引异步到位后也要重建，否则一直停在首字母占位。
+      animation: Listenable.merge(
+          <Listenable>[AuthorAvatarStore.instance, authorAvatarRevision]),
       builder: (context, _) => _buildWith(context,
           override: AuthorAvatarStore.instance.pathFor(name) ?? ''),
     );
@@ -9946,8 +9956,11 @@ class _PlayerPageState extends State<PlayerPage>
               // 进度条上方空白不再误触发跳转。
               onLongPress: _showWorkMenu,
               child: Row(children: [
-                if (avatarFor(w).isNotEmpty)
-                  GestureDetector(
+                // B2：作者级头像索引异步到位后要重新解析，否则会一直显示人形占位。
+                ValueListenableBuilder<int>(
+                  valueListenable: authorAvatarRevision,
+                  builder: (context, _, __) => avatarFor(w).isNotEmpty
+                      ? GestureDetector(
                     onTap: openAuthor,
                     child: ClipOval(
                       child: CachedNetworkImage(
@@ -9974,11 +9987,11 @@ class _PlayerPageState extends State<PlayerPage>
                                   radius: 19,
                                   child: Icon(Icons.person))))
                   )
-                else
-                  GestureDetector(
+                      : GestureDetector(
                       onTap: openAuthor,
                       child: const CircleAvatar(
                           radius: 19, child: Icon(Icons.person))),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                     child: Column(
