@@ -6,8 +6,17 @@
 /// - 当前条目、正在预载的条目不会被淘汰。
 library;
 
-/// 默认每侧预载条数。
+/// 默认每侧预载条数（桌面端）。
 const int preloadDefaultPerSide = 2;
+
+/// 移动端默认不预载邻页播放器。
+///
+/// 每条预载都会新建一个 mpv 实例（含解码缓冲）；移动端视频较大时，
+/// 「当前 + 前后各 1」三个原生播放器常驻就会吃光内存，表现为 App 直接
+/// 消失且 Dart 层没有任何日志——这正是长期修不好的闪退来源。
+/// 桌面端内存宽裕，维持原来的 2。
+int preloadDefaultPerSideFor({required bool mobile}) =>
+    mobile ? 0 : preloadDefaultPerSide;
 
 /// 设置允许的每侧条数范围（0 表示关闭预加载）。
 const int preloadMaxPerSide = 4;

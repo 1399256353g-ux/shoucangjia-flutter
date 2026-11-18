@@ -40,7 +40,8 @@ class AppSettings {
   static int hideUiSec = 3;
 
   /// M6：滑动方向前后各预载多少条（0 = 关闭）。
-  static int preloadPerSide = preloadDefaultPerSide;
+  static int preloadPerSide = preloadDefaultPerSideFor(
+      mobile: Platform.isAndroid || Platform.isIOS);
 
   /// M6：预加载缓存内存上限（MB）。
   static int preloadMemoryMb = preloadDefaultMemoryMb;
@@ -111,7 +112,8 @@ class AppSettings {
     defaultSpeed = 1.0;
     imageIntervalSec = 3;
     hideUiSec = 3;
-    preloadPerSide = preloadDefaultPerSide;
+    preloadPerSide = preloadDefaultPerSideFor(
+        mobile: Platform.isAndroid || Platform.isIOS);
     preloadMemoryMb = preloadDefaultMemoryMb;
     stripLibIndex = true;
     doubleTapLike = true;
