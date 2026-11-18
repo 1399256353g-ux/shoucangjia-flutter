@@ -62,12 +62,26 @@ void main() {
       expect(memo.resolve('k', compute), 'x2');
     });
 
-    test('超过上限时整体清空，不会无限增长', () {
+    test('超过上限时按 FIFO 淘汰最旧条目，不会无限增长', () {
       final memo = CoverMemo(maxEntries: 3);
       for (var i = 0; i < 10; i++) {
         memo.resolve('k$i', () => 'v$i');
       }
-      expect(memo.size <= 3, isTrue);
+      expect(memo.size, 3);
+      expect(memo.evictions, 7);
+      // 最近写入的仍命中，不重新计算
+      var calls = 0;
+      expect(memo.resolve('k9', () {
+        calls++;
+        return 'x';
+      }), 'v9');
+      expect(calls, 0);
+      // 最旧的已被淘汰
+      expect(memo.resolve('k0', () {
+        calls++;
+        return 'again';
+      }), 'again');
+      expect(calls, 1);
     });
   });
 

@@ -8,12 +8,13 @@
 // 规则：
 //  - 键由调用方拼好（单元库 id + 影响结果的信号，如封面版本/播放修订号/服务地址）；
 //  - 命中直接返回，未命中计算并存入；
-//  - 条目超过 [maxEntries] 时整体清空，避免长会话里无限堆积；
+//  - 条目超过 [maxEntries] 时只淘汰最早写入的一条（FIFO），
+//    不再整体清空——整体清空会让翻页/滚动时刚算好的封面全部重算；
 //  - 只缓存字符串（封面 URL 或空串），不持有任何 widget/字符串以外的对象。
 class CoverMemo {
   CoverMemo({this.maxEntries = 512});
 
-  /// 条目上限；超出即清空重来（封面表很便宜，重建一次可接受）。
+  /// 条目上限；超出时按写入顺序淘汰最旧的一条（FIFO）。
   final int maxEntries;
 
   final Map<String, String> _cache = <String, String>{};
@@ -29,6 +30,10 @@ class CoverMemo {
   int get misses => _misses;
   int _misses = 0;
 
+  /// 因超出上限被淘汰的条目数（供诊断/测试）。
+  int get evictions => _evictions;
+  int _evictions = 0;
+
   /// 取缓存；未命中时调用 [compute] 并记住结果（含空串）。
   String resolve(String key, String Function() compute) {
     final cached = _cache[key];
@@ -38,7 +43,11 @@ class CoverMemo {
     }
     _misses++;
     final value = compute();
-    if (_cache.length >= maxEntries) _cache.clear();
+    // 只淘汰最旧一条：清空整表会让刚用过的键全部失效，滚动时反复重算。
+    while (_cache.length >= maxEntries && _cache.isNotEmpty) {
+      _cache.remove(_cache.keys.first);
+      _evictions++;
+    }
     _cache[key] = value;
     return value;
   }
@@ -48,5 +57,6 @@ class CoverMemo {
     _cache.clear();
     _hits = 0;
     _misses = 0;
+    _evictions = 0;
   }
 }
