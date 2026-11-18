@@ -21,10 +21,43 @@ void main() {
       expect(videoFitFor(aspect: 0.81), VideoFit.contain);
     });
 
-    test('宽高比缺失/非法时同样铺满', () {
-      expect(videoFitFor(aspect: null), VideoFit.fill);
-      expect(videoFitFor(aspect: 0), VideoFit.fill);
-      expect(videoFitFor(aspect: -1.5), VideoFit.fill);
+    test('宽高比缺失/非法时退回适应，不强行放大裁切', () {
+      // 横板视频在首帧前若按铺满渲染，会被裁掉大半，观感像强行拉伸。
+      expect(videoFitFor(aspect: null), VideoFit.contain);
+      expect(videoFitFor(aspect: 0), VideoFit.contain);
+      expect(videoFitFor(aspect: -1.5), VideoFit.contain);
+    });
+
+    test('竖屏视频放进宽窗口必须保原比例（不裁成横板）', () {
+      // 9:16 源 + 16:9 容器：cover 要裁掉约 68% 高度，会只剩中间一条
+      expect(
+        videoFitFor(aspect: 9 / 16, containerAspect: 16 / 9),
+        VideoFit.contain,
+      );
+    });
+
+    test('竖屏视频在竖屏舞台内仍铺满（裁切极小）', () {
+      expect(
+        videoFitFor(aspect: 9 / 16, containerAspect: 9 / 16),
+        VideoFit.fill,
+      );
+      expect(
+        videoFitFor(aspect: 0.56, containerAspect: 0.5625),
+        VideoFit.fill,
+      );
+    });
+
+    test('比例差在 8% 以内才允许裁切铺满', () {
+      // 0.5625 → 0.60 的差异约 6%，可以铺满
+      expect(
+        videoFitFor(aspect: 0.60, containerAspect: 0.5625),
+        VideoFit.fill,
+      );
+      // 0.5625 → 0.70 的差异约 20%，必须适应
+      expect(
+        videoFitFor(aspect: 0.70, containerAspect: 0.5625),
+        VideoFit.contain,
+      );
     });
 
     test('手动覆盖优先于自动判定', () {

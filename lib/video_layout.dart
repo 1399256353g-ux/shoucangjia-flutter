@@ -20,6 +20,9 @@ enum VideoFit { fill, contain }
 /// 竖屏判定阈值：源宽高比（宽/高）小于此值视为竖屏。
 const double portraitAspectThreshold = 0.8;
 
+/// 允许为了铺满而裁掉的最大比例（8%）。超过就必须「适应」保原比例。
+const double maxFillCrop = 0.08;
+
 /// 按源比例与用户覆盖设置决定填充模式。
 ///
 /// owner 2026-11-18 规则：
@@ -32,9 +35,19 @@ const double portraitAspectThreshold = 0.8;
 ///
 /// 为什么横板不能铺满：9:16 舞台里 cover 一个 16:9 源，需要把宽度撑到
 /// 28.4 个舞台宽度，左右各裁掉约 68%，画面基本被毁。
-VideoFit videoFitFor({double? aspect, VideoFit? mode}) {
+VideoFit videoFitFor({double? aspect, VideoFit? mode, double? containerAspect}) {
   if (mode != null) return mode;
-  if (aspect == null || aspect <= 0) return VideoFit.fill;
+  // 关键：裁剪量要按「源比例 vs 容器比例」算，而不是只看源。
+  // 竖屏视频放进宽窗口时，cover 会把上下裁掉只剩中间一条，看起来像横板画面。
+  if (aspect != null && aspect > 0 && containerAspect != null && containerAspect > 0) {
+    final cropW = aspect > containerAspect ? 1 - containerAspect / aspect : 0.0;
+    final cropH = aspect < containerAspect ? 1 - aspect / containerAspect : 0.0;
+    final crop = cropW > cropH ? cropW : cropH;
+    return crop <= maxFillCrop ? VideoFit.fill : VideoFit.contain;
+  }
+  // owner 2026-11-18：比例未知时一律「适应」，绝不先按铺满放大裁切。
+  // 之前 default=fill 会让横板视频在首帧前被放大裁掉大半，观感像强行拉伸。
+  if (aspect == null || aspect <= 0) return VideoFit.contain;
   return aspect > portraitAspectThreshold ? VideoFit.contain : VideoFit.fill;
 }
 

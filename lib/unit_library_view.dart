@@ -646,7 +646,9 @@ class UnitLibraryCard extends StatelessWidget {
             // 封面铺满（自定义封面优先，其次自动获取）。
             Positioned.fill(
               child: ValueListenableBuilder<int>(
-                valueListenable: WorkPlaysStore.revision,
+                // 0.9.74：只监听本单元库子树内的库，播放别的库不再重建这张卡。
+                valueListenable:
+                    WorkPlaysStore.libsListenable(unit.allBasics.map((b) => b.id)),
                 builder: (_, __, ___) => _UnitCoverFill(
                   key: ValueKey('unit-cover-${unit.id}'),
                   url: unitCoverUrl(unit, customUrl: coverUrl),
@@ -1148,7 +1150,8 @@ class BasicLibCard extends StatelessWidget {
         // 与单元库卡片一致：封面铺满整张卡片，信息压在底部渐变上。
         child: Stack(fit: StackFit.expand, children: [
           ValueListenableBuilder<int>(
-            valueListenable: WorkPlaysStore.revision,
+            // 0.9.74：基础库封面只依赖自己的播放量，按库通知即可。
+            valueListenable: WorkPlaysStore.libListenable(basic.id),
             builder: (_, __, ___) => _UnitCoverFill(
               key: ValueKey('basic-cover-${basic.id}'),
               url: basicCoverUrl(basic, preset: coverUrl),

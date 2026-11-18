@@ -6826,23 +6826,29 @@ class _NeighborPageState extends State<_NeighborPage> {
     if (widget.imageUrl.isEmpty) return fallback;
     // 与播放页同一套判定：竖屏铺满、横板留边；用户手动覆盖优先。
     // 留边时黑底属于本页，滑动中整页一起位移，接缝是黑接黑。
-    final fill =
-        videoFitFor(aspect: _aspect, mode: AppSettings.videoFitOverride) ==
-            VideoFit.fill;
     return ColoredBox(
       color: Colors.black,
       child: ClipRect(
-        child: CachedNetworkImage(
+        child: LayoutBuilder(builder: (_, c) {
+          final fill = videoFitFor(
+                      aspect: _aspect,
+                      mode: AppSettings.videoFitOverride,
+                      containerAspect: c.maxHeight > 0
+                          ? c.maxWidth / c.maxHeight
+                          : null) ==
+                  VideoFit.fill;
+          return CachedNetworkImage(
           cacheManager: DiziCache.manager,
           // 滑动中的相邻页只是占位：720px 缩图足够，按屏幕宽度解码。
           imageUrl: widget.imageUrl,
           httpHeaders: widget.headers,
           memCacheWidth: widget.memCacheWidth,
-          fit: fill ? BoxFit.cover : BoxFit.contain,
-          fadeInDuration: Duration.zero,
-          placeholder: (_, __) => fallback,
-          errorWidget: (_, __, ___) => fallback,
-        ),
+            fit: fill ? BoxFit.cover : BoxFit.contain,
+            fadeInDuration: Duration.zero,
+            placeholder: (_, __) => fallback,
+            errorWidget: (_, __, ___) => fallback,
+          );
+        }),
       ),
     );
   }
@@ -10138,17 +10144,18 @@ class _PlayerPageState extends State<PlayerPage>
     if (Platform.isWindows && _winResizing) {
       return const ColoredBox(color: Colors.black);
     }
-    // B：按源比例自适应；fill 时 cover + ClipRect 铺满，contain 留黑边。
-    final fit = videoFitFor(
-                aspect: _aspectFor(_workAt(cur)),
-                mode: AppSettings.videoFitOverride) ==
-            VideoFit.fill
-        ? BoxFit.cover
-        : BoxFit.contain;
+    // B：按源比例自适应；比例差超过 8% 一律适应，保原比例不裁切。
     return LayoutBuilder(builder: (_, c) {
       if (c.maxWidth < 2 || c.maxHeight < 2) {
         return const ColoredBox(color: Colors.black);
       }
+      final fit = videoFitFor(
+                  aspect: _aspectFor(_workAt(cur)),
+                  mode: AppSettings.videoFitOverride,
+                  containerAspect: c.maxWidth / c.maxHeight) ==
+              VideoFit.fill
+          ? BoxFit.cover
+          : BoxFit.contain;
       return ClipRect(
         child: RepaintBoundary(
           // key 随槽位变化：预缓冲切换后必须重建 Video，才能挂到新控制器
@@ -11580,23 +11587,26 @@ class _PlayerPageState extends State<PlayerPage>
                         onLongPressEnd: fs ? (_) => player.setRate(speed) : null,
                         child: Stack(fit: StackFit.expand, children: [
                           if ((it['th'] ?? '').toString().isNotEmpty)
-                            CachedNetworkImage(
-                                cacheManager: DiziCache.manager,
-                                // 0.9.25：正片海报取 1080px 缩图并按屏幕解码。
-                                imageUrl: withImageWidth(
-                                    cfg.mediaUrl(it['th'].toString(),
-                                        lib: _libFor(it)),
-                                    kPlayerImageWidth),
-                                httpHeaders: cfg.headersFor(_libFor(it)),
-                                memCacheWidth: _posterDecodeWidth(context),
-                                // B：海报与视频同模式，fill 时裁剪铺满。
-                                fit: videoFitFor(
-                                            aspect: _aspectFor(it),
-                                            mode:
-                                                AppSettings.videoFitOverride) ==
-                                        VideoFit.fill
-                                    ? BoxFit.cover
-                                    : BoxFit.contain),
+                            LayoutBuilder(builder: (_, pc) {
+                              final fit = videoFitFor(
+                                          aspect: _aspectFor(it),
+                                          mode: AppSettings.videoFitOverride,
+                                          containerAspect: pc.maxHeight > 0
+                                              ? pc.maxWidth / pc.maxHeight
+                                              : null) ==
+                                      VideoFit.fill
+                                  ? BoxFit.cover
+                                  : BoxFit.contain;
+                              return CachedNetworkImage(
+                                  cacheManager: DiziCache.manager,
+                                  imageUrl: withImageWidth(
+                                      cfg.mediaUrl(it['th'].toString(),
+                                          lib: _libFor(it)),
+                                      kPlayerImageWidth),
+                                  httpHeaders: cfg.headersFor(_libFor(it)),
+                                  memCacheWidth: _posterDecodeWidth(context),
+                                  fit: fit);
+                            }),
                           videoView(),
                           // J-A5：加载圈移到右上角，垂直中线与左侧返回键图标对齐；
                           // 错误/重试仍由中央的 _failureOverlay 展示。

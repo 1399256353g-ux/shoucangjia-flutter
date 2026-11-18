@@ -185,6 +185,14 @@ class WorkPlaysStore {
   /// 变更自增，UI 可监听刷新封面。
   static final ValueNotifier<int> revision = ValueNotifier<int>(0);
 
+  /// 0.9.74：按库的变更通知。播放只影响该库（及其上级单元库）的封面，
+  /// 不必让网格里所有库卡片一起重算封面。
+  static final Map<String, ValueNotifier<int>> _libRev =
+      <String, ValueNotifier<int>>{};
+
+  /// 合并通知器缓存：键为排序后的库 id 集合（单元库封面取决于整棵子树）。
+  static final Map<String, _LibsNotifier> _merged = <String, _LibsNotifier>{};
+
   static Map<String, WorkPlay> _items = <String, WorkPlay>{};
   static bool _loaded = false;
   static Timer? _flush;
@@ -220,7 +228,29 @@ class WorkPlaysStore {
     if (key.isEmpty) return;
     _items = bumpWorkPlay(_items, key, thumb: thumb, kind: kind, at: at);
     revision.value++;
+    _libRev[lib.trim()]?.value++;
     _flush ??= Timer(const Duration(milliseconds: 1500), flush);
+  }
+
+  /// 单个基础库的变更通知；空库退回到全局 [revision]。
+  static ValueListenable<int> libListenable(String lib) {
+    final l = lib.trim();
+    if (l.isEmpty) return revision;
+    return _libRev.putIfAbsent(l, () => ValueNotifier<int>(0));
+  }
+
+  /// 一组基础库（单元库整棵子树）的合并通知；空集合退回全局 [revision]。
+  /// 同一组库复用同一个通知器，避免每次 build 都新建监听链。
+  static ValueListenable<int> libsListenable(Iterable<String> libs) {
+    final ids = <String>{
+      for (final l in libs)
+        if (l.trim().isNotEmpty) l.trim(),
+    }.toList()
+      ..sort();
+    if (ids.isEmpty) return revision;
+    final key = ids.join('|');
+    return _merged.putIfAbsent(
+        key, () => _LibsNotifier(key, [for (final i in ids) libListenable(i)]));
   }
 
   /// 立即落盘（测试与退出路径可用）。
@@ -245,5 +275,34 @@ class WorkPlaysStore {
     _flush?.cancel();
     _flush = null;
     revision.value++;
+    for (final n in _libRev.values) {
+      n.value++;
+    }
+  }
+}
+
+/// 把一组库通知器合并成一个可监听对象（单元库封面依赖子树内所有库）。
+class _LibsNotifier extends ValueNotifier<int> {
+  final String _key;
+  final List<ValueListenable<int>> _sources;
+
+  _LibsNotifier(this._key, this._sources) : super(0) {
+    for (final s in _sources) {
+      s.addListener(_onAny);
+    }
+  }
+
+  String get key => _key;
+
+  void _onAny() {
+    value++;
+  }
+
+  @override
+  void dispose() {
+    for (final s in _sources) {
+      s.removeListener(_onAny);
+    }
+    super.dispose();
   }
 }
