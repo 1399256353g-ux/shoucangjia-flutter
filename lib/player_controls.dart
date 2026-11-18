@@ -1091,7 +1091,7 @@ class ScrubBar extends StatelessWidget {
           valueListenable: fraction,
           builder: (_, f, __) => LayoutBuilder(builder: (_, c) {
           final w = c.maxWidth;
-          final x = scrubKnobX(trackWidth: w, fraction: f);
+          final x = scrubKnobX(trackWidth: w, fraction: f, knobRadius: 0);
           final timeLabel = labelFor?.call(f) ?? '';
           return Stack(clipBehavior: Clip.none, children: [
             Positioned(
@@ -1113,18 +1113,7 @@ class ScrubBar extends StatelessWidget {
               ),
             ),
             if (active) ...[
-              Positioned(
-                left: x - kScrubKnobRadius,
-                bottom: h / 2 - kScrubKnobRadius,
-                child: Container(
-                  width: kScrubKnobRadius * 2,
-                  height: kScrubKnobRadius * 2,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
+              // owner 2026-11-18：去掉末端圆点，纯条状更干净。
               if (timeLabel.isNotEmpty)
                 Positioned(
                   // owner 2026-11-18：时间固定显示在进度条正上方居中，
