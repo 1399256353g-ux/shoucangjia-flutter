@@ -64,8 +64,10 @@ class _WorkCardState extends State<WorkCard> {
   @override
   Widget build(BuildContext context) {
     final w = widget;
-    return RepaintBoundary(
-      child: MouseRegion(
+    // 不要在这里套 RepaintBoundary：卡片被顶部栏部分遮住时，悬停触发的
+    // 局部重绘只会重画可见区域，露出的那一段没有像素缓存，表现就是整卡
+    // 重新出现、被遮住的部分一片空白。
+    return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => _hover.value = true,
       onExit: (_) => _hover.value = false,
@@ -178,7 +180,6 @@ class _WorkCardState extends State<WorkCard> {
                 : const SizedBox.shrink(),
           ),
         ]),
-      ),
       ),
       ),
     );

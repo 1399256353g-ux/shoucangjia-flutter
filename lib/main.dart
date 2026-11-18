@@ -5338,18 +5338,6 @@ class _RankPageState extends State<RankPage> {
             _rowMap(e)
       ];
 
-  /// 排行榜可选的单元库（来自各库的单元库树）。
-  List<AuthorLibNode> get _allUnits {
-    final out = <AuthorLibNode>[];
-    final seen = <String>{};
-    for (final m in metas.values) {
-      for (final u in m.units) {
-        if (!seen.add(u.id)) continue;
-        out.add(AuthorLibNode(id: u.id, name: m.unitNameOf(u.id)));
-      }
-    }
-    return authorLibNodes(out);
-  }
 
   List<AuthorLibNode> get _filterBasics {
     final out = <AuthorLibNode>[];
@@ -5472,17 +5460,6 @@ class _RankPageState extends State<RankPage> {
         const HomeAction(),
       ]),
       body: Column(children: [
-        // 与作者总览共用同一个快捷条组件；状态即 filter.units。
-        AuthorQuickChips(
-          allLabel: '全部单元库',
-          items: _allUnits,
-          selected: filter.units,
-          onPick: (id) {
-            final next = filter.copy();
-            pickOnlyIn(next.units, id);
-            authorFilter.apply(next);
-          },
-        ),
         HorizontalChipBar(
           children: [
             for (final p in _periods.entries)
@@ -6653,18 +6630,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                   FilledButton(onPressed: load, child: const Text('重试')),
                 ]))
               : Column(children: [
-                  // 与排行榜共用同一个快捷条组件；状态即 filter.bigs。
-                  // 与排行榜同一套快捷筛选：按钮文案、选中态、维度都对齐。
-                  AuthorQuickChips(
-                    allLabel: '全部单元库',
-                    items: _filterUnits,
-                    selected: filter.units,
-                    onPick: (id) {
-                      final next = filter.copy();
-                      pickOnlyIn(next.units, id);
-                      authorFilter.apply(next);
-                    },
-                  ),
                   SizedBox(
                     height: 46,
                     child: ListView(

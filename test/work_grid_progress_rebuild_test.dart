@@ -100,15 +100,17 @@ void main() {
 
     final cards = find.byType(WorkCard);
     expect(cards, findsWidgets);
-    // 每张卡片的构建树根节点都应是 RepaintBoundary。
+    // 0.9.87：根节点不再套 RepaintBoundary。
+    // 原因：卡片被顶部栏部分遮挡时，悬停触发的局部重绘只覆盖可见区域，
+    // 露出的那一段没有像素缓存，会出现「整卡重新出现、被遮住部分空白」。
     for (final e in tester.elementList(cards)) {
       Element? first;
       e.visitChildren((c) {
         first ??= c;
       });
       expect(first, isNotNull, reason: 'WorkCard 没有子节点');
-      expect(first!.widget is RepaintBoundary, isTrue,
-          reason: 'WorkCard 根节点缺少 RepaintBoundary');
+      expect(first!.widget is RepaintBoundary, isFalse,
+          reason: '卡片根节点不应再包 RepaintBoundary');
     }
 
     await tester.pump(const Duration(milliseconds: 700));
