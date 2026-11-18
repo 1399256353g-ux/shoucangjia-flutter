@@ -11480,15 +11480,33 @@ class _PlayerPageState extends State<PlayerPage>
     // 全屏：保留旧的「单击呼出/隐藏」逻辑——任务栏始终渲染为半透明浮层，
     // 显隐由 ui（及 chromeOpacity）控制；舞台仍铺满整屏不占位。
     final hideTaskbar = false;
-    final stageInset = broken
+    // owner 2026-11-19：任务栏跟随视频下沿。
+    // 视频铺满时任务栏贴屏幕底（现状）；视频保比例留黑边时，任务栏移到
+    // 画面下沿，避免视频与栏之间留一大块黑区。
+    final _aspectNow = _aspectFor(w);
+    final _taskbarHNow = _taskbarH > 0
+        ? _taskbarH
+        : taskbarReservedHeight(
+            contentHeight: kTaskbarHeight, safeBottom: pad.bottom);
+    final _followVideo = !fs &&
+        !broken &&
+        _aspectNow != null &&
+        _aspectNow > 0 &&
+        videoFitFor(
+                aspect: _aspectNow,
+                mode: AppSettings.videoFitOverride,
+                containerAspect: viewSize.height > _taskbarHNow
+                    ? viewSize.width / (viewSize.height - _taskbarHNow)
+                    : null) ==
+            VideoFit.contain;
+    final taskbarLift = _followVideo
+        ? taskbarBottomInset(box: viewSize, aspect: _aspectNow)
+        : 0.0;
+    final stageInset = broken || _followVideo
         ? 0.0
         : stageBottomInset(
             screenHeight: viewSize.height,
-            taskbarHeight: _taskbarH > 0
-                ? _taskbarH
-                : taskbarReservedHeight(
-                    contentHeight: kTaskbarHeight,
-                    safeBottom: pad.bottom),
+            taskbarHeight: _taskbarHNow,
             fullscreen: fs,
           );
     // T：进度层贴在本页舞台底边（PageView 子页 Stack 内）；作者/标题信息行
@@ -12085,8 +12103,8 @@ class _PlayerPageState extends State<PlayerPage>
                 Positioned(
                   left: 0,
                   right: 0,
-                  // A：实底任务栏贴屏幕底；视频舞台已按其高度内缩。
-                  bottom: 0,
+                  // 视频铺满时贴屏幕底；留边时跟随画面下沿上移。
+                  bottom: taskbarLift,
                   child: IgnorePointer(
                     ignoring: !ui,
                     child: AnimatedOpacity(
