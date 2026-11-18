@@ -13654,11 +13654,7 @@ class _AuthorPageState extends State<AuthorPage> {
   Map<String, int> typeCounts = {};
   String primaryLib = '';
   bool loading = true;
-  // 该库是否配置了爬虫脚本；没有脚本时禁用联网同步。
-  bool _hasCrawler = false;
-  bool syncing = false;
   LibMeta? meta;
-  Timer? syncTimer;
   // J-A3：作者主页头部上滑自动收起为紧凑条（头像 + 名字 + 等级）。
   bool _headerCollapsed = false;
   // P 修复：
@@ -13939,7 +13935,6 @@ class _AuthorPageState extends State<AuthorPage> {
 
   @override
   void dispose() {
-    syncTimer?.cancel();
     _headerRecheck?.cancel();
     _authorScroll.dispose();
     super.dispose();
@@ -13955,70 +13950,6 @@ class _AuthorPageState extends State<AuthorPage> {
           _authorScroll.position.pixels <
               _authorScroll.position.maxScrollExtent;
       if (!ok) setState(() => _headerCollapsed = false);
-    });
-  }
-
-  // 只有配置了爬虫脚本的库才允许联网同步。
-  bool get _canSync => cfg.base.isNotEmpty && _hasCrawler;
-
-  Future<void> _syncAuthor() async {
-    if (syncing || !_canSync) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('同步作者 @${widget.name}'),
-        content: const Text(
-            '将立即抓取该作者的全部作品（已入库的跳过），并补全头像、简介、封面。\n\n同步在 NAS 后台运行，作品多时耗时较长。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('开始同步')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    final j = await startServerSync(
-        target: 'author', author: widget.name, lib: primaryLib, full: true);
-    if (j == null || j['ok'] != true) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
-      }
-      return;
-    }
-    setState(() => syncing = true);
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已开始同步该作者，完成后自动刷新')));
-    }
-    syncTimer?.cancel();
-    var tries = 0;
-    syncTimer = Timer.periodic(const Duration(seconds: 4), (t) async {
-      tries++;
-      final s = await serverSyncStatus();
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      if (s == null) {
-        if (tries > 5) {
-          t.cancel();
-          setState(() => syncing = false);
-        }
-        return;
-      }
-      if (s['running'] == true) return;
-      t.cancel();
-      setState(() => syncing = false);
-      final code = s['exit'];
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(code == 0 ? '作者同步完成' : '作者同步结束（退出码 $code）')));
-      }
-      await load();
     });
   }
 
@@ -14056,20 +13987,6 @@ class _AuthorPageState extends State<AuthorPage> {
     if (primaryLib.isNotEmpty) {
       try {
         meta = await LibMeta.load(primaryLib);
-      } catch (_) {}
-      // 没有配置爬虫脚本的库：禁用联网同步按钮。
-      try {
-        final cr = await http
-            .get(
-                Uri.parse('${cfg.baseFor(primaryLib)}/api/crawler'
-                    '?lib=${Uri.encodeQueryComponent(primaryLib)}'),
-                headers: cfg.headersFor(primaryLib))
-            .timeout(const Duration(seconds: 8));
-        if (cr.statusCode == 200) {
-          final cj = jsonDecode(cr.body);
-          final scripts = (cj is Map ? cj['scripts'] : null);
-          _hasCrawler = scripts is List && scripts.isNotEmpty;
-        }
       } catch (_) {}
     }
     fallbackAv =
@@ -14522,18 +14439,7 @@ class _AuthorPageState extends State<AuthorPage> {
                         ),
                     ])),
               ]),
-          if (_canSync)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Row(children: [
-                const Icon(Icons.cloud_sync_outlined,
-                    size: 14, color: Colors.grey),
-                const SizedBox(width: 6),
-                const Expanded(
-                    child: Text('点右上角云同步按钮，立即爬取该作者的全部作品',
-                        style: TextStyle(fontSize: 11, color: Colors.grey))),
-              ]),
-            ),
+          // L2：作者页不再提供「全量同步」入口，同步统一收到单元库级配置。
         ],
       ),
     );
@@ -14569,16 +14475,6 @@ class _AuthorPageState extends State<AuthorPage> {
                   : () => setState(() => selectingWorks = true),
               icon: const Icon(Icons.checklist)),
         ],
-        if (_canSync)
-          IconButton(
-              tooltip: syncing ? '同步中…' : '同步该作者',
-              onPressed: syncing ? null : _syncAuthor,
-              icon: syncing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.cloud_sync_outlined)),
       ]),
       body: loading
           ? const _AuthorPageSkeleton()
