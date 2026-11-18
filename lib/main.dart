@@ -21,6 +21,7 @@ import 'cover_cache.dart';
 import 'cover_upload.dart';
 import 'deleted_monitor.dart';
 import 'concurrency.dart';
+import 'breadcrumb.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
 import 'decode_plan.dart';
@@ -96,6 +97,14 @@ Future<void> main() async {
   final perf = PerfDiagnostics.instance..markAppStart();
   // 0.9.23：先装崩溃兜底，后面任何初始化出错都能记下来而不是整屏灰掉
   installCrashGuard();
+  // 崩溃前现场：原生崩溃不会进 FlutterError，这里把关键动作落盘。
+  await Breadcrumb.init();
+  if (Breadcrumb.lastSessionCrashed && Breadcrumb.lastSessionTail.isNotEmpty) {
+    CrashLog.instance.record(
+      '疑似原生崩溃，最后动作：${Breadcrumb.lastSessionTail.last}',
+      kind: 'native',
+    );
+  }
   // 作者头像索引：卡片、作者主页、播放页共用同一份兜底数据。
   ensureAuthorAvatarsLoaded();
   perf.step('crash_guard');
@@ -211,9 +220,18 @@ class Cfg {
   // 媒体路径统一带库前缀：/media/<lib>/<相对路径>
   String media(String p, {String? lib}) {
     final l = lib ?? this.lib;
-    if (l.isEmpty || !p.startsWith('/media/')) return p;
-    final rest = p.substring(7);
-    if (rest.startsWith('$l/')) return p;
+    final path = p.trim();
+    if (path.isEmpty) return path;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (l.isEmpty) return path;
+    // 相对路径（如手动封面 `_cover/v1.jpg`）必须补成 /media/<lib>/...，
+    // 否则会被直接拼到域名后面变成 `http://ip:8090_cover/...`，永远加载不出来。
+    if (!path.startsWith('/media/')) {
+      final rel = path.replaceFirst(RegExp(r'^/+'), '');
+      return '/media/${Uri.encodeComponent(l)}/$rel';
+    }
+    final rest = path.substring(7);
+    if (rest.startsWith('$l/')) return path;
     return '/media/${Uri.encodeComponent(l)}/$rest';
   }
 
@@ -267,6 +285,18 @@ Future<CoverUploadResult> uploadCoverFromPicker({
   required String libId,
   String unitRel = '',
 }) async {
+  // owner 2026-11-18：Windows 在全屏/无边框窗口下调用系统文件对话框会直接
+  // 崩溃（对话框还没弹出就没了）。先退全屏、等窗口稳定，再开对话框。
+  if (Platform.isWindows) {
+    try {
+      Breadcrumb.mark('cover:pre_pick');
+      if (await windowManager.isFullScreen()) {
+        await windowManager.setFullScreen(false);
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+      }
+    } catch (_) {}
+  }
+  Breadcrumb.mark('cover:open_dialog', unitRel.isEmpty ? 'lib' : 'unit');
   final r = await pickAndUploadCover(
     url: cfg.u('/api/cover/upload', lib: libId).toString(),
     headers: cfg.headersFor(libId),
@@ -2896,10 +2926,11 @@ class ThemeSettingsPage extends StatelessWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: kAppThemes.length,
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 1.22,
+                  // owner 2026-11-18：色卡改小，一屏多放几个主题。
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 1.05,
                 ),
                 itemBuilder: (context, i) {
                   final spec = kAppThemes[i];
@@ -2970,14 +3001,14 @@ class _ThemePreviewCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         child: Container(
           decoration: BoxDecoration(
             color: spec.background,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: borderColor, width: selected ? 2 : 1),
           ),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -3019,8 +3050,8 @@ class _ThemePreviewCard extends StatelessWidget {
   }
 
   Widget _dot(Color c) => Container(
-      width: 12,
-      height: 12,
+      width: 9,
+      height: 9,
       decoration: BoxDecoration(color: c, shape: BoxShape.circle));
 }
 
@@ -10522,6 +10553,69 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 可见的封面入口：把原来的长按菜单项集中到一个底部面板。
+  /// 取「当前画面」作为封面：
+  /// - 视频：截取当前帧（media_kit screenshot）
+  /// - 图文/单图：取当前正在显示的那一张原图
+  Future<void> _applyCoverFromCurrent({required bool unitScope}) async {
+    final w = _workAt(cur);
+    final lib = _libFor(w);
+    final isV = w['t'] == 'v';
+    List<int>? bytes;
+    try {
+      if (isV) {
+        bytes = await player.screenshot(format: 'image/jpeg');
+      } else {
+        final pics = workMediaPaths(w);
+        if (pics.isNotEmpty) {
+          final i = img.clamp(0, pics.length - 1);
+          final r = await http.get(
+            Uri.parse(cfg.mediaUrl(pics[i], lib: lib)),
+            headers: cfg.headersFor(lib),
+          );
+          if (r.statusCode == 200) bytes = r.bodyBytes;
+        }
+      }
+    } catch (e) {
+      _toast('当前画面截取失败：$e');
+      return;
+    }
+    if (bytes == null || bytes.isEmpty) {
+      _toast('当前画面截取失败');
+      return;
+    }
+    final r = await uploadCoverBytes(
+      bytes: bytes,
+      url: cfg.u('/api/cover/upload', lib: lib).toString(),
+      headers: cfg.headersFor(lib),
+      libId: lib,
+      unitRel: unitScope ? _unitRelForLib(lib) : '',
+    );
+    if (r.ok) coverRevision.value++;
+    _toast(r.message);
+  }
+
+  /// 基础库所属单元库的相对路径（用于单元库封面上传）。
+  String _unitRelForLib(String lib) {
+    final m = _meta;
+    if (m == null) return '';
+    String? walk(UnitLibrary u) {
+      for (final b in u.basics) {
+        if (b.id == lib) return u.rel;
+      }
+      for (final c in u.children) {
+        final hit = walk(c);
+        if (hit != null && hit.isNotEmpty) return hit;
+      }
+      return null;
+    }
+
+    for (final u in m.units) {
+      final hit = walk(u);
+      if (hit != null && hit.isNotEmpty) return hit;
+    }
+    return '';
+  }
+
   void _openCoverSheet() {
     final w = _workAt(cur);
     final lib = _libFor(w);
@@ -10537,8 +10631,7 @@ class _PlayerPageState extends State<PlayerPage>
             subtitle: const Text('用当前作品图片作为基础库封面'),
             onTap: () {
               Navigator.of(ctx).pop();
-              _applyCover(CoverRequest.set(
-                  lib: lib, work: '${w['id'] ?? ''}'));
+              _applyCoverFromCurrent(unitScope: false);
             },
           ),
           ListTile(
@@ -10547,11 +10640,7 @@ class _PlayerPageState extends State<PlayerPage>
             subtitle: const Text('用当前作品图片作为所属单元库封面'),
             onTap: () {
               Navigator.of(ctx).pop();
-              _applyCover(CoverRequest.set(
-                scope: CoverScope.unit,
-                lib: lib,
-                work: '${w['id'] ?? ''}',
-              ));
+              _applyCoverFromCurrent(unitScope: true);
             },
           ),
           ListTile(

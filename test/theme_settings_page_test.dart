@@ -18,23 +18,28 @@ void main() {
     ));
 
     expect(find.text('主题外观'), findsOneWidget);
+    // 主题数量增加后网格是懒加载的：逐个滚动到可见再断言，
+    // 不能要求所有卡片同时存在于树上。
+    final grid = find.byType(Scrollable).first;
     for (final t in kAppThemes) {
+      await tester.scrollUntilVisible(find.text(t.name), 160, scrollable: grid);
       expect(find.text(t.name), findsOneWidget);
     }
 
     // 点「极光青」应立即切换全局主题，无需确认或重启
-    await tester.ensureVisible(find.text('极光青'));
+    await tester.scrollUntilVisible(find.text('极光青'), -160, scrollable: grid);
     await tester.pumpAndSettle();
     await tester.tap(find.text('极光青'));
     await tester.pumpAndSettle();
     expect(AppTheme.current.value, 'aurora');
 
-    await tester.ensureVisible(find.text('明亮日间'));
+    await tester.scrollUntilVisible(find.text('明亮日间'), 160, scrollable: grid);
     await tester.pumpAndSettle();
     await tester.tap(find.text('明亮日间'));
     await tester.pumpAndSettle();
     expect(AppTheme.current.value, 'daylight');
-    expect(Theme.of(tester.element(find.text('示例条目'))).brightness,
+    // 不再依赖「示例条目」是否在可视区：直接从页面上下文取当前主题亮度。
+    expect(Theme.of(tester.element(find.byType(ThemeSettingsPage))).brightness,
         Brightness.light);
   });
 

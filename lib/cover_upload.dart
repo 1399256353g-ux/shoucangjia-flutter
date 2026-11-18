@@ -101,6 +101,30 @@ Future<CoverUploadResult> pickAndUploadCover({
     return const CoverUploadResult(false, '只支持 JPG/PNG/WebP 图片');
   }
 
+  return uploadCoverBytes(
+    bytes: bytes,
+    url: url,
+    headers: headers,
+    libId: libId,
+    unitRel: unitRel,
+  );
+}
+
+/// 直接用已有图片字节上传封面（播放页「设置封面」截帧/取当前图时用）。
+Future<CoverUploadResult> uploadCoverBytes({
+  required List<int> bytes,
+  required String url,
+  required Map<String, String> headers,
+  required String libId,
+  String unitRel = '',
+}) async {
+  if (bytes.isEmpty) return const CoverUploadResult(false, '图片为空');
+  if (bytes.length > kCoverUploadMaxBytes) {
+    return const CoverUploadResult(false, '图片超过 12MB，请先压缩');
+  }
+  if (!isSupportedCoverBytes(bytes)) {
+    return const CoverUploadResult(false, '只支持 JPG/PNG/WebP 图片');
+  }
   http.Response r;
   try {
     r = await http.post(
