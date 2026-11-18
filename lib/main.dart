@@ -11299,7 +11299,15 @@ class _PlayerPageState extends State<PlayerPage>
               dragPic = null;
             });
           },
-          child: Align(
+          // owner 2026-11-18：全屏清屏时图文/图片合集的进度条必须跟任务栏
+          // 一起消失；非全屏与拖动中保持可见。
+          child: IgnorePointer(
+            ignoring: fs && !ui && !dragging,
+            child: AnimatedOpacity(
+              opacity: (!fs || ui || dragging) ? 1 : 0,
+              duration: const Duration(milliseconds: kScrubFadeMs),
+              curve: Curves.easeOut,
+              child: Align(
             alignment: Alignment.bottomCenter,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -11319,6 +11327,8 @@ class _PlayerPageState extends State<PlayerPage>
                   ),
                 );
               }),
+            ),
+          ),
             ),
           ),
         );
