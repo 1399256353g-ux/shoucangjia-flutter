@@ -152,6 +152,23 @@ void main() {
       expect(workAvatarFallbackPath(null), '');
     });
 
+    test('只接受图片路径：th 是视频时回落到 m 里的图', () {
+      // th 误填了视频文件 → 不能拿去当头像
+      expect(workAvatarFallbackPath({'th': 'v.mp4', 'm': ['a.mp4']}), '');
+      expect(
+          workAvatarFallbackPath({
+            'th': 'v.mp4',
+            'm': ['a.mp4', 'b.jpg'],
+          }),
+          'b.jpg');
+      // 非图片（文本/无扩展名）跳过
+      expect(workAvatarFallbackPath({'m': ['x.txt', 'y']}), '');
+      // 缩图参数不影响判定
+      expect(workAvatarFallbackPath({'th': 'a.jpg?w=200'}), 'a.jpg?w=200');
+      expect(isAvatarImagePath('a.PNG?w=64'), true);
+      expect(isAvatarImagePath('a.mp4'), false);
+    });
+
     test('按作品顺序取每个作者第一张可用图，空作者跳过', () {
       final idx = authorFallbackThumbs(<dynamic>[
         {'a': 'A', 'th': 'a1.jpg'},

@@ -2381,6 +2381,61 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
 }
 
 /// 删除监测页：展示服务端 `_deleted.log` 的只读记录。
+/// 诊断页：显示本次运行的「最后动作」记录，用于定位原生崩溃、
+/// 播放异常停止、封面缺失等没有 Dart 堆栈的问题。
+class DiagnosticsPage extends StatefulWidget {
+  const DiagnosticsPage({super.key});
+  @override
+  State<DiagnosticsPage> createState() => _DiagnosticsPageState();
+}
+
+class _DiagnosticsPageState extends State<DiagnosticsPage> {
+  List<String> _lines = const <String>[];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final l = await Breadcrumb.readTail(lines: 80);
+    if (!mounted) return;
+    setState(() {
+      _lines = l.reversed.toList(growable: false);
+      _loading = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('诊断'), actions: [
+        IconButton(
+            tooltip: '刷新', onPressed: _load, icon: const Icon(Icons.refresh)),
+      ]),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _lines.isEmpty
+              ? const Center(child: Text('暂无记录'))
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _lines.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, i) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: SelectableText(
+                      _lines[i],
+                      style: const TextStyle(
+                          fontSize: 12, fontFamily: 'monospace'),
+                    ),
+                  ),
+                ),
+    );
+  }
+}
+
 class DeletedMonitorPage extends StatefulWidget {
   const DeletedMonitorPage({super.key});
   @override
@@ -2823,6 +2878,13 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('账号全部同步源 · 勾选参与同步，未勾选不在主页显示'),
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const CollectionAdminPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.bug_report_outlined),
+          title: const Text('诊断'),
+          subtitle: const Text('本次运行的最后动作记录 · 崩溃/停播/封面异常排查'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DiagnosticsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.sell_outlined),
@@ -4213,7 +4275,7 @@ class _LibraryPageState extends State<LibraryPage> {
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('已将「${l['name']}」设为默认库')));
+          .showSnackBar(SnackBar(content: Text('已将「${l['name']}」设为当前媒体库')));
       await load();
     } catch (e) {
       if (mounted) {
@@ -4488,7 +4550,7 @@ class _LibraryPageState extends State<LibraryPage> {
           if (v == 'delete') _delete(l);
         },
         itemBuilder: (_) => [
-          const PopupMenuItem(value: 'default', child: Text('设为默认库')),
+          const PopupMenuItem(value: 'default', child: Text('设为当前媒体库')),
           const PopupMenuItem(value: 'crawler', child: Text('爬虫配置')),
           const PopupMenuItem(value: 'maint', child: Text('维护检查')),
           const PopupMenuItem(value: 'delete', child: Text('删除库（保留文件）')),
@@ -6750,55 +6812,6 @@ class _MediaRetryBox extends StatelessWidget {
   }
 }
 
-/// O1：边缘竖滑识别器——方向不满足要求时主动 reject，把手势还给 PageView。
-///
-/// 只有「竖向位移 > 12px 且横向位移 < 竖向位移的 0.6」才接管；
-/// 斜向/横向拖动直接让位，避免调亮度时误切作品。
-class _EdgeVerticalDragRecognizer extends VerticalDragGestureRecognizer {
-  _EdgeVerticalDragRecognizer({
-    required this.screenWidth,
-    required this.portrait,
-    required this.zone,
-  });
-
-  final double screenWidth;
-  final bool portrait;
-  final SwipeZone zone;
-  Offset _down = Offset.zero;
-  bool _decided = false;
-
-  @override
-  void addAllowedPointer(PointerDownEvent event) {
-    _down = event.position;
-    _decided = false;
-    super.addAllowedPointer(event);
-  }
-
-  @override
-  void handleEvent(PointerEvent event) {
-    if (!_decided && event is PointerMoveEvent) {
-      final d = event.position - _down;
-      if (d.distance > 6) {
-        _decided = true;
-        final intent = edgeGestureIntent(
-          dx: d.dx,
-          dy: d.dy,
-          width: screenWidth,
-          startX: _down.dx,
-          portrait: portrait,
-        );
-        final want = zone == SwipeZone.brightness
-            ? EdgeGestureIntent.brightness
-            : EdgeGestureIntent.volume;
-        if (intent != want) {
-          resolve(GestureDisposition.rejected);
-          return;
-        }
-      }
-    }
-    super.handleEvent(event);
-  }
-}
 
 /// C：PageView 邻页（预载页）。独立 StatefulWidget，State 与已解码封面
 /// 在父级 setState 时保留；封面未就绪时用纯黑占位，绝不黑屏闪烁。
@@ -7032,11 +7045,6 @@ class _PlayerPageState extends State<PlayerPage>
   double brightness = 100;
   bool _swipeActive = false;
   bool _swipeShow = false;
-  SwipeZone? _swipeZone;
-  double _swipeStartY = 0;
-  double _swipeStartValue = 0;
-  double _swipeValue = 0;
-  int _swipeStep = 0;
   Timer? _swipeHintTimer;
   bool get _swipeHint => _swipeActive || _swipeShow;
   bool get _mobileSwipe =>
@@ -9474,136 +9482,8 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
-  // G15：上下滑开始（左亮度 / 右音量），以按下时的值为基准。
-  void _swipeStart(DragStartDetails d, SwipeZone zone) {
-    _swipeHintTimer?.cancel();
-    hapticTap();
-    final start =
-        zone == SwipeZone.brightness ? brightness : (muted ? 0.0 : volume);
-    setState(() {
-      _swipeZone = zone;
-      _swipeActive = true;
-      _swipeShow = true;
-      _swipeStartY = d.globalPosition.dy;
-      _swipeStartValue = start;
-      _swipeValue = start;
-      _swipeStep = swipeHapticStep(start);
-    });
-  }
 
-  void _swipeUpdate(DragUpdateDetails d) {
-    if (!_swipeActive) return;
-    final zone = _swipeZone;
-    if (zone == null) return;
-    final h = _stageSize.height > 0
-        ? _stageSize.height
-        : MediaQuery.of(context).size.height;
-    final v = swipeValueFromDrag(
-        start: _swipeStartValue,
-        dy: d.globalPosition.dy - _swipeStartY,
-        height: h);
-    final step = swipeHapticStep(v);
-    if (step != _swipeStep) {
-      _swipeStep = step;
-      HapticFeedback.selectionClick();
-    }
-    setState(() {
-      _swipeValue = v;
-      if (zone == SwipeZone.brightness) {
-        brightness = v;
-      } else {
-        volume = v;
-        muted = v == 0;
-        if (v > 0) lastVol = v;
-      }
-    });
-    if (zone == SwipeZone.volume) player.setVolume(v);
-  }
 
-  void _swipeEnd() {
-    if (!_swipeActive) return;
-    _swipeHintTimer?.cancel();
-    setState(() => _swipeActive = false);
-    _swipeHintTimer = Timer(const Duration(milliseconds: 700), () {
-      if (mounted) setState(() => _swipeShow = false);
-    });
-  }
-
-  // 左右两条边缘手势区（各 1/4 屏宽）：中间与斜向手势留给 PageView。
-  Widget _swipeEdge(SwipeZone zone, double width, EdgeInsets pad) {
-    final size = MediaQuery.sizeOf(context);
-    final portrait = size.width <= size.height;
-    return Positioned(
-      left: zone == SwipeZone.brightness ? 0 : null,
-      right: zone == SwipeZone.volume ? 0 : null,
-      top: pad.top + 64,
-      bottom: pad.bottom + 132,
-      width: width,
-      child: RawGestureDetector(
-        behavior: HitTestBehavior.translucent,
-        gestures: <Type, GestureRecognizerFactory>{
-          _EdgeVerticalDragRecognizer:
-              GestureRecognizerFactoryWithHandlers<
-                  _EdgeVerticalDragRecognizer>(
-            () => _EdgeVerticalDragRecognizer(
-                screenWidth: size.width, portrait: portrait, zone: zone),
-            (r) {
-              r.onStart = (d) => _swipeStart(d, zone);
-              r.onUpdate = _swipeUpdate;
-              r.onEnd = (_) => _swipeEnd();
-              r.onCancel = _swipeEnd;
-            },
-          ),
-        },
-      ),
-    );
-  }
-
-  // G15：拖动期间/松手后的轻量读数（图标 + 进度 + 百分比）。
-  Widget _swipeHintWidget(EdgeInsets pad) {
-    final zone = _swipeZone ?? SwipeZone.brightness;
-    final value = _swipeValue.clamp(0.0, 100.0);
-    return Positioned(
-      left: 0,
-      right: 0,
-      top: pad.top + 96,
-      child: IgnorePointer(
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.72),
-                borderRadius: BorderRadius.circular(14)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(
-                  zone == SwipeZone.brightness
-                      ? Icons.brightness_6
-                      : (value == 0 ? Icons.volume_off : Icons.volume_up),
-                  size: 18,
-                  color: Colors.white70),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 96,
-                height: 4,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(2),
-                  child: LinearProgressIndicator(
-                    value: value / 100.0,
-                    backgroundColor: Colors.white24,
-                    valueColor: const AlwaysStoppedAnimation(Colors.white),
-                    minHeight: 4,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text('${swipeLabel(zone)} ${value.round()}%',
-                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
-            ]),
-          ),
-        ),
-      ),
-    );
-  }
 
   void toggleLoop() {
     // L6：打开循环时自动关闭连播并记住原状态；关闭循环时恢复到打开前的连播。
@@ -12002,15 +11882,6 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
-              // O1：仅手机竖屏启用边缘竖滑（左右各 1/4 屏宽）。
-              // 斜向/横向位移交给 PageView，避免误触切条。
-              if (_mobileSwipe && viewSize.width <= viewSize.height) ...[
-                _swipeEdge(
-                    SwipeZone.brightness, edgeHotZoneWidth(viewSize.width), pad),
-                _swipeEdge(
-                    SwipeZone.volume, edgeHotZoneWidth(viewSize.width), pad),
-                if (_swipeHint) _swipeHintWidget(pad),
-              ],
               Positioned(
                 // P0 §6：非全屏左边距 12dp（全屏保持旧值 8dp）。
                 left: pad.left + (fs ? 8 : 12),

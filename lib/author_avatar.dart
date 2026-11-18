@@ -131,41 +131,58 @@ List<AvatarCandidate> avatarCandidatesFromWorks(Iterable<Map> works) {
         if (p.isNotEmpty) pics.add(p);
       }
     }
-    if (kind == 'p' && pics.isNotEmpty) {
-      for (var i = 0; i < pics.length && i < 3; i++) {
+    final picsOnly = pics.where(isAvatarImagePath).toList();
+    if (kind == 'p' && picsOnly.isNotEmpty) {
+      for (var i = 0; i < picsOnly.length && i < 3; i++) {
         out.add(AvatarCandidate(
-            path: pics[i], kind: 'pic', order: order++));
+            path: picsOnly[i], kind: 'pic', order: order++));
       }
-    } else if (th.isNotEmpty) {
+    } else if (th.isNotEmpty && isAvatarImagePath(th)) {
       out.add(AvatarCandidate(path: th, kind: 'video', order: order++));
-    } else if (pics.isNotEmpty) {
-      out.add(AvatarCandidate(path: pics.first, kind: 'pic', order: order++));
+    } else if (picsOnly.isNotEmpty) {
+      out.add(AvatarCandidate(
+          path: picsOnly.first, kind: 'pic', order: order++));
     }
   }
   return out;
 }
 
+/// 可当头像/封面的图片扩展名（含服务端缩图参数前的原始名）。
+const List<String> kAvatarImageExts = <String>[
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.bmp',
+  '.avif',
+];
+
+/// 路径是否指向图片：去掉 `?w=200` 之类的查询串后再判断扩展名。
+/// 非图片（视频、文本、无扩展名）一律返回 false，避免把 mp4 当头像去请求。
+bool isAvatarImagePath(String path) {
+  var p = path.trim().toLowerCase();
+  if (p.isEmpty) return false;
+  final q = p.indexOf('?');
+  if (q >= 0) p = p.substring(0, q);
+  final h = p.indexOf('#');
+  if (h >= 0) p = p.substring(0, h);
+  return kAvatarImageExts.any(p.endsWith);
+}
+
 /// 播放页作者头像的兜底图路径（纯逻辑，便于单测）。
 ///
-/// 规则与播放页原实现一致：`th` 优先；没有 `th` 时取 `m` 里第一张
-/// 非视频文件（图文原图）；都没有返回空串。
+/// `th` 优先，但只接受图片路径；没有可用 `th` 时取 `m` 里第一张
+/// 图片（图文原图）；都拿不到返回空串，由调用方显示首字母占位。
 String workAvatarFallbackPath(dynamic work) {
   if (work is! Map) return '';
-  final t = '${work['th'] ?? ''}';
-  if (t.isNotEmpty) return t;
+  final t = '${work['th'] ?? ''}'.trim();
+  if (isAvatarImagePath(t)) return t;
   final m = work['m'];
   if (m is List) {
     for (final x in m) {
-      final u = '$x';
-      if (u.isEmpty) continue;
-      final low = u.toLowerCase();
-      if (low.endsWith('.mp4') ||
-          low.endsWith('.webm') ||
-          low.endsWith('.mov') ||
-          low.endsWith('.m4v')) {
-        continue;
-      }
-      return u;
+      final u = '$x'.trim();
+      if (isAvatarImagePath(u)) return u;
     }
   }
   return '';

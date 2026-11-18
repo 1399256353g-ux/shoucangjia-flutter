@@ -10,9 +10,9 @@ Widget host(Widget child) =>
 
 void main() {
   group('displayLibraryName', () {
-    test('旧版「抖音收藏」按 id 显示为默认库', () {
-      expect(displayLibraryName('douyin', '抖音收藏'), '默认库');
-      expect(displayLibraryName('douyin', ' 抖音收藏 '), '默认库');
+    test('旧版「抖音收藏」按 id 显示为当前媒体库', () {
+      expect(displayLibraryName('douyin', '抖音收藏'), '当前媒体库');
+      expect(displayLibraryName('douyin', ' 抖音收藏 '), '当前媒体库');
     });
 
     test('其它库带同样字样时回落到 id，不展示旧名', () {
@@ -35,7 +35,7 @@ void main() {
         {'id': 'lib-008', 'name': '(2) douyin'},
       ];
       final out = librariesWithDisplayNames(src);
-      expect(out[0]['name'], '默认库');
+      expect(out[0]['name'], '当前媒体库');
       expect(out[0]['count'], 1502);
       expect(out[1]['name'], '(2) douyin');
       expect(src[0]['name'], '抖音收藏');

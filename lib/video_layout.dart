@@ -23,6 +23,10 @@ const double portraitAspectThreshold = 0.8;
 /// 允许为了铺满而裁掉的最大比例（8%）。超过就必须「适应」保原比例。
 const double maxFillCrop = 0.08;
 
+/// 竖屏源在竖屏容器里允许的最大裁切（30%）。
+/// 9:16 → 9:19.5 约 15%，仍算「放大顶边」；接近方形则接近 40%，必须适应。
+const double maxPortraitFillCrop = 0.30;
+
 /// 按源比例与用户覆盖设置决定填充模式。
 ///
 /// owner 2026-11-18 规则：
@@ -43,7 +47,12 @@ VideoFit videoFitFor({double? aspect, VideoFit? mode, double? containerAspect}) 
   // 只有「竖屏源 + 宽容器」（如 Windows 宽窗口）才保比例，避免裁成横条。
   if (aspect != null && aspect > 0 && containerAspect != null && containerAspect > 0) {
     if (aspect <= portraitAspectThreshold && containerAspect <= portraitAspectThreshold) {
-      return VideoFit.fill;
+      // 只允许「小幅放大顶到上下边」：9:16 放进 9:19.5 屏约裁 15%，保留铺满；
+      // 接近方形（如 0.79）要裁近 40%，那就不是「顶边」而是毁画面，改适应。
+      final cropW = aspect > containerAspect
+          ? 1 - containerAspect / aspect
+          : 0.0;
+      return cropW <= maxPortraitFillCrop ? VideoFit.fill : VideoFit.contain;
     }
     final cropW = aspect > containerAspect ? 1 - containerAspect / aspect : 0.0;
     final cropH = aspect < containerAspect ? 1 - aspect / containerAspect : 0.0;

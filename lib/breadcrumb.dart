@@ -54,6 +54,28 @@ class Breadcrumb {
     } catch (_) {}
   }
 
+  /// 把缓冲刷到磁盘，供诊断页读取当前会话记录。
+  static Future<void> flush() async {
+    try {
+      await _sink?.flush();
+    } catch (_) {}
+  }
+
+  /// 读取当前会话最后 N 行（诊断页用）。
+  static Future<List<String>> readTail({int lines = 40}) async {
+    try {
+      await flush();
+      final dir = await getApplicationSupportDirectory();
+      final f = File('${dir.path}/breadcrumb.log');
+      if (!await f.exists()) return const <String>[];
+      final all = await f.readAsLines();
+      if (all.isEmpty) return const <String>[];
+      return all.length > lines ? all.sublist(all.length - lines) : all;
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
   /// 正常退出标记。
   static Future<void> cleanExit() async {
     try {

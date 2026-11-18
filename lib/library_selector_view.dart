@@ -95,7 +95,7 @@ class LibrarySelectorView extends StatelessWidget {
           leading: const Icon(Icons.tune, size: 18),
           title: const Text('已注册媒体库（管理）',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-          subtitle: Text('$legacyCount 个 · 默认库 / 爬虫 / 维护',
+          subtitle: Text('$legacyCount 个 · 媒体库 / 爬虫 / 维护',
               style: const TextStyle(fontSize: 11, color: Colors.grey)),
           trailing: AnimatedRotation(
             turns: legacyOpen ? 0.25 : 0,
