@@ -6938,7 +6938,10 @@ class _PlayerPageState extends State<PlayerPage>
   late final List<_PlaybackSlot> _slots = <_PlaybackSlot>[_PlaybackSlot('a')];
   int _slotActive = 0;
   int _slotSeq = 1;
-  DecodeMode _decodeMode = DecodeMode.hardware;
+  // owner 2026-11-18：Windows 上反复切全屏会触发原生崩溃，根因是硬解纹理
+  // 跟着窗口反复重建。这里默认改软件解码（兼容性优先），其它平台不变。
+  DecodeMode _decodeMode =
+      Platform.isWindows ? DecodeMode.software : DecodeMode.hardware;
   bool _softwareDecodeRetried = false;
   // 槽位重建后强制重建 Video，避免沿用旧控制器的纹理
   int _videoGen = 0;
@@ -9605,6 +9608,8 @@ class _PlayerPageState extends State<PlayerPage>
 
   Future<void> toggleFs() async {
     if (_fsBusy) return;
+    // 窗口还在缩放/最大化过程中不接受切换，避免纹理与窗口状态互相踩。
+    if (Platform.isWindows && _winResizing) return;
     _fsBusy = true;
     final next = !fs;
     try {
@@ -9635,7 +9640,8 @@ class _PlayerPageState extends State<PlayerPage>
       }
     } finally {
       // 窗口管理器切换需要一点时间，防抖避免快速连点导致的窗口状态错乱/崩溃
-      await Future<void>.delayed(const Duration(milliseconds: 220));
+      await Future<void>.delayed(Duration(
+          milliseconds: Platform.isWindows ? 600 : 220));
       _fsBusy = false;
     }
   }
