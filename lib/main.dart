@@ -7009,6 +7009,9 @@ class _PlayerPageState extends State<PlayerPage>
   // 栏高在布局完成后测量（简介展开/安全区都会影响）。
   final GlobalKey _taskbarKey = GlobalKey();
   double _taskbarH = 0;
+  // 最近两次测量值，用于识别全屏切换期间的来回震荡。
+  double _taskbarSwingA = 0;
+  double _taskbarSwingB = 0;
   bool _taskbarMeasureScheduled = false;
   // C：邻页 widget 复用缓存：同一实例返回给 PageView，setState 时不重建。
   final Map<String, Widget> _neighborPages = <String, Widget>{};
@@ -9509,16 +9512,21 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> toggleFs() async {
     if (_fsBusy) return;
     _fsBusy = true;
-    setState(() => fs = !fs);
+    final next = !fs;
     try {
+      // Windows：先让窗口管理器完成切换，再重建界面。反过来会在重建
+      // 期间同步调用窗口管理器，容易把窗口线程卡住（表现为切全屏卡死）。
+      if (Platform.isWindows) {
+        try {
+          await windowManager
+              .setFullScreen(next)
+              .timeout(const Duration(seconds: 3));
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() => fs = next);
       if (fs) {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-        // Windows 使用窗口管理器进入真全屏（无边框、全屏不遮挡任务栏）
-        if (Platform.isWindows) {
-          try {
-            await windowManager.setFullScreen(true);
-          } catch (_) {}
-        }
         showUi();
       } else {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -9527,11 +9535,6 @@ class _PlayerPageState extends State<PlayerPage>
         hideTimer?.cancel();
         hideTimer = null;
         _hideDeadline.clear();
-        if (Platform.isWindows) {
-          try {
-            await windowManager.setFullScreen(false);
-          } catch (_) {}
-        }
         setState(() => ui = true);
         // P2：退出全屏后重新开始非全屏沉浸计时。
         _scheduleImmersive();
@@ -10141,9 +10144,24 @@ class _PlayerPageState extends State<PlayerPage>
       _taskbarMeasureScheduled = false;
       if (!mounted) return;
       final h = _taskbarKey.currentContext?.size?.height ?? 0;
-      if (h > 0 && (h - _taskbarH).abs() > 0.5) {
-        setState(() => _taskbarH = h);
+      if (h <= 0) return;
+      // 防震荡：全屏切换时布局会抖动，如果高度在两值之间来回跳，
+      // 每帧 setState 会让窗口线程卡死。连续两次回到同一值就锁定。
+      if ((h - _taskbarH).abs() <= 0.5) {
+        _taskbarSwingA = _taskbarSwingB;
+        _taskbarSwingB = h;
+        return;
       }
+      final oscillating = (_taskbarSwingB - h).abs() < 0.5 &&
+          (_taskbarSwingA - h).abs() < 0.5 &&
+          _taskbarSwingA > 0;
+      if (oscillating) {
+        debugPrint('[taskbar] measure oscillation ignored: $h');
+        return;
+      }
+      _taskbarSwingA = _taskbarSwingB;
+      _taskbarSwingB = _taskbarH;
+      setState(() => _taskbarH = h);
     });
   }
 
@@ -10853,9 +10871,11 @@ class _PlayerPageState extends State<PlayerPage>
   /// 全屏（spec=false）保持旧视觉与旧拖动语义。
   /// 呼出式进度条浮层：底部 28dp 热区，整条宽度可拖。
   Widget _scrubOverlay({required double progress, double lift = 0}) {
-    final keepThin =
+    final desktop =
         Platform.isWindows || Platform.isLinux || Platform.isMacOS;
-    final active = _scrubActive || _scrubHover;
+    // 全屏时进度条要跟功能区一起随时间隐藏；非全屏桌面端才常驻细条。
+    final persistent = desktop && (!fs || ui);
+    final active = _scrubActive || (_scrubHover && (!fs || ui));
     final frac = _scrubActive ? (_scrubFrac ?? progress) : progress;
     return Positioned(
       left: 0,
@@ -10868,6 +10888,7 @@ class _PlayerPageState extends State<PlayerPage>
           // 桌面端：指针进入热区即放大成可拖状态，移出恢复细条。
           onEnter: (_) {
             if (_scrubHover) return;
+            if (fs && !ui) return; // 全屏清屏状态下不因悬停把进度条叫出来
             setState(() => _scrubHover = true);
           },
           onExit: (_) {
@@ -10885,7 +10906,7 @@ class _PlayerPageState extends State<PlayerPage>
             child: ScrubBar(
               fraction: frac,
               active: active,
-              visible: active || _scrubThin || keepThin,
+              visible: active || _scrubThin || persistent,
               timeLabel: active && dur.inMilliseconds > 0
                   ? '${fmt(dur * frac)} / ${fmt(dur)}'
                   : '',
