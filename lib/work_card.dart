@@ -48,7 +48,18 @@ class WorkCard extends StatefulWidget {
 }
 
 class _WorkCardState extends State<WorkCard> {
-  bool _hover = false;
+  /// 桌面端悬停描边（0.9.70）：改用 ValueNotifier 只驱动描边这一层。
+  ///
+  /// 旧实现是 `setState`，鼠标划过网格时每张被扫到的卡片都会重建整个
+  /// 封面子树（CachedNetworkImage / ClipRRect / 标题渐变），滚动中频繁
+  /// enter/exit 就成了桌面端掉帧的一个来源。现在悬停切换不再重建卡片。
+  final ValueNotifier<bool> _hover = ValueNotifier<bool>(false);
+
+  @override
+  void dispose() {
+    _hover.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,8 +67,8 @@ class _WorkCardState extends State<WorkCard> {
     return RepaintBoundary(
       child: MouseRegion(
       cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
+      onEnter: (_) => _hover.value = true,
+      onExit: (_) => _hover.value = false,
       child: InkWell(
       onTap: w.onTap,
       borderRadius: BorderRadius.circular(WorkCard.radius),
@@ -146,20 +157,26 @@ class _WorkCardState extends State<WorkCard> {
                 ),
               ),
             ),
-          // 桌面端悬停指示：只画一圈描边，不覆盖信息区
-          if (_hover)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(WorkCard.radius),
-                    border: Border.all(
-                        color: Theme.of(context).colorScheme.primary,
-                        width: 2),
-                  ),
-                ),
-              ),
-            ),
+          // 桌面端悬停指示：只画一圈描边，不覆盖信息区。
+          // 描边由 ValueNotifier 局部驱动，悬停切换不触发整卡重建。
+          ValueListenableBuilder<bool>(
+            valueListenable: _hover,
+            builder: (_, hover, __) => hover
+                ? Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        key: const ValueKey('work-card-hover'),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(WorkCard.radius),
+                          border: Border.all(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 2),
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
         ]),
       ),
       ),
