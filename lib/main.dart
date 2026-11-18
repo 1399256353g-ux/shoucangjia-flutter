@@ -3729,6 +3729,13 @@ class _LibraryPageState extends State<LibraryPage> {
       // 兜底：只要服务端给了爬虫封面（cv），就直接用它，避免任何挑选逻辑
       // 把封面吞掉后卡片一直显示默认图。
       final cv = b.crawlerCover.trim();
+      if (cv.isEmpty) {
+        // 诊断：区分「服务端没下发 cv」和「下发了但拼接失败」。
+        CrashLog.instance.record(
+          '封面缺失 ${b.id} cv=(空) rel=${b.rel}',
+          kind: 'cover',
+        );
+      }
       return cv.isEmpty ? '' : cfg.mediaUrl(cv, lib: b.id);
     }
     return cfg.mediaUrl(pick.path, lib: b.id);
@@ -7094,6 +7101,8 @@ class _PlayerPageState extends State<PlayerPage>
   // 变化中重排纹理导致原生崩溃；尺寸稳定后重建 Video 元素。
   bool _winResizing = false;
   Timer? _winResizeTimer;
+  /// 切换期间用户又点了全屏：记录最后一次意图，结束后补执行。
+  bool? _fsPending;
 
   bool _taskbarMeasureScheduled = false;
   // C：邻页 widget 复用缓存：同一实例返回给 PageView，setState 时不重建。
@@ -9652,42 +9661,47 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   Future<void> toggleFs() async {
-    if (_fsBusy) return;
-    // 窗口还在缩放/最大化过程中不接受切换，避免纹理与窗口状态互相踩。
+    final next = !fs;
+    // 快速连点：记住最后一次意图，等本次切换结束再执行。直接丢弃会让
+    // 界面状态与真实窗口状态错位，下一次切换就更容易触发原生崩溃。
+    if (_fsBusy) {
+      _fsPending = next;
+      return;
+    }
     if (Platform.isWindows && _winResizing) return;
     _fsBusy = true;
-    final next = !fs;
+    Breadcrumb.mark('fs:toggle', next ? 'enter' : 'exit');
     try {
-      // Windows：先让窗口管理器完成切换，再重建界面。反过来会在重建
-      // 期间同步调用窗口管理器，容易把窗口线程卡住（表现为切全屏卡死）。
-      if (Platform.isWindows) {
-        try {
-          await windowManager
-              .setFullScreen(next)
-              .timeout(const Duration(seconds: 3));
-        } catch (_) {}
-      }
-      if (!mounted) return;
-      setState(() => fs = next);
+      // 先刷新界面：按钮立即响应，不再等窗口管理器回来才变。
+      if (mounted) setState(() => fs = next);
       if (fs) {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
         showUi();
       } else {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-        // M4：退出全屏必须彻底取消自动隐藏计时器，否则旧的计时器到期后
-        // 仍会把非全屏的功能区隐藏掉。
         hideTimer?.cancel();
         hideTimer = null;
         _hideDeadline.clear();
-        setState(() => ui = true);
-        // P2：退出全屏后重新开始非全屏沉浸计时。
+        if (mounted) setState(() => ui = true);
         _scheduleImmersive();
       }
+      if (Platform.isWindows) {
+        try {
+          await windowManager
+              .setFullScreen(next)
+              .timeout(const Duration(seconds: 2));
+        } catch (_) {}
+      }
     } finally {
-      // 窗口管理器切换需要一点时间，防抖避免快速连点导致的窗口状态错乱/崩溃
-      await Future<void>.delayed(Duration(
-          milliseconds: Platform.isWindows ? 600 : 220));
+      // Windows 窗口切换更慢，留足时间再接受下一次切换。
+      await Future<void>.delayed(
+          Duration(milliseconds: Platform.isWindows ? 800 : 220));
       _fsBusy = false;
+      final pending = _fsPending;
+      _fsPending = null;
+      if (mounted && pending != null && pending != fs) {
+        scheduleMicrotask(toggleFs);
+      }
     }
   }
 
