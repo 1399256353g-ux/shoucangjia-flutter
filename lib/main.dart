@@ -7312,14 +7312,30 @@ class _PlayerPageState extends State<PlayerPage>
   // 上万条列表时会明显卡住主线程（iOS 上尤其明显）。
   final Map<String, String> _avatarFallbackCache = <String, String>{};
   Map<String, String>? _avatarFallbackIndex;
-  int _avatarFallbackLen = -1;
-  // 0.9.76：已建索引的作品条数。分页追加时只补新批次，避免每页都全量重扫。
+  // 0.9.77：索引对应的作品列表指纹（条数 + 首个作品 id）。
+  // 只看条数会漏掉「同一位置换了一批作品」（切筛选/换排序），旧索引会张冠李戴。
+  String _avatarFallbackKey = '';
+  // 已建索引的作品条数：分页追加时只补新批次，避免每页都全量重扫。
   int _avatarFallbackBuilt = 0;
+
+  /// 作品列表指纹：条数 + 首个作品 id（id 缺失时退回标题/类型）。
+  String _worksFingerprint() {
+    final n = widget.works.length;
+    if (n == 0) return '0|';
+    String keyOf(Map w) => '${w['id'] ?? w['i'] ?? w['t'] ?? ''}';
+    return '$n|${keyOf(widget.works.first)}';
+  }
+
+  /// 指纹里「首个作品」的部分（去掉条数），用于判断是否为尾部追加。
+  static String _fingerprintHead(String fp) {
+    final i = fp.indexOf('|');
+    return i < 0 ? '' : fp.substring(i + 1);
+  }
 
   /// 播放页头像：作品自带 `av` 优先；离线库没有作者头像时，
   /// 用该作者任一作品的封面图兜底，避免永远显示默认人形图标。
   ///
-  /// 兜底索引按「作者 → 首张可用图」预建一次，只在作品数变化时重建；
+  /// 兜底索引按「作者 → 首张可用图」预建一次，只在作品列表变化时重建/补新批次；
   /// 结果按作者名缓存，单次 build 内的多次调用都是 O(1)。
   String avatarFor(Map w) {
     final av = '${w['av'] ?? ''}';
@@ -7333,27 +7349,31 @@ class _PlayerPageState extends State<PlayerPage>
     // 作者级头像（authors.json）：作品条目没带 av 时用它兜底。
     final byAuthor = authorAvatarIndex[name];
     if (byAuthor != null && byAuthor.isNotEmpty) return byAuthor;
-    final cached = _avatarFallbackCache[name];
-    if (cached != null && cached.isNotEmpty) return cached;
-    if (_avatarFallbackIndex == null ||
-        _avatarFallbackLen != widget.works.length) {
-      // 作品数变多（分页追加载入）只补新批次；变少或首次则全量重建。
-      if (_avatarFallbackIndex == null ||
-          widget.works.length < _avatarFallbackBuilt) {
-        _avatarFallbackIndex = authorFallbackThumbs(widget.works);
-        _avatarFallbackBuilt = widget.works.length;
-      } else if (widget.works.length > _avatarFallbackBuilt) {
+    // 先确保索引与当前作品列表一致，再查缓存：否则列表换了一批后
+    // 旧缓存会先命中，索引永远不会被纠正（0.9.77 修复）。
+    final fp = _worksFingerprint();
+    if (_avatarFallbackIndex == null || _avatarFallbackKey != fp) {
+      final n = widget.works.length;
+      // 同一批作品只在尾部追加：保留旧索引，只补新作者，缓存也留着。
+      final appended = _avatarFallbackIndex != null &&
+          n > _avatarFallbackBuilt &&
+          _fingerprintHead(fp) == _fingerprintHead(_avatarFallbackKey);
+      if (appended) {
         addFirstThumbPerAuthor(
           _avatarFallbackIndex!,
           widget.works.skip(_avatarFallbackBuilt),
           thumbOf: workAvatarFallbackPath,
         );
-        _avatarFallbackBuilt = widget.works.length;
+      } else {
+        _avatarFallbackIndex = authorFallbackThumbs(widget.works);
+        // 整表重建：旧缓存里的作者可能已不在列表，清掉避免脏数据。
+        _avatarFallbackCache.clear();
       }
-      _avatarFallbackLen = widget.works.length;
-      // 新作者可能补进了兜底图，清掉旧缓存让下次取到新值。
-      _avatarFallbackCache.clear();
+      _avatarFallbackBuilt = n;
+      _avatarFallbackKey = fp;
     }
+    final cached = _avatarFallbackCache[name];
+    if (cached != null && cached.isNotEmpty) return cached;
     final fb = _avatarFallbackIndex![name] ?? '';
     if (fb.isNotEmpty) _avatarFallbackCache[name] = fb;
     return fb;
