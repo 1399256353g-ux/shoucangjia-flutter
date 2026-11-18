@@ -7568,11 +7568,9 @@ class _PlayerPageState extends State<PlayerPage>
     _winResizeTimer?.cancel();
     _winResizeTimer = Timer(const Duration(milliseconds: 320), () {
       if (!mounted) return;
-      setState(() {
-        _winResizing = false;
-        // 尺寸已稳定：换一个 key，强制重建 Video 并挂到新的纹理尺寸。
-        _videoGen++;
-      });
+      // 只恢复视频层，不换 key、不重建 Video：重建会把纹理重新挂载一次，
+      // 在切全屏/进新页面的瞬间最容易触发原生崩溃。纹理本身会跟随尺寸自适应。
+      setState(() => _winResizing = false);
     });
   }
 

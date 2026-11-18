@@ -1118,9 +1118,12 @@ class ScrubBar extends StatelessWidget {
               ),
               if (timeLabel.isNotEmpty)
                 Positioned(
-                  left: (x - 58).clamp(0.0, (w - 116).clamp(0.0, double.infinity)),
+                  // owner 2026-11-18：时间固定显示在进度条正上方居中，
+                  // 不再跟着滑块移动，避免和头像/简介区重叠。
+                  left: 0,
+                  right: 0,
                   bottom: h + kScrubBubbleGap,
-                  child: Container(
+                  child: Center(child: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
@@ -1132,7 +1135,7 @@ class ScrubBar extends StatelessWidget {
                             .copyWith(fontFeatures: const [
                           FontFeature.tabularFigures()
                         ])),
-                  ),
+                  )),
                 ),
             ],
           ]);
