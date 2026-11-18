@@ -68,6 +68,7 @@ import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'perf_diagnostics.dart';
 import 'text_fit.dart';
+import 'esc_back.dart';
 import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
@@ -1177,6 +1178,10 @@ class _AppState extends State<App> {
         // 主题里带显式 emoji 字体回退链：Windows/Android/iOS 各自命中本机彩色
         // emoji 字体，避免收藏夹名（如「🦶」）或作者名里的 emoji 显示成方框。
         theme: AppTheme.themeData,
+        // 输入框有焦点时 TextField 的默认 Esc 映射会拦掉下面的 shortcuts，
+        // 这里往下沉一层，保证「部分页面 Esc 返回失效」不再出现。
+        builder: (context, child) =>
+            EscBackScope(navKey: navKey, child: child ?? const SizedBox.shrink()),
         shortcuts: const {
           SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
         },
