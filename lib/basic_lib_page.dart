@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -49,6 +50,11 @@ String pickAuthorAvatar({
 ///
 /// 本页不直接依赖全局 cfg：URL/鉴权/媒体地址由调用方注入，
 /// 避免 lib 包与 main.dart 之间形成循环导入。
+/// 在 isolate 里解析 works.json：把 UTF-8 解码 + JSON 解析都移出 UI 线程。
+/// 大库单页几十到上百条，主线程解析会直接卡住首帧。
+Map<String, dynamic> _parseWorksPayload(List<int> bytes) =>
+    jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+
 class BasicLibPage extends StatefulWidget {
   final BasicLib basic;
   final Uri Function(String path, {String? lib}) urlOf;
@@ -136,7 +142,8 @@ class _BasicLibPageState extends State<BasicLibPage>
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      // 解析放到 isolate：避免大 payload 在 UI 线程卡顿/掉帧。
+      final j = await compute(_parseWorksPayload, r.bodyBytes);
       final list = <Map<String, dynamic>>[];
       for (final a in (j['authors'] as List? ?? const [])) {
         if (a is Map) list.add(Map<String, dynamic>.from(a));
