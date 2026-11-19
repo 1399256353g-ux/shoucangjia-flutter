@@ -37,6 +37,11 @@ class _FolderRow {
   /// 基础库目录：永远不允许勾选为「节点文件夹」（单元库）。
   final bool isBasic;
 
+  /// 服务端注册表（`/api/libraries.json` 的 `basicLibraries`）或接口显式字段
+  /// 明确认定为基础库。只有它为 true 时才「硬锁」；
+  /// 仅凭「@作者」目录推断的（改造后残留子目录）可自动解锁。
+  final bool listed;
+
   _FolderRow({
     required this.rel,
     required this.name,
@@ -44,7 +49,29 @@ class _FolderRow {
     required this.authors,
     required this.children,
     this.isBasic = false,
+    this.listed = false,
   });
+}
+
+/// 是否锁死「不能设为节点文件夹」。
+///
+/// - `listed`：服务端注册表/接口显式标记为基础库 → 锁（除非手动解锁）；
+/// - 仅靠「@作者」子目录推断、且注册表已能正常读到（[basicsKnown]）却不含它
+///   → 认为该目录已被改成单元库、只是残留作者目录，自动解锁；
+/// - 注册表读不到（[basicsKnown] 为 false）时保持保守：仍然锁。
+bool basicLocked({
+  required bool isBasic,
+  required bool listed,
+  required bool basicsKnown,
+  required int authors,
+  required bool unlocked,
+}) {
+  if (!isBasic) return false;
+  if (unlocked) return false;
+  // 已经没有作者＝不再具备基础库特征，直接解锁。
+  if (authors <= 0) return false;
+  if (listed) return true;
+  return !basicsKnown;
 }
 
 class _FolderStructurePageState extends State<FolderStructurePage> {
@@ -57,6 +84,9 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
 
   /// 基础库 rel 集合（来自 `/api/libraries.json` 的 `basicLibraries`）。
   Set<String> basicRels = <String>{};
+
+  /// 上一步的注册表是否真的读到了（失败时不能据此解锁）。
+  bool basicsKnown = false;
 
   /// 手动强制解锁的基础库目录（持久化）：允许把它们设为节点文件夹。
   final Set<String> unlocked = <String>{};
@@ -151,9 +181,15 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   }
 
   /// 有效「基础库锁定」：目录仍具基础库特征（有作者）且未被手动解锁。
-  /// 已经没有作者（不再具备基础库特征）的目录自动解锁。
-  bool _lockedBasic(_FolderRow r) =>
-      r.isBasic && r.authors > 0 && !unlocked.contains(normalizeRel(r.rel));
+  /// 已经没有作者、或注册表里已不再登记它（改成单元库后只剩 @作者 残留）
+  /// 的目录自动解锁。
+  bool _lockedBasic(_FolderRow r) => basicLocked(
+        isBasic: r.isBasic,
+        listed: r.listed,
+        basicsKnown: basicsKnown,
+        authors: r.authors,
+        unlocked: unlocked.contains(normalizeRel(r.rel)),
+      );
 
   void _forceUnlock(_FolderRow r) {
     final n = normalizeRel(r.rel);
@@ -169,14 +205,15 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       err = null;
     });
     try {
-      final rs = await Future.wait<Object>([
+      final rs = await Future.wait<Object?>([
         http
             .get(widget.urlOf('/api/folders'), headers: widget.headersOf())
             .timeout(const Duration(seconds: 20)),
-        _fetchBasicRels(),
+        _fetchBasicRels().then<Object?>((v) => v),
       ]);
       final r = rs[0] as http.Response;
-      final basics = rs[1] as Set<String>;
+      final basics = rs[1] as Set<String>?;
+      final known = basics ?? const <String>{};
       if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
       final j = jsonDecode(utf8.decode(r.bodyBytes));
       final top = j['top'];
@@ -190,8 +227,9 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       saved
         ..clear()
         ..addAll(serverNodes);
-      basicRels = basics;
-      rows = _parse(((j['folders'] as List?) ?? const []), basics);
+      basicRels = known.toSet();
+      basicsKnown = basics != null;
+      rows = _parse(((j['folders'] as List?) ?? const []), known);
       // 基础库永远不能是节点：按「实时基础库特征」清掉历史误选（保留 saved 原值）。
       nodes.removeWhere((e) => _isBasicRel(e));
       if (!mounted) return;
@@ -206,16 +244,18 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   }
 
   /// 读取 `/api/libraries.json` 的基础库 rel 集合；失败不影响主流程。
-  Future<Set<String>> _fetchBasicRels() async {
+  /// 失败返回 `null`（与「读到了但一个都没有」区分）：只有真读到注册表时，
+  /// 才能据此判断某个目录「已经不是基础库了」。
+  Future<Set<String>?> _fetchBasicRels() async {
     try {
       final r = await http
           .get(widget.urlOf('/api/libraries.json'), headers: widget.headersOf())
           .timeout(const Duration(seconds: 20));
-      if (r.statusCode != 200) return <String>{};
+      if (r.statusCode != 200) return null;
       final j = jsonDecode(utf8.decode(r.bodyBytes));
-      if (j is! Map) return <String>{};
+      if (j is! Map) return null;
       final raw = j['basicLibraries'];
-      if (raw is! List) return <String>{};
+      if (raw is! List) return null;
       final out = <String>{};
       for (final e in raw) {
         if (e is! Map) continue;
@@ -224,7 +264,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       }
       return out;
     } catch (_) {
-      return <String>{};
+      return null;
     }
   }
 
@@ -243,6 +283,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
         authors: authors,
         children: _parse((raw['dirs'] as List?) ?? const [], basics),
         isBasic: _isBasicFolder(raw, rel, authors, basics),
+        listed: _explicitBasicFlag(raw) == true ||
+            basics.contains(normalizeRel(rel)),
       ));
     }
     return out;

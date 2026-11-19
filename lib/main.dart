@@ -9422,10 +9422,16 @@ class _PlayerPageState extends State<PlayerPage>
   bool _authorDragResume = false;
   bool _authorDragClosing = false;
 
-  void _authorDragStart() {
+  /// 触发「左滑进入作者主页」的右侧边缘宽度。
+  /// owner 2026-11-20：只在右侧边缘起手，避免在画面中间滑动误开作者页。
+  static const double kAuthorDragEdge = 48;
+
+  void _authorDragStart(double startDx, double width) {
     // P0：左滑拉作者页时取消单击判定，避免“滑一下却切了暂停”。
     _cancelPendingSingleTap();
     if (_authorDrag != null) return;
+    // 只有从右侧边缘起手才算「进入作者页」手势
+    if (width <= 0 || width - startDx > kAuthorDragEdge) return;
     final name = '${_workAt(cur)['a'] ?? ''}';
     if (name.isEmpty) return;
     _authorDragDx = 0;
@@ -9437,7 +9443,7 @@ class _PlayerPageState extends State<PlayerPage>
       Breadcrumb.mark('player:pause', 'L9245');
       player.pause();
     } catch (_) {}
-    final c = AuthorDragController(vsync: this);
+    final c = AuthorDragController();
     final route = AuthorDragRoute(
       drag: c,
       builder: (_) => AuthorPage(name: name, libs: [_curLib]),
@@ -11826,7 +11832,9 @@ class _PlayerPageState extends State<PlayerPage>
                           onTapUp: (d) => onStageTap(d.localPosition),
                           // M9：抖音式跟手拖拽——向左拖作者页随手指从右侧滑入，
                           // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
-                          onHorizontalDragStart: (_) => _authorDragStart(),
+                          onHorizontalDragStart: (d) =>
+                              _authorDragStart(d.globalPosition.dx,
+                                  MediaQuery.sizeOf(context).width),
                           onHorizontalDragUpdate: (d) => _authorDragUpdate(
                               d.delta.dx, MediaQuery.sizeOf(context).width),
                           onHorizontalDragEnd: (d) =>

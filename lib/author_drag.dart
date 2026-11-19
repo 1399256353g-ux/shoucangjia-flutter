@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 /// M9：作者页「抖音式跟手拖拽」。
 ///
@@ -63,11 +65,23 @@ class AuthorDrag {
   }
 }
 
+/// 自带 Ticker 的 vsync。
+///
+/// 关键：不能让这个控制器用「播放页」的 TickerProvider——作者页路由推上来后，
+/// 播放页被 TickerMode 静音，`animateTo` 的 Future 永远不会完成，收起的 pop()
+/// 也就永远不执行，最后留下一层挡住输入的路由（表现为「返回必卡死」）。
+class _FreeTickerProvider implements TickerProvider {
+  const _FreeTickerProvider();
+  @override
+  Ticker createTicker(TickerCallback onTick) =>
+      Ticker(onTick, debugLabel: 'author-drag');
+}
+
 /// 作者页滑入/收回的共享进度（0=完全隐藏，1=完全展开）。
 class AuthorDragController extends ChangeNotifier {
-  AuthorDragController({required TickerProvider vsync})
+  AuthorDragController()
       : _c = AnimationController(
-          vsync: vsync,
+          vsync: const _FreeTickerProvider(),
           duration: const Duration(milliseconds: AuthorDrag.openMs),
         ) {
     _c.addListener(notifyListeners);
@@ -152,7 +166,11 @@ class _AuthorDragHostState extends State<_AuthorDragHost> {
   Future<void> _close() async {
     if (_closing) return;
     _closing = true;
-    await widget.drag.settleTo(0, opening: false);
+    // 兜底：动画万一没跑（ticker 被静音/页面销毁），也不能把路由留在原地
+    // 挡住输入。超时就强制 pop，宁可少一段动画，也不能卡死。
+    await widget.drag
+        .settleTo(0, opening: false)
+        .timeout(const Duration(milliseconds: 400), onTimeout: () {});
     if (!mounted) return;
     final nav = Navigator.of(context);
     final route = ModalRoute.of(context);
