@@ -91,8 +91,8 @@ class ThumbPrefetchStats {
 /// 全局预热器：只有一个实例，多页共用去重表与统计。
 class ThumbPrefetch extends ChangeNotifier {
   ThumbPrefetch({
-    this.maxConcurrent = 4,
-    this.scrollMaxConcurrent = 2,
+    this.maxConcurrent = 6,
+    this.scrollMaxConcurrent = 4,
     this.seenLimit = 600,
   })  : assert(maxConcurrent > 0),
         assert(scrollMaxConcurrent > 0),
@@ -102,7 +102,9 @@ class ThumbPrefetch extends ChangeNotifier {
 
   final int maxConcurrent;
 
-  /// 滚动/惯性期间的并发上限（保守值，停下后恢复 [maxConcurrent]）。
+  /// 滚动/惯性期间的并发上限（停下后恢复 [maxConcurrent]）。
+  /// owner 2026-11-20：iOS 大量读取时排队过重，4/2 提到 6/4；服务端
+  /// 缩图缓存命中后单张很轻，提高并发主要是降低排队而非加压。
   final int scrollMaxConcurrent;
   final int seenLimit;
 
