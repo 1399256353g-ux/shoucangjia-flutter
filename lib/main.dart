@@ -11187,7 +11187,13 @@ class _PlayerPageState extends State<PlayerPage>
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
-            onTapDown: (d) => _scrubStart(d.localPosition, width),
+            onTapDown: (d) {
+              // owner 2026-11-20：热区高度含 34dp 气泡预留。在气泡区按下
+              // 原来会被当成「跳到该位置」，点一下视频就卡一下；这里只认
+              // 进度条本体（底部 28dp），上方按下直接忽略。
+              if (d.localPosition.dy < kScrubBubbleSpace) return;
+              _scrubStart(d.localPosition, width);
+            },
             onTapUp: (_) => _scrubEnd(),
             onTapCancel: () => _scrubEnd(),
             onHorizontalDragStart: (d) => _scrubStart(d.localPosition, width),
@@ -12591,6 +12597,31 @@ class _PlayerPageState extends State<PlayerPage>
                       ),
                     ),
                   ),
+                ),
+
+              // owner 2026-11-20：进度条呼出/拖动热区向下跨过分界线，
+              // 视频区与任务栏各占一半；靠近分界线横向拖动也能拖进度条。
+              if (!broken && !hideTaskbar && ui && !fs && _workAt(cur)['t'] == 'v')
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom:
+                      (_taskbarH > 0 ? _taskbarH : kTaskbarHeight) - 8,
+                  height: 18,
+                  child: LayoutBuilder(builder: (_, cc) {
+                    Offset at(double dx) =>
+                        Offset(dx, kScrubBubbleSpace);
+                    return GestureDetector(
+                      // translucent：拖动归进度条，单击仍能落到任务栏按钮上
+                      behavior: HitTestBehavior.translucent,
+                      onHorizontalDragStart: (d) =>
+                          _scrubStart(at(d.globalPosition.dx), cc.maxWidth),
+                      onHorizontalDragUpdate: (d) =>
+                          _scrubMove(at(d.globalPosition.dx), cc.maxWidth),
+                      onHorizontalDragEnd: (_) => _scrubEnd(),
+                      onHorizontalDragCancel: _scrubEnd,
+                    );
+                  }),
                 ),
               // J-A2：顶部固定半透明胶囊（位于顶部工具按钮下沿，
               // 不随功能区淡出，也绝不进入底部任务栏区域）。
