@@ -79,7 +79,9 @@ class BasicLibPage extends StatefulWidget {
 
 class _BasicLibPageState extends State<BasicLibPage>
     with SingleTickerProviderStateMixin {
-  static const int _pageSize = 120;
+  // owner 2026-11-19：单页从 120 降到 60，降低一次性解码/建卡的数量，
+  // 避免大库（几百到上千件）翻页时内存与解码压力叠加导致崩溃。
+  static const int _pageSize = 60;
 
   late final TabController _tabs = TabController(length: 2, vsync: this);
   final ScrollController _worksScroll = ScrollController();
@@ -503,6 +505,33 @@ class _BasicLibPageState extends State<BasicLibPage>
     final shown = filtered;
     return Column(children: [
       _typeFilterBar(),
+      // owner 2026-11-19：排序入口恢复，默认按入库时间（新的在前）。
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(children: [
+          const Text('排序', style: TextStyle(fontSize: 12)),
+          const SizedBox(width: 8),
+          DropdownButton<int>(
+            value: _sortMode,
+            isDense: true,
+            underline: const SizedBox.shrink(),
+            style: const TextStyle(fontSize: 12),
+            items: const [
+              DropdownMenuItem(value: 0, child: Text('入库时间')),
+              DropdownMenuItem(value: 1, child: Text('播放量')),
+              DropdownMenuItem(value: 2, child: Text('标题')),
+            ],
+            onChanged: (v) {
+              if (v == null || v == _sortMode) return;
+              setState(() => _sortMode = v);
+              _prefetchFirstScreen();
+            },
+          ),
+          const Spacer(),
+          Text('${shown.length} 件',
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ]),
+      ),
       if (shown.isEmpty)
         Expanded(
           child: Center(
@@ -610,9 +639,38 @@ class _BasicLibPageState extends State<BasicLibPage>
   static String _typeLabel(String type) => workFilterLabel(type);
 
   /// 本地过滤后的作品列表；筛选为空时即全部作品。
+  /// 作品排序：0 入库时间（默认，新的在前）、1 播放量、2 标题。
+  int _sortMode = 0;
+
+  int _ingestMs(dynamic w) {
+    final at = (w is Map) ? w['srcAt'] : null;
+    final n = at is num ? at.toInt() : int.tryParse('${at ?? ''}') ?? 0;
+    if (n > 0) return n;
+    // 没有时间戳时用日期字符串兜底（形如 2026-11-17）。
+    final d = '${(w is Map) ? (w['d'] ?? '') : ''}';
+    return int.tryParse(d.replaceAll('-', '')) ?? 0;
+  }
+
   List<dynamic> get filtered {
-    if (_typeFilter.isEmpty) return works;
-    return works.where((w) => _typeFilter.contains(_workType(w))).toList();
+    final base = _typeFilter.isEmpty
+        ? works
+        : works.where((w) => _typeFilter.contains(_workType(w))).toList();
+    final out = List<dynamic>.from(base);
+    switch (_sortMode) {
+      case 1:
+        out.sort((a, b) =>
+            _int(b is Map ? b['pl'] ?? b['plays'] : 0).compareTo(
+                _int(a is Map ? a['pl'] ?? a['plays'] : 0)));
+        break;
+      case 2:
+        out.sort((a, b) => '${a is Map ? a['ti'] ?? '' : ''}'
+            .compareTo('${b is Map ? b['ti'] ?? '' : ''}'));
+        break;
+      default:
+        // 入库时间：新的在前
+        out.sort((a, b) => _ingestMs(b).compareTo(_ingestMs(a)));
+    }
+    return out;
   }
 
   int _countOf(String type) => _typeCounts[type] ?? 0;
