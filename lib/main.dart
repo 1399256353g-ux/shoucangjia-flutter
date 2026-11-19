@@ -7089,6 +7089,11 @@ class _PlayerPageState extends State<PlayerPage>
   bool _softwareDecodeRetried = false;
   // 槽位重建后强制重建 Video，避免沿用旧控制器的纹理
   int _videoGen = 0;
+  // iOS「有声无画」看门狗：音频在走但视频轨始终没报出尺寸，说明纹理没出帧。
+  // 先只重建一次纹理（不重开媒体、不换解码器），仍无画面才降级软解。
+  double _videoDw = 0;
+  bool _blackRebuilt = false;
+  Timer? _blackGuard;
   _PlaybackSlot get _active => _slots[_slotActive];
   // 对播放页其余代码保持原有 player / vc 接口，内部指向当前活动槽位
   Player get player => _active.player;
@@ -7707,6 +7712,7 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.videoParams.listen((vp) {
       if (!identical(p, player)) return;
       if (!mounted) return;
+      _videoDw = (vp.dw ?? 0).toDouble();
       final a = vp.aspect ??
           ((vp.dw != null && vp.dh != null && vp.dh! > 0)
               ? vp.dw! / vp.dh!
@@ -8275,6 +8281,7 @@ class _PlayerPageState extends State<PlayerPage>
     final switching = i != cur;
     _stallTimer?.cancel();
     _startupGuard?.cancel();
+    _blackGuard?.cancel();
     if (switching) _resetOverlaysOnSwitch();
     if (switching) {
       _stallAttempts = 0;
@@ -8346,6 +8353,9 @@ class _PlayerPageState extends State<PlayerPage>
     manualPic = false;
     _pendingPage = null;
     _mediaToken = -1;
+    _blackGuard?.cancel();
+    _blackRebuilt = false;
+    _videoDw = 0;
     _opening = true;
     setState(() {
       cur = i;
@@ -8493,6 +8503,33 @@ class _PlayerPageState extends State<PlayerPage>
       } catch (_) {}
       // I3：起播后再淡入到目标音量（约 270ms），不再「啪」地直接满音量
       if (fadeIn) _startAudioFade(my);
+
+      // iOS：音频在走、视频轨却始终没有尺寸（黑屏有声）。先重建纹理，
+      // 仍不出画面才降级软解；不主动强制软解。
+      _blackGuard?.cancel();
+      if (Platform.isIOS && w['t'] == 'v') {
+        void check() {
+          if (!mounted || my != _openToken || _failure != null) return;
+          if (paused || loading || _videoDw > 1) return;
+          var at = Duration.zero;
+          try {
+            at = player.state.position;
+          } catch (_) {}
+          if (at.inMilliseconds < 400) return;
+          if (!_blackRebuilt) {
+            _blackRebuilt = true;
+            PauseTrace.mark('video:rebuild-texture');
+            setState(() => _videoGen++);
+            _blackGuard =
+                Timer(const Duration(milliseconds: 2600), () => check());
+            return;
+          }
+          PauseTrace.mark('video:soft-decode');
+          _retryWithSoftwareDecode();
+        }
+
+        _blackGuard = Timer(const Duration(milliseconds: 2600), () => check());
+      }
     }
     if (mounted && my == _openToken && _failure == null) {
       setState(() {
@@ -8523,6 +8560,7 @@ class _PlayerPageState extends State<PlayerPage>
     // O3：iOS 专项——媒体已就绪但 1.5 秒内仍 playing=false 视为启动失败，
     // 重开一次当前媒体并恢复位置；仍失败再交给故障提示/用户操作。
     _startupGuard?.cancel();
+    _blackGuard?.cancel();
     if (Platform.isIOS && w['t'] == 'v') {
       _guardBasePosMs = pos.inMilliseconds;
       _startupGuard = Timer(const Duration(milliseconds: 1500), () async {
@@ -9970,6 +10008,7 @@ class _PlayerPageState extends State<PlayerPage>
     _noticeTimer?.cancel();
     _fadeTimer?.cancel();
     _startupGuard?.cancel();
+    _blackGuard?.cancel();
     _fadeGen++;
     _swipeHintTimer?.cancel();
     _preloadTimer?.cancel();
