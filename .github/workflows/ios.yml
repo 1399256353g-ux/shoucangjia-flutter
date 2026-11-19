@@ -16,7 +16,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          # 固定 iOS 构建用的 Flutter 版本：stable 已到 3.50（Dart 3.13），
+          # 会把 video_player_avfoundation 从锁定的 2.8.9 升到 2.12.4，
+          # 其源码用了 Swift 6.2 的 `#isolation`，macos-15 runner 的 Xcode 16
+          # 编译不过（AVFactory.swift:119 / VideoPlayer.swift:568）。
+          # 3.35.4 与本地 analyze/test 通过的版本一致，pub get 沿用 pubspec.lock。
+          flutter-version: '3.35.4'
       - name: Gen platform
         run: flutter create --platforms=ios,android --org com.zzx --project-name shoucangjia .
       # 模板测试会被 flutter create 重新生成且无法编译，删除后再跑测试闸门
