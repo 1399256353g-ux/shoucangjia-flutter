@@ -10253,8 +10253,14 @@ class _PlayerPageState extends State<PlayerPage>
       if (c.maxWidth < 2 || c.maxHeight < 2) {
         return const ColoredBox(color: Colors.black);
       }
+      // owner 2026-11-19：比例未知时先不挂视频层（下层海报继续显示），
+      // 避免先按错误比例画一帧、再跳成正确比例的「抽搐」。
+      final aspectNow = _aspectFor(_workAt(cur));
+      if (aspectNow == null || aspectNow <= 0) {
+        return const SizedBox.shrink();
+      }
       final fit = videoFitFor(
-                  aspect: _aspectFor(_workAt(cur)),
+                  aspect: aspectNow,
                   mode: AppSettings.videoFitOverride,
                   containerAspect: c.maxWidth / c.maxHeight) ==
               VideoFit.fill
@@ -10264,8 +10270,7 @@ class _PlayerPageState extends State<PlayerPage>
       // 切全屏时由合成器缩放这张已渲染的画面，而不是让 media_kit 重建纹理。
       // 基准框按视频比例算，避免换比例视频时被拉伸；只在比例变化时重建一次。
       final baseH = 720.0;
-      final aspectNow = _aspectFor(_workAt(cur));
-      final baseW = (aspectNow != null && aspectNow > 0)
+      final baseW = (aspectNow > 0)
           ? (baseH * aspectNow).clamp(64.0, 8192.0)
           : c.maxWidth;
       return ClipRect(
