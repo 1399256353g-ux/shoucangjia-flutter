@@ -54,6 +54,7 @@ import 'library_badge.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
 import 'loop_link.dart';
+import 'json_isolate.dart';
 import 'library_tree.dart';
 import 'unit_crawler.dart';
 import 'unit_crawler_page.dart';
@@ -3955,8 +3956,9 @@ class _LibraryPageState extends State<LibraryPage> {
           var list = <Map<String, dynamic>>[];
           var def = '';
           if (rs[0].statusCode == 200) {
-            final j = jsonDecode(rs[0].body);
-            if (j is Map) {
+            // 首页库列表可能上千条：解析放 isolate，避免卡首帧。
+            final j = await parseJsonMapAsync(rs[0].bodyBytes);
+            if (j.isNotEmpty) {
               list = librariesWithDisplayNames(
                   ((j['libraries'] as List?) ?? const [])
                       .map((e) => Map<String, dynamic>.from(e as Map))
@@ -6388,7 +6390,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
               headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
       if (ar.statusCode != 200) throw Exception('HTTP ${ar.statusCode}');
-      final m = jsonDecode(utf8.decode(ar.bodyBytes)) as Map<String, dynamic>;
+      // 作者索引可能上千作者：解析放 isolate。
+      final m = await parseJsonMapAsync(ar.bodyBytes);
       for (final e in m.entries) {
         if (e.value is! Map) continue;
         final v = Map<String, dynamic>.from(e.value as Map);
