@@ -7394,6 +7394,9 @@ class _PlayerPageState extends State<PlayerPage>
   final StageLongPressTracker _lpTracker = StageLongPressTracker();
   Timer? _lpTimer;
   bool _suppressStageTap = false;
+  /// 第一下单击是否真的切换了暂停（用于双击时还原）
+  bool _pendingTapPaused = false;
+  bool _pendingTapWasPaused = false;
   bool _menuVisible = false;
   late final AnimationController _menuAnim = AnimationController(
       vsync: this,
@@ -9360,15 +9363,26 @@ class _PlayerPageState extends State<PlayerPage>
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_stageTapArbiter.registerTap(nowMs: now, pos: at)) {
       _cancelPendingSingleTap();
+      // 第一下已经暂停了：双击语义是「点赞」，所以要还原播放状态
+      if (_pendingTapPaused && paused != _pendingTapWasPaused) {
+        _pendingTapPaused = false;
+        togglePause();
+      }
       if (!_isLiked(w)) _setLiked(w, true, at: at);
       showUi();
       return;
     }
+    // owner 2026-11-20：单击立即生效，不再等 250ms 仲裁窗口
+    //（等待期间任何扰动都会让这次点击「像丢包一样」消失）。
+    // 双击的第二下再把刚才的暂停/继续还原，然后点赞。
+    _pendingTapWasPaused = paused;
+    _pendingTapPaused = ui;
+    _singleStageTap();
     _singleTapTimer?.cancel();
     _singleTapTimer =
         Timer(const Duration(milliseconds: kStageSingleTapDelayMs), () {
       _stageTapArbiter.clear();
-      if (mounted) _singleStageTap();
+      _pendingTapPaused = false;
     });
   }
 
@@ -11843,6 +11857,10 @@ class _PlayerPageState extends State<PlayerPage>
                       }
                       if (it['t'] == 'v') {
                         return GestureDetector(
+                          // 默认 deferToChild：只有子组件画到的像素才响应。
+                          // 视频 contain 铺在中间时，四周黑边点下去没有任何
+                          // handler，点击被直接吞掉。opaque 让整块舞台都算命中。
+                          behavior: HitTestBehavior.opaque,
                           onTapUp: (d) => onStageTap(d.localPosition),
                           // M9：抖音式跟手拖拽——向左拖作者页随手指从右侧滑入，
                           // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
