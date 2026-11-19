@@ -13,10 +13,12 @@ import 'package:flutter/material.dart';
 /// 头像候选图。`width/height` 未知时填 0（列表接口通常不给尺寸）。
 class AvatarCandidate {
   final String path;
+
   /// 'pic'（图文原图）或 'video'（视频封面/缩略图）。
   final String kind;
   final int width;
   final int height;
+
   /// 作品在列表里的顺序（0 为最新），用于同分时优先新作品。
   final int order;
 
@@ -134,14 +136,14 @@ List<AvatarCandidate> avatarCandidatesFromWorks(Iterable<Map> works) {
     final picsOnly = pics.where(isAvatarImagePath).toList();
     if (kind == 'p' && picsOnly.isNotEmpty) {
       for (var i = 0; i < picsOnly.length && i < 3; i++) {
-        out.add(AvatarCandidate(
-            path: picsOnly[i], kind: 'pic', order: order++));
+        out.add(
+            AvatarCandidate(path: picsOnly[i], kind: 'pic', order: order++));
       }
     } else if (th.isNotEmpty && isAvatarImagePath(th)) {
       out.add(AvatarCandidate(path: th, kind: 'video', order: order++));
     } else if (picsOnly.isNotEmpty) {
-      out.add(AvatarCandidate(
-          path: picsOnly.first, kind: 'pic', order: order++));
+      out.add(
+          AvatarCandidate(path: picsOnly.first, kind: 'pic', order: order++));
     }
   }
   return out;
@@ -247,10 +249,40 @@ class AvatarCropBox {
 
 /// 头像首字母：空名返回 `?`；按 rune 取第一个完整字符，
 /// 避免 emoji / 代理对被截成半个而显示空白。
+///
+/// 另外跳过不可见字符：空白、零宽连接符（U+200B–U+200D、U+FEFF）
+/// 与组合附加符号（e.g. 声调符）本身画不出来，直接取会让头像圆圈
+/// 看起来是空的；全部不可见时回落 `?`。
 String avatarInitial(String name) {
   final t = name.trim();
   if (t.isEmpty) return '?';
-  return String.fromCharCode(t.runes.first);
+  for (final r in t.runes) {
+    if (_isInvisibleRune(r)) continue;
+    return String.fromCharCode(r);
+  }
+  return '?';
+}
+
+/// 单独渲染时看不见（或只作为前缀修饰）的 rune。
+bool _isInvisibleRune(int r) {
+  // 空白（含全角空格、不换行空格）
+  if (r == 0x20 || r == 0xA0 || r == 0x3000 || (r >= 0x09 && r <= 0x0D)) {
+    return true;
+  }
+  // 零宽字符 / 方向标记 / BOM
+  if (r == 0x200B ||
+      r == 0x200C ||
+      r == 0x200D ||
+      r == 0x200E ||
+      r == 0x200F ||
+      r == 0xFEFF) {
+    return true;
+  }
+  // 变体选择符（emoji 呈现方式）与组合附加符号
+  if ((r >= 0xFE00 && r <= 0xFE0F) || (r >= 0x0300 && r <= 0x036F)) {
+    return true;
+  }
+  return false;
 }
 
 /// 没有可用头像路径时必须显示首字母占位（不能返回空白）。

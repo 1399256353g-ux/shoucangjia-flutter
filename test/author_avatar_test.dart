@@ -10,7 +10,11 @@ void main() {
           'm': ['/media/lib/a.jpg', '/media/lib/b.jpg'],
           'th': '/media/lib/thumb.jpg'
         },
-        {'t': 'v', 'm': ['/media/lib/v.mp4'], 'th': '/media/lib/v.jpg'},
+        {
+          't': 'v',
+          'm': ['/media/lib/v.mp4'],
+          'th': '/media/lib/v.jpg'
+        },
       ]);
       expect(cs.map((e) => e.path),
           ['/media/lib/a.jpg', '/media/lib/b.jpg', '/media/lib/v.jpg']);
@@ -23,7 +27,10 @@ void main() {
       final cs = avatarCandidatesFromWorks([
         {'t': 'p', 'm': <String>[], 'th': ''},
         {'t': 'v', 'th': ''},
-        {'t': 'p', 'm': ['', '  ']},
+        {
+          't': 'p',
+          'm': ['', '  ']
+        },
       ]);
       expect(cs, isEmpty);
     });
@@ -41,7 +48,11 @@ void main() {
 
     test('视频无封面但 m 有图时退化为原图', () {
       final cs = avatarCandidatesFromWorks([
-        {'t': 'v', 'm': ['/media/lib/frame.jpg'], 'th': ''}
+        {
+          't': 'v',
+          'm': ['/media/lib/frame.jpg'],
+          'th': ''
+        }
       ]);
       expect(cs.single.path, '/media/lib/frame.jpg');
       expect(cs.single.kind, 'pic');
@@ -140,21 +151,35 @@ void main() {
 
   group('播放页作者兜底图', () {
     test('th 优先；没有 th 取第一张非视频媒体；全无返回空串', () {
-      expect(workAvatarFallbackPath({'th': 't.jpg', 'm': ['a.mp4']}), 't.jpg');
+      expect(
+          workAvatarFallbackPath({
+            'th': 't.jpg',
+            'm': ['a.mp4']
+          }),
+          't.jpg');
       expect(
           workAvatarFallbackPath({
             'th': '',
             'm': ['a.mp4', 'b.webm', 'c.jpg', 'd.jpg'],
           }),
           'c.jpg');
-      expect(workAvatarFallbackPath({'m': ['a.mp4']}), '');
+      expect(
+          workAvatarFallbackPath({
+            'm': ['a.mp4']
+          }),
+          '');
       expect(workAvatarFallbackPath('bad'), '');
       expect(workAvatarFallbackPath(null), '');
     });
 
     test('只接受图片路径：th 是视频时回落到 m 里的图', () {
       // th 误填了视频文件 → 不能拿去当头像
-      expect(workAvatarFallbackPath({'th': 'v.mp4', 'm': ['a.mp4']}), '');
+      expect(
+          workAvatarFallbackPath({
+            'th': 'v.mp4',
+            'm': ['a.mp4']
+          }),
+          '');
       expect(
           workAvatarFallbackPath({
             'th': 'v.mp4',
@@ -162,7 +187,11 @@ void main() {
           }),
           'b.jpg');
       // 非图片（文本/无扩展名）跳过
-      expect(workAvatarFallbackPath({'m': ['x.txt', 'y']}), '');
+      expect(
+          workAvatarFallbackPath({
+            'm': ['x.txt', 'y']
+          }),
+          '');
       // 缩图参数不影响判定
       expect(workAvatarFallbackPath({'th': 'a.jpg?w=200'}), 'a.jpg?w=200');
       expect(isAvatarImagePath('a.PNG?w=64'), true);
@@ -174,9 +203,15 @@ void main() {
         {'a': 'A', 'th': 'a1.jpg'},
         {'a': 'A', 'th': 'a2.jpg'},
         {'a': '', 'th': 'noname.jpg'},
-        {'a': 'B', 'm': ['x.mp4', 'b1.jpg']},
+        {
+          'a': 'B',
+          'm': ['x.mp4', 'b1.jpg']
+        },
         {'a': 'B', 'th': 'b2.jpg'},
-        {'a': 'C', 'm': ['only.mp4']},
+        {
+          'a': 'C',
+          'm': ['only.mp4']
+        },
       ]);
       expect(idx['A'], 'a1.jpg');
       expect(idx['B'], 'b1.jpg');
@@ -197,6 +232,24 @@ void main() {
       expect(added, 1);
       expect(target['A'], 'a1.jpg');
       expect(target['B'], 'b1.jpg');
+    });
+  });
+
+  group('avatarInitial', () {
+    test('空名与纯不可见字符回落 ?', () {
+      expect(avatarInitial(''), '?');
+      expect(avatarInitial('   '), '?');
+      expect(avatarInitial('\u200b\u200d\ufeff'), '?');
+      expect(avatarInitial('\u3000\u00a0'), '?');
+    });
+
+    test('跳过零宽/组合符号，取第一个可见字符', () {
+      expect(avatarInitial('\u200b张三'), '张');
+      expect(avatarInitial(' \u0301abc'), 'a');
+    });
+
+    test('emoji 取完整 rune，不会被截成半个', () {
+      expect(avatarInitial('🎬作品'), '🎬');
     });
   });
 }
