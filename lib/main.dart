@@ -7646,6 +7646,10 @@ class _PlayerPageState extends State<PlayerPage>
       final now = DateTime.now().millisecondsSinceEpoch;
       final bigJump =
           (position.inMilliseconds - pos.inMilliseconds).abs() > 1200;
+      // owner 2026-11-19：进度条是「呼出式」的，不可见时页面上没有任何
+      // 地方需要 pos。此时不再整页 setState（原来 5 次/秒重建整个播放页），
+      // 只在发生大幅跳转时刷新，避免正常播放被无谓重建拖慢。
+      if (!ui && !_scrubActive && !bigJump) return;
       if (!bigJump && now - _lastPosSet < 200) return;
       _lastPosSet = now;
       setState(() => pos = position);
