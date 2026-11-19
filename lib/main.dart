@@ -8068,7 +8068,9 @@ class _PlayerPageState extends State<PlayerPage>
     }
     if (widget.works.length <= 1) return;
     final gen = _preloadGen;
-    _preloadTimer = Timer(const Duration(milliseconds: 600), () {
+    // owner 2026-11-19：起播 300ms 后就开始预载相邻条（原 600ms），
+    // 缩短 iOS 滑动时的黑屏窗口；预载仍是每侧 1 条，内存可控。
+    _preloadTimer = Timer(const Duration(milliseconds: 300), () {
       if (gen == _preloadGen) _runPreloads();
     });
   }
