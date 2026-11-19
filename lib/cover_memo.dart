@@ -8,13 +8,15 @@
 // 规则：
 //  - 键由调用方拼好（单元库 id + 影响结果的信号，如封面版本/播放修订号/服务地址）；
 //  - 命中直接返回，未命中计算并存入；
-//  - 条目超过 [maxEntries] 时只淘汰最早写入的一条（FIFO），
+//  - 条目超过 [maxEntries] 时淘汰最久未使用的一条（LRU），
 //    不再整体清空——整体清空会让翻页/滚动时刚算好的封面全部重算；
+//    FIFO 会让常驻首屏的少数单元库被持续写入的新键挤出、每帧重算，
+//    命中即视为「最近使用」，故改为 LRU（0.9.103）；
 //  - 只缓存字符串（封面 URL 或空串），不持有任何 widget/字符串以外的对象。
 class CoverMemo {
   CoverMemo({this.maxEntries = 512});
 
-  /// 条目上限；超出时按写入顺序淘汰最旧的一条（FIFO）。
+  /// 条目上限；超出时按使用顺序淘汰最久未用的一条（LRU）。
   final int maxEntries;
 
   final Map<String, String> _cache = <String, String>{};
@@ -36,16 +38,18 @@ class CoverMemo {
 
   /// 取缓存；未命中时调用 [compute] 并记住结果（含空串）。
   String resolve(String key, String Function() compute) {
-    final cached = _cache[key];
+    // 命中即更新「最近使用」：先摘下再放回末尾（Map 保持插入顺序）。
+    final cached = _cache.remove(key);
     if (cached != null) {
       _hits++;
+      _cache[key] = cached;
       return cached;
     }
     _misses++;
     final value = compute();
     // 只淘汰最旧一条：清空整表会让刚用过的键全部失效，滚动时反复重算。
     while (_cache.length >= maxEntries && _cache.isNotEmpty) {
-      _cache.remove(_cache.keys.first);
+      _cache.remove(_cache.keys.first); // 表头 = 最久未使用
       _evictions++;
     }
     _cache[key] = value;

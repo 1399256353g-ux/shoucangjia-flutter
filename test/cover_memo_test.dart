@@ -62,7 +62,7 @@ void main() {
       expect(memo.resolve('k', compute), 'x2');
     });
 
-    test('超过上限时按 FIFO 淘汰最旧条目，不会无限增长', () {
+    test('超过上限时按 LRU 淘汰最久未用条目，不会无限增长', () {
       final memo = CoverMemo(maxEntries: 3);
       for (var i = 0; i < 10; i++) {
         memo.resolve('k$i', () => 'v$i');
@@ -71,23 +71,56 @@ void main() {
       expect(memo.evictions, 7);
       // 最近写入的仍命中，不重新计算
       var calls = 0;
-      expect(memo.resolve('k9', () {
-        calls++;
-        return 'x';
-      }), 'v9');
+      expect(
+          memo.resolve('k9', () {
+            calls++;
+            return 'x';
+          }),
+          'v9');
       expect(calls, 0);
       // 最旧的已被淘汰
-      expect(memo.resolve('k0', () {
-        calls++;
-        return 'again';
-      }), 'again');
+      expect(
+          memo.resolve('k0', () {
+            calls++;
+            return 'again';
+          }),
+          'again');
+      expect(calls, 1);
+    });
+
+    test('命中会刷新使用顺序：热点键不会被挤出（0.9.103）', () {
+      final memo = CoverMemo(maxEntries: 3);
+      memo.resolve('a', () => 'A');
+      memo.resolve('b', () => 'B');
+      memo.resolve('c', () => 'C');
+      // 首屏常驻的 a 被反复命中
+      expect(memo.resolve('a', () => 'x'), 'A');
+      // 新键 d 触发淘汰：应淘汰最久未用的 b，而不是刚命中过的 a
+      memo.resolve('d', () => 'D');
+      expect(memo.size, 3);
+      expect(memo.evictions, 1);
+      var calls = 0;
+      expect(
+          memo.resolve('a', () {
+            calls++;
+            return 'x';
+          }),
+          'A');
+      expect(calls, 0);
+      expect(
+          memo.resolve('b', () {
+            calls++;
+            return 'B2';
+          }),
+          'B2');
       expect(calls, 1);
     });
   });
 
   group('WorkPlaysStore 按库汇总', () {
-    int totalIn(String lib) =>
-        WorkPlaysStore.countsFor(lib).values.fold<int>(0, (a, b) => a + b.count);
+    int totalIn(String lib) => WorkPlaysStore.countsFor(lib)
+        .values
+        .fold<int>(0, (a, b) => a + b.count);
     test('按库汇总次数', () {
       WorkPlaysStore.resetForTest(items: <String, WorkPlay>{
         'l1/a': const WorkPlay(count: 2),
