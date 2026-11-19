@@ -42,6 +42,22 @@ const LinearGradient kLibCardGradient = LinearGradient(
   colors: [Color(0x00000000), Color(0xC7000000)],
 );
 
+/// 单元库卡片的显示宽度（网格 `maxCrossAxisExtent: 260`）。
+const double kUnitCardDisplayWidth = 260;
+
+/// 单元库卡片解码宽度上限（260dp × 3x）。
+const int kUnitCardMaxDecodeWidth = 780;
+
+/// 单元库卡片封面解码宽度（卡片渲染与首屏预热必须共用）。
+///
+/// 基础库卡片是 220dp、单元库卡片是 260dp；两者共用 `_UnitCoverFill`，
+/// 以前统一按 220dp 解码，260dp 的单元库卡片在高 DPI 下被放大 ~18%。
+int unitCardDecodeWidth(double devicePixelRatio) => decodeWidthForDisplay(
+      kUnitCardDisplayWidth,
+      devicePixelRatio,
+      maxWidth: kUnitCardMaxDecodeWidth,
+    );
+
 /// 库卡片底部信息层：词条（基础库才有）→ 名称 → 统计 → 服务器。
 ///
 /// [dense] 用于网格更小的基础库卡片（字号/内边距各缩一档），层级与
@@ -301,8 +317,8 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
       headers[url] = unitHeadersOf(u, widget.headersOf);
     }
     if (urls.isEmpty) return;
-    // 与 `_UnitCoverFill` 共用同一个解码宽度，缓存键一致才命中。
-    final px = libCardDecodeWidth(mq.devicePixelRatio);
+    // 与 `_UnitCoverFill` 共用同一个解码宽度（单元库卡片 260dp），缓存键一致才命中。
+    final px = unitCardDecodeWidth(mq.devicePixelRatio);
     ThumbPrefetch.instance.run(
       urls,
       limit: n,
@@ -504,8 +520,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
       headers[url] = unitHeadersOf(u, widget.headersOf);
     }
     if (urls.isEmpty) return;
-    // 与 `_UnitCoverFill` 共用同一个解码宽度，缓存键一致才命中。
-    final px = libCardDecodeWidth(mq.devicePixelRatio);
+    // 与 `_UnitCoverFill` 共用同一个解码宽度（单元库卡片 260dp），缓存键一致才命中。
+    final px = unitCardDecodeWidth(mq.devicePixelRatio);
     ThumbPrefetch.instance.run(
       urls,
       limit: n,
@@ -660,6 +676,7 @@ class UnitLibraryCard extends StatelessWidget {
                     WorkPlaysStore.libsListenable(unit.allBasics.map((b) => b.id)),
                 builder: (_, __, ___) => _UnitCoverFill(
                   key: ValueKey('unit-cover-${unit.id}'),
+                  displayWidth: kUnitCardDisplayWidth,
                   url: unitCoverUrl(
                     unit,
                     customUrl: coverUrlOf?.call(unit) ?? coverUrl,
@@ -732,11 +749,15 @@ class _UnitCoverFill extends StatelessWidget {
   final Map<String, String> headers;
   final IconData fallbackIcon;
 
+  /// 卡片的逻辑显示宽度（单元库 260 / 基础库 220），决定解码宽度。
+  final double displayWidth;
+
   const _UnitCoverFill({
     super.key,
     required this.url,
     required this.headers,
     required this.fallbackIcon,
+    this.displayWidth = 220,
   });
 
   @override
@@ -754,10 +775,13 @@ class _UnitCoverFill extends StatelessWidget {
       // 避免把爬虫/自定义封面的原始大图整张传给客户端。
       imageUrl: withImageWidth(url, kCardImageWidth),
       httpHeaders: headers,
-      // 0.9.44：解码宽度与首屏预热共用 `libCardDecodeWidth`，同一张封面
-      // 不会因解码宽度不同而二次解码。
-      memCacheWidth:
-          libCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
+      // 0.9.119：按卡片真实显示宽度解码（单元库 260dp / 基础库 220dp），
+      // 与首屏预热用同一个函数，同一张封面不会因解码宽度不同而二次解码。
+      memCacheWidth: decodeWidthForDisplay(
+        displayWidth,
+        MediaQuery.devicePixelRatioOf(context),
+        maxWidth: (displayWidth * 3).ceil(),
+      ),
       fit: BoxFit.cover,
       fadeInDuration: Duration.zero,
       errorWidget: (_, __, ___) => fallback,
@@ -886,10 +910,13 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     final unit = widget.unit;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
-    final urls = <String>[];
-    final headers = <String, Map<String, String>>{};
+    final subUrls = <String>[];
+    final subHeaders = <String, Map<String, String>>{};
+    final basicUrls = <String>[];
+    final basicHeaders = <String, Map<String, String>>{};
 
-    void add(String raw, Map<String, String> h) {
+    void add(List<String> urls, Map<String, Map<String, String>> headers,
+        String raw, Map<String, String> h) {
       final cover = raw.trim();
       if (cover.isEmpty) return;
       final url = withImageWidth(cover, kCardImageWidth);
@@ -913,7 +940,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     if (subN > 0) {
       for (final sub in unit.children.take(subN)) {
         final cover = widget.unitCoverOf?.call(sub) ?? '';
-        add(cover, unitHeadersOf(sub, widget.headersOf));
+        add(subUrls, subHeaders, cover, unitHeadersOf(sub, widget.headersOf));
       }
     }
 
@@ -932,22 +959,29 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     if (basicN > 0) {
       for (final b in unit.basics.take(basicN)) {
         final cover = basicCoverUrl(b, preset: widget.coverOf?.call(b) ?? '');
-        add(cover, widget.headersOf?.call(b.id) ?? const <String, String>{});
+        add(basicUrls, basicHeaders, cover,
+            widget.headersOf?.call(b.id) ?? const <String, String>{});
       }
     }
-    if (urls.isEmpty) return;
-    // 与 `_UnitCoverFill` 共用同一个解码宽度，缓存键一致才命中。
-    final px = libCardDecodeWidth(mq.devicePixelRatio);
-    ThumbPrefetch.instance.run(
-      urls,
-      limit: urls.length,
-      provider: (u) => thumbImageProvider(
-        u,
-        decodeWidth: px,
-        headers: headers[u] ?? const <String, String>{},
-        cacheManager: DiziCache.manager,
-      ),
-    );
+    // 两类卡片显示宽度不同（260 / 220），各自用自己的解码宽度预热，
+    // 与 `_UnitCoverFill` 传入的 `displayWidth` 一致，缓存键才对得上。
+    void prefetch(List<String> urls,
+        Map<String, Map<String, String>> headers, int px) {
+      if (urls.isEmpty) return;
+      ThumbPrefetch.instance.run(
+        urls,
+        limit: urls.length,
+        provider: (u) => thumbImageProvider(
+          u,
+          decodeWidth: px,
+          headers: headers[u] ?? const <String, String>{},
+          cacheManager: DiziCache.manager,
+        ),
+      );
+    }
+
+    prefetch(subUrls, subHeaders, unitCardDecodeWidth(mq.devicePixelRatio));
+    prefetch(basicUrls, basicHeaders, libCardDecodeWidth(mq.devicePixelRatio));
   }
 
   @override
