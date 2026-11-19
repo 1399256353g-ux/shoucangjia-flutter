@@ -78,6 +78,7 @@ import 'immersive.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'player_controls.dart';
+import 'player_layers.dart';
 import 'pause_trace.dart';
 import 'preload_policy.dart';
 import 'preload_plan.dart';
@@ -7128,7 +7129,6 @@ class _PlayerPageState extends State<PlayerPage>
   Timer? _wheelUnlock;
   Timer? _wheelIdle;
   bool _fsBusy = false;
-  int _lastPosSet = 0;
   int _navAt = 0;
   int _lastKeyNav = 0;
   int? _pendingPage;
@@ -7211,12 +7211,9 @@ class _PlayerPageState extends State<PlayerPage>
   final Map<String, Widget> _neighborPages = <String, Widget>{};
 
   /// O3：iOS 启动 1.5 秒内未真正播放时只重开一次，避免循环重开。
-  Timer? _startupGuard;
   /// 起播守卫采样基准：调度守卫时的播放位置。iOS 上 `state.playing`
   /// 在缓冲/首帧渲染期间会短暂为 false，仅凭它判断会误触发重开，
   /// 表现为「刚播一秒又停一下」。位置有前进就说明在播，不再重开。
-  int _guardBasePosMs = 0;
-  bool _startupReopened = false;
   // I1：音量调节 UI 仅桌面端保留，移动端交给系统音量键。
   bool get _volumeUi => volumeUiEnabled(
       isDesktop: Platform.isWindows || Platform.isMacOS || Platform.isLinux);
@@ -7242,6 +7239,23 @@ class _PlayerPageState extends State<PlayerPage>
   // M2：是否由播放页主动锁定过屏幕方向（退出时需恢复系统默认）。
   bool _orientationForced = false;
   bool dragging = false;
+  // P2：位置/时长改为 ValueNotifier——播放中每次位置回调只重绘进度条，
+  // 不再整页 setState（原来播放页整个视频树/信息区/任务栏都跟着重建）。
+  final ValueNotifier<Duration> _posVN =
+      ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> _durVN =
+      ValueNotifier<Duration>(Duration.zero);
+  /// 播放进度 0..1：由位置/时长派生，只驱动进度条自身（拖动时改用 _scrubFracVN）。
+  late final PlaybackFraction _progressVN =
+      PlaybackFraction(position: _posVN, duration: _durVN);
+
+  /// 旧的读写接口保持不变：读/写都落到 ValueNotifier。
+  Duration get pos => _posVN.value;
+  set pos(Duration v) => _posVN.value = v;
+
+  Duration get dur => _durVN.value;
+  set dur(Duration v) => _durVN.value = v;
+
   // owner 2026-11-18：呼出式进度条——常态不可见，触底才在指下放大。
   bool _scrubActive = false;
   // 桌面端鼠标悬停：细条放大成可拖状态（owner 2026-11-18）。
@@ -7347,7 +7361,6 @@ class _PlayerPageState extends State<PlayerPage>
   // 不能据此改写 paused，否则下一条会停在首帧（F32）。
   bool _opening = false;
   // 连播兜底：视频已就绪但播放器未在播放时补一次 play。
-  Timer? playGuard;
   double? dragFrac;
   // 图文进度条拖动时当前指向的图片序号（null = 未在拖动）
   int? dragPic;
@@ -7417,22 +7430,25 @@ class _PlayerPageState extends State<PlayerPage>
   // P0 §3：进度条是否处于「按住/拖动」态（与拖动 seek 合并为一次按下）。
   bool _seeking = false;
   double speed = 1.0;
-  Duration pos = Duration.zero;
-  Duration dur = Duration.zero;
   Timer? autoTimer;
   Timer? hideTimer;
 
   /// 0.9.72：功能区自动隐藏的截止时刻（见 [HideDeadline]）。
   final HideDeadline _hideDeadline = HideDeadline();
-  Timer? retryTimer;
   // I3：起播静音淡入（定时器 + 代数，用户调音量/切条时立即作废）
   Timer? _fadeTimer;
   int _fadeGen = 0;
   // G12：加载超时 / 播放器报错提示与重试
   PlaybackFailure? _failure;
   Timer? _loadTimeout;
-  bool _buffering = false;
-  bool _slowBuffer = false;
+  // P2：缓冲状态只驱动一个小角落的提示层，独立于位置/时长，
+  // 切换缓冲态不再整页重建。
+  final ValueNotifier<bool> _bufferingVN = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _slowBufferVN = ValueNotifier<bool>(false);
+  bool get _buffering => _bufferingVN.value;
+  set _buffering(bool v) => _bufferingVN.value = v;
+  bool get _slowBuffer => _slowBufferVN.value;
+  set _slowBuffer(bool v) => _slowBufferVN.value = v;
   Timer? _slowBufferTimer;
   // J9：当前库的基础库/统计，用于信息行的来源词条与等级词条
   LibMeta? _meta;
@@ -7655,23 +7671,13 @@ class _PlayerPageState extends State<PlayerPage>
           _recordContinue(cw, position.inMilliseconds, dur.inMilliseconds);
         }
       }
-      // 位置流每 100ms 左右触发一次；全量 setState 会让视频层频繁重建、
-      // 在 Windows 上造成卡顿与音画不同步。这里节流到 200ms，
-      // 但跳转/拖动后的大幅变化立即刷新。
+      // 位置流每 100ms 左右触发一次。pos 走 ValueNotifier，进度条自己
+      // 订阅重绘；不再 setState 重建整页（视频层/信息区/任务栏保持不动）。
       if (!_firstFrameSeen && position.inMilliseconds >= 120) {
         _firstFrameSeen = true;
         if (mounted) setState(() {});
       }
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final bigJump =
-          (position.inMilliseconds - pos.inMilliseconds).abs() > 1200;
-      // owner 2026-11-19：进度条是「呼出式」的，不可见时页面上没有任何
-      // 地方需要 pos。此时不再整页 setState（原来 5 次/秒重建整个播放页），
-      // 只在发生大幅跳转时刷新，避免正常播放被无谓重建拖慢。
-      if (!ui && !_scrubActive && !bigJump) return;
-      if (!bigJump && now - _lastPosSet < 200) return;
-      _lastPosSet = now;
-      setState(() => pos = position);
+      pos = position;
     });
     subDur = p.stream.duration.listen((d) {
       if (!identical(p, player)) return;
@@ -7679,7 +7685,8 @@ class _PlayerPageState extends State<PlayerPage>
         _loadTimeout?.cancel();
         _loadTimeout = null;
       }
-      if (mounted) setState(() => dur = d);
+      // 时长同样只喂给进度条，不触发整页重建。
+      dur = d;
     });
     if (subPos != null) _playerSubs.add(subPos!);
     if (subDur != null) _playerSubs.add(subDur!);
@@ -7703,19 +7710,16 @@ class _PlayerPageState extends State<PlayerPage>
       if (!b) {
         _slowBufferTimer?.cancel();
         _slowBufferTimer = null;
-        if (_buffering || _slowBuffer) {
-          setState(() {
-            _buffering = false;
-            _slowBuffer = false;
-          });
-        }
+        // 只改 ValueNotifier：提示层自行消失，视频/信息/任务栏不重建。
+        _buffering = false;
+        _slowBuffer = false;
         return;
       }
       if (_buffering) return;
-      setState(() => _buffering = true);
+      _buffering = true;
       _slowBufferTimer?.cancel();
       _slowBufferTimer = Timer(slowBufferThreshold, () {
-        if (mounted && _buffering) setState(() => _slowBuffer = true);
+        if (mounted && _buffering) _slowBuffer = true;
       });
     }));
     // O4：跟踪视频显示宽高比，供手机端任务栏贴画面下沿。
@@ -8290,12 +8294,10 @@ class _PlayerPageState extends State<PlayerPage>
     // 否则「重开 → 又停 → 再重开」会无限循环。
     final switching = i != cur;
     _stallTimer?.cancel();
-    _startupGuard?.cancel();
     _blackGuard?.cancel();
     if (switching) _resetOverlaysOnSwitch();
     if (switching) {
       _stallAttempts = 0;
-      _startupReopened = false;
       _videoAspect = null;
     }
     _userPaused = false;
@@ -8314,8 +8316,6 @@ class _PlayerPageState extends State<PlayerPage>
       _cancelPreload();
       _cancelVideoPrefetch();
       autoTimer?.cancel();
-      retryTimer?.cancel();
-      playGuard?.cancel();
       _loadTimeout?.cancel();
       _slowBufferTimer?.cancel();
       _preloadTimer?.cancel();
@@ -8354,8 +8354,6 @@ class _PlayerPageState extends State<PlayerPage>
     final my = ++_openToken;
     _pausedByBackground = false;
     autoTimer?.cancel();
-    retryTimer?.cancel();
-    playGuard?.cancel();
     _loadTimeout?.cancel();
     _slowBufferTimer?.cancel();
     _preloadTimer?.cancel();
@@ -8549,82 +8547,6 @@ class _PlayerPageState extends State<PlayerPage>
         if (w['t'] != 'v' && !_pausedByBackground) paused = false;
       });
     }
-    // F32 兜底：媒体就绪后 2.5 秒仍未起播且用户没暂停，补一次 play，
-    // 避免停在片尾/首帧导致连播链路中断。
-    playGuard = Timer(const Duration(milliseconds: 2500), () {
-      if (!mounted || my != _openToken || _failure != null) return;
-      if (_workAt(i)['t'] != 'v') return;
-      bool playing = false;
-      try {
-        playing = player.state.playing;
-      } catch (_) {}
-      if (shouldForcePlay(
-          paused: paused,
-          opening: _opening,
-          playerPlaying: playing,
-          hasMedia: dur.inMilliseconds > 0 || pos.inMilliseconds > 0)) {
-        try {
-          player.play();
-        } catch (_) {}
-      }
-    });
-    // O3：iOS 专项——媒体已就绪但 1.5 秒内仍 playing=false 视为启动失败，
-    // 重开一次当前媒体并恢复位置；仍失败再交给故障提示/用户操作。
-    _startupGuard?.cancel();
-    _blackGuard?.cancel();
-    if (Platform.isIOS && w['t'] == 'v') {
-      _guardBasePosMs = pos.inMilliseconds;
-      _startupGuard = Timer(const Duration(milliseconds: 1500), () async {
-        if (!mounted || my != _openToken || _failure != null) return;
-        if (_startupReopened || !_appForeground) return;
-        var playing = false;
-        var at = pos;
-        try {
-          playing = player.state.playing;
-          if (at.inMilliseconds <= 0) at = player.state.position;
-        } catch (_) {}
-        // 位置已经往前走 = 实际在播（iOS 的 playing 标志有假阴性）。
-        // 这时重开会把正在播的媒体重新打开，用户听到的就是「停一下」。
-        if (at.inMilliseconds - _guardBasePosMs >= 300) return;
-        if (!shouldStartupReopen(
-          playing: playing,
-          positionMs: at.inMilliseconds,
-          durationMs: dur.inMilliseconds,
-          opening: _opening,
-          userPaused: _userPaused,
-          backgroundPaused: _pausedByBackground,
-          failed: _failure != null,
-          retried: _startupReopened,
-        )) {
-          return;
-        }
-        _startupReopened = true;
-        PauseTrace.mark('startup:ios-reopen');
-        await open(i, saveProgress: false);
-        if (!mounted || my == _openToken) return;
-        final my2 = _openToken;
-        await Future<void>.delayed(const Duration(milliseconds: 350));
-        if (!mounted || my2 != _openToken || paused) return;
-        try {
-          if (at.inMilliseconds > 500) await player.seek(at);
-          await player.setRate(speed);
-          await player.play();
-        } catch (_) {}
-      });
-    }
-    retryTimer = Timer(const Duration(milliseconds: 1800), () {
-      if (mounted &&
-          my == _openToken &&
-          _failure == null &&
-          !paused &&
-          w['t'] == 'v' &&
-          dur.inMilliseconds == 0) {
-        player.open(Media(cfg.mediaUrl(workMediaPaths(w).first, lib: wl),
-            httpHeaders: cfg.headersFor(wl)));
-        player.play();
-        _mediaToken = my;
-      }
-    });
     // 后台打开的作品不启动图文轮播，等回前台再按用户状态恢复
     if (w['t'] != 'v' && !paused) startAuto();
     // G18：起播稳定后再预缓冲下一条，避免和当前条抢带宽
@@ -10027,7 +9949,6 @@ class _PlayerPageState extends State<PlayerPage>
     autoTimer?.cancel();
     hideTimer?.cancel();
     _immTimer?.cancel();
-    retryTimer?.cancel();
     _loadTimeout?.cancel();
     _slowBufferTimer?.cancel();
     _wheelUnlock?.cancel();
@@ -10035,7 +9956,6 @@ class _PlayerPageState extends State<PlayerPage>
     _volHintTimer?.cancel();
     _noticeTimer?.cancel();
     _fadeTimer?.cancel();
-    _startupGuard?.cancel();
     _blackGuard?.cancel();
     _fadeGen++;
     _swipeHintTimer?.cancel();
@@ -10065,7 +9985,6 @@ class _PlayerPageState extends State<PlayerPage>
     }
     subPos?.cancel();
     subDur?.cancel();
-    playGuard?.cancel();
     for (final s in _playerSubs) {
       s.cancel();
     }
@@ -10085,6 +10004,12 @@ class _PlayerPageState extends State<PlayerPage>
     _winResizeTimer?.cancel();
     _scrubFracVN.dispose();
     _picDragVN.dispose();
+    // 先断开派生进度对位置/时长的监听，再释放底层 notifier。
+    _progressVN.dispose();
+    _posVN.dispose();
+    _durVN.dispose();
+    _bufferingVN.dispose();
+    _slowBufferVN.dispose();
     super.dispose();
   }
 
@@ -11217,7 +11142,9 @@ class _PlayerPageState extends State<PlayerPage>
             child: Align(
               alignment: Alignment.bottomCenter,
               child: ScrubBar(
-                fraction: _scrubFracVN,
+                // P2：不拖动时直接订阅播放进度（ValueListenable），
+                // 播放中不再需要整页 setState 才能让进度条动。
+                fraction: _scrubActive ? _scrubFracVN : _progressVN,
                 active: active,
                 visible: active || _scrubThin || persistent,
                 labelFor: (f) => dur.inMilliseconds > 0
@@ -11879,7 +11806,9 @@ class _PlayerPageState extends State<PlayerPage>
                           onLongPressEnd:
                               fs ? (_) => player.setRate(speed) : null,
                           child: Stack(fit: StackFit.expand, children: [
-                            videoView(),
+                            // P2：视频层自成一画层——上层进度条/提示的局部重绘
+                            // 不再把原生视频纹理拖进同一 layer 重绘。
+                            RepaintBoundary(child: videoView()),
                             // 首帧没出来之前用海报盖住视频层：既挡掉起播黑屏，
                             // 也避免纹理先按错误比例画一帧再跳。
                             if ((it['th'] ?? '').toString().isNotEmpty)
@@ -12049,36 +11978,45 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               ),
               // G12：弱网缓冲提示（延迟出现，避免正常起播闪烁）
-              if (_slowBuffer && _failure == null && !loading)
-                Positioned(
-                  top: pad.top + 14,
-                  left: 0,
-                  right: 0,
-                  child: IgnorePointer(
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 7),
-                        decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(20)),
-                        child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 1.6, color: Colors.white70)),
-                              SizedBox(width: 8),
-                              Text('网络较慢，正在缓冲…',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.white70)),
-                            ]),
+              // P2：订阅独立的 _slowBufferVN，缓冲态变化只重建这颗小提示。
+              ValueListenableBuilder<bool>(
+                valueListenable: _slowBufferVN,
+                builder: (_, slow, __) {
+                  if (!slow || _failure != null || loading) {
+                    return const SizedBox.shrink();
+                  }
+                  return Positioned(
+                    top: pad.top + 14,
+                    left: 0,
+                    right: 0,
+                    child: IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
+                          decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(20)),
+                          child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 1.6,
+                                        color: Colors.white70)),
+                                SizedBox(width: 8),
+                                Text('网络较慢，正在缓冲…',
+                                    style: TextStyle(
+                                        fontSize: 12, color: Colors.white70)),
+                              ]),
+                        ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                },
+              ),
               // G12：加载超时/解码失败/网络失败 —— 给出重试入口
               if (_failure != null) _failureOverlay(),
               // G9 / P0 §5：双击位置的红心反馈（58dp、#FFFF3B5C、700ms、
@@ -12285,7 +12223,9 @@ class _PlayerPageState extends State<PlayerPage>
                   right: 0,
                   // A：实底任务栏贴屏幕底；视频舞台已按其高度内缩。
                   bottom: 0,
-                  child: IgnorePointer(
+                  // P2：任务栏自成一画层，视频层/进度条的局部重绘不波及它。
+                  child: RepaintBoundary(
+                    child: IgnorePointer(
                     ignoring: !ui,
                     child: AnimatedOpacity(
                       opacity: chromeOpacity,
@@ -12613,6 +12553,7 @@ class _PlayerPageState extends State<PlayerPage>
                               ]),
                         ),
                       ),
+                    ),
                     ),
                   ),
                 ),
