@@ -7204,6 +7204,10 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// O3：iOS 启动 1.5 秒内未真正播放时只重开一次，避免循环重开。
   Timer? _startupGuard;
+  /// 起播守卫采样基准：调度守卫时的播放位置。iOS 上 `state.playing`
+  /// 在缓冲/首帧渲染期间会短暂为 false，仅凭它判断会误触发重开，
+  /// 表现为「刚播一秒又停一下」。位置有前进就说明在播，不再重开。
+  int _guardBasePosMs = 0;
   bool _startupReopened = false;
   // I1：音量调节 UI 仅桌面端保留，移动端交给系统音量键。
   bool get _volumeUi => volumeUiEnabled(
@@ -8520,6 +8524,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 重开一次当前媒体并恢复位置；仍失败再交给故障提示/用户操作。
     _startupGuard?.cancel();
     if (Platform.isIOS && w['t'] == 'v') {
+      _guardBasePosMs = pos.inMilliseconds;
       _startupGuard = Timer(const Duration(milliseconds: 1500), () async {
         if (!mounted || my != _openToken || _failure != null) return;
         if (_startupReopened || !_appForeground) return;
@@ -8529,6 +8534,9 @@ class _PlayerPageState extends State<PlayerPage>
           playing = player.state.playing;
           if (at.inMilliseconds <= 0) at = player.state.position;
         } catch (_) {}
+        // 位置已经往前走 = 实际在播（iOS 的 playing 标志有假阴性）。
+        // 这时重开会把正在播的媒体重新打开，用户听到的就是「停一下」。
+        if (at.inMilliseconds - _guardBasePosMs >= 300) return;
         if (!shouldStartupReopen(
           playing: playing,
           positionMs: at.inMilliseconds,
