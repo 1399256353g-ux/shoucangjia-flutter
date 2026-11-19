@@ -6116,6 +6116,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     'drops': '小水滴',
   };
 
+  /// 排序方式持久化的键：进页面先恢复上次选择，不再每次都回到「播放量」。
+  static const _sortPrefsKey = 'author_sort_v1';
+
   List<MapEntry<String, Map<String, dynamic>>> authors = [];
   Map<String, dynamic> stats = {};
   // 0.9.8：作者数据源改为全部基础库（`/api/authors.json?lib=all`）。
@@ -6126,6 +6129,25 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   // J9：库 -> 基础库/统计映射，用于显示基础库来源词条
   final Map<String, LibMeta> metas = {};
   String sort = 'plays';
+
+  Future<void> _loadSort() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final v = sp.getString(_sortPrefsKey);
+      if (!mounted || v == null || !_sorts.containsKey(v) || v == sort) return;
+      setState(() {
+        sort = v;
+        _applyOrder();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveSort(String value) async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(_sortPrefsKey, value);
+    } catch (_) {}
+  }
   bool loading = true;
   String? err;
   bool syncing = false;
@@ -6166,6 +6188,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     AuthorGrade.load().then((_) {
       if (mounted) setState(() {});
     });
+    _loadSort();
     load();
   }
 
@@ -6734,6 +6757,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                               onSelected: (_) => setState(() {
                                 sort = s.key;
                                 _applyOrder();
+                                _saveSort(s.key);
                               }),
                             ),
                           ),
