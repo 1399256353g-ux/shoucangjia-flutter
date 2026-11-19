@@ -11526,7 +11526,10 @@ class _PlayerPageState extends State<PlayerPage>
     final taskbarLift = _followVideo
         ? taskbarBottomInset(box: viewSize, aspect: _aspectNow)
         : 0.0;
-    final stageInset = broken || _followVideo
+    // 只有确实需要上移（留边高度 > 0）才让舞台铺满；否则舞台必须继续让开
+    // 任务栏，不然视频会画到任务栏底下、头像/信息也被盖住。
+    final followActive = _followVideo && taskbarLift > 0.5;
+    final stageInset = broken || followActive
         ? 0.0
         : stageBottomInset(
             screenHeight: viewSize.height,
