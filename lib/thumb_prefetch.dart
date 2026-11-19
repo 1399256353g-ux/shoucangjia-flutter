@@ -70,8 +70,10 @@ class ThumbPrefetchStats {
   int loaded = 0;
   int failed = 0;
   int skipped = 0;
+
   /// 本轮预取的在途并发峰值（诊断用）。
   int peakActive = 0;
+
   /// 排队等待的峰值（诊断用）。
   int peakWaiting = 0;
   DateTime? lastRun;
@@ -107,6 +109,10 @@ class ThumbPrefetch extends ChangeNotifier {
   final ThumbPrefetchStats stats = ThumbPrefetchStats();
   final Set<String> _seen = <String>{};
   final Queue<String> _seenOrder = Queue<String>();
+
+  /// 已登记但尚未跑完（排队/在途）的 URL。淘汰时不能把它们踢出
+  /// 去重表，否则同一张图会被再次预热、重复解码。
+  final Set<String> _pending = <String>{};
   late final DecodeBudget budget = DecodeBudget(
     limit: maxConcurrent,
     scrollLimit: scrollMaxConcurrent,
@@ -192,6 +198,7 @@ class ThumbPrefetch extends ChangeNotifier {
         ok = false;
       } finally {
         _active--;
+        _pending.remove(url);
       }
       if (ok) {
         stats.loaded++;
@@ -225,11 +232,26 @@ class ThumbPrefetch extends ChangeNotifier {
   bool _mark(String url) {
     if (!_seen.add(url)) return false;
     _seenOrder.add(url);
-    while (_seenOrder.length > seenLimit) {
-      final old = _seenOrder.removeFirst();
-      _seen.remove(old);
-    }
+    _pending.add(url);
+    _evictOverflow();
     return true;
+  }
+
+  /// 去重表超限时淘汰最旧的**已完成**项；排队/在途项即使最旧也保留，
+  /// 避免被再次入队造成重复请求与重复解码。
+  void _evictOverflow() {
+    while (_seenOrder.length > seenLimit) {
+      String? victim;
+      for (final candidate in _seenOrder) {
+        if (!_pending.contains(candidate)) {
+          victim = candidate;
+          break;
+        }
+      }
+      if (victim == null) return; // 全都在途，允许短暂超出上限
+      _seenOrder.remove(victim);
+      _seen.remove(victim);
+    }
   }
 
   void _forget(String url) {

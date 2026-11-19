@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/crash_reports_page.dart';
@@ -155,6 +157,29 @@ void main() {
       await p.runWith(['x'], fetch: (_) async => throw StateError('boom'));
       expect(p.stats.failed, 1);
       expect(p.stats.loaded, 0);
+    });
+
+    test('去重表淘汰不踢在途项：同一 URL 不会重复预热', () async {
+      final p = ThumbPrefetch(maxConcurrent: 2, seenLimit: 2);
+      final gate = Completer<bool>();
+      final calls = <String, int>{};
+      Future<bool> fetch(String u) {
+        calls[u] = (calls[u] ?? 0) + 1;
+        if (u == 'a') return gate.future;
+        return Future<bool>.value(true);
+      }
+
+      final firstA = p.runWith(['a'], fetch: fetch);
+      await p.runWith(['b', 'c'], fetch: fetch); // 超限，但 a 仍在途
+      await p.runWith(['a'], fetch: fetch); // 不得重复预热
+      expect(calls['a'], 1);
+      gate.complete(true);
+      await firstA;
+      expect(p.stats.loaded, 3);
+
+      // 全部完成后再次超限，才允许淘汰最旧的已完成项
+      await p.runWith(['d'], fetch: fetch);
+      expect(calls['d'], 1);
     });
 
     test('reset 清空统计与去重表', () async {
