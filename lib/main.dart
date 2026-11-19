@@ -7093,6 +7093,9 @@ class _PlayerPageState extends State<PlayerPage>
   // 先只重建一次纹理（不重开媒体、不换解码器），仍无画面才降级软解。
   double _videoDw = 0;
   bool _blackRebuilt = false;
+  /// 首帧是否真的出来了（位置开始走动）。出来之前一直用海报盖住视频层，
+  /// 避免「黑屏一下 / 缓冲圈闪一下 / 比例跳一下」的起播观感。
+  bool _firstFrameSeen = false;
   Timer? _blackGuard;
   _PlaybackSlot get _active => _slots[_slotActive];
   // 对播放页其余代码保持原有 player / vc 接口，内部指向当前活动槽位
@@ -7652,6 +7655,10 @@ class _PlayerPageState extends State<PlayerPage>
       // 位置流每 100ms 左右触发一次；全量 setState 会让视频层频繁重建、
       // 在 Windows 上造成卡顿与音画不同步。这里节流到 200ms，
       // 但跳转/拖动后的大幅变化立即刷新。
+      if (!_firstFrameSeen && position.inMilliseconds >= 120) {
+        _firstFrameSeen = true;
+        if (mounted) setState(() {});
+      }
       final now = DateTime.now().millisecondsSinceEpoch;
       final bigJump =
           (position.inMilliseconds - pos.inMilliseconds).abs() > 1200;
@@ -8356,6 +8363,7 @@ class _PlayerPageState extends State<PlayerPage>
     _blackGuard?.cancel();
     _blackRebuilt = false;
     _videoDw = 0;
+    _firstFrameSeen = false;
     _opening = true;
     setState(() {
       cur = i;
@@ -11847,31 +11855,44 @@ class _PlayerPageState extends State<PlayerPage>
                           onLongPressEnd:
                               fs ? (_) => player.setRate(speed) : null,
                           child: Stack(fit: StackFit.expand, children: [
-                            if ((it['th'] ?? '').toString().isNotEmpty)
-                              LayoutBuilder(builder: (_, pc) {
-                                final fit = videoFitFor(
-                                            aspect: _aspectFor(it),
-                                            mode: AppSettings.videoFitOverride,
-                                            containerAspect: pc.maxHeight > 0
-                                                ? pc.maxWidth / pc.maxHeight
-                                                : null) ==
-                                        VideoFit.fill
-                                    ? BoxFit.cover
-                                    : BoxFit.contain;
-                                return CachedNetworkImage(
-                                    cacheManager: DiziCache.manager,
-                                    imageUrl: withImageWidth(
-                                        cfg.mediaUrl(it['th'].toString(),
-                                            lib: _libFor(it)),
-                                        kPlayerImageWidth),
-                                    httpHeaders: cfg.headersFor(_libFor(it)),
-                                    memCacheWidth: _posterDecodeWidth(context),
-                                    fit: fit);
-                              }),
                             videoView(),
+                            // 首帧没出来之前用海报盖住视频层：既挡掉起播黑屏，
+                            // 也避免纹理先按错误比例画一帧再跳。
+                            if ((it['th'] ?? '').toString().isNotEmpty)
+                              IgnorePointer(
+                                ignoring: _firstFrameSeen,
+                                child: AnimatedOpacity(
+                                  opacity: _firstFrameSeen ? 0 : 1,
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOut,
+                                  child: LayoutBuilder(builder: (_, pc) {
+                                    final fit = videoFitFor(
+                                                aspect: _aspectFor(it),
+                                                mode: AppSettings.videoFitOverride,
+                                                containerAspect: pc.maxHeight > 0
+                                                    ? pc.maxWidth / pc.maxHeight
+                                                    : null) ==
+                                            VideoFit.fill
+                                        ? BoxFit.cover
+                                        : BoxFit.contain;
+                                    return CachedNetworkImage(
+                                        cacheManager: DiziCache.manager,
+                                        imageUrl: withImageWidth(
+                                            cfg.mediaUrl(it['th'].toString(),
+                                                lib: _libFor(it)),
+                                            kPlayerImageWidth),
+                                        httpHeaders:
+                                            cfg.headersFor(_libFor(it)),
+                                        memCacheWidth:
+                                            _posterDecodeWidth(context),
+                                        fit: fit);
+                                  }),
+                                ),
+                              ),
                             // J-A5：加载圈移到右上角，垂直中线与左侧返回键图标对齐；
                             // 错误/重试仍由中央的 _failureOverlay 展示。
-                            if (loading)
+                            if (loading &&
+                                (it['th'] ?? '').toString().isEmpty)
                               Positioned(
                                 top: pad.top + 20,
                                 right: pad.right + 18,
