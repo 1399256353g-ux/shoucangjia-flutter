@@ -33,6 +33,7 @@ class _FolderRow {
   final int depth;
   final int authors;
   final List<_FolderRow> children;
+
   /// 基础库目录：永远不允许勾选为「节点文件夹」（单元库）。
   final bool isBasic;
 
@@ -53,6 +54,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   final Set<String> expanded = <String>{};
   final Set<String> nodes = <String>{};
   final Set<String> saved = <String>{};
+
   /// 基础库 rel 集合（来自 `/api/libraries.json` 的 `basicLibraries`）。
   Set<String> basicRels = <String>{};
 
@@ -157,8 +159,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     final n = normalizeRel(r.rel);
     setState(() => unlocked.add(n));
     _saveUnlocked();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('已解锁「${r.name}」，可设为节点文件夹')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('已解锁「${r.name}」，可设为节点文件夹')));
   }
 
   Future<void> _load() async {
@@ -207,8 +209,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   Future<Set<String>> _fetchBasicRels() async {
     try {
       final r = await http
-          .get(widget.urlOf('/api/libraries.json'),
-              headers: widget.headersOf())
+          .get(widget.urlOf('/api/libraries.json'), headers: widget.headersOf())
           .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) return <String>{};
       final j = jsonDecode(utf8.decode(r.bodyBytes));
@@ -240,8 +241,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
         name: '${raw['name'] ?? rel}'.trim(),
         depth: (raw['depth'] is num) ? (raw['depth'] as num).toInt() : 1,
         authors: authors,
-        children:
-            _parse((raw['dirs'] as List?) ?? const [], basics),
+        children: _parse((raw['dirs'] as List?) ?? const [], basics),
         isBasic: _isBasicFolder(raw, rel, authors, basics),
       ));
     }
@@ -263,9 +263,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
             body: jsonEncode({'nodes': nodes.toList()}),
           )
           .timeout(const Duration(seconds: 20));
-      final j = r.statusCode == 200
-          ? jsonDecode(utf8.decode(r.bodyBytes))
-          : null;
+      final j =
+          r.statusCode == 200 ? jsonDecode(utf8.decode(r.bodyBytes)) : null;
       if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
         throw (j is Map && j['error'] != null)
             ? '${j['error']}'
@@ -289,6 +288,37 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
 
   bool get dirty =>
       nodes.length != saved.length || !nodes.every(saved.contains);
+
+  /// 有未保存改动时，离开页面或刷新会丢掉这些改动：先向 owner 确认。
+  Future<bool> _confirmDiscard(String action) async {
+    if (!dirty) return true;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('还有未保存的改动'),
+        content: Text('$action会丢弃当前未保存的节点设置，确定继续吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('放弃改动'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// 刷新前先确认：避免把未保存的勾选一并刷掉。
+  Future<void> _refresh() async {
+    if (loading || saving) return;
+    if (!await _confirmDiscard('刷新')) return;
+    if (!mounted) return;
+    await _load();
+  }
 
   void _toggleExpand(String rel) {
     setState(() {
@@ -332,6 +362,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
         walk(r.children);
       }
     }
+
     walk(rows);
     return out;
   }
@@ -426,10 +457,9 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             fontSize: 13,
-                            fontWeight:
-                                isNode && !isBasic
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
+                            fontWeight: isNode && !isBasic
+                                ? FontWeight.w700
+                                : FontWeight.w500,
                             color: isBasic ? Colors.grey : null)),
                     if (r.authors > 0)
                       Text('${r.authors} 位作者',
@@ -464,8 +494,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Text('节点',
-                      style: TextStyle(
-                          fontSize: 10, fontWeight: FontWeight.w600)),
+                      style:
+                          TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
                 ),
               if (isBasic)
                 IconButton(
@@ -491,107 +521,115 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('文件结构'),
-        actions: [
-          IconButton(
-            tooltip: '刷新',
-            onPressed: loading ? null : _load,
-            icon: const Icon(Icons.refresh),
-          ),
-          const HomeAction(),
-          TextButton(
-            onPressed: (dirty && !saving) ? _save : null,
-            child: saving
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('保存'),
-          ),
-        ],
-      ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : err != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('加载失败：$err',
-                        style: const TextStyle(fontSize: 12)),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  children: [
-                    Container(
-                      margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest
-                            .withValues(alpha: 0.4),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.layers_outlined, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text('顶级节点：$topName',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600)),
-                        ),
-                        Text('已选 ${nodes.length} 个节点',
-                            style: const TextStyle(
-                                fontSize: 11, color: Colors.grey)),
-                      ]),
+    return PopScope(
+      canPop: !dirty || saving,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (!await _confirmDiscard('返回')) return;
+        if (!mounted) return;
+        Navigator.of(context).pop();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('文件结构'),
+          actions: [
+            IconButton(
+              tooltip: '刷新',
+              onPressed: loading ? null : _refresh,
+              icon: const Icon(Icons.refresh),
+            ),
+            const HomeAction(),
+            TextButton(
+              onPressed: (dirty && !saving) ? _save : null,
+              child: saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('保存'),
+            ),
+          ],
+        ),
+        body: loading
+            ? const Center(child: CircularProgressIndicator())
+            : err != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text('加载失败：$err',
+                          style: const TextStyle(fontSize: 12)),
                     ),
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
-                      child: Text(
-                          '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级节点是当前媒体库的根节点，默认名称为 SECRET；接入多个媒体库时，每个库各有自己的顶级节点。'
-                          '「基础库」目录固定排除，不能设为节点。',
-                          style: TextStyle(fontSize: 11, color: Colors.grey)),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      child: Row(children: [
-                        Expanded(
-                          child: FilledButton.tonalIcon(
-                            key: const ValueKey('bulk-set-nodes'),
-                            onPressed: (loading || saving || rows.isEmpty)
-                                ? null
-                                : _setAllNonBasicAsNodes,
-                            icon: const Icon(Icons.account_tree_outlined,
-                                size: 16),
-                            label: const Text(
-                                '一键把所有非基础库文件夹设为节点',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 12)),
-                          ),
+                  )
+                : ListView(
+                    padding: const EdgeInsets.only(bottom: 24),
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest
+                              .withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        if (basicRels.isNotEmpty) ...[
+                        child: Row(children: [
+                          const Icon(Icons.layers_outlined, size: 18),
                           const SizedBox(width: 8),
-                          Text('基础库 ${basicRels.length} 个',
+                          Expanded(
+                            child: Text('顶级节点：$topName',
+                                style: const TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.w600)),
+                          ),
+                          Text('已选 ${nodes.length} 个节点',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.grey)),
-                        ],
-                      ]),
-                    ),
-                    for (final r in rows) _buildRow(r),
-                    if (rows.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text('该库下没有子文件夹',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        ]),
                       ),
-                  ],
-                ),
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+                        child: Text(
+                            '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级节点是当前媒体库的根节点，默认名称为 SECRET；接入多个媒体库时，每个库各有自己的顶级节点。'
+                            '「基础库」目录固定排除，不能设为节点。',
+                            style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: Row(children: [
+                          Expanded(
+                            child: FilledButton.tonalIcon(
+                              key: const ValueKey('bulk-set-nodes'),
+                              onPressed: (loading || saving || rows.isEmpty)
+                                  ? null
+                                  : _setAllNonBasicAsNodes,
+                              icon: const Icon(Icons.account_tree_outlined,
+                                  size: 16),
+                              label: const Text('一键把所有非基础库文件夹设为节点',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 12)),
+                            ),
+                          ),
+                          if (basicRels.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Text('基础库 ${basicRels.length} 个',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.grey)),
+                          ],
+                        ]),
+                      ),
+                      for (final r in rows) _buildRow(r),
+                      if (rows.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Text('该库下没有子文件夹',
+                              textAlign: TextAlign.center,
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.grey)),
+                        ),
+                    ],
+                  ),
+      ),
     );
   }
 }
