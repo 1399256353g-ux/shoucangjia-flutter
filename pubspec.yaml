@@ -1,7 +1,7 @@
 name: shoucangjia
 description: Local media library client
 publish_to: 'none'
-version: 0.9.117+120
+version: 0.9.118+121
 environment:
   sdk: '>=3.4.0 <4.0.0'
 
@@ -14,7 +14,6 @@ dependencies:
   media_kit: ^1.1.11
   media_kit_video: ^1.2.5
   media_kit_libs_video: ^1.0.5
-  video_player: ^2.10.1
   window_manager: ^0.4.3
   path_provider: ^2.1.5
   path: ^1.9.0
