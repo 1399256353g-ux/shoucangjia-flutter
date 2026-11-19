@@ -250,10 +250,46 @@ class Cfg {
 
   /// 媒体绝对地址：按作品所属库路由到对应 IP。
   String mediaUrl(String p, {String? lib}) =>
-      '${baseFor(lib)}${media(p, lib: lib)}';
+      '${baseFor(lib)}${encodeMediaPath(media(p, lib: lib))}';
 }
 
 final cfg = Cfg();
+
+/// 媒体路径转义：只处理会让 `Uri.parse` 把一个文件名断成片段/查询的字符。
+///
+/// NAS 上的文件名可能带 `#`、`?` 或空格（如 `1#花絮.mp4`），直接拼进 URL 后
+/// `Uri.parse` 会把 `#` 之后当 fragment、`?` 之后当 query，请求到的就是另一个路径，
+/// 表现为封面 404 / 播放失败。这里按字符做最小转义：
+/// - 已有合法 `%XX` 原样保留，避免二次编码（`%25`）；
+/// - 孤立 `%`（后面不是两位十六进制）转成 `%25`；
+/// - `#`、`?`、空格、控制字符转义成 `%XX`；
+/// - 其余字符（含中文、`/` 分段符）不动，交给 Uri 自己编码。
+String encodeMediaPath(String path) {
+  if (path.isEmpty) return path;
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  final hex2 = RegExp(r'^[0-9A-Fa-f]{2}$');
+  final out = StringBuffer();
+  for (var i = 0; i < path.length; i++) {
+    final ch = path[i];
+    if (ch == '%') {
+      final hex = i + 2 < path.length ? path.substring(i + 1, i + 3) : '';
+      if (hex2.hasMatch(hex)) {
+        out.write(path.substring(i, i + 3));
+        i += 2;
+      } else {
+        out.write('%25');
+      }
+      continue;
+    }
+    final code = ch.codeUnitAt(0);
+    if (ch == '#' || ch == '?' || ch == ' ' || ch == '\u007f' || code < 0x20) {
+      out.write(Uri.encodeComponent(ch));
+    } else {
+      out.write(ch);
+    }
+  }
+  return out.toString();
+}
 
 /// 全局作者头像索引：作者名 → `av` 路径（来自 `/api/authors.json`）。
 ///
@@ -296,6 +332,7 @@ Future<void> ensureAuthorAvatarsLoaded() async {
     if (_authorAvatarLoaded) authorAvatarRevision.value++;
   }
 }
+
 final navKey = GlobalKey<NavigatorState>();
 
 /// 封面设置成功后的刷新信号：主页库卡片据此重新拉取封面索引。
@@ -392,7 +429,10 @@ class LibMeta {
       var basicToUnit = const <String, String>{};
       try {
         final rs = await Future.wait([
-          http.get(cfg.u('/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}', lib: lib),
+          http.get(
+              cfg.u(
+                  '/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}',
+                  lib: lib),
               headers: cfg.headers),
           http.get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers),
           http.get(cfg.u('/api/author_stats.json', lib: lib),
@@ -664,7 +704,11 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
           .timeout(const Duration(seconds: 12));
       if (reg.statusCode != 200) return <String, Set<String>>{};
       final lj = await http
-          .get(cfg.u('/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}', lib: lib), headers: cfg.headers)
+          .get(
+              cfg.u(
+                  '/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}',
+                  lib: lib),
+              headers: cfg.headers)
           .timeout(const Duration(seconds: 12));
       if (lj.statusCode != 200) return <String, Set<String>>{};
       final regJson = jsonDecode(utf8.decode(reg.bodyBytes));
@@ -961,7 +1005,8 @@ bool isManualWork(Object? manualIds, String id) {
 }
 
 /// K7：剪掉已不存在的单元库标记，保留原顺序并去重。
-List<String> pruneUnitMarks(Iterable<String> existingIds, Iterable<String> marks) {
+List<String> pruneUnitMarks(
+    Iterable<String> existingIds, Iterable<String> marks) {
   final keep = existingIds.where((e) => e.isNotEmpty).toSet();
   final out = <String>[];
   final seen = <String>{};
@@ -1027,7 +1072,10 @@ Future<Map<String, dynamic>?> postWorkDelete(String lib, String id,
   try {
     final r = await http
         .post(cfg.u('/api/work/delete', lib: lib),
-            headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
+            headers: {
+              ...cfg.headersFor(lib),
+              'Content-Type': 'application/json'
+            },
             body: jsonEncode({
               'lib': lib,
               'id': id,
@@ -1040,7 +1088,11 @@ Future<Map<String, dynamic>?> postWorkDelete(String lib, String id,
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
     }
-    return {'status': r.statusCode, 'ok': false, 'error': 'HTTP ${r.statusCode}'};
+    return {
+      'status': r.statusCode,
+      'ok': false,
+      'error': 'HTTP ${r.statusCode}'
+    };
   } catch (e) {
     return {'ok': false, 'error': '$e'};
   }
@@ -1055,7 +1107,10 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
   try {
     final r = await http
         .post(cfg.u('/api/work/move', lib: lib),
-            headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
+            headers: {
+              ...cfg.headersFor(lib),
+              'Content-Type': 'application/json'
+            },
             body: jsonEncode({
               'lib': lib,
               'id': id,
@@ -1069,7 +1124,11 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
     }
-    return {'status': r.statusCode, 'ok': false, 'error': 'HTTP ${r.statusCode}'};
+    return {
+      'status': r.statusCode,
+      'ok': false,
+      'error': 'HTTP ${r.statusCode}'
+    };
   } catch (e) {
     return {'ok': false, 'error': '$e'};
   }
@@ -1085,7 +1144,8 @@ String authorPrefixOfMedia(String path) {
     if (at > 0) p = p.substring(at + 1);
   }
   final segs = p.split('/').where((e) => e.isNotEmpty).toList();
-  final i = segs.indexWhere((s) => s == 'VID' || s == 'PIC' || s == 'vid' || s == 'pic');
+  final i = segs
+      .indexWhere((s) => s == 'VID' || s == 'PIC' || s == 'vid' || s == 'pic');
   if (i > 0) return segs.sublist(0, i).join('/');
   return segs.length > 1 ? segs.sublist(0, segs.length - 1).join('/') : '';
 }
@@ -1180,8 +1240,8 @@ class _AppState extends State<App> {
         theme: AppTheme.themeData,
         // 输入框有焦点时 TextField 的默认 Esc 映射会拦掉下面的 shortcuts，
         // 这里往下沉一层，保证「部分页面 Esc 返回失效」不再出现。
-        builder: (context, child) =>
-            EscBackScope(navKey: navKey, child: child ?? const SizedBox.shrink()),
+        builder: (context, child) => EscBackScope(
+            navKey: navKey, child: child ?? const SizedBox.shrink()),
         shortcuts: const {
           SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
         },
@@ -1269,7 +1329,10 @@ class _SettingsPageState extends State<SettingsPage> {
             .get(Uri.parse('${s.base}/api/index.json'), headers: headers)
             .timeout(const Duration(seconds: 8)),
         http
-            .get(Uri.parse('${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'), headers: headers)
+            .get(
+                Uri.parse(
+                    '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+                headers: headers)
             .timeout(const Duration(seconds: 8)),
       ]);
       if (rs[0].statusCode != 200) throw Exception('HTTP ${rs[0].statusCode}');
@@ -1923,8 +1986,7 @@ class LibBadgeChip extends StatelessWidget {
     // 位置词条自动省略目录名前缀序号（`(1) 名称` → `名称`）。
     final text = label.startsWith('+')
         ? label
-        : LibraryBadge.labelWithEmoji(
-            LibraryBadge.stripIndex(label), unitId);
+        : LibraryBadge.labelWithEmoji(LibraryBadge.stripIndex(label), unitId);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
@@ -2118,9 +2180,8 @@ class AuthorAvatar extends StatelessWidget {
     final src = override.isNotEmpty
         ? override
         : (mediaPath.isNotEmpty ? mediaPath : authorAv);
-    final srcLib = override.isNotEmpty
-        ? (overLib.isEmpty ? lib : overLib)
-        : lib;
+    final srcLib =
+        override.isNotEmpty ? (overLib.isEmpty ? lib : overLib) : lib;
     // 统一占位：无图/加载中/失败都不空白，用首字母圆形占位（emoji 安全）。
     final placeholder = AvatarLetterPlaceholder(name: name, size: size);
     return ClipOval(
@@ -2485,8 +2546,8 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
             : 'HTTP ${r.statusCode}';
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('已开始检测平台删除的作品，完成后自动刷新')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已开始检测平台删除的作品，完成后自动刷新')));
       await Future<void>.delayed(const Duration(seconds: 5));
       if (mounted) await load();
     } catch (e) {
@@ -2599,8 +2660,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                             '${report.updatedLabel.isEmpty ? '' : ' · 日志更新 ${report.updatedLabel}'}'
                             ' · 只读记录，不删除媒体',
                             style: TextStyle(
-                                fontSize: 11,
-                                color: cs.onSurfaceVariant)),
+                                fontSize: 11, color: cs.onSurfaceVariant)),
                       ),
                     ]),
                   ),
@@ -2627,8 +2687,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600)),
+                                    fontSize: 13, fontWeight: FontWeight.w600)),
                             subtitle: Text(
                                 '@${e.author}'
                                 '${e.date.isEmpty ? '' : ' · ${e.date}'}'
@@ -2836,8 +2895,7 @@ class _RecommendCountTileState extends State<_RecommendCountTile> {
               onPressed: () => Navigator.pop(c, false),
               child: const Text('取消')),
           FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('保存')),
+              onPressed: () => Navigator.pop(c, true), child: const Text('保存')),
         ],
       ),
     );
@@ -2845,8 +2903,8 @@ class _RecommendCountTileState extends State<_RecommendCountTile> {
     final v = await RecommendCountSettings.save(ctrl.text);
     if (!mounted) return;
     setState(() {});
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-        content: Text(v == 0 ? '已设为默认 40' : '已设为 $v 个')));
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(content: Text(v == 0 ? '已设为默认 40' : '已设为 $v 个')));
   }
 
   @override
@@ -2855,9 +2913,7 @@ class _RecommendCountTileState extends State<_RecommendCountTile> {
     return ListTile(
       leading: const Icon(Icons.auto_awesome_outlined),
       title: const Text('推荐数量'),
-      subtitle: Text(v == 0
-          ? '默认 40 个 · 续播自动追加'
-          : '$v 个 · 0–500 · 续播自动追加'),
+      subtitle: Text(v == 0 ? '默认 40 个 · 续播自动追加' : '$v 个 · 0–500 · 续播自动追加'),
       onTap: _edit,
     );
   }
@@ -2898,8 +2954,8 @@ class SettingsHubPage extends StatelessWidget {
           leading: const Icon(Icons.bug_report_outlined),
           title: const Text('诊断'),
           subtitle: const Text('本次运行的最后动作记录 · 崩溃/停播/封面异常排查'),
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const DiagnosticsPage())),
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const DiagnosticsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.sell_outlined),
@@ -2955,9 +3011,8 @@ class SettingsHubPage extends StatelessWidget {
                   detail: cfg.base.isEmpty
                       ? '未连接服务器'
                       : '${cfg.base} · ${cfg.libName.isEmpty ? cfg.lib : cfg.libName}',
-                  cacheStatsUri: cfg.base.isEmpty
-                      ? null
-                      : cfg.u('/api/cache/stats'),
+                  cacheStatsUri:
+                      cfg.base.isEmpty ? null : cfg.u('/api/cache/stats'),
                   cachePruneUri:
                       cfg.base.isEmpty ? null : cfg.u('/api/cache/prune'),
                   cacheHeaders: cfg.headers))),
@@ -3278,7 +3333,8 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
               },
             ),
         ]),
-        const Text('铺满：竖屏视频裁剪填满屏幕（默认）；适应：始终按源比例完整显示，横屏/方形视频自动留黑边。手动选择后优先于按比例自动判定。',
+        const Text(
+            '铺满：竖屏视频裁剪填满屏幕（默认）；适应：始终按源比例完整显示，横屏/方形视频自动留黑边。手动选择后优先于按比例自动判定。',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
       ]),
     );
@@ -3890,7 +3946,10 @@ class _LibraryPageState extends State<LibraryPage> {
                 .get(Uri.parse('${s.base}/api/libraries'), headers: h)
                 .timeout(const Duration(seconds: 10)),
             http
-                .get(Uri.parse('${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'), headers: h)
+                .get(
+                    Uri.parse(
+                        '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+                    headers: h)
                 .timeout(const Duration(seconds: 10)),
           ]);
           var list = <Map<String, dynamic>>[];
@@ -3972,7 +4031,10 @@ class _LibraryPageState extends State<LibraryPage> {
         };
         try {
           final r = await http
-              .get(Uri.parse('${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'), headers: h)
+              .get(
+                  Uri.parse(
+                      '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+                  headers: h)
               .timeout(const Duration(seconds: 8));
           if (r.statusCode != 200) continue;
           final j = jsonDecode(r.body);
@@ -4640,7 +4702,10 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       var flags = const <String, bool>{};
       try {
         final m = await LibMeta.load(cfg.lib);
-        unitList = [for (final u in m.units) if (u.id != 'secret') u];
+        unitList = [
+          for (final u in m.units)
+            if (u.id != 'secret') u
+        ];
       } catch (_) {}
       try {
         final nr = await http
@@ -4696,7 +4761,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         has ? '已配置爬虫脚本 · 可单独设置同步频率' : '无爬虫脚本（J17：同步设置不可用）',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 11, color: has ? Colors.grey : Colors.orange),
+        style:
+            TextStyle(fontSize: 11, color: has ? Colors.grey : Colors.orange),
       ),
       trailing: Icon(Icons.chevron_right,
           color: has ? null : Colors.grey.withValues(alpha: 0.4)),
@@ -5234,8 +5300,7 @@ class _HomePageState extends State<HomePage> {
 ///
 /// 合并索引会给 `libs`（出处）或无头像作者只有 `_lib`，不能只看头像路径，
 /// 否则筛选面板选了库之后会把没有头像的作者全部排除。
-({String basic, String big, String unit}) authorRowIdsFor(
-    Map e, LibMeta? m) {
+({String basic, String big, String unit}) authorRowIdsFor(Map e, LibMeta? m) {
   var basic = '${e['_bid'] ?? ''}';
   final libs = e['libs'];
   if (basic.isEmpty && libs is List) {
@@ -5253,9 +5318,8 @@ class _HomePageState extends State<HomePage> {
     final l = '${e['_lib'] ?? ''}';
     if (m?.basicById(l) != null) basic = l;
   }
-  var unit = basic.isEmpty
-      ? (m?.unitIdFor(av) ?? '')
-      : (m?.basicToUnit[basic] ?? '');
+  var unit =
+      basic.isEmpty ? (m?.unitIdFor(av) ?? '') : (m?.basicToUnit[basic] ?? '');
   var big = m?.basicById(basic)?.bigId ?? '';
   if (big.isEmpty) big = m?.bigIdFor(av) ?? '';
   return (basic: basic, big: big, unit: unit);
@@ -5379,8 +5443,9 @@ class _RankPageState extends State<RankPage> {
     for (final e in visibleRows.take(n)) {
       final av = '${e['avatar'] ?? ''}';
       if (av.isEmpty) continue;
-      final lib =
-          sel == 'all' ? '${e['lib'] ?? cfg.lib}' : (sel.isEmpty ? cfg.lib : sel);
+      final lib = sel == 'all'
+          ? '${e['lib'] ?? cfg.lib}'
+          : (sel.isEmpty ? cfg.lib : sel);
       final u = withImageWidth(cfg.mediaUrl(av, lib: lib), kAvatarImageWidth);
       urls.add(u);
       headers[u] = cfg.headersFor(lib);
@@ -5426,7 +5491,6 @@ class _RankPageState extends State<RankPage> {
               (!filter.isActive || _rowMatches(_rowMap(e), filter)))
             _rowMap(e)
       ];
-
 
   List<AuthorLibNode> get _filterBasics {
     final out = <AuthorLibNode>[];
@@ -6148,6 +6212,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       await sp.setString(_sortPrefsKey, value);
     } catch (_) {}
   }
+
   bool loading = true;
   String? err;
   bool syncing = false;
@@ -6166,9 +6231,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   final Set<String> _avLookup = {};
   // J11：作者筛选状态全 App 共享（总览/排行/搜索/推荐同一份）
   AuthorFilterState get filter => authorFilter.value;
+
   /// 快捷条当前唯一选中大库（'' / 多个 → all），用于文案与作者页兜底库。
-  String get _quickBig =>
-      filter.bigs.length == 1 ? filter.bigs.first : 'all';
+  String get _quickBig => filter.bigs.length == 1 ? filter.bigs.first : 'all';
   Map<String, Set<String>> authorTypes = {};
   bool typesLoading = false;
   String _typesForSel = '';
@@ -6680,7 +6745,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   Widget _authorCell(MapEntry<String, Map<String, dynamic>> e) {
     final av = '${e.value['av'] ?? ''}';
-    final lib = '${e.value['_lib'] ?? (_quickBig == 'all' ? cfg.lib : _quickBig)}';
+    final lib =
+        '${e.value['_lib'] ?? (_quickBig == 'all' ? cfg.lib : _quickBig)}';
     final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
 
     // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位
@@ -6851,7 +6917,6 @@ class _MediaRetryBox extends StatelessWidget {
   }
 }
 
-
 /// C：PageView 邻页（预载页）。独立 StatefulWidget，State 与已解码封面
 /// 在父级 setState 时保留；封面未就绪时用纯黑占位，绝不黑屏闪烁。
 class _NeighborPage extends StatefulWidget {
@@ -6936,18 +7001,17 @@ class _NeighborPageState extends State<_NeighborPage> {
       child: ClipRect(
         child: LayoutBuilder(builder: (_, c) {
           final fill = videoFitFor(
-                      aspect: _aspect,
-                      mode: AppSettings.videoFitOverride,
-                      containerAspect: c.maxHeight > 0
-                          ? c.maxWidth / c.maxHeight
-                          : null) ==
-                  VideoFit.fill;
+                  aspect: _aspect,
+                  mode: AppSettings.videoFitOverride,
+                  containerAspect:
+                      c.maxHeight > 0 ? c.maxWidth / c.maxHeight : null) ==
+              VideoFit.fill;
           return CachedNetworkImage(
-          cacheManager: DiziCache.manager,
-          // 滑动中的相邻页只是占位：720px 缩图足够，按屏幕宽度解码。
-          imageUrl: widget.imageUrl,
-          httpHeaders: widget.headers,
-          memCacheWidth: widget.memCacheWidth,
+            cacheManager: DiziCache.manager,
+            // 滑动中的相邻页只是占位：720px 缩图足够，按屏幕宽度解码。
+            imageUrl: widget.imageUrl,
+            httpHeaders: widget.headers,
+            memCacheWidth: widget.memCacheWidth,
             fit: fill ? BoxFit.cover : BoxFit.contain,
             fadeInDuration: Duration.zero,
             placeholder: (_, __) => fallback,
@@ -7088,6 +7152,7 @@ class _PlayerPageState extends State<PlayerPage>
   bool get _swipeHint => _swipeActive || _swipeShow;
   bool get _mobileSwipe =>
       swipeEnabledFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
+
   /// O4：当前视频宽高比（来自播放器 videoParams），用于把手机端任务栏
   /// 贴到画面下沿；拿不到时退回屏幕底部。
   double? _videoAspect;
@@ -7125,12 +7190,14 @@ class _PlayerPageState extends State<PlayerPage>
   // 变化中重排纹理导致原生崩溃；尺寸稳定后重建 Video 元素。
   bool _winResizing = false;
   Timer? _winResizeTimer;
+
   /// 切换期间用户又点了全屏：记录最后一次意图，结束后补执行。
   bool? _fsPending;
 
   bool _taskbarMeasureScheduled = false;
   // C：邻页 widget 复用缓存：同一实例返回给 PageView，setState 时不重建。
   final Map<String, Widget> _neighborPages = <String, Widget>{};
+
   /// O3：iOS 启动 1.5 秒内未真正播放时只重开一次，避免循环重开。
   Timer? _startupGuard;
   bool _startupReopened = false;
@@ -7164,8 +7231,10 @@ class _PlayerPageState extends State<PlayerPage>
   // 桌面端鼠标悬停：细条放大成可拖状态（owner 2026-11-18）。
   bool _scrubHover = false;
   double? _scrubFrac;
+
   /// 拖动中的比例：只驱动进度条自身重绘，不触发整页 setState。
   final ValueNotifier<double> _scrubFracVN = ValueNotifier<double>(0);
+
   /// 图文拖动中的目标段：同样只驱动分段条自身重绘。
   final ValueNotifier<int?> _picDragVN = ValueNotifier<int?>(null);
   bool _scrubThin = false;
@@ -7253,6 +7322,7 @@ class _PlayerPageState extends State<PlayerPage>
     }
     return -1;
   }
+
   // 当前页面实际已载入的媒体所属 open token；图文无音频时为 -1。
   // 用于忽略 player.stop()/切条时上一段媒体迟到的 completed 事件，
   // 避免刚打开图文就被上一次播放的完成事件带去下一条。
@@ -7332,6 +7402,7 @@ class _PlayerPageState extends State<PlayerPage>
   Duration dur = Duration.zero;
   Timer? autoTimer;
   Timer? hideTimer;
+
   /// 0.9.72：功能区自动隐藏的截止时刻（见 [HideDeadline]）。
   final HideDeadline _hideDeadline = HideDeadline();
   Timer? retryTimer;
@@ -7368,8 +7439,8 @@ class _PlayerPageState extends State<PlayerPage>
     _bindPlayer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       focus.requestFocus();
-      PerfDiagnostics.instance.endSpan('page:player',
-          <String, Object?>{'works': widget.works.length});
+      PerfDiagnostics.instance.endSpan(
+          'page:player', <String, Object?>{'works': widget.works.length});
       open(widget.start);
       // 预热作者头像索引：作品没带 av 时用作者级头像兜底。
       ensureAuthorAvatarsLoaded();
@@ -8682,15 +8753,12 @@ class _PlayerPageState extends State<PlayerPage>
 
   // P1：非全屏互动栏的收藏标记（本机内存态，暂不写服务端）。
 
-
   /// P1 §2：文案优先用作品简介，没有简介用标题；都为空则不显示。
   String _infoCaptionFor(dynamic w) {
     final desc = '${w['desc'] ?? ''}'.trim();
     if (desc.isNotEmpty) return desc;
     return '${w['ti'] ?? ''}'.trim();
   }
-
-
 
   // P1b §8：非全屏舞台长按菜单（500ms、位移 ≤12px、不暂停）。
   // 全屏分支不进入以下逻辑。
@@ -9233,8 +9301,8 @@ class _PlayerPageState extends State<PlayerPage>
       return;
     }
     _singleTapTimer?.cancel();
-    _singleTapTimer = Timer(
-        const Duration(milliseconds: kStageSingleTapDelayMs), () {
+    _singleTapTimer =
+        Timer(const Duration(milliseconds: kStageSingleTapDelayMs), () {
       _stageTapArbiter.clear();
       if (mounted) _singleStageTap();
     });
@@ -9536,9 +9604,6 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
-
-
-
   void toggleLoop() {
     // L6：打开循环时自动关闭连播并记住原状态；关闭循环时恢复到打开前的连播。
     // 不使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
@@ -9663,9 +9728,7 @@ class _PlayerPageState extends State<PlayerPage>
 
     final left = _hideDeadline.remaining(DateTime.now());
     hideTimer = Timer(
-        left > Duration.zero
-            ? left
-            : Duration(seconds: AppSettings.hideUiSec),
+        left > Duration.zero ? left : Duration(seconds: AppSettings.hideUiSec),
         fire);
   }
 
@@ -9675,13 +9738,13 @@ class _PlayerPageState extends State<PlayerPage>
     // owner 2026-11-18：非全屏的头像/简介必须常驻，不允许过几秒自动淡出。
     if (!fs) return false;
     return ImmersivePolicy.eligible(
-        fullscreen: fs,
-        uiVisible: ui,
-        pageSwiping: _pageSwiping,
-        overlayOpen: _commentVisible || _menuVisible,
-        dragging: dragging,
-        seeking: _seeking,
-      );
+      fullscreen: fs,
+      uiVisible: ui,
+      pageSwiping: _pageSwiping,
+      overlayOpen: _commentVisible || _menuVisible,
+      dragging: dragging,
+      seeking: _seeking,
+    );
   }
 
   /// P2 §12：重新排定 3 秒无操作计时；不允许时立即退出沉浸。
@@ -9950,7 +10013,6 @@ class _PlayerPageState extends State<PlayerPage>
     return (size.width * dpr).round().clamp(360, 2160);
   }
 
-
   /// 页内浮层：作者头像/文案/音乐 + 右侧互动栏（含全屏旧信息行）。
   ///
   /// 放进每一页自己的 Stack，滑动时随视频整页位移——抖音的文案是跟着
@@ -9971,229 +10033,217 @@ class _PlayerPageState extends State<PlayerPage>
   }) {
     // 全屏时任务栏是半透明浮层（占 _taskbarH），信息必须整段让开，
     // 否则会与任务栏重叠。
-    final overlayBottom = fs
-        ? (_taskbarH > 0 ? _taskbarH : 56 + pad.bottom) + 12
-        : bottom;
+    final overlayBottom =
+        fs ? (_taskbarH > 0 ? _taskbarH : 56 + pad.bottom) + 12 : bottom;
     return [
       // P1 §2：非全屏左侧信息区走独立的抖音式面板；全屏保留旧信息行。
       if (!broken)
-      Positioned(
-        left: pad.left + 14,
-        right: pad.right + 80,
-        bottom: overlayBottom,
-        child: IgnorePointer(
-          ignoring: !ui,
-          child: AnimatedOpacity(
-            opacity: chromeOpacity,
-            duration: Duration(milliseconds: chromeMs),
-            curve: Curves.easeOut,
-            child: GestureDetector(
-              // owner 2026-11-18：只有头像和作者名可进作者页；简介区域与
-              // 进度条上方空白不再误触发跳转。
-              onLongPress: _showWorkMenu,
-              child: Row(children: [
-                // B2：作者级头像索引异步到位后要重新解析，否则会一直显示人形占位。
-                ValueListenableBuilder<int>(
-                  valueListenable: authorAvatarRevision,
-                  builder: (context, _, __) => avatarFor(w).isNotEmpty
-                      ? GestureDetector(
-                    onTap: openAuthor,
-                    child: ClipOval(
-                      child: CachedNetworkImage(
-                          cacheManager: DiziCache.manager,
-                          // 播放页头像 38dp：取 200px 缩图即可。
-                          // 兜底图可能来自作者所在的基础库，按图片自身
-                          // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
-                          imageUrl: withImageWidth(
-                              cfg.mediaUrl(avatarFor(w),
-                                  lib: _avatarLibFor(avatarFor(w))),
-                              kAvatarImageWidth),
-                          httpHeaders:
-                              cfg.headersFor(_avatarLibFor(avatarFor(w))),
-                          width: 38,
-                          height: 38,
-                          memCacheWidth: (38 *
-                                  MediaQuery.devicePixelRatioOf(
-                                      context))
-                              .round(),
-                          fadeInDuration: Duration.zero,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) =>
-                              const CircleAvatar(
-                                  radius: 19,
-                                  child: Icon(Icons.person))))
-                  )
-                      : GestureDetector(
-                      onTap: openAuthor,
-                      child: const CircleAvatar(
-                          radius: 19, child: Icon(Icons.person))),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                    child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Row(children: [
-                        Flexible(
-                          child: GestureDetector(
+        Positioned(
+          left: pad.left + 14,
+          right: pad.right + 80,
+          bottom: overlayBottom,
+          child: IgnorePointer(
+            ignoring: !ui,
+            child: AnimatedOpacity(
+              opacity: chromeOpacity,
+              duration: Duration(milliseconds: chromeMs),
+              curve: Curves.easeOut,
+              child: GestureDetector(
+                // owner 2026-11-18：只有头像和作者名可进作者页；简介区域与
+                // 进度条上方空白不再误触发跳转。
+                onLongPress: _showWorkMenu,
+                child: Row(children: [
+                  // B2：作者级头像索引异步到位后要重新解析，否则会一直显示人形占位。
+                  ValueListenableBuilder<int>(
+                    valueListenable: authorAvatarRevision,
+                    builder: (context, _, __) => avatarFor(w).isNotEmpty
+                        ? GestureDetector(
                             onTap: openAuthor,
-                            child: Text('@${w['a']}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                        if (('${w['d'] ?? ''}').isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          Text('${w['d']}',
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.white54)),
-                        ],
-                        // G9：本地喜欢标记，点红心可取消
-                        if (_isLiked(w)) ...[
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: () => _setLiked(w, false),
-                            child: const Icon(Icons.favorite,
-                                size: 14, color: Color(0xFFFF3B5C)),
-                          ),
-                        ],
-                      ]),
-                      // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
-                      if (_meta != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Opacity(
-                            opacity: 0.7,
-                            child: AuthorBadges(
-                              meta: _meta,
-                              name: '${w['a'] ?? ''}',
-                              mediaPath: avatarFor(w),
-                              // 作品条目自带基础库 id 时直接用它归属单元库
-                              basicId:
-                                  '${w['_bid'] ?? w['basicId'] ?? ''}',
-                              fallbackId: _curLib,
-                              // 0.9.6：不再回退库名文案，无归属显示 SECRET
-                              fallbackName: '',
-                              works: widget.works
-                                  .where((e) =>
-                                      e is Map && e['a'] == w['a'])
-                                  .length,
+                            child: ClipOval(
+                                child: CachedNetworkImage(
+                                    cacheManager: DiziCache.manager,
+                                    // 播放页头像 38dp：取 200px 缩图即可。
+                                    // 兜底图可能来自作者所在的基础库，按图片自身
+                                    // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
+                                    imageUrl: withImageWidth(
+                                        cfg.mediaUrl(avatarFor(w),
+                                            lib: _avatarLibFor(avatarFor(w))),
+                                        kAvatarImageWidth),
+                                    httpHeaders: cfg.headersFor(
+                                        _avatarLibFor(avatarFor(w))),
+                                    width: 38,
+                                    height: 38,
+                                    memCacheWidth: (38 *
+                                            MediaQuery.devicePixelRatioOf(
+                                                context))
+                                        .round(),
+                                    fadeInDuration: Duration.zero,
+                                    fit: BoxFit.cover,
+                                    errorWidget: (_, __, ___) =>
+                                        const CircleAvatar(
+                                            radius: 19,
+                                            child: Icon(Icons.person)))))
+                        : GestureDetector(
+                            onTap: openAuthor,
+                            child: const CircleAvatar(
+                                radius: 19, child: Icon(Icons.person))),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Row(children: [
+                          Flexible(
+                            child: GestureDetector(
+                              onTap: openAuthor,
+                              child: Text('@${w['a']}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold)),
                             ),
                           ),
-                        ),
-                      // 作品/合集文件夹里的 txt 简介（服务端下发 desc）
-                      if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 3),
-                          child: Text('${w['desc']}'.trim(),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.white70)),
-                        ),
-                      // T：集数标签已移入页内舞台底部的进度层（随页位移），
-                      // 信息行不再重复展示。
-                      Row(children: [
-                        Expanded(
-                          child: LayoutBuilder(builder: (context, c) {
-                            const style = TextStyle(
-                                fontSize: 12, color: Colors.white70);
-                            const expandWidth = 22.0;
-                            final title = '${w['ti'] ?? ''}';
-                            // F33：按可用宽度实际测量，只有真的截断才
-                            // 显示展开按钮（原按字符数猜测会误判）。
-                            final needsExpand = willOverflowText(
-                                title, style, c.maxWidth - expandWidth,
-                                textScaler:
-                                    MediaQuery.textScalerOf(context),
-                                locale: Localizations.maybeLocaleOf(
-                                    context));
-                            // H13：展开后任务栏向上拉长，显示缩略全文，
-                            // 不弹独立窗口；再点一次收起。
-                            if (captionOpen) {
-                              return GestureDetector(
-                                // 吸收点击，避免误触进入作者主页
-                                onTap: () {},
-                                child: Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.fromLTRB(
-                                      10, 8, 10, 6),
-                                  decoration: BoxDecoration(
-                                      color: Colors.black45,
-                                      borderRadius:
-                                          BorderRadius.circular(12)),
-                                  constraints: BoxConstraints(
-                                      maxHeight:
-                                          MediaQuery.sizeOf(context)
-                                                  .height *
-                                              0.42),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Flexible(
-                                        child: SingleChildScrollView(
-                                          child: SelectableText(title,
-                                              style: style.copyWith(
-                                                  fontSize: 13,
-                                                  height: 1.5,
-                                                  color: Colors.white)),
-                                        ),
-                                      ),
-                                      Align(
-                                        alignment:
-                                            Alignment.centerRight,
-                                        child: GestureDetector(
-                                          onTap: toggleCaption,
-                                          child: const Padding(
-                                            padding: EdgeInsets.only(
-                                                left: 6,
-                                                top: 4,
-                                                bottom: 2),
-                                            child: Icon(
-                                                Icons.unfold_less,
-                                                size: 16,
-                                                color: Colors.white54),
+                          if (('${w['d'] ?? ''}').isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            Text('${w['d']}',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.white54)),
+                          ],
+                          // G9：本地喜欢标记，点红心可取消
+                          if (_isLiked(w)) ...[
+                            const SizedBox(width: 6),
+                            GestureDetector(
+                              onTap: () => _setLiked(w, false),
+                              child: const Icon(Icons.favorite,
+                                  size: 14, color: Color(0xFFFF3B5C)),
+                            ),
+                          ],
+                        ]),
+                        // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
+                        if (_meta != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Opacity(
+                              opacity: 0.7,
+                              child: AuthorBadges(
+                                meta: _meta,
+                                name: '${w['a'] ?? ''}',
+                                mediaPath: avatarFor(w),
+                                // 作品条目自带基础库 id 时直接用它归属单元库
+                                basicId: '${w['_bid'] ?? w['basicId'] ?? ''}',
+                                fallbackId: _curLib,
+                                // 0.9.6：不再回退库名文案，无归属显示 SECRET
+                                fallbackName: '',
+                                works: widget.works
+                                    .where((e) => e is Map && e['a'] == w['a'])
+                                    .length,
+                              ),
+                            ),
+                          ),
+                        // 作品/合集文件夹里的 txt 简介（服务端下发 desc）
+                        if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3),
+                            child: Text('${w['desc']}'.trim(),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.white70)),
+                          ),
+                        // T：集数标签已移入页内舞台底部的进度层（随页位移），
+                        // 信息行不再重复展示。
+                        Row(children: [
+                          Expanded(
+                            child: LayoutBuilder(builder: (context, c) {
+                              const style = TextStyle(
+                                  fontSize: 12, color: Colors.white70);
+                              const expandWidth = 22.0;
+                              final title = '${w['ti'] ?? ''}';
+                              // F33：按可用宽度实际测量，只有真的截断才
+                              // 显示展开按钮（原按字符数猜测会误判）。
+                              final needsExpand = willOverflowText(
+                                  title, style, c.maxWidth - expandWidth,
+                                  textScaler: MediaQuery.textScalerOf(context),
+                                  locale: Localizations.maybeLocaleOf(context));
+                              // H13：展开后任务栏向上拉长，显示缩略全文，
+                              // 不弹独立窗口；再点一次收起。
+                              if (captionOpen) {
+                                return GestureDetector(
+                                  // 吸收点击，避免误触进入作者主页
+                                  onTap: () {},
+                                  child: Container(
+                                    width: double.infinity,
+                                    padding:
+                                        const EdgeInsets.fromLTRB(10, 8, 10, 6),
+                                    decoration: BoxDecoration(
+                                        color: Colors.black45,
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                    constraints: BoxConstraints(
+                                        maxHeight:
+                                            MediaQuery.sizeOf(context).height *
+                                                0.42),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Flexible(
+                                          child: SingleChildScrollView(
+                                            child: SelectableText(title,
+                                                style: style.copyWith(
+                                                    fontSize: 13,
+                                                    height: 1.5,
+                                                    color: Colors.white)),
                                           ),
                                         ),
-                                      ),
-                                    ],
+                                        Align(
+                                          alignment: Alignment.centerRight,
+                                          child: GestureDetector(
+                                            onTap: toggleCaption,
+                                            child: const Padding(
+                                              padding: EdgeInsets.only(
+                                                  left: 6, top: 4, bottom: 2),
+                                              child: Icon(Icons.unfold_less,
+                                                  size: 16,
+                                                  color: Colors.white54),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
+                                );
+                              }
+                              return Row(children: [
+                                Expanded(
+                                  child: Text(title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: style),
                                 ),
-                              );
-                            }
-                            return Row(children: [
-                              Expanded(
-                                child: Text(title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: style),
-                              ),
-                              if (needsExpand)
-                                GestureDetector(
-                                  onTap: toggleCaption,
-                                  child: const Padding(
-                                    padding: EdgeInsets.only(
-                                        left: 6, top: 2, bottom: 2),
-                                    child: Icon(Icons.unfold_more,
-                                        size: 16,
-                                        color: Colors.white54),
+                                if (needsExpand)
+                                  GestureDetector(
+                                    onTap: toggleCaption,
+                                    child: const Padding(
+                                      padding: EdgeInsets.only(
+                                          left: 6, top: 2, bottom: 2),
+                                      child: Icon(Icons.unfold_more,
+                                          size: 16, color: Colors.white54),
+                                    ),
                                   ),
-                                ),
-                            ]);
-                          }),
-                        ),
-                      ]),
-                    ])),
-              ]),
+                              ]);
+                            }),
+                          ),
+                        ]),
+                      ])),
+                ]),
+              ),
             ),
           ),
         ),
-      ),
     ];
   }
 
@@ -10633,7 +10683,8 @@ class _PlayerPageState extends State<PlayerPage>
               subtitle: const Text('用当前作品图片作为基础库封面，不影响原文件'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _applyCover(CoverRequest.set(lib: _libFor(w), work: '${w['id'] ?? ''}'));
+                _applyCover(CoverRequest.set(
+                    lib: _libFor(w), work: '${w['id'] ?? ''}'));
               },
             ),
             // 0.9.29：自定义封面可撤销——只删 `_cover/current` 指针，已生成封面文件保留。
@@ -10707,7 +10758,8 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   // 0.9.29：清除自定义封面前先确认（服务端只删指针，封面文件保留可回滚）。
-  Future<void> _confirmClearCover(String lib, {CoverScope scope = CoverScope.basic}) async {
+  Future<void> _confirmClearCover(String lib,
+      {CoverScope scope = CoverScope.basic}) async {
     final unit = scope == CoverScope.unit;
     final ok = await showDialog<bool>(
       context: context,
@@ -10939,17 +10991,13 @@ class _PlayerPageState extends State<PlayerPage>
     if (!isV) {
       // owner 2026-11-18：图文的分段进度条也紧贴任务栏上缘（通栏细条）。
       return _picProgressFlush(
-          pics: pics,
-          idx: idx,
-          lift: fs ? _taskbarH : 0.0);
+          pics: pics, idx: idx, lift: fs ? _taskbarH : 0.0);
     }
     // 非全屏视频：呼出式进度条（贴任务栏上缘、极细、不操作时不可见）。
     // 全屏保留旧进度条，避免破坏沉浸态已有的呼出/隐藏逻辑。
     if (isV) {
       // 全屏时任务栏是浮层，进度条贴它的上缘，而不是屏幕最底。
-      return _scrubOverlay(
-          progress: progress,
-          lift: fs ? _taskbarH : 0.0);
+      return _scrubOverlay(progress: progress, lift: fs ? _taskbarH : 0.0);
     }
     final pad = MediaQuery.paddingOf(context);
     final opacity = ChromeFade.opacity(
@@ -10958,8 +11006,7 @@ class _PlayerPageState extends State<PlayerPage>
     final chapters = workChapterCount(w);
     // P0 §3：非全屏进度条距任务栏 8dp（全屏保持旧值 10dp）。
     final bottom = stageProgressBottomOffset(
-        safeBottom: fs ? pad.bottom : 0,
-        padding: fs ? 10 : kProgressBottomGap);
+        safeBottom: fs ? pad.bottom : 0, padding: fs ? 10 : kProgressBottomGap);
     return Positioned(
       left: 0,
       right: 0,
@@ -10996,8 +11043,7 @@ class _PlayerPageState extends State<PlayerPage>
                             : ''),
                     // P0 §3：非全屏时间 11px tabular / 白 90%。
                     style: fs
-                        ? const TextStyle(
-                            fontSize: 10, color: Colors.white60)
+                        ? const TextStyle(fontSize: 10, color: Colors.white60)
                         : kProgressTimeStyle),
                 const SizedBox(width: 8),
                 Expanded(
@@ -11019,8 +11065,7 @@ class _PlayerPageState extends State<PlayerPage>
                 const SizedBox(width: 8),
                 Text('${cur + 1} / ${widget.works.length}',
                     style: fs
-                        ? const TextStyle(
-                            fontSize: 10, color: Colors.white54)
+                        ? const TextStyle(fontSize: 10, color: Colors.white54)
                         : const TextStyle(
                             fontSize: kProgressTimeFontSize,
                             color: Color(0xB3FFFFFF),
@@ -11040,8 +11085,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 全屏（spec=false）保持旧视觉与旧拖动语义。
   /// 呼出式进度条浮层：底部 28dp 热区，整条宽度可拖。
   Widget _scrubOverlay({required double progress, double lift = 0}) {
-    final desktop =
-        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    final desktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
     // 全屏时进度条要跟功能区一起随时间隐藏；非全屏桌面端才常驻细条。
     final persistent = desktop && (!fs || ui);
     final active = _scrubActive || (_scrubHover && (!fs || ui));
@@ -11065,27 +11109,27 @@ class _PlayerPageState extends State<PlayerPage>
             setState(() => _scrubHover = false);
           },
           child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
-          onTapDown: (d) => _scrubStart(d.localPosition, width),
-          onTapUp: (_) => _scrubEnd(),
-          onTapCancel: () => _scrubEnd(),
-          onHorizontalDragStart: (d) => _scrubStart(d.localPosition, width),
-          onHorizontalDragUpdate: (d) => _scrubMove(d.localPosition, width),
-          onHorizontalDragEnd: (_) => _scrubEnd(),
-          onHorizontalDragCancel: () => _scrubEnd(),
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: ScrubBar(
-              fraction: _scrubFracVN,
-              active: active,
-              visible: active || _scrubThin || persistent,
-              labelFor: (f) => dur.inMilliseconds > 0
-                  ? '${fmt(dur * f)} / ${fmt(dur)}'
-                  : '',
+            behavior: HitTestBehavior.opaque,
+            // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
+            onTapDown: (d) => _scrubStart(d.localPosition, width),
+            onTapUp: (_) => _scrubEnd(),
+            onTapCancel: () => _scrubEnd(),
+            onHorizontalDragStart: (d) => _scrubStart(d.localPosition, width),
+            onHorizontalDragUpdate: (d) => _scrubMove(d.localPosition, width),
+            onHorizontalDragEnd: (_) => _scrubEnd(),
+            onHorizontalDragCancel: () => _scrubEnd(),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: ScrubBar(
+                fraction: _scrubFracVN,
+                active: active,
+                visible: active || _scrubThin || persistent,
+                labelFor: (f) => dur.inMilliseconds > 0
+                    ? '${fmt(dur * f)} / ${fmt(dur)}'
+                    : '',
+              ),
             ),
           ),
-        ),
         );
       }),
     );
@@ -11187,16 +11231,14 @@ class _PlayerPageState extends State<PlayerPage>
 
     final pressed = spec && (dragging || _seeking);
     final metrics = stageProgressMetrics(pressed: pressed);
-    final idleH = spec ? kProgressIdleHeight : ((dragging || barHover) ? 7.0 : 3.0);
+    final idleH =
+        spec ? kProgressIdleHeight : ((dragging || barHover) ? 7.0 : 3.0);
     final h = spec ? metrics.height : idleH;
-    final trackColor =
-        spec ? metrics.trackColor : Colors.white24;
-    final playedColor = spec
-        ? metrics.playedColor
-        : (dragging ? Colors.white : Colors.white70);
-    final radius = spec
-        ? BorderRadius.circular(metrics.radius)
-        : BorderRadius.circular(0);
+    final trackColor = spec ? metrics.trackColor : Colors.white24;
+    final playedColor =
+        spec ? metrics.playedColor : (dragging ? Colors.white : Colors.white70);
+    final radius =
+        spec ? BorderRadius.circular(metrics.radius) : BorderRadius.circular(0);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -11392,8 +11434,7 @@ class _PlayerPageState extends State<PlayerPage>
   }) {
     // H1：按下即进入拖动，跨段震动反馈，松手才切换图片；
     // 拖动中的目标段放大到与视频进度条一致（7px）。
-    int picAt(Offset p) =>
-        picIndexAtFraction(p.dx / width, pics.length);
+    int picAt(Offset p) => picIndexAtFraction(p.dx / width, pics.length);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapUp: (d) {
@@ -11648,130 +11689,230 @@ class _PlayerPageState extends State<PlayerPage>
               Padding(
                 padding: EdgeInsets.only(bottom: stageInset),
                 child: NotificationListener<ScrollNotification>(
-                onNotification: (n) {
-                  if (n.depth != 0) return false;
-                  if (n is ScrollStartNotification && n.dragDetails != null) {
-                    _setPageSwiping(true);
-                  } else if (n is ScrollEndNotification) {
-                    _setPageSwiping(false);
-                    // J-A4：拖动/回弹结束后才切条，拖拽过程中旧视频继续播放。
-                    final pending = _swipePendingIndex;
-                    _swipePendingIndex = null;
-                    if (pending != null && pending != cur) open(pending);
-                  }
-                  return false;
-                },
-                child: PageView.builder(
-                  controller: pc,
-                  // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
-                  // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
-                  // G14：图片缩放/捏合期间也禁止翻页，避免缩放时误切作品。
-                  physics: (_picZoom.isZoomed ||
-                          _pinching ||
-                          Platform.isWindows ||
-                          Platform.isLinux ||
-                          Platform.isMacOS)
-                      ? const NeverScrollableScrollPhysics()
-                      : DiziPageScrollPhysics(
-                          parent: const ClampingScrollPhysics(),
-                          fromPage: cur.toDouble()),
-                  // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
-                  dragStartBehavior: DragStartBehavior.down,
-                  scrollDirection: Axis.vertical,
-                  // C：预载相邻页并参与 render，拖动时邻页已挂载。
-                  // 稳定性优先：不提前挂载邻页，避免同时存在多个解码器导致 OOM 闪退。
-                  allowImplicitScrolling: false,
-                  itemCount: widget.works.length,
-                  onPageChanged: (i) {
-                    // J-A4：手势滑动中只记下标，等 ScrollEnd 确认后再切；
-                    // 键盘/按钮的程序化翻页（不在滑动中）保持立即切换。
-                    if (_pageSwiping) {
-                      _swipePendingIndex = i;
-                    } else {
-                      open(i);
+                  onNotification: (n) {
+                    if (n.depth != 0) return false;
+                    if (n is ScrollStartNotification && n.dragDetails != null) {
+                      _setPageSwiping(true);
+                    } else if (n is ScrollEndNotification) {
+                      _setPageSwiping(false);
+                      // J-A4：拖动/回弹结束后才切条，拖拽过程中旧视频继续播放。
+                      final pending = _swipePendingIndex;
+                      _swipePendingIndex = null;
+                      if (pending != null && pending != cur) open(pending);
                     }
+                    return false;
                   },
-                  itemBuilder: (_, i) {
-                    final it = _workAt(i);
-                    if (!workPlayable(it)) return _brokenWorkView(it);
-                    if (i != cur) {
-                      // C：邻页拆成独立子组件并复用实例；预载页先铺封面，
-                      // setState 时 Element 不重建，拖动进页不黑屏。
-                      final page = _neighborPageFor(i);
-                      // 拖动时把信息层也挂到邻页上：头像/文案跟画面一起滑进来，
-                      // 落页后不再「凭空冒出一段文字」。不拖动时不建，省开销。
-                      if (!_pageSwiping) return page;
-                      return Stack(fit: StackFit.expand, children: [
-                        page,
-                        ..._stageOverlayChildren(
-                          w: it,
-                          fs: fs,
-                          broken: false,
-                          pad: pad,
-                          bottom: infoBottomInPage,
-                          viewSize: viewSize,
-                          chromeOpacity: chromeOpacity,
-                          chromeMs: chromeMs,
-                          immersiveFade: immersiveFade,
-                          railOpacity: railOpacity,
-                          railMs: railMs,
-                        ),
-                      ]);
-                    }
-                    if (it['t'] == 'v') {
-                      return GestureDetector(
-                        onTapUp: (d) => onStageTap(d.localPosition),
-                        // M9：抖音式跟手拖拽——向左拖作者页随手指从右侧滑入，
-                        // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
-                        onHorizontalDragStart: (_) => _authorDragStart(),
-                        onHorizontalDragUpdate: (d) => _authorDragUpdate(
-                            d.delta.dx, MediaQuery.sizeOf(context).width),
-                        onHorizontalDragEnd: (d) =>
-                            _authorDragEnd(d.primaryVelocity ?? 0),
-                        onHorizontalDragCancel: _authorDragCancel,
-                        // G2：2 倍速只在全屏保留；非全屏长按改为 §8 菜单
-                        // （500ms / 位移 ≤12px，由舞台 Listener 统一判定，不暂停）。
-                        onLongPressStart:
-                            fs ? (_) => player.setRate(2.0) : null,
-                        onLongPressEnd: fs ? (_) => player.setRate(speed) : null,
-                        child: Stack(fit: StackFit.expand, children: [
-                          if ((it['th'] ?? '').toString().isNotEmpty)
-                            LayoutBuilder(builder: (_, pc) {
-                              final fit = videoFitFor(
-                                          aspect: _aspectFor(it),
-                                          mode: AppSettings.videoFitOverride,
-                                          containerAspect: pc.maxHeight > 0
-                                              ? pc.maxWidth / pc.maxHeight
-                                              : null) ==
-                                      VideoFit.fill
-                                  ? BoxFit.cover
-                                  : BoxFit.contain;
-                              return CachedNetworkImage(
-                                  cacheManager: DiziCache.manager,
-                                  imageUrl: withImageWidth(
-                                      cfg.mediaUrl(it['th'].toString(),
-                                          lib: _libFor(it)),
-                                      kPlayerImageWidth),
-                                  httpHeaders: cfg.headersFor(_libFor(it)),
-                                  memCacheWidth: _posterDecodeWidth(context),
-                                  fit: fit);
-                            }),
-                          videoView(),
-                          // J-A5：加载圈移到右上角，垂直中线与左侧返回键图标对齐；
-                          // 错误/重试仍由中央的 _failureOverlay 展示。
-                          if (loading)
-                            Positioned(
-                              top: pad.top + 20,
-                              right: pad.right + 18,
-                              child: const IgnorePointer(
-                                child: SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2.2,
-                                      color: Colors.white38),
+                  child: PageView.builder(
+                    controller: pc,
+                    // Windows 桌面端由 onWheel 统一翻页；关闭 PageView 自带滚动，
+                    // 否则一次滚轮会同时触发原生滚动和手动翻页，跳过多个作品。
+                    // G14：图片缩放/捏合期间也禁止翻页，避免缩放时误切作品。
+                    physics: (_picZoom.isZoomed ||
+                            _pinching ||
+                            Platform.isWindows ||
+                            Platform.isLinux ||
+                            Platform.isMacOS)
+                        ? const NeverScrollableScrollPhysics()
+                        : DiziPageScrollPhysics(
+                            parent: const ClampingScrollPhysics(),
+                            fromPage: cur.toDouble()),
+                    // I2：移动端抖音式手感——越界阻尼 + 松手快速吸附（三端一致无回弹）
+                    dragStartBehavior: DragStartBehavior.down,
+                    scrollDirection: Axis.vertical,
+                    // C：预载相邻页并参与 render，拖动时邻页已挂载。
+                    // 稳定性优先：不提前挂载邻页，避免同时存在多个解码器导致 OOM 闪退。
+                    allowImplicitScrolling: false,
+                    itemCount: widget.works.length,
+                    onPageChanged: (i) {
+                      // J-A4：手势滑动中只记下标，等 ScrollEnd 确认后再切；
+                      // 键盘/按钮的程序化翻页（不在滑动中）保持立即切换。
+                      if (_pageSwiping) {
+                        _swipePendingIndex = i;
+                      } else {
+                        open(i);
+                      }
+                    },
+                    itemBuilder: (_, i) {
+                      final it = _workAt(i);
+                      if (!workPlayable(it)) return _brokenWorkView(it);
+                      if (i != cur) {
+                        // C：邻页拆成独立子组件并复用实例；预载页先铺封面，
+                        // setState 时 Element 不重建，拖动进页不黑屏。
+                        final page = _neighborPageFor(i);
+                        // 拖动时把信息层也挂到邻页上：头像/文案跟画面一起滑进来，
+                        // 落页后不再「凭空冒出一段文字」。不拖动时不建，省开销。
+                        if (!_pageSwiping) return page;
+                        return Stack(fit: StackFit.expand, children: [
+                          page,
+                          ..._stageOverlayChildren(
+                            w: it,
+                            fs: fs,
+                            broken: false,
+                            pad: pad,
+                            bottom: infoBottomInPage,
+                            viewSize: viewSize,
+                            chromeOpacity: chromeOpacity,
+                            chromeMs: chromeMs,
+                            immersiveFade: immersiveFade,
+                            railOpacity: railOpacity,
+                            railMs: railMs,
+                          ),
+                        ]);
+                      }
+                      if (it['t'] == 'v') {
+                        return GestureDetector(
+                          onTapUp: (d) => onStageTap(d.localPosition),
+                          // M9：抖音式跟手拖拽——向左拖作者页随手指从右侧滑入，
+                          // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
+                          onHorizontalDragStart: (_) => _authorDragStart(),
+                          onHorizontalDragUpdate: (d) => _authorDragUpdate(
+                              d.delta.dx, MediaQuery.sizeOf(context).width),
+                          onHorizontalDragEnd: (d) =>
+                              _authorDragEnd(d.primaryVelocity ?? 0),
+                          onHorizontalDragCancel: _authorDragCancel,
+                          // G2：2 倍速只在全屏保留；非全屏长按改为 §8 菜单
+                          // （500ms / 位移 ≤12px，由舞台 Listener 统一判定，不暂停）。
+                          onLongPressStart:
+                              fs ? (_) => player.setRate(2.0) : null,
+                          onLongPressEnd:
+                              fs ? (_) => player.setRate(speed) : null,
+                          child: Stack(fit: StackFit.expand, children: [
+                            if ((it['th'] ?? '').toString().isNotEmpty)
+                              LayoutBuilder(builder: (_, pc) {
+                                final fit = videoFitFor(
+                                            aspect: _aspectFor(it),
+                                            mode: AppSettings.videoFitOverride,
+                                            containerAspect: pc.maxHeight > 0
+                                                ? pc.maxWidth / pc.maxHeight
+                                                : null) ==
+                                        VideoFit.fill
+                                    ? BoxFit.cover
+                                    : BoxFit.contain;
+                                return CachedNetworkImage(
+                                    cacheManager: DiziCache.manager,
+                                    imageUrl: withImageWidth(
+                                        cfg.mediaUrl(it['th'].toString(),
+                                            lib: _libFor(it)),
+                                        kPlayerImageWidth),
+                                    httpHeaders: cfg.headersFor(_libFor(it)),
+                                    memCacheWidth: _posterDecodeWidth(context),
+                                    fit: fit);
+                              }),
+                            videoView(),
+                            // J-A5：加载圈移到右上角，垂直中线与左侧返回键图标对齐；
+                            // 错误/重试仍由中央的 _failureOverlay 展示。
+                            if (loading)
+                              Positioned(
+                                top: pad.top + 20,
+                                right: pad.right + 18,
+                                child: const IgnorePointer(
+                                  child: SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2.2,
+                                        color: Colors.white38),
+                                  ),
                                 ),
                               ),
+                            ..._stageOverlayChildren(
+                              w: it,
+                              fs: fs,
+                              broken: false,
+                              pad: pad,
+                              bottom: infoBottomInPage,
+                              viewSize: viewSize,
+                              chromeOpacity: chromeOpacity,
+                              chromeMs: chromeMs,
+                              immersiveFade: immersiveFade,
+                              railOpacity: railOpacity,
+                              railMs: railMs,
+                            ),
+                            // T：进度条/集数标签贴本页舞台底边，随 PageView 位移。
+                            _stageProgressOverlay(
+                              w: it,
+                              isV: true,
+                              pics: const <String>[],
+                              idx: 0,
+                              progress: progress,
+                            ),
+                          ]),
+                        );
+                      }
+                      return GestureDetector(
+                        onTapUp: (d) => onStageTap(d.localPosition),
+                        // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
+                        // G14：放大查看时禁用长按菜单，避免平移误触
+                        onLongPress: _picZoom.isZoomed ? null : _showWorkMenu,
+                        onHorizontalDragEnd: (d) {
+                          // G14：放大后横向拖动是平移图片，不换图
+                          if (_picZoom.isZoomed) return;
+                          stopAuto();
+                          final v = d.primaryVelocity ?? 0;
+                          setState(() {
+                            if (v < -100) {
+                              _setPicIndex((idx + 1).clamp(0, pics.length - 1));
+                            } else if (v > 100) {
+                              _setPicIndex((idx - 1).clamp(0, pics.length - 1));
+                            }
+                          });
+                        },
+                        child: Stack(fit: StackFit.expand, children: [
+                          // G14：双指缩放 + 放大后单指拖动查看；单击恢复原大小
+                          LayoutBuilder(builder: (_, cons) {
+                            _stageSize = cons.biggest;
+                            return Listener(
+                              behavior: HitTestBehavior.opaque,
+                              onPointerDown: _zoomDown,
+                              onPointerMove: _zoomMove,
+                              onPointerUp: _zoomUp,
+                              onPointerCancel: _zoomUp,
+                              child: ClipRect(
+                                child: Transform(
+                                  alignment: Alignment.center,
+                                  transform: Matrix4.diagonal3Values(
+                                      _picZoom.scale, _picZoom.scale, 1)
+                                    ..setTranslationRaw(_picZoom.offset.dx,
+                                        _picZoom.offset.dy, 0),
+                                  child: picView(pics[idx], lib: _curLib),
+                                ),
+                              ),
+                            );
+                          }),
+                          if (pics.length > 1)
+                            Positioned(
+                              top: pad.top + 2,
+                              right: pad.right + 4,
+                              child: AnimatedOpacity(
+                                opacity: dotsOpacity,
+                                duration: Duration(milliseconds: chromeMs),
+                                curve: Curves.easeOut,
+                                child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: List.generate(
+                                        pics.length,
+                                        (k) => Container(
+                                              width: 4,
+                                              height: 4,
+                                              margin:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 1.5),
+                                              decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: k == idx
+                                                      ? Colors.white
+                                                      : Colors.white24),
+                                            ))),
+                              ),
+                            ),
+                          // T：图文分段进度 + 计数贴本页舞台底边，随页位移。
+                          if (pics.length > 1)
+                            _stageProgressOverlay(
+                              w: it,
+                              isV: false,
+                              pics: pics,
+                              idx: idx,
+                              progress: progress,
                             ),
                           ..._stageOverlayChildren(
                             w: it,
@@ -11780,105 +11921,17 @@ class _PlayerPageState extends State<PlayerPage>
                             pad: pad,
                             bottom: infoBottomInPage,
                             viewSize: viewSize,
-                              chromeOpacity: chromeOpacity,                              chromeMs: chromeMs,                              immersiveFade: immersiveFade,                              railOpacity: railOpacity,                              railMs: railMs,                          ),
-                          // T：进度条/集数标签贴本页舞台底边，随 PageView 位移。
-                          _stageProgressOverlay(
-                            w: it,
-                            isV: true,
-                            pics: const <String>[],
-                            idx: 0,
-                            progress: progress,
+                            chromeOpacity: chromeOpacity,
+                            chromeMs: chromeMs,
+                            immersiveFade: immersiveFade,
+                            railOpacity: railOpacity,
+                            railMs: railMs,
                           ),
                         ]),
                       );
-                    }
-                    return GestureDetector(
-                      onTapUp: (d) => onStageTap(d.localPosition),
-                      // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
-                      // G14：放大查看时禁用长按菜单，避免平移误触
-                      onLongPress: _picZoom.isZoomed ? null : _showWorkMenu,
-                      onHorizontalDragEnd: (d) {
-                        // G14：放大后横向拖动是平移图片，不换图
-                        if (_picZoom.isZoomed) return;
-                        stopAuto();
-                        final v = d.primaryVelocity ?? 0;
-                        setState(() {
-                          if (v < -100) {
-                            _setPicIndex((idx + 1).clamp(0, pics.length - 1));
-                          } else if (v > 100) {
-                            _setPicIndex((idx - 1).clamp(0, pics.length - 1));
-                          }
-                        });
-                      },
-                      child: Stack(fit: StackFit.expand, children: [
-                        // G14：双指缩放 + 放大后单指拖动查看；单击恢复原大小
-                        LayoutBuilder(builder: (_, cons) {
-                          _stageSize = cons.biggest;
-                          return Listener(
-                            behavior: HitTestBehavior.opaque,
-                            onPointerDown: _zoomDown,
-                            onPointerMove: _zoomMove,
-                            onPointerUp: _zoomUp,
-                            onPointerCancel: _zoomUp,
-                            child: ClipRect(
-                              child: Transform(
-                                alignment: Alignment.center,
-                                transform: Matrix4.diagonal3Values(
-                                    _picZoom.scale, _picZoom.scale, 1)
-                                  ..setTranslationRaw(_picZoom.offset.dx,
-                                      _picZoom.offset.dy, 0),
-                                child: picView(pics[idx], lib: _curLib),
-                              ),
-                            ),
-                          );
-                        }),
-                        if (pics.length > 1)
-                          Positioned(
-                            top: pad.top + 2,
-                            right: pad.right + 4,
-                            child: AnimatedOpacity(
-                              opacity: dotsOpacity,
-                              duration: Duration(milliseconds: chromeMs),
-                              curve: Curves.easeOut,
-                              child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: List.generate(
-                                      pics.length,
-                                      (k) => Container(
-                                            width: 4,
-                                            height: 4,
-                                            margin: const EdgeInsets.symmetric(
-                                                horizontal: 1.5),
-                                            decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                color: k == idx
-                                                    ? Colors.white
-                                                    : Colors.white24),
-                                          ))),
-                            ),
-                          ),
-                        // T：图文分段进度 + 计数贴本页舞台底边，随页位移。
-                        if (pics.length > 1)
-                          _stageProgressOverlay(
-                            w: it,
-                            isV: false,
-                            pics: pics,
-                            idx: idx,
-                            progress: progress,
-                          ),
-                        ..._stageOverlayChildren(
-                          w: it,
-                          fs: fs,
-                          broken: false,
-                          pad: pad,
-                          bottom: infoBottomInPage,
-                          viewSize: viewSize,
-                            chromeOpacity: chromeOpacity,                            chromeMs: chromeMs,                            immersiveFade: immersiveFade,                            railOpacity: railOpacity,                            railMs: railMs,                        ),
-                      ]),
-                    );
-                  },
+                    },
+                  ),
                 ),
-              ),
               ),
               // G12：弱网缓冲提示（延迟出现，避免正常起播闪烁）
               if (_slowBuffer && _failure == null && !loading)
@@ -11961,44 +12014,46 @@ class _PlayerPageState extends State<PlayerPage>
                     curve: Curves.easeOut,
                     // P0 §6：非全屏改用 24dp/间距 12dp/无圆底的抖音式图标按钮；
                     // 全屏保留原 IconButton 组合，行为与视觉均不变。
-                    child: Row(mainAxisSize: MainAxisSize.min, children: fs
-                        ? [
-                            IconButton(
-                                onPressed: () =>
-                                    Navigator.of(context).maybePop(),
-                                icon: const Icon(Icons.arrow_back,
-                                    color: Colors.white70),
-                                style: IconButton.styleFrom(
-                                    overlayColor: Colors.white24)),
-                            // 深页面统一「返回主页」：从作者页/搜索进播放页也能一步回主页。
-                            const HomeOverlayButton(),
-                            // 封面入口做成可见按钮（长按信息区同样可用）
-                            IconButton(
-                                tooltip: '设置封面',
-                                onPressed: _openCoverSheet,
-                                icon: const Icon(Icons.image_outlined,
-                                    color: Colors.white70),
-                                style: IconButton.styleFrom(
-                                    overlayColor: Colors.white24)),
-                          ]
-                        : [
-                            StageIconButton(
-                                tooltip: '返回',
-                                icon: Icons.arrow_back,
-                                onPressed: () =>
-                                    Navigator.of(context).maybePop()),
-                            const SizedBox(width: kStageIconSpacing),
-                            StageIconButton(
-                                tooltip: '返回主页',
-                                icon: Icons.home_outlined,
-                                onPressed: () => Navigator.of(context)
-                                    .popUntil((r) => r.isFirst)),
-                            const SizedBox(width: kStageIconSpacing),
-                            StageIconButton(
-                                tooltip: '设置封面',
-                                icon: Icons.image_outlined,
-                                onPressed: _openCoverSheet),
-                          ]),
+                    child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: fs
+                            ? [
+                                IconButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).maybePop(),
+                                    icon: const Icon(Icons.arrow_back,
+                                        color: Colors.white70),
+                                    style: IconButton.styleFrom(
+                                        overlayColor: Colors.white24)),
+                                // 深页面统一「返回主页」：从作者页/搜索进播放页也能一步回主页。
+                                const HomeOverlayButton(),
+                                // 封面入口做成可见按钮（长按信息区同样可用）
+                                IconButton(
+                                    tooltip: '设置封面',
+                                    onPressed: _openCoverSheet,
+                                    icon: const Icon(Icons.image_outlined,
+                                        color: Colors.white70),
+                                    style: IconButton.styleFrom(
+                                        overlayColor: Colors.white24)),
+                              ]
+                            : [
+                                StageIconButton(
+                                    tooltip: '返回',
+                                    icon: Icons.arrow_back,
+                                    onPressed: () =>
+                                        Navigator.of(context).maybePop()),
+                                const SizedBox(width: kStageIconSpacing),
+                                StageIconButton(
+                                    tooltip: '返回主页',
+                                    icon: Icons.home_outlined,
+                                    onPressed: () => Navigator.of(context)
+                                        .popUntil((r) => r.isFirst)),
+                                const SizedBox(width: kStageIconSpacing),
+                                StageIconButton(
+                                    tooltip: '设置封面',
+                                    icon: Icons.image_outlined,
+                                    onPressed: _openCoverSheet),
+                              ]),
                   ),
                 ),
               ),
@@ -12032,10 +12087,8 @@ class _PlayerPageState extends State<PlayerPage>
                             decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: Colors.black.withValues(alpha: 0.45)),
-                            child: Icon(
-                                paused ? Icons.play_arrow : Icons.pause,
-                                size: 44,
-                                color: Colors.white70),
+                            child: Icon(paused ? Icons.play_arrow : Icons.pause,
+                                size: 44, color: Colors.white70),
                           ),
                         ),
                       ),
@@ -12146,278 +12199,303 @@ class _PlayerPageState extends State<PlayerPage>
                         child: SizedBox(
                           height: fs ? null : kTaskbarHeight - 1,
                           child: Column(
-                            mainAxisSize:
-                                fs ? MainAxisSize.min : MainAxisSize.max,
-                            mainAxisAlignment: fs
-                                ? MainAxisAlignment.start
-                                : MainAxisAlignment.center,
-                            children: [
-                          Row(children: [
-                            // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
-                            // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
-                            Expanded(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
-                                      // I1：移动端隐藏音量按钮，音量由系统音量键控制
-                                      if (_volumeUi)
-                                        GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: toggleMute,
-                                          onLongPressStart: _volLongPressStart,
-                                          onLongPressMoveUpdate:
-                                              _volLongPressMove,
-                                          onLongPressEnd: (_) => _volDragEnd(),
-                                          onHorizontalDragStart: _volDragStart,
-                                          onHorizontalDragUpdate:
-                                              _volDragUpdate,
-                                          onHorizontalDragEnd: _volDragEnd,
-                                          child: Tooltip(
-                                            message: '点击静音 / 长按拖动调音量',
-                                            child: SizedBox(
-                                              width: fs ? 48 : tbBtnW,
-                                              height: 48,
-                                              child: Icon(
-                                                  muted || volume == 0
-                                                      ? Icons.volume_off
-                                                      : (volume < 50
-                                                          ? Icons.volume_down
-                                                          : Icons.volume_up),
-                                                  size: fs
-                                                      ? null
-                                                      : kTaskbarIconSize,
-                                                  color: tbColor(true)),
-                                            ),
-                                          ),
-                                        ),
-                                      // L6：桌面端音量模块常驻任务栏（声音按钮右侧）：
-                                      // 细滑杆即时改音量，单击左侧声音按钮仍然是静音切换。
-                                      if (_volumeUi)
-                                        SizedBox(
-                                          key: const ValueKey('volume-module'),
-                                          width: 104,
-                                          height: 48,
-                                          child: Row(children: [
-                                            Expanded(
-                                              child: SliderTheme(
-                                                data: const SliderThemeData(
-                                                  trackHeight: 2.5,
-                                                  thumbShape:
-                                                      RoundSliderThumbShape(
-                                                          enabledThumbRadius:
-                                                              5),
-                                                  overlayShape:
-                                                      RoundSliderOverlayShape(
-                                                          overlayRadius: 10),
-                                                  activeTrackColor:
-                                                      Colors.white70,
-                                                  inactiveTrackColor:
-                                                      Colors.white24,
-                                                  thumbColor: Colors.white,
-                                                ),
-                                                child: Slider(
-                                                  value: (muted ? 0.0 : volume)
-                                                      .clamp(0.0, 100.0),
-                                                  max: 100,
-                                                  onChanged: _setVolume,
-                                                ),
-                                              ),
-                                            ),
-                                            SizedBox(
-                                              width: 30,
-                                              child: Text('${volume.round()}',
-                                                  textAlign: TextAlign.right,
-                                                  style: const TextStyle(
-                                                      fontSize: 10,
-                                                      color: Colors.white54)),
-                                            ),
-                                          ]),
-                                        ),
-                                      // J5：视频合集章节选择（按「选集」图标 + 当前集数）
-                                      if (workChapterCount(w) > 1)
-                                        GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: _showChapters,
-                                          child: Tooltip(
-                                            message: '选集',
-                                            child: SizedBox(
-                                              width: fs ? 46 : tbBtnW,
-                                              height: 48,
-                                              child: Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                children: [
-                                                  Icon(
-                                                      Icons
-                                                          .video_library_outlined,
-                                                      size: fs
-                                                          ? 19
-                                                          : kTaskbarIconSize,
-                                                      color: tbColor(true)),
-                                                  const SizedBox(height: 1),
-                                                  Text(
-                                                      '${_chapter + 1}/${workChapterCount(w)}',
-                                                      style: const TextStyle(
-                                                          fontSize: 9,
-                                                          height: 1.0,
-                                                          color:
-                                                              Colors.white54)),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      // M2/M3：桌面端播放/暂停常驻任务栏；
-                                      // O2：手机端改由画面中央大圆钮承担。
-                                      if (taskbar.showPlayPause)
-                                        TaskbarPlayButton(
-                                            paused: paused,
-                                            onPressed: togglePause),
-                                      IconButton(
-                                          constraints: fs
-                                              ? null
-                                              : BoxConstraints(
-                                                  minWidth: tbBtnW,
-                                                  minHeight: 48,
-                                                  maxHeight: 48),
-                                          onPressed: cycleSpeed,
-                                          icon: Text('${speed}x',
-                                              style: TextStyle(
-                                                  fontSize: 11,
-                                                  color: tbColor(true)))),
-                                      IconButton(
-                                          constraints: fs
-                                              ? null
-                                              : BoxConstraints(
-                                                  minWidth: tbBtnW,
-                                                  minHeight: 48,
-                                                  maxHeight: 48),
-                                          onPressed: toggleShuffle,
-                                          tooltip: shuffle
-                                              ? '乱序播放（当前库内随机）'
-                                              : '顺序播放',
-                                          icon: Icon(Icons.shuffle,
-                                              size: fs
-                                                  ? null
-                                                  : kTaskbarIconSize,
-                                              color: shuffle
-                                                  ? Colors.lightBlueAccent
-                                                  : tbColor(false))),
-                                      IconButton(
-                                          constraints: fs
-                                              ? null
-                                              : BoxConstraints(
-                                                  minWidth: tbBtnW,
-                                                  minHeight: 48,
-                                                  maxHeight: 48),
-                                          // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
-                                          onPressed:
-                                              loopOne ? null : toggleAutoplay,
-                                          tooltip: loopOne
-                                              ? '单条循环开启时自动连播不可用'
-                                              : '自动连播',
-                                          icon: Icon(Icons.skip_next,
-                                              size: fs
-                                                  ? null
-                                                  : kTaskbarIconSize,
-                                              color: autoplay
-                                                  ? tbColor(true)
-                                                  : tbColor(false))),
-                                      IconButton(
-                                          constraints: fs
-                                              ? null
-                                              : BoxConstraints(
-                                                  minWidth: tbBtnW,
-                                                  minHeight: 48,
-                                                  maxHeight: 48),
-                                          onPressed: toggleLoop,
-                                          tooltip: '单条循环',
-                                          icon: Icon(Icons.repeat_one,
-                                              size: fs
-                                                  ? null
-                                                  : kTaskbarIconSize,
-                                              color: loopOne
-                                                  ? tbColor(true)
-                                                  : tbColor(false))),
-                                      // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
-                                      Tooltip(
-                                        message: '送一颗小水滴',
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: (dropBusy ||
-                                                  dropDayLeft <= 0 ||
-                                                  dropWeekLeft <= 0)
-                                              ? null
-                                              : _sendDrop,
-                                          child: SizedBox(
-                                            width: fs ? 46 : tbBtnW,
-                                            height: 48,
-                                            child: ScaleTransition(
-                                              scale: _dropScale,
-                                              child: Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                children: [
-                                                  if (dropBusy)
-                                                    const SizedBox(
-                                                        width: 18,
-                                                        height: 18,
-                                                        child:
-                                                            CircularProgressIndicator(
-                                                                strokeWidth: 2,
-                                                                color: Colors
-                                                                    .white54))
-                                                  else
-                                                    Icon(Icons.water_drop,
+                              mainAxisSize:
+                                  fs ? MainAxisSize.min : MainAxisSize.max,
+                              mainAxisAlignment: fs
+                                  ? MainAxisAlignment.start
+                                  : MainAxisAlignment.center,
+                              children: [
+                                Row(children: [
+                                  // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
+                                  // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
+                                  Expanded(
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerLeft,
+                                      child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
+                                            // I1：移动端隐藏音量按钮，音量由系统音量键控制
+                                            if (_volumeUi)
+                                              GestureDetector(
+                                                behavior:
+                                                    HitTestBehavior.opaque,
+                                                onTap: toggleMute,
+                                                onLongPressStart:
+                                                    _volLongPressStart,
+                                                onLongPressMoveUpdate:
+                                                    _volLongPressMove,
+                                                onLongPressEnd: (_) =>
+                                                    _volDragEnd(),
+                                                onHorizontalDragStart:
+                                                    _volDragStart,
+                                                onHorizontalDragUpdate:
+                                                    _volDragUpdate,
+                                                onHorizontalDragEnd:
+                                                    _volDragEnd,
+                                                child: Tooltip(
+                                                  message: '点击静音 / 长按拖动调音量',
+                                                  child: SizedBox(
+                                                    width: fs ? 48 : tbBtnW,
+                                                    height: 48,
+                                                    child: Icon(
+                                                        muted || volume == 0
+                                                            ? Icons.volume_off
+                                                            : (volume < 50
+                                                                ? Icons
+                                                                    .volume_down
+                                                                : Icons
+                                                                    .volume_up),
                                                         size: fs
-                                                            ? 20
+                                                            ? null
                                                             : kTaskbarIconSize,
-                                                        color: dropGlow &&
-                                                                dropDayLeft >= 0
-                                                            ? Colors
-                                                                .lightBlueAccent
-                                                            : (dropDayLeft >
-                                                                        0 &&
-                                                                    dropWeekLeft >
-                                                                        0
-                                                                ? tbColor(true)
-                                                                : tbColor(
-                                                                    false))),
-                                                ],
+                                                        color: tbColor(true)),
+                                                  ),
+                                                ),
+                                              ),
+                                            // L6：桌面端音量模块常驻任务栏（声音按钮右侧）：
+                                            // 细滑杆即时改音量，单击左侧声音按钮仍然是静音切换。
+                                            if (_volumeUi)
+                                              SizedBox(
+                                                key: const ValueKey(
+                                                    'volume-module'),
+                                                width: 104,
+                                                height: 48,
+                                                child: Row(children: [
+                                                  Expanded(
+                                                    child: SliderTheme(
+                                                      data:
+                                                          const SliderThemeData(
+                                                        trackHeight: 2.5,
+                                                        thumbShape:
+                                                            RoundSliderThumbShape(
+                                                                enabledThumbRadius:
+                                                                    5),
+                                                        overlayShape:
+                                                            RoundSliderOverlayShape(
+                                                                overlayRadius:
+                                                                    10),
+                                                        activeTrackColor:
+                                                            Colors.white70,
+                                                        inactiveTrackColor:
+                                                            Colors.white24,
+                                                        thumbColor:
+                                                            Colors.white,
+                                                      ),
+                                                      child: Slider(
+                                                        value: (muted
+                                                                ? 0.0
+                                                                : volume)
+                                                            .clamp(0.0, 100.0),
+                                                        max: 100,
+                                                        onChanged: _setVolume,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  SizedBox(
+                                                    width: 30,
+                                                    child: Text(
+                                                        '${volume.round()}',
+                                                        textAlign:
+                                                            TextAlign.right,
+                                                        style: const TextStyle(
+                                                            fontSize: 10,
+                                                            color: Colors
+                                                                .white54)),
+                                                  ),
+                                                ]),
+                                              ),
+                                            // J5：视频合集章节选择（按「选集」图标 + 当前集数）
+                                            if (workChapterCount(w) > 1)
+                                              GestureDetector(
+                                                behavior:
+                                                    HitTestBehavior.opaque,
+                                                onTap: _showChapters,
+                                                child: Tooltip(
+                                                  message: '选集',
+                                                  child: SizedBox(
+                                                    width: fs ? 46 : tbBtnW,
+                                                    height: 48,
+                                                    child: Column(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        Icon(
+                                                            Icons
+                                                                .video_library_outlined,
+                                                            size: fs
+                                                                ? 19
+                                                                : kTaskbarIconSize,
+                                                            color:
+                                                                tbColor(true)),
+                                                        const SizedBox(
+                                                            height: 1),
+                                                        Text(
+                                                            '${_chapter + 1}/${workChapterCount(w)}',
+                                                            style: const TextStyle(
+                                                                fontSize: 9,
+                                                                height: 1.0,
+                                                                color: Colors
+                                                                    .white54)),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            // M2/M3：桌面端播放/暂停常驻任务栏；
+                                            // O2：手机端改由画面中央大圆钮承担。
+                                            if (taskbar.showPlayPause)
+                                              TaskbarPlayButton(
+                                                  paused: paused,
+                                                  onPressed: togglePause),
+                                            IconButton(
+                                                constraints: fs
+                                                    ? null
+                                                    : BoxConstraints(
+                                                        minWidth: tbBtnW,
+                                                        minHeight: 48,
+                                                        maxHeight: 48),
+                                                onPressed: cycleSpeed,
+                                                icon: Text('${speed}x',
+                                                    style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: tbColor(true)))),
+                                            IconButton(
+                                                constraints: fs
+                                                    ? null
+                                                    : BoxConstraints(
+                                                        minWidth: tbBtnW,
+                                                        minHeight: 48,
+                                                        maxHeight: 48),
+                                                onPressed: toggleShuffle,
+                                                tooltip: shuffle
+                                                    ? '乱序播放（当前库内随机）'
+                                                    : '顺序播放',
+                                                icon: Icon(Icons.shuffle,
+                                                    size: fs
+                                                        ? null
+                                                        : kTaskbarIconSize,
+                                                    color: shuffle
+                                                        ? Colors.lightBlueAccent
+                                                        : tbColor(false))),
+                                            IconButton(
+                                                constraints: fs
+                                                    ? null
+                                                    : BoxConstraints(
+                                                        minWidth: tbBtnW,
+                                                        minHeight: 48,
+                                                        maxHeight: 48),
+                                                // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
+                                                onPressed: loopOne
+                                                    ? null
+                                                    : toggleAutoplay,
+                                                tooltip: loopOne
+                                                    ? '单条循环开启时自动连播不可用'
+                                                    : '自动连播',
+                                                icon: Icon(Icons.skip_next,
+                                                    size: fs
+                                                        ? null
+                                                        : kTaskbarIconSize,
+                                                    color: autoplay
+                                                        ? tbColor(true)
+                                                        : tbColor(false))),
+                                            IconButton(
+                                                constraints: fs
+                                                    ? null
+                                                    : BoxConstraints(
+                                                        minWidth: tbBtnW,
+                                                        minHeight: 48,
+                                                        maxHeight: 48),
+                                                onPressed: toggleLoop,
+                                                tooltip: '单条循环',
+                                                icon: Icon(Icons.repeat_one,
+                                                    size: fs
+                                                        ? null
+                                                        : kTaskbarIconSize,
+                                                    color: loopOne
+                                                        ? tbColor(true)
+                                                        : tbColor(false))),
+                                            // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
+                                            Tooltip(
+                                              message: '送一颗小水滴',
+                                              child: GestureDetector(
+                                                behavior:
+                                                    HitTestBehavior.opaque,
+                                                onTap: (dropBusy ||
+                                                        dropDayLeft <= 0 ||
+                                                        dropWeekLeft <= 0)
+                                                    ? null
+                                                    : _sendDrop,
+                                                child: SizedBox(
+                                                  width: fs ? 46 : tbBtnW,
+                                                  height: 48,
+                                                  child: ScaleTransition(
+                                                    scale: _dropScale,
+                                                    child: Column(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        if (dropBusy)
+                                                          const SizedBox(
+                                                              width: 18,
+                                                              height: 18,
+                                                              child: CircularProgressIndicator(
+                                                                  strokeWidth:
+                                                                      2,
+                                                                  color: Colors
+                                                                      .white54))
+                                                        else
+                                                          Icon(Icons.water_drop,
+                                                              size: fs
+                                                                  ? 20
+                                                                  : kTaskbarIconSize,
+                                                              color: dropGlow &&
+                                                                      dropDayLeft >=
+                                                                          0
+                                                                  ? Colors
+                                                                      .lightBlueAccent
+                                                                  : (dropDayLeft >
+                                                                              0 &&
+                                                                          dropWeekLeft >
+                                                                              0
+                                                                      ? tbColor(
+                                                                          true)
+                                                                      : tbColor(
+                                                                          false))),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                        ),
-                                      ),
-                                      if (taskbar.showRotate)
-                                        TaskbarRotateButton(
-                                          mode: screenModeOf(
-                                              MediaQuery.sizeOf(context)),
-                                          onPressed: toggleOrientation,
-                                        ),
-                                    ]),
-                              ),
-                            ),
-                            IconButton(
-                                constraints: fs
-                                    ? null
-                                    : const BoxConstraints(
-                                        minWidth: 44,
-                                        minHeight: 48,
-                                        maxHeight: 48),
-                                onPressed: toggleFs,
-                                icon: Icon(
-                                    fs
-                                        ? Icons.fullscreen_exit
-                                        : Icons.fullscreen,
-                                    size: fs ? null : kTaskbarIconSize,
-                                    color: tbColor(true))),
-                          ]),
-                        ]),
+                                            if (taskbar.showRotate)
+                                              TaskbarRotateButton(
+                                                mode: screenModeOf(
+                                                    MediaQuery.sizeOf(context)),
+                                                onPressed: toggleOrientation,
+                                              ),
+                                          ]),
+                                    ),
+                                  ),
+                                  IconButton(
+                                      constraints: fs
+                                          ? null
+                                          : const BoxConstraints(
+                                              minWidth: 44,
+                                              minHeight: 48,
+                                              maxHeight: 48),
+                                      onPressed: toggleFs,
+                                      icon: Icon(
+                                          fs
+                                              ? Icons.fullscreen_exit
+                                              : Icons.fullscreen,
+                                          size: fs ? null : kTaskbarIconSize,
+                                          color: tbColor(true))),
+                                ]),
+                              ]),
                         ),
                       ),
                     ),
@@ -12468,8 +12546,7 @@ class _PlayerTopNotice extends StatelessWidget {
             child: Container(
               key: ValueKey<String>(text),
               margin: const EdgeInsets.symmetric(horizontal: 24),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.62),
                 borderRadius: BorderRadius.circular(999),
@@ -12606,9 +12683,8 @@ class _RecommendPageState extends State<RecommendPage> {
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
     final j = jsonDecode(utf8.decode(r.bodyBytes));
     final out = <Map<String, dynamic>>[];
-    for (final w in (j is Map && j['works'] is List)
-        ? (j['works'] as List)
-        : const []) {
+    for (final w
+        in (j is Map && j['works'] is List) ? (j['works'] as List) : const []) {
       if (w is! Map) continue;
       final m = Map<String, dynamic>.from(w);
       out.add({...m, '_lib': '${m['_lib'] ?? cfg.lib}'});
@@ -12980,8 +13056,8 @@ class _SearchPageState extends State<SearchPage> {
             ? (metas[lib]?.filterBasics ?? const <BasicLibRef>[])
             : (metas[lib]?.basics ?? const <BasicLibRef>[]);
         for (final b in basics) {
-          jobs.add(_BasicJob(
-              lib: lib, basicId: b.id, rel: b.rel, name: b.name));
+          jobs.add(
+              _BasicJob(lib: lib, basicId: b.id, rel: b.rel, name: b.name));
         }
       }
       if (mounted) {
@@ -13406,7 +13482,8 @@ Future<AuthorEditResult> uploadAuthorAvatarBytes({
     if (d is Map<String, dynamic>) j = d;
   } catch (_) {}
   if (r.statusCode != 200 || j['ok'] != true) {
-    final msg = j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
+    final msg =
+        j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
     return AuthorEditResult(false, '头像上传失败：$msg');
   }
   return AuthorEditResult(true, '头像已更新', path: '${j['u'] ?? ''}');
@@ -13437,7 +13514,8 @@ Future<AuthorEditResult> uploadAuthorBio({
     if (d is Map<String, dynamic>) j = d;
   } catch (_) {}
   if (r.statusCode != 200 || j['ok'] != true) {
-    final msg = j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
+    final msg =
+        j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
     return AuthorEditResult(false, '保存失败：$msg');
   }
   final saved = j['bio'] is String ? j['bio'] as String : clean;
@@ -13565,8 +13643,8 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
       shot.dispose();
       if (data == null) throw 'PNG 编码失败';
       if (!mounted) return;
-      Navigator.of(context).pop(Uint8List.view(
-          data.buffer, data.offsetInBytes, data.lengthInBytes));
+      Navigator.of(context).pop(
+          Uint8List.view(data.buffer, data.offsetInBytes, data.lengthInBytes));
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
@@ -13602,8 +13680,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
                           style: const TextStyle(color: Colors.white70))
                       : const CircularProgressIndicator();
                 }
-                final side =
-                    max(80.0, min(cons.maxWidth, cons.maxHeight) - 16);
+                final side = max(80.0, min(cons.maxWidth, cons.maxHeight) - 16);
                 _viewSide = side;
                 return _cropView(img, side);
               }),
@@ -13620,8 +13697,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
             child: Row(children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed:
-                      _busy ? null : () => Navigator.of(context).pop(),
+                  onPressed: _busy ? null : () => Navigator.of(context).pop(),
                   child: const Text('取消'),
                 ),
               ),
@@ -13677,6 +13753,7 @@ class AuthorPage extends StatefulWidget {
 
 class _AuthorPageState extends State<AuthorPage> {
   String bio = '';
+
   /// J13：本机最近一次简介写入时间（服务端 authors.json 的 bioAt 未下发）。
   int bioAt = 0;
   String av = '';
@@ -13697,7 +13774,6 @@ class _AuthorPageState extends State<AuthorPage> {
   // - 收起动画结束（260ms）后再判定一次，避免“收起→范围变小→锁死”。
   final ScrollController _authorScroll = ScrollController();
   Timer? _headerRecheck;
-
 
   // K2：多选模式与已选作品；K3：手动名单（作品 id）。
   bool selectingWorks = false;
@@ -13732,8 +13808,8 @@ class _AuthorPageState extends State<AuthorPage> {
           ListTile(
             leading: const Icon(Icons.photo_library_outlined),
             title: const Text('从作品里挑一张作头像'),
-            subtitle: const Text('只存本机，不改媒体文件与服务端数据',
-                style: TextStyle(fontSize: 11)),
+            subtitle:
+                const Text('只存本机，不改媒体文件与服务端数据', style: TextStyle(fontSize: 11)),
             onTap: () => Navigator.of(ctx).pop('pick'),
           ),
           if (has)
@@ -13798,8 +13874,8 @@ class _AuthorPageState extends State<AuthorPage> {
                   if (!mounted) return;
                   ScaffoldMessenger.of(context)
                     ..hideCurrentSnackBar()
-                    ..showSnackBar(SnackBar(
-                        content: Text(ok ? '已设为该作者头像' : '这张图不能作头像')));
+                    ..showSnackBar(
+                        SnackBar(content: Text(ok ? '已设为该作者头像' : '这张图不能作头像')));
                 },
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -13953,7 +14029,9 @@ class _AuthorPageState extends State<AuthorPage> {
     for (final raw in text.split('\n')) {
       final line = raw.trim();
       if (line.isEmpty) continue;
-      if (line == name || line == '@$name' || line == name.replaceAll('@', '')) {
+      if (line == name ||
+          line == '@$name' ||
+          line == name.replaceAll('@', '')) {
         continue;
       }
       if (RegExp(r'^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$').hasMatch(line)) continue;
@@ -14227,7 +14305,8 @@ class _AuthorPageState extends State<AuthorPage> {
                       for (final c in cands)
                         ListTile(
                           dense: true,
-                          title: Text(c, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          title: Text(c,
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
                           onTap: () => Navigator.of(ctx).pop(c),
                         ),
                     ],
@@ -14332,9 +14411,8 @@ class _AuthorPageState extends State<AuthorPage> {
   void _showAvatar(BuildContext context) {
     final src = effectiveAv;
     if (src.isEmpty) return;
-    final srcLib = libOfMediaPath(src).isEmpty
-        ? primaryLib
-        : libOfMediaPath(src);
+    final srcLib =
+        libOfMediaPath(src).isEmpty ? primaryLib : libOfMediaPath(src);
     showDialog(
       context: context,
       barrierColor: Colors.black87,
@@ -14346,8 +14424,7 @@ class _AuthorPageState extends State<AuthorPage> {
           child: Center(
             child: CachedNetworkImage(
               cacheManager: DiziCache.manager,
-              imageUrl: cfg.mediaUrl(src,
-                  lib: srcLib.isEmpty ? null : srcLib),
+              imageUrl: cfg.mediaUrl(src, lib: srcLib.isEmpty ? null : srcLib),
               httpHeaders: cfg.headersFor(srcLib.isEmpty ? null : srcLib),
               fit: BoxFit.contain,
               placeholder: (_, __) =>
@@ -14382,8 +14459,8 @@ class _AuthorPageState extends State<AuthorPage> {
             child: Text('@${widget.name}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w600)),
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(width: 6),
           Container(
@@ -14407,73 +14484,68 @@ class _AuthorPageState extends State<AuthorPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                GestureDetector(
-                  onTap: () => _showAvatar(context),
-                  onLongPress: () => _showAvatarMenu(context),
-                  child: AuthorAvatar(
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            GestureDetector(
+              onTap: () => _showAvatar(context),
+              onLongPress: () => _showAvatarMenu(context),
+              child: AuthorAvatar(
+                name: widget.name,
+                mediaPath: displayAv,
+                lib: primaryLib.isEmpty ? null : primaryLib,
+                size: AuthorAvatar.headerSize,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  // T2：作者主页词条改为单元库（SECRET / 无归属灰色）
+                  AuthorBadges(
+                    meta: meta,
                     name: widget.name,
                     mediaPath: displayAv,
-                    lib: primaryLib.isEmpty ? null : primaryLib,
-                    size: AuthorAvatar.headerSize,
+                    fallbackId: primaryLib.isEmpty ? cfg.lib : primaryLib,
+                    // 0.9.6：不再回退库名文案，无归属显示 SECRET
+                    fallbackName: '',
+                    works: works.length,
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      // T2：作者主页词条改为单元库（SECRET / 无归属灰色）
-                      AuthorBadges(
-                        meta: meta,
-                        name: widget.name,
-                        mediaPath: displayAv,
-                        fallbackId: primaryLib.isEmpty ? cfg.lib : primaryLib,
-                        // 0.9.6：不再回退库名文案，无归属显示 SECRET
-                        fallbackName: '',
-                        works: works.length,
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    const Text('作者简介',
+                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    const SizedBox(width: 4),
+                    InkWell(
+                      onTap: _editBio,
+                      borderRadius: BorderRadius.circular(4),
+                      child: const Padding(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.edit_outlined,
+                              size: 13, color: Colors.grey),
+                          SizedBox(width: 2),
+                          Text('编辑',
+                              style:
+                                  TextStyle(fontSize: 12, color: Colors.grey)),
+                        ]),
                       ),
-                      const SizedBox(height: 6),
-                      Row(children: [
-                        const Text('作者简介',
-                            style:
-                                TextStyle(fontSize: 12, color: Colors.grey)),
-                        const SizedBox(width: 4),
-                        InkWell(
-                          onTap: _editBio,
-                          borderRadius: BorderRadius.circular(4),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 4, vertical: 2),
-                            child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.edit_outlined,
-                                      size: 13, color: Colors.grey),
-                                  SizedBox(width: 2),
-                                  Text('编辑',
-                                      style: TextStyle(
-                                          fontSize: 12, color: Colors.grey)),
-                                ]),
-                          ),
-                        ),
-                      ]),
-                      const SizedBox(height: 6),
-                      Text(_bioText,
-                          maxLines: 6,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13)),
-                      if (bioAt > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text('简介更新于 ${formatAuthorBioAt(bioAt)}',
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.grey)),
-                        ),
-                    ])),
-              ]),
+                    ),
+                  ]),
+                  const SizedBox(height: 6),
+                  Text(_bioText,
+                      maxLines: 6,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13)),
+                  if (bioAt > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('简介更新于 ${formatAuthorBioAt(bioAt)}',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.grey)),
+                    ),
+                ])),
+          ]),
           // L2：作者页不再提供「全量同步」入口，同步统一收到单元库级配置。
         ],
       ),
@@ -14489,7 +14561,8 @@ class _AuthorPageState extends State<AuthorPage> {
           const SizedBox.shrink()
         else if (selectingWorks) ...[
           IconButton(
-              tooltip: allWorksSelected(selectedWorks, _visibleIds) ? '取消全选' : '全选',
+              tooltip:
+                  allWorksSelected(selectedWorks, _visibleIds) ? '取消全选' : '全选',
               onPressed: _visibleIds.isEmpty ? null : _toggleSelectAll,
               icon: Icon(allWorksSelected(selectedWorks, _visibleIds)
                   ? Icons.deselect
@@ -14580,14 +14653,13 @@ class _AuthorPageState extends State<AuthorPage> {
                             _visibleIds.isEmpty
                                 ? ''
                                 : '共 ${_visibleIds.length} 个',
-                            style:
-                                const TextStyle(fontSize: 11, color: Colors.grey),
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.grey),
                           ),
                         ),
                         TextButton.icon(
-                            onPressed: _visibleIds.isEmpty
-                                ? null
-                                : _toggleSelectAll,
+                            onPressed:
+                                _visibleIds.isEmpty ? null : _toggleSelectAll,
                             icon: const Icon(Icons.select_all, size: 16),
                             label: Text(
                                 allWorksSelected(selectedWorks, _visibleIds)
@@ -14604,10 +14676,10 @@ class _AuthorPageState extends State<AuthorPage> {
                             label: const Text('移动',
                                 style: TextStyle(fontSize: 12))),
                         TextButton.icon(
-                            onPressed: (_batchBusy ||
-                                    !canBatchDelete(selectedWorks))
-                                ? null
-                                : _batchDelete,
+                            onPressed:
+                                (_batchBusy || !canBatchDelete(selectedWorks))
+                                    ? null
+                                    : _batchDelete,
                             icon: const Icon(Icons.delete_outline,
                                 size: 16, color: Colors.redAccent),
                             label: const Text('删除',
@@ -14631,8 +14703,8 @@ class _AuthorPageState extends State<AuthorPage> {
                       delta: n is ScrollUpdateNotification
                           ? (n.scrollDelta ?? 0)
                           : 0,
-                      overscroll: n is OverscrollNotification &&
-                          n.overscroll < 0,
+                      overscroll:
+                          n is OverscrollNotification && n.overscroll < 0,
                     );
                     if (action == HeaderAction.collapse && !_headerCollapsed) {
                       setState(() => _headerCollapsed = true);
@@ -14823,6 +14895,7 @@ class _WorkGridState extends State<WorkGrid> {
   late final bool _ownsScroll = widget.controller == null;
   late final ScrollController _scroll = widget.controller ?? ScrollController();
   int _shown = 0;
+
   /// 已经为哪一份作品列表预热过首屏封面（按列表实例判定，避免每帧重复发起）。
   List<dynamic>? _prefetchedFor;
   @override
@@ -15019,7 +15092,9 @@ class _WorkGridState extends State<WorkGrid> {
                 height: 22,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: selected ? Theme.of(context).colorScheme.primary : Colors.black45,
+                  color: selected
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.black45,
                   border: Border.all(color: Colors.white70, width: 1.5),
                 ),
                 child: selected
@@ -15049,13 +15124,15 @@ class _WorkGridState extends State<WorkGrid> {
               left: 6,
               child: IgnorePointer(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                   decoration: BoxDecoration(
                     color: Colors.black54,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(workSourceLabel(manual: true),
-                      style: const TextStyle(fontSize: 9, color: Colors.white70)),
+                      style:
+                          const TextStyle(fontSize: 9, color: Colors.white70)),
                 ),
               ),
             ),
