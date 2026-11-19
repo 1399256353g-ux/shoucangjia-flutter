@@ -306,16 +306,17 @@ class _BasicLibPageState extends State<BasicLibPage>
         bottom: TabBar(
           controller: _tabs,
           tabs: [
-            Tab(text: '作者 ${loadingAuthors ? '' : authors.length}'),
+            // owner 2026-11-19：作品页放第一位，进入基础库默认看作品。
             Tab(text: '作品 ${total > 0 ? total : b.works}'),
+            Tab(text: '作者 ${loadingAuthors ? '' : authors.length}'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabs,
         children: [
-          _authorsView(),
           _worksView(),
+          _authorsView(),
         ],
       ),
     );
