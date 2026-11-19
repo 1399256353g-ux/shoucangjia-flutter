@@ -92,6 +92,35 @@ void main() {
     expect(back.first.collection, '收藏夹');
   });
 
+  test('写盘节流：同作品同收藏夹小位移跳过，换收藏夹/换作品不跳过', () {
+    final prev = item(pos: 30000);
+    expect(shouldSkipContinueRecord(prev, item(pos: 30500)), isTrue);
+    expect(
+        shouldSkipContinueRecord(prev, item(pos: 30000 + kContinueThrottleMs)),
+        isFalse);
+    expect(
+        shouldSkipContinueRecord(prev, item(pos: 30200, collection: '另一个收藏夹')),
+        isFalse);
+    expect(shouldSkipContinueRecord(prev, item(id: '2', pos: 30200)), isFalse);
+  });
+
+  test('Store.record：换收藏夹立即落库，同收藏夹小位移被节流', () {
+    ContinueWatchingStore.resetForTest();
+    ContinueWatchingStore.record(item(pos: 30000, updated: 1), force: true);
+    expect(ContinueWatchingStore.items.single.collection, '收藏夹');
+
+    // 同收藏夹、位置只前进 500ms → 节流，不写。
+    ContinueWatchingStore.record(item(pos: 30500, updated: 2));
+    expect(ContinueWatchingStore.items.single.positionMs, 30000);
+
+    // 换收藏夹（换条）即使位移很小也要立刻记录。
+    ContinueWatchingStore.record(
+        item(pos: 30600, collection: '另一个收藏夹', updated: 3));
+    expect(ContinueWatchingStore.items.single.collection, '另一个收藏夹');
+    expect(ContinueWatchingStore.items.single.positionMs, 30600);
+    ContinueWatchingStore.resetForTest();
+  });
+
   test('续播位置回退 1 秒并夹紧', () {
     expect(continueResumeMs(item(pos: 500)), 500);
     expect(continueResumeMs(item(pos: 30000)), 29000);

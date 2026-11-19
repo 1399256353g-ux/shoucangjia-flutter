@@ -22,6 +22,9 @@ const int kContinueLimit = 8;
 /// 小于该位置不进入「继续观看」（开头几秒续播没有意义）。
 const int kContinueMinMs = 1000;
 
+/// 写盘节流窗口：同一作品、同一收藏夹内位置变化不足该值时跳过写盘。
+const int kContinueThrottleMs = 3000;
+
 /// 一条「继续观看」记录（作品元信息 + 上次位置）。
 class ContinueItem {
   final String lib;
@@ -211,6 +214,16 @@ List<ContinueItem> removeContinueItem(
   ];
 }
 
+/// 写盘节流判定（纯函数）：同一作品、同一收藏夹、位置变化不足
+/// [kContinueThrottleMs] 时才跳过；换了收藏夹（换条）必须立即记录，
+/// 否则「刚换条又滑回来」会丢掉新的收藏夹归属。
+bool shouldSkipContinueRecord(ContinueItem prev, ContinueItem next) {
+  if (prev.key != next.key) return false;
+  if (prev.collection != next.collection) return false;
+  final delta = prev.positionMs - next.positionMs;
+  return (delta < 0 ? -delta : delta) < kContinueThrottleMs;
+}
+
 /// 上次停留位置：夹在 0–时长之间，回退 1 秒避开解码边界。
 int continueResumeMs(ContinueItem item) {
   if (item.positionMs <= 0) return 0;
@@ -252,13 +265,7 @@ class ContinueWatchingStore {
     final prev = _items.where((e) => e.key == item.key).toList();
     if (!force &&
         prev.isNotEmpty &&
-        (prev.first.positionMs - item.positionMs).abs() < 1000 &&
-        prev.first.collection == item.collection) {
-      return;
-    }
-    if (!force &&
-        prev.isNotEmpty &&
-        (prev.first.positionMs - item.positionMs).abs() < 3000) {
+        shouldSkipContinueRecord(prev.first, item)) {
       return;
     }
     final merged = prev.isEmpty
