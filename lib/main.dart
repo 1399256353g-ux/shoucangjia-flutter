@@ -2570,7 +2570,8 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
           .get(cfg.u('/api/deleted.json'), headers: cfg.headers)
           .timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final parsed = parseDeletedReport(utf8.decode(r.bodyBytes));
+      // 解析放 isolate：删除记录可能很多，避免在 UI 线程解码 JSON。
+      final parsed = parseDeletedReport(await parseJsonMapAsync(r.bodyBytes));
       if (!mounted) return;
       setState(() {
         report = parsed;
