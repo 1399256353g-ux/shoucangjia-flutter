@@ -149,9 +149,12 @@ class DiziPageScrollPhysics extends ScrollPhysics {
     final atRest = (targetPixels - position.pixels).abs() < 0.5;
     if (atRest && velocity.abs() < kPageSwipeVelocity) return null;
     return ScrollSpringSimulation(
+      // owner 2026-11-20：抖音的落位收尾更短。ω = sqrt(k/m)：
+      // 800/0.5 → 40 rad/s（约 100ms 收敛）；1300/0.5 → 51 rad/s（约 78ms）。
+      // 临界阻尼不变，避免“弹一下”的廉价感。
       SpringDescription.withDampingRatio(
         mass: 0.5,
-        stiffness: 800,
+        stiffness: 1300,
         ratio: 1.0,
       ),
       position.pixels,

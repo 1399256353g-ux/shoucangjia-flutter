@@ -95,6 +95,17 @@ void main() {
       expect(sim.isDone(1), isTrue);
     });
 
+    test('落位收敛不超过 150ms（抖音手感基线）', () {
+      const physics = DiziPageScrollPhysics();
+      final m = _Metrics(pixels: 450, max: 800);
+      final sim = physics.createBallisticSimulation(m, 0)!;
+      var t = 0.0;
+      while (!sim.isDone(t) && t < 1.0) {
+        t += 0.008;
+      }
+      expect(t, lessThan(0.15), reason: '收敛 ${(t * 1000).round()}ms，太拖沓');
+    });
+
     test('已在整页且静止时不产生多余动画', () {
       const physics = DiziPageScrollPhysics(fromPage: 2);
       final m = _Metrics(pixels: 800, max: 800);
