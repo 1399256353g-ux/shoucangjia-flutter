@@ -80,7 +80,25 @@ String pickAvatarPath({
       MediaCandidate(auto, MediaTier.auto, at: autoAt),
     ]);
 
+/// 封面必须是图片：视频文件（mp4/mov…）当封面会渲染失败，
+/// 表现成「库封面从来没显示过」。
+const List<String> _coverImageExts = <String>[
+  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic'
+];
+
+bool _isCoverImage(String p) {
+  final l = p.trim().toLowerCase();
+  if (l.isEmpty) return false;
+  final q = l.split('?').first;
+  for (final e in _coverImageExts) {
+    if (q.endsWith(e)) return true;
+  }
+  return false;
+}
+
 /// 封面取图：手动 > 爬虫 > 自动；同级按时间新→旧。
+///
+/// 非图片路径（例如服务端 `fc` 指向的 mp4）直接剔除，不参与竞争。
 String pickCoverPath({
   String manual = '',
   String crawler = '',
@@ -88,12 +106,14 @@ String pickCoverPath({
   int manualAt = 0,
   int crawlerAt = 0,
   int autoAt = 0,
-}) =>
-    pickMediaPath([
-      MediaCandidate(manual, MediaTier.manual, at: manualAt),
-      MediaCandidate(crawler, MediaTier.crawler, at: crawlerAt),
-      MediaCandidate(auto, MediaTier.auto, at: autoAt),
-    ]);
+}) {
+  final candidates = <MediaCandidate>[
+    MediaCandidate(manual, MediaTier.manual, at: manualAt),
+    MediaCandidate(crawler, MediaTier.crawler, at: crawlerAt),
+    MediaCandidate(auto, MediaTier.auto, at: autoAt),
+  ].where((c) => _isCoverImage(c.path)).toList();
+  return pickMediaPath(candidates);
+}
 
 /// 自动封面的作品候选。
 class AutoCoverWork {

@@ -165,6 +165,21 @@ String libOfMediaPath(String p) {
   return rest.substring(0, at);
 }
 
+/// 封面必须是图片：视频文件（mp4/mov…）当封面会一直渲染失败。
+const List<String> kCoverImageExts = <String>[
+  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic'
+];
+
+bool isCoverImagePath(String p) {
+  final l = p.trim().toLowerCase();
+  if (l.isEmpty) return false;
+  final q = l.split('?').first;
+  for (final e in kCoverImageExts) {
+    if (q.endsWith(e)) return true;
+  }
+  return false;
+}
+
 /// 第一张作品的封面路径（无播放数据时的兜底，纯函数）：
 /// 优先作品 `th` 缩略图，否则取 `m` 里第一张图片；都没有返回空串。
 String firstWorkCoverPath(List<dynamic> works) {
@@ -202,8 +217,9 @@ CoverPick pickBasicCover({
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
   final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
   if (pick.isNotEmpty) return CoverPick(pick);
-  // 无播放数据时的兜底：第一张作品的封面。
+  // 无播放数据时的兜底：第一张作品的封面（仅图片）。
   final fb = firstThumb.trim();
+  if (fb.isNotEmpty && !isCoverImagePath(fb)) return const CoverPick.none();
   if (fb.isNotEmpty) return CoverPick(fb);
   return const CoverPick.none();
 }
@@ -224,8 +240,9 @@ CoverPick pickUnitCover({
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
   final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
   if (pick.isNotEmpty) return CoverPick(pick);
-  // 无播放数据时的兜底：第一张作品的封面。
+  // 无播放数据时的兜底：第一张作品的封面（仅图片）。
   final fb = firstThumb.trim();
+  if (fb.isNotEmpty && !isCoverImagePath(fb)) return const CoverPick.none();
   if (fb.isNotEmpty) return CoverPick(fb);
   return const CoverPick.none();
 }
