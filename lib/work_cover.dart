@@ -61,9 +61,24 @@ String workCoverPath(dynamic work) {
   if (th.isNotEmpty) return th;
   if (!isVideoWork(work)) {
     final m = work['m'];
-    if (m is List && m.isNotEmpty) {
-      final first = '${m.first}'.trim();
-      if (first.isNotEmpty && !isVideoPath(first)) return first;
+    // 单图作品常见把 `m` 写成字符串而不是数组；两种都要认，
+    // 否则这类作品在列表里永远没有封面。
+    if (m is String) {
+      final one = m.trim();
+      if (one.isNotEmpty && !isVideoPath(one)) return one;
+    }
+    if (m is List) {
+      for (final e in m) {
+        final one = '$e'.trim();
+        if (one.isEmpty) continue;
+        if (isVideoPath(one)) continue;
+        return one;
+      }
+    }
+    // 兼容只给单图的字段名
+    for (final k in const ['img', 'cover', 'p']) {
+      final one = '${work[k] ?? ''}'.trim();
+      if (one.isNotEmpty && !isVideoPath(one)) return one;
     }
   }
   return '';
