@@ -17,7 +17,10 @@ const int preloadDefaultPerSide = 2;
 /// 桌面端内存宽裕，维持原来的 2。
 // owner 2026-11-18：预载恢复（滑动时上下黑屏体验差），但每侧只保留 1 条，
 // 兼顾内存：一条预载 = 一整只 mpv 实例，2 条以上在移动端容易 OOM。
-int preloadDefaultPerSideFor({required bool mobile}) => 1;
+int preloadDefaultPerSideFor({required bool mobile}) => mobile ? 1 : 2;
+
+/// 桌面端每侧 2 条：内存宽裕，连滑两下仍能命中预载；
+/// 移动端维持 1 条——一个槽位就是一只 mpv 实例，多了会被系统回收解码器。
 
 /// 设置允许的每侧条数范围（0 表示关闭预加载）。
 const int preloadMaxPerSide = 4;

@@ -7094,6 +7094,11 @@ class _PlayerPageState extends State<PlayerPage>
   // iOS「有声无画」看门狗：音频在走但视频轨始终没报出尺寸，说明纹理没出帧。
   // 先只重建一次纹理（不重开媒体、不换解码器），仍无画面才降级软解。
   double _videoDw = 0;
+  /// 纹理首次就绪后是否已经重挂过 Video widget。
+  ///
+  /// owner 2026-11-20：现象是「第一次播放有声音但画面黑，切下一条再回来又正常」。
+  /// 这是 Video 组件在纹理 id 就绪前挂载导致的：重建一次即可出画。
+  bool _videoGenSynced = false;
   bool _blackRebuilt = false;
   /// 首帧是否真的出来了（位置开始走动）。出来之前一直用海报盖住视频层，
   /// 避免「黑屏一下 / 缓冲圈闪一下 / 比例跳一下」的起播观感。
@@ -7728,6 +7733,12 @@ class _PlayerPageState extends State<PlayerPage>
       if (!identical(p, player)) return;
       if (!mounted) return;
       _videoDw = (vp.dw ?? 0).toDouble();
+      // 纹理参数第一次到达 = 真正的输出尺寸有了；此时重挂一次 Video，
+      // 让纹理挂到已就绪的控制器上（否则首播可能一直黑屏，重进才好）。
+      if (_videoDw > 1 && !_videoGenSynced) {
+        _videoGenSynced = true;
+        setState(() => _videoGen++);
+      }
       final a = vp.aspect ??
           ((vp.dw != null && vp.dh != null && vp.dh! > 0)
               ? vp.dw! / vp.dh!
@@ -8148,7 +8159,9 @@ class _PlayerPageState extends State<PlayerPage>
     final gen = _preloadGen;
     // owner 2026-11-19：起播 300ms 后就开始预载相邻条（原 600ms），
     // 缩短 iOS 滑动时的黑屏窗口；预载仍是每侧 1 条，内存可控。
-    _preloadTimer = Timer(const Duration(milliseconds: 300), () {
+    // owner 2026-11-20：切条后立刻开始预载相邻条，不再等 300ms。
+    // 留 120ms 只是让当前条的打开请求先拿到网络，不与它抢带宽。
+    _preloadTimer = Timer(const Duration(milliseconds: 120), () {
       if (gen == _preloadGen) _runPreloads();
     });
   }
@@ -8398,6 +8411,8 @@ class _PlayerPageState extends State<PlayerPage>
     final canUsePreload = cachedSlot != null;
     _invalidatePreload();
     final my = ++_openToken;
+    // 换条时作废尚未执行的播放/暂停意图，避免上一条的暂停落到新视频上
+    _playCmdDesired = null;
     _pausedByBackground = false;
     autoTimer?.cancel();
     _loadTimeout?.cancel();
@@ -8410,6 +8425,7 @@ class _PlayerPageState extends State<PlayerPage>
     _blackGuard?.cancel();
     _blackRebuilt = false;
     _videoDw = 0;
+    _videoGenSynced = false;
     _firstFrameSeen = false;
     _opening = true;
     setState(() {
@@ -9530,9 +9546,13 @@ class _PlayerPageState extends State<PlayerPage>
   /// 改成「写期望状态 + 单线程消费」，原生层永远只有一次调用在跑。
   bool _playCmdBusy = false;
   bool? _playCmdDesired;
+  /// 交命令时所属的 open 周期：换条后旧命令必须作废，
+  /// 否则「上一条的暂停」会在新视频起播后落地，表现就是起播即停。
+  int _playCmdToken = -1;
 
   void _requestPlayState({required bool playing}) {
     _playCmdDesired = playing;
+    _playCmdToken = _openToken;
     if (_playCmdBusy) return;
     _playCmdBusy = true;
     Future<void>(() async {
@@ -9541,6 +9561,8 @@ class _PlayerPageState extends State<PlayerPage>
           final want = _playCmdDesired;
           if (want == null) break;
           _playCmdDesired = null;
+          // 换过条：这条命令属于上一条，丢弃
+          if (_playCmdToken != _openToken) continue;
           try {
             if (want) {
               await player.setRate(speed);

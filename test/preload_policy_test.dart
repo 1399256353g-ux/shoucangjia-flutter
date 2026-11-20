@@ -115,9 +115,10 @@ void main() {
       AppSettings.preloadMemoryMb = 384;
       final j = AppSettings.toJson();
       AppSettings.resetDefaults();
-      // 0.9.89：预载恢复为每侧 1 条（滑动时全黑体验差），但不再默认 2 条，
-      // 每多一条就多一整只 mpv 实例，移动端容易 OOM。
-      expect(AppSettings.preloadPerSide, 1);
+      // owner 2026-11-20：按平台分档——移动端仍 1 条（多一条就是一只 mpv
+      // 实例，容易被系统回收解码器），桌面端 2 条（内存宽裕，连滑两下也有命中）。
+      // 单元测试跑在非移动环境，因此这里是桌面默认值 2。
+      expect(AppSettings.preloadPerSide, 2);
       expect(AppSettings.preloadMemoryMb, 256);
       AppSettings.applyJson(j);
       expect(AppSettings.preloadPerSide, 3);
