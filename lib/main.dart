@@ -9473,6 +9473,39 @@ class _PlayerPageState extends State<PlayerPage>
     if (mounted) showUi();
   }
 
+  /// 播放/暂停命令串行化：连点只保证最后一次意图落地。
+  ///
+  /// 原来每次点击都直接调 `player.play()/pause()`；快速连点会让多个调用
+  /// 同时在 media_kit 原生层执行，Android/iOS 解码器不可重入 → 闪退。
+  /// 改成「写期望状态 + 单线程消费」，原生层永远只有一次调用在跑。
+  bool _playCmdBusy = false;
+  bool? _playCmdDesired;
+
+  void _requestPlayState({required bool playing}) {
+    _playCmdDesired = playing;
+    if (_playCmdBusy) return;
+    _playCmdBusy = true;
+    Future<void>(() async {
+      try {
+        while (mounted) {
+          final want = _playCmdDesired;
+          if (want == null) break;
+          _playCmdDesired = null;
+          try {
+            if (want) {
+              await player.setRate(speed);
+              await player.play();
+            } else {
+              await player.pause();
+            }
+          } catch (_) {}
+        }
+      } finally {
+        _playCmdBusy = false;
+      }
+    });
+  }
+
   void togglePause() {
     final isV = _workAt(cur)['t'] == 'v';
     // 用户手动操作后不再视为后台暂停，避免回前台被自动恢复
@@ -9487,26 +9520,24 @@ class _PlayerPageState extends State<PlayerPage>
         pauseAuto();
         PauseTrace.mark('user:toggle');
         Breadcrumb.mark('player:pause', 'L9345');
-        player.pause();
+        _requestPlayState(playing: false);
       } else {
-        player.play();
         if (!manualPic) startAuto();
+        _requestPlayState(playing: true);
       }
       return;
     }
+    // 先更新 UI（点击立刻有反馈），再排队执行原生调用。
     if (paused) {
       _userPaused = false;
-      try {
-        player.setRate(speed);
-      } catch (_) {}
-      player.play();
       setState(() => paused = false);
+      _requestPlayState(playing: true);
     } else {
       _userPaused = true;
       PauseTrace.mark('user:toggle');
       Breadcrumb.mark('player:pause', 'L9362');
-      player.pause();
       setState(() => paused = true);
+      _requestPlayState(playing: false);
     }
   }
 
@@ -11126,15 +11157,9 @@ class _PlayerPageState extends State<PlayerPage>
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
-            onTapDown: (d) {
-              // owner 2026-11-20：热区高度含 34dp 气泡预留。在气泡区按下
-              // 原来会被当成「跳到该位置」，点一下视频就卡一下；这里只认
-              // 进度条本体（底部 28dp），上方按下直接忽略。
-              if (d.localPosition.dy < kScrubBubbleSpace) return;
-              _scrubStart(d.localPosition, width);
-            },
-            onTapUp: (_) => _scrubEnd(),
-            onTapCancel: () => _scrubEnd(),
+            // owner 2026-11-20：进度条只认「横向拖动」，不再响应点按。
+            // 之前热区一按下就 seek，导致点「展开简介」等靠近底部的按钮
+            // 会被当成跳转进度，表现为误触。
             onHorizontalDragStart: (d) => _scrubStart(d.localPosition, width),
             onHorizontalDragUpdate: (d) => _scrubMove(d.localPosition, width),
             onHorizontalDragEnd: (_) => _scrubEnd(),
