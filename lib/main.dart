@@ -7748,6 +7748,10 @@ class _PlayerPageState extends State<PlayerPage>
   void _scheduleStallCheck() {
     _stallTimer?.cancel();
     final my = _openToken;
+    // owner 2026-11-20：mpv 在缓冲/换码流期间会短暂报 playing=false，
+    // 只看这个标志会把「正在播」误判成「卡死」，于是重开媒体 →
+    // 用户看到的就是「明明放出来了又退回去转圈」。以位置是否前进为准。
+    final baseMs = pos.inMilliseconds;
     _stallTimer = Timer(const Duration(milliseconds: 1200), () {
       if (!mounted || my != _openToken) return;
       if (_opening || _failure != null) return;
@@ -7761,6 +7765,13 @@ class _PlayerPageState extends State<PlayerPage>
             player.state.duration.inMilliseconds > 0 ||
             player.state.position.inMilliseconds > 0;
       } catch (_) {}
+      var atMs = pos.inMilliseconds;
+      try {
+        final cur2 = player.state.position.inMilliseconds;
+        if (cur2 > atMs) atMs = cur2;
+      } catch (_) {}
+      // 位置有前进 = 实际在播，不再动作
+      if (atMs - baseMs >= 300) return;
       if (playing) return;
       _applyStallRecovery(
         stallRecoveryAction(
@@ -11838,9 +11849,15 @@ class _PlayerPageState extends State<PlayerPage>
                             // 也避免纹理先按错误比例画一帧再跳。
                             if ((it['th'] ?? '').toString().isNotEmpty)
                               IgnorePointer(
-                                ignoring: _firstFrameSeen,
+                                // 只有「首帧出来」且「视频轨真的报了尺寸」才让位。
+                                // 有声无画时 _videoDw 一直是 0，海报继续盖着，
+                                // 用户看到的是封面而不是黑屏。
+                                ignoring:
+                                    _firstFrameSeen && _videoDw > 1,
                                 child: AnimatedOpacity(
-                                  opacity: _firstFrameSeen ? 0 : 1,
+                                  opacity: _firstFrameSeen && _videoDw > 1
+                                      ? 0
+                                      : 1,
                                   duration: const Duration(milliseconds: 200),
                                   curve: Curves.easeOut,
                                   child: LayoutBuilder(builder: (_, pc) {
@@ -12005,46 +12022,8 @@ class _PlayerPageState extends State<PlayerPage>
                   ),
                 ),
               ),
-              // G12：弱网缓冲提示（延迟出现，避免正常起播闪烁）
-              // P2：订阅独立的 _slowBufferVN，缓冲态变化只重建这颗小提示。
-              ValueListenableBuilder<bool>(
-                valueListenable: _slowBufferVN,
-                builder: (_, slow, __) {
-                  if (!slow || _failure != null || loading) {
-                    return const SizedBox.shrink();
-                  }
-                  return Positioned(
-                    top: pad.top + 14,
-                    left: 0,
-                    right: 0,
-                    child: IgnorePointer(
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(20)),
-                          child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 1.6,
-                                        color: Colors.white70)),
-                                SizedBox(width: 8),
-                                Text('网络较慢，正在缓冲…',
-                                    style: TextStyle(
-                                        fontSize: 12, color: Colors.white70)),
-                              ]),
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
+              // owner 2026-11-20：去掉中央「网络较慢，正在缓冲…」提示，
+              // 缓冲态只在诊断里记录，不再占用画面中心。
               // G12：加载超时/解码失败/网络失败 —— 给出重试入口
               if (_failure != null) _failureOverlay(),
               // G9 / P0 §5：双击位置的红心反馈（58dp、#FFFF3B5C、700ms、
