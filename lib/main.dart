@@ -7701,7 +7701,9 @@ class _PlayerPageState extends State<PlayerPage>
       }
       // 位置流每 100ms 左右触发一次。pos 走 ValueNotifier，进度条自己
       // 订阅重绘；不再 setState 重建整页（视频层/信息区/任务栏保持不动）。
-      if (!_firstFrameSeen && position.inMilliseconds >= 120) {
+      // 500ms 才算「真的出画」：解码器预热阶段纹理仍是黑的，
+      // 提前让出封面就会露出一段黑屏。
+      if (!_firstFrameSeen && position.inMilliseconds >= 500) {
         _firstFrameSeen = true;
         if (mounted) setState(() {});
       }
@@ -11967,23 +11969,8 @@ class _PlayerPageState extends State<PlayerPage>
                                   }),
                                 ),
                               ),
-                            // J-A5：加载圈移到右上角，垂直中线与左侧返回键图标对齐；
-                            // 错误/重试仍由中央的 _failureOverlay 展示。
-                            if (loading &&
-                                (it['th'] ?? '').toString().isEmpty)
-                              Positioned(
-                                top: pad.top + 20,
-                                right: pad.right + 18,
-                                child: const IgnorePointer(
-                                  child: SizedBox(
-                                    width: 24,
-                                    height: 24,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2.2,
-                                        color: Colors.white38),
-                                  ),
-                                ),
-                              ),
+                            // owner 2026-11-20：舞台上不再有任何加载圈，
+                            // 起播阶段由封面兜住。
                             ..._stageOverlayChildren(
                               w: it,
                               fs: fs,
