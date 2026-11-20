@@ -1,7 +1,7 @@
 name: shoucangjia
 description: Local media library client
 publish_to: 'none'
-version: 0.9.123+126
+version: 0.9.124+127
 environment:
   sdk: '>=3.4.0 <4.0.0'
 
@@ -41,3 +41,6 @@ flutter_launcher_icons:
   remove_alpha_ios: true
   adaptive_icon_background: "#1B3F5F"
   adaptive_icon_foreground: "assets/icon_fg.png"
+
+dependency_overrides:
+  volume_controller: 3.2.0
