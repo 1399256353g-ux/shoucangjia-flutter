@@ -7701,9 +7701,8 @@ class _PlayerPageState extends State<PlayerPage>
       }
       // 位置流每 100ms 左右触发一次。pos 走 ValueNotifier，进度条自己
       // 订阅重绘；不再 setState 重建整页（视频层/信息区/任务栏保持不动）。
-      // 500ms 才算「真的出画」：解码器预热阶段纹理仍是黑的，
-      // 提前让出封面就会露出一段黑屏。
-      if (!_firstFrameSeen && position.inMilliseconds >= 500) {
+      // owner 2026-11-20：开始播放就撤封面，不做任何等待。
+      if (!_firstFrameSeen && position.inMilliseconds > 0) {
         _firstFrameSeen = true;
         if (mounted) setState(() {});
       }
@@ -11943,7 +11942,8 @@ class _PlayerPageState extends State<PlayerPage>
                                   opacity: _firstFrameSeen && _videoDw > 1
                                       ? 0
                                       : 1,
-                                  duration: const Duration(milliseconds: 200),
+                                  // 撤封面不做过渡，避免多出「半透明叠着」的一段
+                                  duration: Duration.zero,
                                   curve: Curves.easeOut,
                                   child: LayoutBuilder(builder: (_, pc) {
                                     final fit = videoFitFor(
