@@ -11884,6 +11884,9 @@ class _PlayerPageState extends State<PlayerPage>
                         );
                       }
                       return GestureDetector(
+                        // 与视频分支同理：deferToChild 时 contain 留出的
+                        // 上下黑边不参与命中，点上去被直接吞掉。
+                        behavior: HitTestBehavior.opaque,
                         onTapUp: (d) => onStageTap(d.localPosition),
                         // G11：图文区没有 2 倍速手势，长按同样弹出播放菜单
                         // G14：放大查看时禁用长按菜单，避免平移误触
