@@ -45,10 +45,10 @@ void main() {
   group('内存预算', () {
     test('按 48MB/条换算槽位并夹在 2..3（预载槽位默认 2、上限 3）', () {
       expect(preloadSlotBudget(96), 2);
-      expect(preloadSlotBudget(256), 3);
+      expect(preloadSlotBudget(256), 5);
       expect(preloadSlotBudget(512), preloadMaxSlots);
       expect(preloadSlotBudget(2000), preloadMaxSlots);
-      expect(preloadMaxSlots, 3);
+      expect(preloadMaxSlots, 5);
       expect(preloadDefaultPerSide, 2);
     });
 

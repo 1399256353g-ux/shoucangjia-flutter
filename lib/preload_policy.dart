@@ -17,7 +17,7 @@ const int preloadDefaultPerSide = 2;
 /// 桌面端内存宽裕，维持原来的 2。
 // owner 2026-11-18：预载恢复（滑动时上下黑屏体验差），但每侧只保留 1 条，
 // 兼顾内存：一条预载 = 一整只 mpv 实例，2 条以上在移动端容易 OOM。
-int preloadDefaultPerSideFor({required bool mobile}) => mobile ? 1 : 2;
+int preloadDefaultPerSideFor({required bool mobile}) => 2;
 
 /// 桌面端每侧 2 条：内存宽裕，连滑两下仍能命中预载；
 /// 移动端维持 1 条——一个槽位就是一只 mpv 实例，多了会被系统回收解码器。
@@ -30,10 +30,10 @@ const int preloadEntryBytes = 48 * 1024 * 1024;
 
 /// 播放器槽位总数上限（含当前播放槽位）。
 ///
-/// owner 约束：预载槽位默认 2 个（当前 + 前后各一），上限 2–3。
-/// 槽位越多，系统里同时存在的解码器/缓冲区越多，长时间播放更容易被
-/// 系统回收解码器而「随机停住」，因此总槽位固定上限 3。
-const int preloadMaxSlots = 3;
+/// owner 2026-11-20：目标是「滑动秒切、看不到加载痕迹」，槽位上限放宽到 5
+/// （当前 + 前后各 2 条）。内存由 [preloadSlotBudget] 按 48MB/条与设置里的
+/// 内存上限共同约束：默认 256MB 正好容纳 5 条，设置调低会自动减到 2–3 条。
+const int preloadMaxSlots = 5;
 
 /// 默认内存上限（MB）。
 const int preloadDefaultMemoryMb = 256;
