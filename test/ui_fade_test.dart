@@ -10,10 +10,10 @@ void main() {
       );
     });
 
-    test('非全屏滑动时整体淡化', () {
+    test('非全屏滑动时不淡化（owner 2026-11-20）', () {
       expect(
         ChromeFade.opacity(uiVisible: true, fullscreen: false, swiping: true),
-        ChromeFade.dimmedOpacity,
+        1.0,
       );
     });
 
@@ -22,8 +22,8 @@ void main() {
           ChromeFade.opacity(uiVisible: true, fullscreen: false, swiping: true);
       final after = ChromeFade.opacity(
           uiVisible: true, fullscreen: false, swiping: false);
+      expect(during, 1.0);
       expect(after, 1.0);
-      expect(after, greaterThan(during));
     });
 
     test('全屏不淡化：维持 M4 的显示逻辑', () {

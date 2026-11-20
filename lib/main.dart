@@ -7068,7 +7068,8 @@ class _PlaybackSlot {
     // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
     vc = VideoController(
       player,
-      configuration: VideoControllerConfiguration(hwdec: hwdecFor(mode)),
+      configuration: VideoControllerConfiguration(
+          hwdec: hwdecFor(mode, androidCopy: Platform.isAndroid)),
     );
     PerfDiagnostics.instance.slotCreated();
   }

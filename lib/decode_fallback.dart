@@ -17,8 +17,13 @@ const String hwdecAutoSafe = 'auto-safe';
 /// 关闭硬件解码，改用 CPU 解码（兼容性最好，功耗更高）。
 const String hwdecSoftware = 'no';
 
-String hwdecFor(DecodeMode mode) =>
-    mode == DecodeMode.software ? hwdecSoftware : hwdecAutoSafe;
+String hwdecFor(DecodeMode mode, {bool androidCopy = false}) =>
+    mode == DecodeMode.software
+        ? hwdecSoftware
+        // owner 2026-11-20：Android 上「有声无画」多数是硬解直接把帧丢给
+        // Surface，纹理层拿不到帧（表现为黑屏）。mediacodec-copy 仍是硬解，
+        // 只是把帧拷回普通内存，绕开 direct-surface 这条路。
+        : (androidCopy ? 'mediacodec-copy' : hwdecAutoSafe);
 
 DecodeMode otherDecodeMode(DecodeMode mode) =>
     mode == DecodeMode.software ? DecodeMode.hardware : DecodeMode.software;
