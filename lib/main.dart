@@ -7528,8 +7528,30 @@ class _PlayerPageState extends State<PlayerPage>
   ///
   /// 兜底索引按「作者 → 首张可用图」预建一次，只在作品列表变化时重建/补新批次；
   /// 结果按作者名缓存，单次 build 内的多次调用都是 O(1)。
+  /// 统一取作者名：作品字段缺失时（部分作品没有 `a`）从媒体路径里
+  /// 的 `@作者` 段回退，避免「没头像、点头像也进不去作者页」。
+  String authorNameOf(Map w) {
+    final direct = '${w['a'] ?? ''}'.trim();
+    if (direct.isNotEmpty) return direct;
+    final alt = '${w['author'] ?? ''}'.trim();
+    if (alt.isNotEmpty) return alt;
+    final m = w['m'];
+    Iterable<String> paths = const <String>[];
+    if (m is List) {
+      paths = m.map((e) => '$e');
+    } else if (m is String && m.isNotEmpty) {
+      paths = <String>[m];
+    }
+    for (final p0 in paths) {
+      for (final seg in p0.split('/')) {
+        if (seg.startsWith('@') && seg.length > 1) return seg.substring(1);
+      }
+    }
+    return '';
+  }
+
   String avatarFor(Map w) {
-    final name = '${w['a'] ?? ''}';
+    final name = authorNameOf(w);
     final av = '${w['av'] ?? ''}';
     // 作品没带作者名时无从查手动/作者级头像，只能用作品自带 `av`。
     if (name.isEmpty) return av;
@@ -9508,7 +9530,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
-    final name = '${_workAt(cur)['a'] ?? ''}';
+    final name = authorNameOf(_workAt(cur));
     if (name.isEmpty) return;
     final resume = !paused;
     _userPaused = true;

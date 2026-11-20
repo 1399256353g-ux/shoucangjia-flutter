@@ -136,7 +136,6 @@ class DiziPageScrollPhysics extends ScrollPhysics {
   Simulation? createBallisticSimulation(
       ScrollMetrics position, double velocity) {
     if (position.viewportDimension <= 0) return null;
-    final tolerance = toleranceFor(position);
     final page = _page(position);
     final maxPage = position.maxScrollExtent / position.viewportDimension;
     final target = pageSwipeTarget(
@@ -148,22 +147,52 @@ class DiziPageScrollPhysics extends ScrollPhysics {
     final targetPixels = target * position.viewportDimension;
     final atRest = (targetPixels - position.pixels).abs() < 0.5;
     if (atRest && velocity.abs() < kPageSwipeVelocity) return null;
-    return ScrollSpringSimulation(
-      // owner 2026-11-20：抖音的落位收尾更短。ω = sqrt(k/m)：
-      // 800/0.5 → 40 rad/s（约 100ms 收敛）；1300/0.5 → 51 rad/s（约 78ms）。
-      // 临界阻尼不变，避免“弹一下”的廉价感。
-      SpringDescription.withDampingRatio(
-        mass: 0.5,
-        stiffness: 1300,
-        ratio: 1.0,
-      ),
-      position.pixels,
-      targetPixels,
-      0, // Q：抬手立即落位，不跟随扇动惯性
-      tolerance: tolerance,
+    // owner 2026-11-20：抖音是「固定时长的干脆落位」，不是弹簧。
+    // 弹簧的收敛时间随位移变化（甩得远就拖），所以一直显得比抖音长。
+    // 这里改成固定 110ms 的曲线动画：不管甩多远，落位时间恒定。
+    final distance = (targetPixels - position.pixels).abs();
+    if (distance < 0.5) return null;
+    return FastSettleSimulation(
+      from: position.pixels,
+      to: targetPixels,
+      duration: const Duration(milliseconds: 110),
     );
   }
 
   @override
   bool get allowImplicitScrolling => false;
+}
+
+/// 固定时长的落位动画。
+///
+/// 弹簧的收敛时间随位移变化（甩得远就更久），所以观感一直比抖音拖；
+/// 这里用固定时长 + easeOutCubic：不管甩多远，110ms 内一定落位。
+class FastSettleSimulation extends Simulation {
+  FastSettleSimulation({
+    required this.from,
+    required this.to,
+    this.duration = const Duration(milliseconds: 110),
+  });
+
+  final double from;
+  final double to;
+  final Duration duration;
+
+  double get _seconds => duration.inMicroseconds / Duration.microsecondsPerSecond;
+
+  @override
+  double x(double time) {
+    final t = (time / _seconds).clamp(0.0, 1.0);
+    return from + (to - from) * Curves.easeOutCubic.transform(t);
+  }
+
+  @override
+  double dx(double time) {
+    if (time >= _seconds) return 0;
+    const dt = 0.001;
+    return (x(time + dt) - x(time)) / dt;
+  }
+
+  @override
+  bool isDone(double time) => time >= _seconds;
 }
