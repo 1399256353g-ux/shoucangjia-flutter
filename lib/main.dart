@@ -7741,6 +7741,40 @@ class _PlayerPageState extends State<PlayerPage>
     }));
   }
 
+  /// 当前条前后各 3 条的封面预取（只进图片缓存，不占解码器）。
+  ///
+  /// 抖音「连续秒切」的关键不是开了很多播放器，而是**任何一页都有封面兜着**；
+  /// 解码器只有 3 个，但封面可以是任意多条。
+  int _coverPrefetchFor = -1;
+
+  void _prefetchNeighborCovers() {
+    if (!mounted) return;
+    if (_coverPrefetchFor == cur) return;
+    _coverPrefetchFor = cur;
+    final memW = _posterDecodeWidth(context);
+    for (var d = -3; d <= 3; d++) {
+      if (d == 0) continue;
+      final i = cur + d;
+      if (i < 0 || i >= widget.works.length) continue;
+      final it = _workAt(i);
+      final th = (it['th'] ?? '').toString();
+      if (th.isEmpty) continue;
+      final lib = _libFor(it);
+      try {
+        precacheImage(
+          CachedNetworkImageProvider(
+            withImageWidth(cfg.mediaUrl(th, lib: lib), kPlayerImageWidth),
+            headers: cfg.headersFor(lib),
+            cacheManager: DiziCache.manager,
+            maxWidth: memW,
+          ),
+          context,
+          onError: (_, __) {},
+        );
+      } catch (_) {}
+    }
+  }
+
   /// 播放器报「不在播放」后，等一小段确认是真空转，再决定是否自救。
   ///
   /// 很多暂停是瞬时的（切清晰度、音频设备重连、NAS 一次读超时），
@@ -8564,6 +8598,10 @@ class _PlayerPageState extends State<PlayerPage>
     _schedulePreload();
     // 线③：同时轻量预热相邻视频头部（HTTP Range，不占播放器）
     _scheduleVideoPrefetch();
+    // owner 2026-11-20：连续快滑时，解码器来不及准备下下条，但封面可以。
+    // 前后各预取 3 条封面（纯图片，几百 KB），保证每次落页都有画面可看，
+    // 不会出现「滑过去是黑的，等解码器」。
+    _prefetchNeighborCovers();
   }
 
   Future<void> _refreshDrop(String id, int token, String lib) async {
