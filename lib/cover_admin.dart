@@ -27,6 +27,25 @@ enum CoverScope {
 /// 封面操作类型。
 enum CoverOp { set, clear }
 
+/// 截取框归一化的最小宽高（小于它说明用户没真正框选，按整帧处理）。
+const double kCoverRectMin = 0.02;
+
+/// 归一化封面截取框：`[x, y, w, h]`（0..1，相对源帧左上角）。
+///
+/// 越界值夹回画面内；宽高同时 ≥0.999、或不是 4 个有限数时返回 null，
+/// 表示「整帧」，服务端维持原行为。与 `gallery_server.js` 的
+/// `coverCropFilter()` 规则一致（两端各自夹一次，协议层不互相信任）。
+List<double>? coverCropRect(List<double>? r) {
+  if (r == null || r.length != 4) return null;
+  if (r.any((v) => v.isNaN || v.isInfinite)) return null;
+  final w = r[2].clamp(kCoverRectMin, 1.0);
+  final h = r[3].clamp(kCoverRectMin, 1.0);
+  if (w >= 0.999 && h >= 0.999) return null;
+  final x = r[0].clamp(0.0, 1.0 - w);
+  final y = r[1].clamp(0.0, 1.0 - h);
+  return <double>[x, y, w, h];
+}
+
 /// 一次封面操作（设置 / 清除）。
 class CoverRequest {
   final String lib;
@@ -40,19 +59,24 @@ class CoverRequest {
   /// 图文/单图取第几张（0 基）。null 表示取第 1 张。
   final int? index;
 
+  /// 封面截取框：`[x, y, w, h]` 归一化。null 表示整帧（旧行为）。
+  final List<double>? rect;
+
   const CoverRequest.set({
     required this.lib,
     required this.work,
     this.scope = CoverScope.basic,
     this.at,
     this.index,
+    this.rect,
   }) : op = CoverOp.set;
 
   const CoverRequest.clear({required this.lib, this.scope = CoverScope.basic})
       : work = '',
         op = CoverOp.clear,
         at = null,
-        index = null;
+        index = null,
+        rect = null;
 
   /// 请求体：清除只带 `clear:true`；设置带作品 id，并按需带截帧时间/图片序号。
   Map<String, dynamic> toBody() {
@@ -60,6 +84,8 @@ class CoverRequest {
     final body = <String, dynamic>{'lib': lib, 'work': work};
     if (at != null) body['at'] = at;
     if (index != null) body['index'] = index;
+    final rr = coverCropRect(rect);
+    if (rr != null) body['rect'] = rr;
     return body;
   }
 

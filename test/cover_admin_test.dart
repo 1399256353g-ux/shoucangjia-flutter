@@ -45,6 +45,36 @@ void main() {
       expect(CoverRequest.set(lib: '', work: '7401').valid, isFalse);
     });
 
+    test('截取框：归一化后进请求体，越界夹回画面', () {
+      final r = CoverRequest.set(
+        lib: 'lib-001',
+        work: 'w1',
+        at: 5,
+        rect: [0.25, 0.1, 0.5, 0.6],
+      );
+      expect(r.toBody()['rect'], [0.25, 0.1, 0.5, 0.6]);
+      expect(
+        CoverRequest.set(lib: 'l', work: 'w', rect: [-0.2, 0.9, 1.4, 0.5])
+            .toBody()['rect'],
+        [0.0, 0.5, 1.0, 0.5],
+      );
+    });
+
+    test('截取框：整帧/非法值不进请求体（旧行为）', () {
+      expect(coverCropRect(null), isNull);
+      expect(coverCropRect([0, 0, 1, 1]), isNull);
+      expect(coverCropRect([0.1, 0.1, 0.5]), isNull);
+      expect(coverCropRect([0.1, 0.1, double.nan, 0.5]), isNull);
+      expect(CoverRequest.set(lib: 'l', work: 'w', rect: [0, 0, 1, 1]).toBody()
+          .containsKey('rect'), isFalse);
+      expect(
+        CoverRequest.clear(lib: 'l', scope: CoverScope.unit)
+            .toBody()
+            .containsKey('rect'),
+        isFalse,
+      );
+    });
+
     test('状态码翻译：已知给原因，未知只报数字', () {
       expect(coverErrorText(404), contains('没有可用图片'));
       expect(coverErrorText(400), '请求格式不对');
