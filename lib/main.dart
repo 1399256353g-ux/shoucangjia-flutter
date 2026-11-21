@@ -7697,14 +7697,31 @@ class _PlayerPageState extends State<PlayerPage>
     if (_coverPrefetchFor == cur) return;
     _coverPrefetchFor = cur;
     final memW = _posterDecodeWidth(context);
+    final previewW = workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context));
     for (var d = -3; d <= 3; d++) {
-      if (d == 0) continue;
       final i = cur + d;
       if (i < 0 || i >= widget.works.length) continue;
       final it = _workAt(i);
       final th = (it['th'] ?? '').toString();
       if (th.isEmpty) continue;
       final lib = _libFor(it);
+      if (d == 0) {
+        // 当前条只要那张「网格尺寸」底图：它就是播放页海报的 placeholder，
+        // 命中后首帧零等待；从作者页/深链直接进播放页时也能提前缓存。
+        try {
+          precacheImage(
+            thumbImageProvider(
+              withImageWidth(cfg.mediaUrl(th, lib: lib), kWorkImageWidth),
+              decodeWidth: previewW,
+              headers: cfg.headersFor(lib),
+              cacheManager: DiziCache.manager,
+            ),
+            context,
+            onError: (_, __) {},
+          );
+        } catch (_) {}
+        continue;
+      }
       try {
         precacheImage(
           CachedNetworkImageProvider(
@@ -10103,6 +10120,38 @@ class _PlayerPageState extends State<PlayerPage>
     return (size.width * dpr).round().clamp(360, 2160);
   }
 
+  /// 播放页海报的「零等待底图」。
+  ///
+  /// 根因（2026-11-21 真机取证）：网格卡片按 `kWorkImageWidth` + 
+  /// `workCardDecodeWidth` 缓存缩略图，播放页海报按 `kPlayerImageWidth` +
+  /// `_posterDecodeWidth` 请求——URL 与解码宽度都不同 → 图片缓存键不同 →
+  /// 进播放页必须重新下载/解码，期间海报是空的，露出底层黑色 → 就是
+  /// 「有声音、黑屏 ~300ms」。
+  ///
+  /// 这里不再加任何计时/兜底，只把渲染拆成两级（抖音做法）：先铺那张
+  /// **已在缓存里的网格缩略图**，高清图解码完成后由 `CachedNetworkImage`
+  /// 自然淡入覆盖。底图 provider 与 `WorkCard` 完全一致（同 URL + 同
+  /// `ResizeImage` 宽度），命中即同步出图、无额外请求。
+  Widget _posterPreview(dynamic it, {required BoxFit fit}) {
+    final th = (it['th'] ?? '').toString();
+    if (th.isEmpty) return const SizedBox.expand();
+    final lib = _libFor(it);
+    final align =
+        fit == BoxFit.cover ? Alignment.topCenter : Alignment.center;
+    return Image(
+      image: thumbImageProvider(
+        withImageWidth(cfg.mediaUrl(th, lib: lib), kWorkImageWidth),
+        decodeWidth: workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
+        headers: cfg.headersFor(lib),
+        cacheManager: DiziCache.manager,
+      ),
+      fit: fit,
+      alignment: align,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => const SizedBox.expand(),
+    );
+  }
+
   /// 页内浮层：作者头像/文案/音乐 + 右侧互动栏（含全屏旧信息行）。
   ///
   /// 放进每一页自己的 Stack，滑动时随视频整页位移——抖音的文案是跟着
@@ -11992,6 +12041,11 @@ class _PlayerPageState extends State<PlayerPage>
                                         : BoxFit.contain;
                                     return CachedNetworkImage(
                                         cacheManager: DiziCache.manager,
+                                        // 底图：与作品卡同一张 provider。进播放页
+                                        // 时它通常已在 ImageCache 里，直接同步命中，
+                                        // 海报第一帧不空 → 起播不再露黑。
+                                        placeholder: (_, __) =>
+                                            _posterPreview(it, fit: fit),
                                         imageUrl: withImageWidth(
                                             cfg.mediaUrl(it['th'].toString(),
                                                 lib: _libFor(it)),
