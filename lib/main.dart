@@ -7012,26 +7012,50 @@ class _PlayerPageState extends State<PlayerPage>
   /// 贴到画面下沿；拿不到时退回屏幕底部。
   double? _videoAspect;
 
-  /// 按作品缓存显示比例（键与点赞一致）。
+  /// 播放器自己上报的比例，按作品缓存（键与点赞一致）。
   ///
-  /// 切条时 `_videoAspect` 会重置，若只依赖它，新视频会先按“铺满”画、
-  /// 等解码器报出比例再改成“留边”——那一下就是抽搐。
-  /// 这里按作品记住比例（邻页封面解析时也会回填），落页直接是最终矩形。
-  final Map<String, double> _aspectByWork = {};
+  /// owner 2026-11-21：起播瞬间「诡异拉伸」的根因是**拿封面比例给视频纹理
+  /// 排版**。封面比例来自缩略图像素（可能是裁切过的帧，也可能与带旋转信息
+  /// 的视频轨不一致）；它往往比播放器先到，视频就被画进错误矩形的
+  /// `BoxFit.fill`，等解码器报出真比例再跳回——那一下就是拉伸。
+  /// 现在视频层只认播放器上报的比例；拿不到就先不挂视频层（海报继续盖着）。
+  final Map<String, double> _playerAspectByWork = {};
 
-  double? _aspectFor(dynamic w) {
-    final cached = _aspectByWork[_likeKeyFor(w)];
-    if (cached != null && cached > 0) return cached;
+  /// 封面 / 邻页占位图的比例：只服务封面显示，不能用于视频层布局。
+  final Map<String, double> _coverAspectByWork = {};
+
+  /// 视频层可用比例：只有播放器报过的才作数。
+  double? _videoAspectFor(dynamic w) {
+    final a = _playerAspectByWork[_likeKeyFor(w)];
+    return (a != null && a > 0) ? a : null;
+  }
+
+  /// 封面显示比例：封面 → 播放器 → 上次播放器上报值。
+  double? _coverAspectFor(dynamic w) {
+    final key = _likeKeyFor(w);
+    final cover = _coverAspectByWork[key];
+    if (cover != null && cover > 0) return cover;
+    final player = _playerAspectByWork[key];
+    if (player != null && player > 0) return player;
     return _videoAspect;
   }
 
-  /// 记住比例；与已有值相差 <2% 时不覆盖，避免封面与解码器来回抢。
-  void _rememberAspect(dynamic w, double a) {
+  /// 记住封面比例（邻近页封面解析时回填）；与已有值相差 <2% 时不覆盖。
+  void _rememberCoverAspect(dynamic w, double a) {
     if (a <= 0 || !a.isFinite) return;
     final key = _likeKeyFor(w);
-    final old = _aspectByWork[key];
+    final old = _coverAspectByWork[key];
     if (old != null && old > 0 && (old - a).abs() / old < 0.02) return;
-    _aspectByWork[key] = a;
+    _coverAspectByWork[key] = a;
+  }
+
+  /// 记住播放器比例；与已有值相差 <2% 时不覆盖，避免来回抖动。
+  void _rememberPlayerAspect(dynamic w, double a) {
+    if (a <= 0 || !a.isFinite) return;
+    final key = _likeKeyFor(w);
+    final old = _playerAspectByWork[key];
+    if (old != null && old > 0 && (old - a).abs() / old < 0.02) return;
+    _playerAspectByWork[key] = a;
   }
 
   // A：底部任务栏改为不透明实底；视频视口按其高度内缩，避免遮住画面。
@@ -7588,8 +7612,8 @@ class _PlayerPageState extends State<PlayerPage>
               : null);
       if (a == null || a <= 0) return;
       final curWork = _workAt(cur);
-      final before = _aspectFor(curWork);
-      _rememberAspect(curWork, a);
+      final before = _videoAspectFor(curWork);
+      _rememberPlayerAspect(curWork, a);
       // 已是同一比例（或只在 2% 内摆动）就不重排，避免像素级跳动。
       if (before != null && (before - a).abs() / before < 0.02) return;
       setState(() => _videoAspect = a);
@@ -10229,7 +10253,7 @@ class _PlayerPageState extends State<PlayerPage>
       }
       // owner 2026-11-19：比例未知时先不挂视频层（下层海报继续显示），
       // 避免先按错误比例画一帧、再跳成正确比例的「抽搐」。
-      final aspectNow = _aspectFor(_workAt(cur));
+      final aspectNow = _videoAspectFor(_workAt(cur));
       if (aspectNow == null || aspectNow <= 0) {
         return const SizedBox.shrink();
       }
@@ -10315,7 +10339,7 @@ class _PlayerPageState extends State<PlayerPage>
             : withImageWidth(cfg.mediaUrl(th, lib: lib), kPlayerPreloadWidth),
         headers: cfg.headersFor(lib),
         memCacheWidth: memW,
-        onAspect: (a) => _rememberAspect(it, a),
+        onAspect: (a) => _rememberCoverAspect(it, a),
       );
     });
   }
@@ -11771,13 +11795,18 @@ class _PlayerPageState extends State<PlayerPage>
                             // 也避免纹理先按错误比例画一帧再跳。
                             if ((it['th'] ?? '').toString().isNotEmpty)
                               IgnorePointer(
-                                // 只有「首帧出来」且「视频轨真的报了尺寸」才让位。
+                                // 只有「首帧出来」+「视频轨报了尺寸」+
+                                // 「播放器比例已知」才让位：比例没到就淡出，
+                                // 视频层还没挂载，会露黑屏。
                                 // 有声无画时 _videoDw 一直是 0，海报继续盖着，
                                 // 用户看到的是封面而不是黑屏。
-                                ignoring:
-                                    _firstFrameSeen && _videoDw > 1,
+                                ignoring: _firstFrameSeen &&
+                                    _videoDw > 1 &&
+                                    _videoAspectFor(it) != null,
                                 child: AnimatedOpacity(
-                                  opacity: _firstFrameSeen && _videoDw > 1
+                                  opacity: _firstFrameSeen &&
+                                          _videoDw > 1 &&
+                                          _videoAspectFor(it) != null
                                       ? 0
                                       : 1,
                                   // 短淡出：不拖沓，也不至于生硬跳变
@@ -11785,7 +11814,7 @@ class _PlayerPageState extends State<PlayerPage>
                                   curve: Curves.easeOut,
                                   child: LayoutBuilder(builder: (_, pc) {
                                     final fit = videoFitFor(
-                                                aspect: _aspectFor(it),
+                                                aspect: _coverAspectFor(it),
                                                 mode: AppSettings.videoFitOverride,
                                                 containerAspect: pc.maxHeight > 0
                                                     ? pc.maxWidth / pc.maxHeight

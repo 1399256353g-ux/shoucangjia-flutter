@@ -13,7 +13,7 @@
 - 依赖可用：`video_player 2.10.1` 已解析并写入 `pubspec.yaml` / `pubspec.lock`
   （只新增 5 个传递依赖，未升级任何现有包）。
 - 抽象层 `lib/player_backend.dart` 已就绪，`MpvBackend` 是**零行为改动**包装；
-  `lib/player_ios_native.dart` 已能完成打开/播放/暂停/seek/停止/音量/速率与
+  `docs/skeletons/ios_native_player.dart` 已能完成打开/播放/暂停/seek/停止/音量/速率与
   七路事件流，**缺三块原生能力**（截图、`videoGravity`、loop-file），已在
   `PlayerCapabilities` 里显式声明，不用猜。
 - 本轮不接线：iOS 继续走 mpv。接线步骤与回退开关见 §6、§7。
@@ -124,7 +124,7 @@ abstract class PlayerBackend {
 
 ### IosNativeBackend 关键实现点
 
-`lib/player_ios_native.dart`
+`docs/skeletons/ios_native_player.dart`
 
 - `VideoPlayerController.networkUrl(uri, httpHeaders:, viewType: platformView)`
 - `initialize()` 完成后补发 duration / videoParams / position，再恢复音量与速率
@@ -315,7 +315,7 @@ iOS 原生后端连续 2 次在 `open()` 阶段失败（`errorStream` 早于 dur
 | 文件 | 说明 |
 |---|---|
 | `lib/player_backend.dart` | 接口 + 数据类型 + `MpvBackend`（零行为改动） + 后端选择纯函数 |
-| `lib/player_ios_native.dart` | `IosNativeBackend`（AVPlayer / video_player）+ `IosVideoSurface` |
+| `docs/skeletons/ios_native_player.dart` | `IosNativeBackend`（AVPlayer / video_player）+ `IosVideoSurface` |
 | `docs/ios-native-player.md` | 本文档 |
 | `pubspec.yaml` | 新增 `video_player: ^2.10.1` |
 | `pubspec.lock` | 仅新增 7 条依赖记录 |
