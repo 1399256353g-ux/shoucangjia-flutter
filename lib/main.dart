@@ -2597,8 +2597,9 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     var anyOk = false;
     for (final uri in attempts) {
       try {
-        final r =
-            await http.get(uri, headers: cfg.headers).timeout(const Duration(seconds: 12));
+        final r = await http
+            .get(uri, headers: cfg.headers)
+            .timeout(const Duration(seconds: 12));
         if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
         dynamic raw;
         try {
@@ -2804,37 +2805,35 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                       child: Center(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 28),
-                          child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                    report.total > 0
-                                        ? Icons.warning_amber_rounded
-                                        : Icons.delete_outline,
-                                    size: 34,
-                                    color: Colors.grey),
-                                const SizedBox(height: 10),
-                                Text(
-                                    report.total > 0
-                                        ? '服务端记录总数 ${report.total}，但未解析到条目'
-                                        : '暂无删除记录',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(color: Colors.grey)),
-                                const SizedBox(height: 6),
-                                Text(
-                                    report.total > 0
-                                        ? '已自动回退读取链路仍为空，请点「刷新」重试。'
-                                        : '平台删除/取消收藏的作品会按同步批次出现在这里。',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Colors.grey)),
-                                if (report.total > 0) ...[
-                                  const SizedBox(height: 12),
-                                  FilledButton(
-                                      onPressed: load,
-                                      child: const Text('重新读取')),
-                                ],
-                              ]),
+                          child:
+                              Column(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(
+                                report.total > 0
+                                    ? Icons.warning_amber_rounded
+                                    : Icons.delete_outline,
+                                size: 34,
+                                color: Colors.grey),
+                            const SizedBox(height: 10),
+                            Text(
+                                report.total > 0
+                                    ? '服务端记录总数 ${report.total}，但未解析到条目'
+                                    : '暂无删除记录',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.grey)),
+                            const SizedBox(height: 6),
+                            Text(
+                                report.total > 0
+                                    ? '已自动回退读取链路仍为空，请点「刷新」重试。'
+                                    : '平台删除/取消收藏的作品会按同步批次出现在这里。',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.grey)),
+                            if (report.total > 0) ...[
+                              const SizedBox(height: 12),
+                              FilledButton(
+                                  onPressed: load, child: const Text('重新读取')),
+                            ],
+                          ]),
                         ),
                       ),
                     )
@@ -5634,8 +5633,7 @@ class _RankPageState extends State<RankPage> {
   List<Map<String, dynamic>> get _visibleRows => [
         for (final e in rows)
           if (sel == 'all' ||
-              _rowMeta(_rowMap(e))
-                      ?.bigIdFor('${_rowMap(e)['avatar'] ?? ''}') ==
+              _rowMeta(_rowMap(e))?.bigIdFor('${_rowMap(e)['avatar'] ?? ''}') ==
                   sel)
             _rowMap(e)
       ];
@@ -6611,8 +6609,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// 触发 `_maybeLoadMore`，分页会把作者卡在首屏 60 个——owner 反馈
   /// 「Windows 版只显示 60 个」就是这个。移动端仍按页追加。
   int _initialShown(int total) {
-    final desktop =
-        Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+    final desktop = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
     return desktop ? total : initialGridCount(total);
   }
 
@@ -6666,8 +6663,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   Widget _authorCell(MapEntry<String, Map<String, dynamic>> e) {
     final av = '${e.value['av'] ?? ''}';
-    final lib =
-        '${e.value['_lib'] ?? cfg.lib}';
+    final lib = '${e.value['_lib'] ?? cfg.lib}';
     final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
 
     // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位
@@ -6921,8 +6917,7 @@ class _NeighborPageState extends State<_NeighborPage> {
             imageUrl: widget.imageUrl,
             httpHeaders: widget.headers,
             memCacheWidth: widget.memCacheWidth,
-            alignment:
-                fill ? Alignment.topCenter : Alignment.center,
+            alignment: fill ? Alignment.topCenter : Alignment.center,
             fit: fill ? BoxFit.cover : BoxFit.contain,
             fadeInDuration: Duration.zero,
             placeholder: (_, __) => fallback,
@@ -7000,12 +6995,14 @@ class _PlayerPageState extends State<PlayerPage>
   // iOS「有声无画」看门狗：音频在走但视频轨始终没报出尺寸，说明纹理没出帧。
   // 先只重建一次纹理（不重开媒体、不换解码器），仍无画面才降级软解。
   double _videoDw = 0;
+
   /// 纹理首次就绪后是否已经重挂过 Video widget。
   ///
   /// owner 2026-11-20：现象是「第一次播放有声音但画面黑，切下一条再回来又正常」。
   /// 这是 Video 组件在纹理 id 就绪前挂载导致的：重建一次即可出画。
   bool _videoGenSynced = false;
   bool _blackRebuilt = false;
+
   /// 首帧是否真的出来了（位置开始走动）。出来之前一直用海报盖住视频层，
   /// 避免「黑屏一下 / 缓冲圈闪一下 / 比例跳一下」的起播观感。
   bool _firstFrameSeen = false;
@@ -7177,10 +7174,9 @@ class _PlayerPageState extends State<PlayerPage>
   bool dragging = false;
   // P2：位置/时长改为 ValueNotifier——播放中每次位置回调只重绘进度条，
   // 不再整页 setState（原来播放页整个视频树/信息区/任务栏都跟着重建）。
-  final ValueNotifier<Duration> _posVN =
-      ValueNotifier<Duration>(Duration.zero);
-  final ValueNotifier<Duration> _durVN =
-      ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> _posVN = ValueNotifier<Duration>(Duration.zero);
+  final ValueNotifier<Duration> _durVN = ValueNotifier<Duration>(Duration.zero);
+
   /// 播放进度 0..1：由位置/时长派生，只驱动进度条自身（拖动时改用 _scrubFracVN）。
   late final PlaybackFraction _progressVN =
       PlaybackFraction(position: _posVN, duration: _durVN);
@@ -7343,6 +7339,7 @@ class _PlayerPageState extends State<PlayerPage>
   final StageLongPressTracker _lpTracker = StageLongPressTracker();
   Timer? _lpTimer;
   bool _suppressStageTap = false;
+
   /// 第一下单击是否真的切换了暂停（用于双击时还原）
   bool _pendingTapPaused = false;
   bool _pendingTapWasPaused = false;
@@ -9451,8 +9448,31 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  /// 作者点击链路取证（0.9.144）。
+  ///
+  /// owner 2026-11-21 复现：点头像「什么都没发生」，点作者名却落回舞台暂停。
+  /// 三种可能必须分清，否则只能继续在手势参数上试：
+  ///   a) 指针根本没到信息层（上层有别的层挡住）；
+  ///   b) 到了信息层但抬手被别的手势抢走；
+  ///   c) onTap 进了却在中途抛异常（界面无变化、日志也没有）。
+  /// 指针级日志 + onTap 首行 + 异常记录，一次即可区分。
+  Offset? _diagPointer;
+
+  void _authorTapDiag(String stage, {Object? error}) {
+    try {
+      final p = _diagPointer;
+      CrashLog.instance.record(
+        'author-tap[$stage] pos=${p == null ? 'null' : '${p.dx.toStringAsFixed(0)},${p.dy.toStringAsFixed(0)}'} '
+        'ui=$ui fs=$fs paused=$paused'
+        '${error == null ? '' : ' err=$error'}',
+        kind: 'author',
+      );
+    } catch (_) {}
+  }
+
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
+    _authorTapDiag('openAuthor');
     final name = authorNameOf(_workAt(cur));
     CrashLog.instance.record(
       'author-tap raw=${_workAt(cur)['a'] ?? ''} resolved=${name.isEmpty ? 'EMPTY' : 'ok'}',
@@ -9495,6 +9515,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 改成「写期望状态 + 单线程消费」，原生层永远只有一次调用在跑。
   bool _playCmdBusy = false;
   bool? _playCmdDesired;
+
   /// 交命令时所属的 open 周期：换条后旧命令必须作废，
   /// 否则「上一条的暂停」会在新视频起播后落地，表现就是起播即停。
   int _playCmdToken = -1;
@@ -10112,213 +10133,251 @@ class _PlayerPageState extends State<PlayerPage>
           bottom: overlayBottom,
           child: IgnorePointer(
             ignoring: !ui,
-            child: AnimatedOpacity(
-              opacity: chromeOpacity,
-              duration: Duration(milliseconds: chromeMs),
-              curve: Curves.easeOut,
-              child: GestureDetector(
-                // owner 2026-11-18：只有头像和作者名可进作者页；简介区域与
-                // 进度条上方空白不再误触发跳转。
-                onLongPress: _showWorkMenu,
-                child: Row(children: [
-                  // B2：作者级头像索引异步到位后要重新解析，否则会一直显示人形占位。
-                  ValueListenableBuilder<int>(
-                    valueListenable: authorAvatarRevision,
-                    builder: (context, _, __) => avatarFor(w).isNotEmpty
-                        ? GestureDetector(
-                            // owner 2026-11-21：头像/作者名的点击必须由「显式热区」
-                            // 保证。默认 deferToChild 依赖子组件自己命中，图片还在
-                            // 加载（占位为空）或加载失败时中心像素没有可命中对象，
-                            // 点击会穿透到舞台被当成暂停——表现就是「点头像没反应」。
-                            behavior: HitTestBehavior.opaque,
-                            onTap: openAuthor,
-                            child: ClipOval(
-                                child: CachedNetworkImage(
-                                    cacheManager: DiziCache.manager,
-                                    // 播放页头像 38dp：取 200px 缩图即可。
-                                    // 兜底图可能来自作者所在的基础库，按图片自身
-                                    // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
-                                    imageUrl: withImageWidth(
-                                        cfg.mediaUrl(avatarFor(w),
-                                            lib: _avatarLibFor(avatarFor(w))),
-                                        kAvatarImageWidth),
-                                    httpHeaders: cfg.headersFor(
-                                        _avatarLibFor(avatarFor(w))),
-                                    width: 38,
-                                    height: 38,
-                                    memCacheWidth: (38 *
-                                            MediaQuery.devicePixelRatioOf(
-                                                context))
-                                        .round(),
-                                    fadeInDuration: Duration.zero,
-                                    fit: BoxFit.cover,
-                                    errorWidget: (_, __, ___) =>
-                                        const CircleAvatar(
-                                            radius: 19,
-                                            child: Icon(Icons.person)))))
-                        : GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: openAuthor,
-                            child: const CircleAvatar(
-                                radius: 19, child: Icon(Icons.person))),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Row(children: [
-                          Flexible(
-                            child: GestureDetector(
-                              // 同上：文字区域也按整块热区命中，不依赖字形像素。
+            // 指针级取证：只要指针进到信息层就会留下 down/up，用来区分
+            // 「没进来」和「进来了但被抢」。translucent 不拦兄弟层。
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (e) {
+                _diagPointer = e.localPosition;
+                _authorTapDiag('pointer-down');
+              },
+              onPointerUp: (e) {
+                _diagPointer = e.localPosition;
+                _authorTapDiag('pointer-up');
+              },
+              child: AnimatedOpacity(
+                opacity: chromeOpacity,
+                duration: Duration(milliseconds: chromeMs),
+                curve: Curves.easeOut,
+                child: GestureDetector(
+                  // owner 2026-11-18：只有头像和作者名可进作者页；简介区域与
+                  // 进度条上方空白不再误触发跳转。
+                  onLongPress: _showWorkMenu,
+                  child: Row(children: [
+                    // B2：作者级头像索引异步到位后要重新解析，否则会一直显示人形占位。
+                    ValueListenableBuilder<int>(
+                      valueListenable: authorAvatarRevision,
+                      builder: (context, _, __) => avatarFor(w).isNotEmpty
+                          ? GestureDetector(
+                              // owner 2026-11-21：头像/作者名的点击必须由「显式热区」
+                              // 保证。默认 deferToChild 依赖子组件自己命中，图片还在
+                              // 加载（占位为空）或加载失败时中心像素没有可命中对象，
+                              // 点击会穿透到舞台被当成暂停——表现就是「点头像没反应」。
                               behavior: HitTestBehavior.opaque,
-                              onTap: openAuthor,
-                              child: Text(
-                                  authorLabel.isEmpty ? '@未知作者' : '@$authorLabel',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold)),
-                            ),
-                          ),
-                          if (('${w['d'] ?? ''}').isNotEmpty) ...[
-                            const SizedBox(width: 8),
-                            Text('${w['d']}',
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.white54)),
-                          ],
-                          // G9：本地喜欢标记，点红心可取消
-                          if (_isLiked(w)) ...[
-                            const SizedBox(width: 6),
-                            GestureDetector(
-                              onTap: () => _setLiked(w, false),
-                              child: const Icon(Icons.favorite,
-                                  size: 14, color: Color(0xFFFF3B5C)),
-                            ),
-                          ],
-                        ]),
-                        // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
-                        if (_meta != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Opacity(
-                              opacity: 0.7,
-                              child: AuthorBadges(
-                                meta: _meta,
-                                name: authorName,
-                                mediaPath: avatarFor(w),
-                                // 作品条目自带基础库 id 时直接用它归属单元库
-                                basicId: '${w['_bid'] ?? w['basicId'] ?? ''}',
-                                fallbackId: _curLib,
-                                // 0.9.6：不再回退库名文案，无归属显示 SECRET
-                                fallbackName: '',
-                                works: widget.works
-                                    .where((e) =>
-                                        e is Map &&
-                                        authorNameOf(e) == authorName)
-                                    .length,
+                              onTap: () {
+                                _authorTapDiag('tap');
+                                try {
+                                  openAuthor();
+                                } catch (e) {
+                                  _authorTapDiag('tap-error', error: e);
+                                }
+                              },
+                              child: ClipOval(
+                                  child: CachedNetworkImage(
+                                      cacheManager: DiziCache.manager,
+                                      // 播放页头像 38dp：取 200px 缩图即可。
+                                      // 兜底图可能来自作者所在的基础库，按图片自身
+                                      // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
+                                      imageUrl: withImageWidth(
+                                          cfg.mediaUrl(avatarFor(w),
+                                              lib: _avatarLibFor(avatarFor(w))),
+                                          kAvatarImageWidth),
+                                      httpHeaders: cfg.headersFor(
+                                          _avatarLibFor(avatarFor(w))),
+                                      width: 38,
+                                      height: 38,
+                                      memCacheWidth: (38 *
+                                              MediaQuery.devicePixelRatioOf(
+                                                  context))
+                                          .round(),
+                                      fadeInDuration: Duration.zero,
+                                      fit: BoxFit.cover,
+                                      errorWidget: (_, __, ___) =>
+                                          const CircleAvatar(
+                                              radius: 19,
+                                              child: Icon(Icons.person)))))
+                          : GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                _authorTapDiag('tap');
+                                try {
+                                  openAuthor();
+                                } catch (e) {
+                                  _authorTapDiag('tap-error', error: e);
+                                }
+                              },
+                              child: const CircleAvatar(
+                                  radius: 19, child: Icon(Icons.person))),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Row(children: [
+                            Flexible(
+                              child: GestureDetector(
+                                // 同上：文字区域也按整块热区命中，不依赖字形像素。
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  _authorTapDiag('tap');
+                                  try {
+                                    openAuthor();
+                                  } catch (e) {
+                                    _authorTapDiag('tap-error', error: e);
+                                  }
+                                },
+                                child: Text(
+                                    authorLabel.isEmpty
+                                        ? '@未知作者'
+                                        : '@$authorLabel',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
                               ),
                             ),
-                          ),
-                        // 作品/合集文件夹里的 txt 简介（服务端下发 desc）
-                        if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 3),
-                            child: Text('${w['desc']}'.trim(),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.white70)),
-                          ),
-                        // T：集数标签已移入页内舞台底部的进度层（随页位移），
-                        // 信息行不再重复展示。
-                        Row(children: [
-                          Expanded(
-                            child: LayoutBuilder(builder: (context, c) {
-                              const style = TextStyle(
-                                  fontSize: 12, color: Colors.white70);
-                              const expandWidth = 22.0;
-                              final title = '${w['ti'] ?? ''}';
-                              // F33：按可用宽度实际测量，只有真的截断才
-                              // 显示展开按钮（原按字符数猜测会误判）。
-                              final needsExpand = willOverflowText(
-                                  title, style, c.maxWidth - expandWidth,
-                                  textScaler: MediaQuery.textScalerOf(context),
-                                  locale: Localizations.maybeLocaleOf(context));
-                              // H13：展开后任务栏向上拉长，显示缩略全文，
-                              // 不弹独立窗口；再点一次收起。
-                              if (captionOpen) {
-                                return GestureDetector(
-                                  // 吸收点击，避免误触进入作者主页
-                                  onTap: () {},
-                                  child: Container(
-                                    width: double.infinity,
-                                    padding:
-                                        const EdgeInsets.fromLTRB(10, 8, 10, 6),
-                                    decoration: BoxDecoration(
-                                        color: Colors.black45,
-                                        borderRadius:
-                                            BorderRadius.circular(12)),
-                                    constraints: BoxConstraints(
-                                        maxHeight:
-                                            MediaQuery.sizeOf(context).height *
-                                                0.42),
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Flexible(
-                                          child: SingleChildScrollView(
-                                            child: SelectableText(title,
-                                                style: style.copyWith(
-                                                    fontSize: 13,
-                                                    height: 1.5,
-                                                    color: Colors.white)),
-                                          ),
-                                        ),
-                                        Align(
-                                          alignment: Alignment.centerRight,
-                                          child: GestureDetector(
-                                            onTap: toggleCaption,
-                                            child: const Padding(
-                                              padding: EdgeInsets.only(
-                                                  left: 6, top: 4, bottom: 2),
-                                              child: Icon(Icons.unfold_less,
-                                                  size: 16,
-                                                  color: Colors.white54),
+                            if (('${w['d'] ?? ''}').isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              Text('${w['d']}',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.white54)),
+                            ],
+                            // G9：本地喜欢标记，点红心可取消
+                            if (_isLiked(w)) ...[
+                              const SizedBox(width: 6),
+                              GestureDetector(
+                                onTap: () => _setLiked(w, false),
+                                child: const Icon(Icons.favorite,
+                                    size: 14, color: Color(0xFFFF3B5C)),
+                              ),
+                            ],
+                          ]),
+                          // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
+                          if (_meta != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Opacity(
+                                opacity: 0.7,
+                                child: AuthorBadges(
+                                  meta: _meta,
+                                  name: authorName,
+                                  mediaPath: avatarFor(w),
+                                  // 作品条目自带基础库 id 时直接用它归属单元库
+                                  basicId: '${w['_bid'] ?? w['basicId'] ?? ''}',
+                                  fallbackId: _curLib,
+                                  // 0.9.6：不再回退库名文案，无归属显示 SECRET
+                                  fallbackName: '',
+                                  works: widget.works
+                                      .where((e) =>
+                                          e is Map &&
+                                          authorNameOf(e) == authorName)
+                                      .length,
+                                ),
+                              ),
+                            ),
+                          // 作品/合集文件夹里的 txt 简介（服务端下发 desc）
+                          if ('${w['desc'] ?? ''}'.trim().isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text('${w['desc']}'.trim(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.white70)),
+                            ),
+                          // T：集数标签已移入页内舞台底部的进度层（随页位移），
+                          // 信息行不再重复展示。
+                          Row(children: [
+                            Expanded(
+                              child: LayoutBuilder(builder: (context, c) {
+                                const style = TextStyle(
+                                    fontSize: 12, color: Colors.white70);
+                                const expandWidth = 22.0;
+                                final title = '${w['ti'] ?? ''}';
+                                // F33：按可用宽度实际测量，只有真的截断才
+                                // 显示展开按钮（原按字符数猜测会误判）。
+                                final needsExpand = willOverflowText(
+                                    title, style, c.maxWidth - expandWidth,
+                                    textScaler:
+                                        MediaQuery.textScalerOf(context),
+                                    locale:
+                                        Localizations.maybeLocaleOf(context));
+                                // H13：展开后任务栏向上拉长，显示缩略全文，
+                                // 不弹独立窗口；再点一次收起。
+                                if (captionOpen) {
+                                  return GestureDetector(
+                                    // 吸收点击，避免误触进入作者主页
+                                    onTap: () {},
+                                    child: Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.fromLTRB(
+                                          10, 8, 10, 6),
+                                      decoration: BoxDecoration(
+                                          color: Colors.black45,
+                                          borderRadius:
+                                              BorderRadius.circular(12)),
+                                      constraints: BoxConstraints(
+                                          maxHeight: MediaQuery.sizeOf(context)
+                                                  .height *
+                                              0.42),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Flexible(
+                                            child: SingleChildScrollView(
+                                              child: SelectableText(title,
+                                                  style: style.copyWith(
+                                                      fontSize: 13,
+                                                      height: 1.5,
+                                                      color: Colors.white)),
                                             ),
                                           ),
-                                        ),
-                                      ],
+                                          Align(
+                                            alignment: Alignment.centerRight,
+                                            child: GestureDetector(
+                                              onTap: toggleCaption,
+                                              child: const Padding(
+                                                padding: EdgeInsets.only(
+                                                    left: 6, top: 4, bottom: 2),
+                                                child: Icon(Icons.unfold_less,
+                                                    size: 16,
+                                                    color: Colors.white54),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
+                                  );
+                                }
+                                return Row(children: [
+                                  Expanded(
+                                    child: Text(title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: style),
                                   ),
-                                );
-                              }
-                              return Row(children: [
-                                Expanded(
-                                  child: Text(title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: style),
-                                ),
-                                if (needsExpand)
-                                  GestureDetector(
-                                    onTap: toggleCaption,
-                                    child: const Padding(
-                                      padding: EdgeInsets.only(
-                                          left: 6, top: 2, bottom: 2),
-                                      child: Icon(Icons.unfold_more,
-                                          size: 16, color: Colors.white54),
+                                  if (needsExpand)
+                                    GestureDetector(
+                                      onTap: toggleCaption,
+                                      child: const Padding(
+                                        padding: EdgeInsets.only(
+                                            left: 6, top: 2, bottom: 2),
+                                        child: Icon(Icons.unfold_more,
+                                            size: 16, color: Colors.white54),
+                                      ),
                                     ),
-                                  ),
-                              ]);
-                            }),
-                          ),
-                        ]),
-                      ])),
-                ]),
+                                ]);
+                              }),
+                            ),
+                          ]),
+                        ])),
+                  ]),
+                ),
               ),
             ),
           ),
@@ -11854,9 +11913,9 @@ class _PlayerPageState extends State<PlayerPage>
                           onTapUp: (d) => onStageTap(d.localPosition),
                           // M9：抖音式跟手拖拽——向左拖作者页随手指从右侧滑入，
                           // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
-                          onHorizontalDragStart: (d) =>
-                              _authorDragStart(d.globalPosition.dx,
-                                  MediaQuery.sizeOf(context).width),
+                          onHorizontalDragStart: (d) => _authorDragStart(
+                              d.globalPosition.dx,
+                              MediaQuery.sizeOf(context).width),
                           onHorizontalDragUpdate: (d) => _authorDragUpdate(
                               d.delta.dx, MediaQuery.sizeOf(context).width),
                           onHorizontalDragEnd: (d) =>
@@ -11896,8 +11955,10 @@ class _PlayerPageState extends State<PlayerPage>
                                   child: LayoutBuilder(builder: (_, pc) {
                                     final fit = videoFitFor(
                                                 aspect: _coverAspectFor(it),
-                                                mode: AppSettings.videoFitOverride,
-                                                containerAspect: pc.maxHeight > 0
+                                                mode: AppSettings
+                                                    .videoFitOverride,
+                                                containerAspect: pc.maxHeight >
+                                                        0
                                                     ? pc.maxWidth / pc.maxHeight
                                                     : null) ==
                                             VideoFit.fill
@@ -12254,350 +12315,359 @@ class _PlayerPageState extends State<PlayerPage>
                   // P2：任务栏自成一画层，视频层/进度条的局部重绘不波及它。
                   child: RepaintBoundary(
                     child: IgnorePointer(
-                    ignoring: !ui,
-                    child: AnimatedOpacity(
-                      opacity: chromeOpacity,
-                      duration: Duration(milliseconds: chromeMs),
-                      curve: Curves.easeOut,
-                      child: Container(
-                        key: _taskbarKey,
-                        // P1 §4：非全屏 56dp 纯黑 + 1px #1AFFFFFF 顶部分割线；
-                        // 全屏保留旧的 10/6 内边距与无分割线外观。
-                        decoration: BoxDecoration(
-                          // 全屏：半透明浮层（保留旧观感）；非全屏：不透明实底。
-                          color: fs
-                              ? Colors.black.withValues(alpha: 0.35)
-                              : kTaskbarColor,
-                          border: fs
-                              ? null
-                              : const Border(
-                                  top: BorderSide(
-                                      color: kTaskbarDividerColor, width: 1)),
-                        ),
-                        padding: EdgeInsets.only(
-                            left: pad.left + (fs ? 12 : kTaskbarSidePadding),
-                            right: pad.right + (fs ? 12 : kTaskbarSidePadding),
-                            top: fs ? 10 : 0,
-                            bottom: fs ? 6 + pad.bottom : pad.bottom),
-                        child: SizedBox(
-                          height: fs ? null : kTaskbarHeight - 1,
-                          child: Column(
-                              mainAxisSize:
-                                  fs ? MainAxisSize.min : MainAxisSize.max,
-                              mainAxisAlignment: fs
-                                  ? MainAxisAlignment.start
-                                  : MainAxisAlignment.center,
-                              children: [
-                                Row(children: [
-                                  // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
-                                  // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
-                                  Expanded(
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      alignment: Alignment.centerLeft,
-                                      child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
-                                            // I1：移动端隐藏音量按钮，音量由系统音量键控制
-                                            if (_volumeUi)
-                                              GestureDetector(
-                                                behavior:
-                                                    HitTestBehavior.opaque,
-                                                onTap: toggleMute,
-                                                onLongPressStart:
-                                                    _volLongPressStart,
-                                                onLongPressMoveUpdate:
-                                                    _volLongPressMove,
-                                                onLongPressEnd: (_) =>
-                                                    _volDragEnd(),
-                                                onHorizontalDragStart:
-                                                    _volDragStart,
-                                                onHorizontalDragUpdate:
-                                                    _volDragUpdate,
-                                                onHorizontalDragEnd:
-                                                    _volDragEnd,
-                                                child: Tooltip(
-                                                  message: '点击静音 / 长按拖动调音量',
-                                                  child: SizedBox(
-                                                    width: fs ? 48 : tbBtnW,
-                                                    height: 48,
-                                                    child: Icon(
-                                                        muted || volume == 0
-                                                            ? Icons.volume_off
-                                                            : (volume < 50
-                                                                ? Icons
-                                                                    .volume_down
-                                                                : Icons
-                                                                    .volume_up),
-                                                        size: fs
-                                                            ? null
-                                                            : kTaskbarIconSize,
-                                                        color: tbColor(true)),
+                      ignoring: !ui,
+                      child: AnimatedOpacity(
+                        opacity: chromeOpacity,
+                        duration: Duration(milliseconds: chromeMs),
+                        curve: Curves.easeOut,
+                        child: Container(
+                          key: _taskbarKey,
+                          // P1 §4：非全屏 56dp 纯黑 + 1px #1AFFFFFF 顶部分割线；
+                          // 全屏保留旧的 10/6 内边距与无分割线外观。
+                          decoration: BoxDecoration(
+                            // 全屏：半透明浮层（保留旧观感）；非全屏：不透明实底。
+                            color: fs
+                                ? Colors.black.withValues(alpha: 0.35)
+                                : kTaskbarColor,
+                            border: fs
+                                ? null
+                                : const Border(
+                                    top: BorderSide(
+                                        color: kTaskbarDividerColor, width: 1)),
+                          ),
+                          padding: EdgeInsets.only(
+                              left: pad.left + (fs ? 12 : kTaskbarSidePadding),
+                              right:
+                                  pad.right + (fs ? 12 : kTaskbarSidePadding),
+                              top: fs ? 10 : 0,
+                              bottom: fs ? 6 + pad.bottom : pad.bottom),
+                          child: SizedBox(
+                            height: fs ? null : kTaskbarHeight - 1,
+                            child: Column(
+                                mainAxisSize:
+                                    fs ? MainAxisSize.min : MainAxisSize.max,
+                                mainAxisAlignment: fs
+                                    ? MainAxisAlignment.start
+                                    : MainAxisAlignment.center,
+                                children: [
+                                  Row(children: [
+                                    // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
+                                    // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
+                                    Expanded(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        alignment: Alignment.centerLeft,
+                                        child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
+                                              // I1：移动端隐藏音量按钮，音量由系统音量键控制
+                                              if (_volumeUi)
+                                                GestureDetector(
+                                                  behavior:
+                                                      HitTestBehavior.opaque,
+                                                  onTap: toggleMute,
+                                                  onLongPressStart:
+                                                      _volLongPressStart,
+                                                  onLongPressMoveUpdate:
+                                                      _volLongPressMove,
+                                                  onLongPressEnd: (_) =>
+                                                      _volDragEnd(),
+                                                  onHorizontalDragStart:
+                                                      _volDragStart,
+                                                  onHorizontalDragUpdate:
+                                                      _volDragUpdate,
+                                                  onHorizontalDragEnd:
+                                                      _volDragEnd,
+                                                  child: Tooltip(
+                                                    message: '点击静音 / 长按拖动调音量',
+                                                    child: SizedBox(
+                                                      width: fs ? 48 : tbBtnW,
+                                                      height: 48,
+                                                      child: Icon(
+                                                          muted || volume == 0
+                                                              ? Icons.volume_off
+                                                              : (volume < 50
+                                                                  ? Icons
+                                                                      .volume_down
+                                                                  : Icons
+                                                                      .volume_up),
+                                                          size: fs
+                                                              ? null
+                                                              : kTaskbarIconSize,
+                                                          color: tbColor(true)),
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            // L6：桌面端音量模块常驻任务栏（声音按钮右侧）：
-                                            // 细滑杆即时改音量，单击左侧声音按钮仍然是静音切换。
-                                            if (_volumeUi)
-                                              SizedBox(
-                                                key: const ValueKey(
-                                                    'volume-module'),
-                                                width: 104,
-                                                height: 48,
-                                                child: Row(children: [
-                                                  Expanded(
-                                                    child: SliderTheme(
-                                                      data:
-                                                          const SliderThemeData(
-                                                        trackHeight: 2.5,
-                                                        thumbShape:
-                                                            RoundSliderThumbShape(
-                                                                enabledThumbRadius:
-                                                                    5),
-                                                        overlayShape:
-                                                            RoundSliderOverlayShape(
-                                                                overlayRadius:
-                                                                    10),
-                                                        activeTrackColor:
-                                                            Colors.white70,
-                                                        inactiveTrackColor:
-                                                            Colors.white24,
-                                                        thumbColor:
-                                                            Colors.white,
+                                              // L6：桌面端音量模块常驻任务栏（声音按钮右侧）：
+                                              // 细滑杆即时改音量，单击左侧声音按钮仍然是静音切换。
+                                              if (_volumeUi)
+                                                SizedBox(
+                                                  key: const ValueKey(
+                                                      'volume-module'),
+                                                  width: 104,
+                                                  height: 48,
+                                                  child: Row(children: [
+                                                    Expanded(
+                                                      child: SliderTheme(
+                                                        data:
+                                                            const SliderThemeData(
+                                                          trackHeight: 2.5,
+                                                          thumbShape:
+                                                              RoundSliderThumbShape(
+                                                                  enabledThumbRadius:
+                                                                      5),
+                                                          overlayShape:
+                                                              RoundSliderOverlayShape(
+                                                                  overlayRadius:
+                                                                      10),
+                                                          activeTrackColor:
+                                                              Colors.white70,
+                                                          inactiveTrackColor:
+                                                              Colors.white24,
+                                                          thumbColor:
+                                                              Colors.white,
+                                                        ),
+                                                        child: Slider(
+                                                          value: (muted
+                                                                  ? 0.0
+                                                                  : volume)
+                                                              .clamp(
+                                                                  0.0, 100.0),
+                                                          max: 100,
+                                                          onChanged: _setVolume,
+                                                        ),
                                                       ),
-                                                      child: Slider(
-                                                        value: (muted
-                                                                ? 0.0
-                                                                : volume)
-                                                            .clamp(0.0, 100.0),
-                                                        max: 100,
-                                                        onChanged: _setVolume,
+                                                    ),
+                                                    SizedBox(
+                                                      width: 30,
+                                                      child: Text(
+                                                          '${volume.round()}',
+                                                          textAlign:
+                                                              TextAlign.right,
+                                                          style: const TextStyle(
+                                                              fontSize: 10,
+                                                              color: Colors
+                                                                  .white54)),
+                                                    ),
+                                                  ]),
+                                                ),
+                                              // J5：视频合集章节选择（按「选集」图标 + 当前集数）
+                                              if (workChapterCount(w) > 1)
+                                                GestureDetector(
+                                                  behavior:
+                                                      HitTestBehavior.opaque,
+                                                  onTap: _showChapters,
+                                                  child: Tooltip(
+                                                    message: '选集',
+                                                    child: SizedBox(
+                                                      width: fs ? 46 : tbBtnW,
+                                                      height: 48,
+                                                      child: Column(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          Icon(
+                                                              Icons
+                                                                  .video_library_outlined,
+                                                              size: fs
+                                                                  ? 19
+                                                                  : kTaskbarIconSize,
+                                                              color: tbColor(
+                                                                  true)),
+                                                          const SizedBox(
+                                                              height: 1),
+                                                          Text(
+                                                              '${_chapter + 1}/${workChapterCount(w)}',
+                                                              style: const TextStyle(
+                                                                  fontSize: 9,
+                                                                  height: 1.0,
+                                                                  color: Colors
+                                                                      .white54)),
+                                                        ],
                                                       ),
                                                     ),
                                                   ),
-                                                  SizedBox(
-                                                    width: 30,
-                                                    child: Text(
-                                                        '${volume.round()}',
-                                                        textAlign:
-                                                            TextAlign.right,
-                                                        style: const TextStyle(
-                                                            fontSize: 10,
-                                                            color: Colors
-                                                                .white54)),
-                                                  ),
-                                                ]),
-                                              ),
-                                            // J5：视频合集章节选择（按「选集」图标 + 当前集数）
-                                            if (workChapterCount(w) > 1)
-                                              GestureDetector(
-                                                behavior:
-                                                    HitTestBehavior.opaque,
-                                                onTap: _showChapters,
-                                                child: Tooltip(
-                                                  message: '选集',
+                                                ),
+                                              // M2/M3：桌面端播放/暂停常驻任务栏；
+                                              // O2：手机端改由画面中央大圆钮承担。
+                                              if (taskbar.showPlayPause)
+                                                TaskbarPlayButton(
+                                                    paused: paused,
+                                                    onPressed: togglePause),
+                                              IconButton(
+                                                  constraints: fs
+                                                      ? null
+                                                      : BoxConstraints(
+                                                          minWidth: tbBtnW,
+                                                          minHeight: 48,
+                                                          maxHeight: 48),
+                                                  onPressed: cycleSpeed,
+                                                  icon: Text('${speed}x',
+                                                      style: TextStyle(
+                                                          fontSize: 11,
+                                                          color:
+                                                              tbColor(true)))),
+                                              IconButton(
+                                                  constraints: fs
+                                                      ? null
+                                                      : BoxConstraints(
+                                                          minWidth: tbBtnW,
+                                                          minHeight: 48,
+                                                          maxHeight: 48),
+                                                  onPressed: toggleShuffle,
+                                                  tooltip: shuffle
+                                                      ? '乱序播放（当前库内随机）'
+                                                      : '顺序播放',
+                                                  icon: Icon(Icons.shuffle,
+                                                      size: fs
+                                                          ? null
+                                                          : kTaskbarIconSize,
+                                                      color: shuffle
+                                                          ? Colors
+                                                              .lightBlueAccent
+                                                          : tbColor(false))),
+                                              IconButton(
+                                                  constraints: fs
+                                                      ? null
+                                                      : BoxConstraints(
+                                                          minWidth: tbBtnW,
+                                                          minHeight: 48,
+                                                          maxHeight: 48),
+                                                  // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
+                                                  onPressed: loopOne
+                                                      ? null
+                                                      : toggleAutoplay,
+                                                  tooltip: loopOne
+                                                      ? '单条循环开启时自动连播不可用'
+                                                      : '自动连播',
+                                                  icon: Icon(Icons.skip_next,
+                                                      size: fs
+                                                          ? null
+                                                          : kTaskbarIconSize,
+                                                      color: autoplay
+                                                          ? tbColor(true)
+                                                          : tbColor(false))),
+                                              IconButton(
+                                                  constraints: fs
+                                                      ? null
+                                                      : BoxConstraints(
+                                                          minWidth: tbBtnW,
+                                                          minHeight: 48,
+                                                          maxHeight: 48),
+                                                  onPressed: toggleLoop,
+                                                  tooltip: '单条循环',
+                                                  icon: Icon(Icons.repeat_one,
+                                                      size: fs
+                                                          ? null
+                                                          : kTaskbarIconSize,
+                                                      color: loopOne
+                                                          ? tbColor(true)
+                                                          : tbColor(false))),
+                                              // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
+                                              Tooltip(
+                                                message: '送一颗小水滴',
+                                                child: GestureDetector(
+                                                  behavior:
+                                                      HitTestBehavior.opaque,
+                                                  onTap: (dropBusy ||
+                                                          dropDayLeft <= 0 ||
+                                                          dropWeekLeft <= 0)
+                                                      ? null
+                                                      : _sendDrop,
                                                   child: SizedBox(
                                                     width: fs ? 46 : tbBtnW,
                                                     height: 48,
-                                                    child: Column(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .center,
-                                                      children: [
-                                                        Icon(
-                                                            Icons
-                                                                .video_library_outlined,
-                                                            size: fs
-                                                                ? 19
-                                                                : kTaskbarIconSize,
-                                                            color:
-                                                                tbColor(true)),
-                                                        const SizedBox(
-                                                            height: 1),
-                                                        Text(
-                                                            '${_chapter + 1}/${workChapterCount(w)}',
-                                                            style: const TextStyle(
-                                                                fontSize: 9,
-                                                                height: 1.0,
-                                                                color: Colors
-                                                                    .white54)),
-                                                      ],
+                                                    child: ScaleTransition(
+                                                      scale: _dropScale,
+                                                      child: Column(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          if (dropBusy)
+                                                            const SizedBox(
+                                                                width: 18,
+                                                                height: 18,
+                                                                child: CircularProgressIndicator(
+                                                                    strokeWidth:
+                                                                        2,
+                                                                    color: Colors
+                                                                        .white54))
+                                                          else
+                                                            Icon(
+                                                                Icons
+                                                                    .water_drop,
+                                                                size: fs
+                                                                    ? 20
+                                                                    : kTaskbarIconSize,
+                                                                color: dropGlow &&
+                                                                        dropDayLeft >=
+                                                                            0
+                                                                    ? Colors
+                                                                        .lightBlueAccent
+                                                                    : (dropDayLeft >
+                                                                                0 &&
+                                                                            dropWeekLeft >
+                                                                                0
+                                                                        ? tbColor(
+                                                                            true)
+                                                                        : tbColor(
+                                                                            false))),
+                                                        ],
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
                                               ),
-                                            // M2/M3：桌面端播放/暂停常驻任务栏；
-                                            // O2：手机端改由画面中央大圆钮承担。
-                                            if (taskbar.showPlayPause)
-                                              TaskbarPlayButton(
-                                                  paused: paused,
-                                                  onPressed: togglePause),
-                                            IconButton(
-                                                constraints: fs
-                                                    ? null
-                                                    : BoxConstraints(
-                                                        minWidth: tbBtnW,
-                                                        minHeight: 48,
-                                                        maxHeight: 48),
-                                                onPressed: cycleSpeed,
-                                                icon: Text('${speed}x',
-                                                    style: TextStyle(
-                                                        fontSize: 11,
-                                                        color: tbColor(true)))),
-                                            IconButton(
-                                                constraints: fs
-                                                    ? null
-                                                    : BoxConstraints(
-                                                        minWidth: tbBtnW,
-                                                        minHeight: 48,
-                                                        maxHeight: 48),
-                                                onPressed: toggleShuffle,
-                                                tooltip: shuffle
-                                                    ? '乱序播放（当前库内随机）'
-                                                    : '顺序播放',
-                                                icon: Icon(Icons.shuffle,
-                                                    size: fs
-                                                        ? null
-                                                        : kTaskbarIconSize,
-                                                    color: shuffle
-                                                        ? Colors.lightBlueAccent
-                                                        : tbColor(false))),
-                                            IconButton(
-                                                constraints: fs
-                                                    ? null
-                                                    : BoxConstraints(
-                                                        minWidth: tbBtnW,
-                                                        minHeight: 48,
-                                                        maxHeight: 48),
-                                                // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
-                                                onPressed: loopOne
-                                                    ? null
-                                                    : toggleAutoplay,
-                                                tooltip: loopOne
-                                                    ? '单条循环开启时自动连播不可用'
-                                                    : '自动连播',
-                                                icon: Icon(Icons.skip_next,
-                                                    size: fs
-                                                        ? null
-                                                        : kTaskbarIconSize,
-                                                    color: autoplay
-                                                        ? tbColor(true)
-                                                        : tbColor(false))),
-                                            IconButton(
-                                                constraints: fs
-                                                    ? null
-                                                    : BoxConstraints(
-                                                        minWidth: tbBtnW,
-                                                        minHeight: 48,
-                                                        maxHeight: 48),
-                                                onPressed: toggleLoop,
-                                                tooltip: '单条循环',
-                                                icon: Icon(Icons.repeat_one,
-                                                    size: fs
-                                                        ? null
-                                                        : kTaskbarIconSize,
-                                                    color: loopOne
-                                                        ? tbColor(true)
-                                                        : tbColor(false))),
-                                            // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
-                                            Tooltip(
-                                              message: '送一颗小水滴',
-                                              child: GestureDetector(
-                                                behavior:
-                                                    HitTestBehavior.opaque,
-                                                onTap: (dropBusy ||
-                                                        dropDayLeft <= 0 ||
-                                                        dropWeekLeft <= 0)
-                                                    ? null
-                                                    : _sendDrop,
-                                                child: SizedBox(
-                                                  width: fs ? 46 : tbBtnW,
-                                                  height: 48,
-                                                  child: ScaleTransition(
-                                                    scale: _dropScale,
-                                                    child: Column(
-                                                      mainAxisAlignment:
-                                                          MainAxisAlignment
-                                                              .center,
-                                                      children: [
-                                                        if (dropBusy)
-                                                          const SizedBox(
-                                                              width: 18,
-                                                              height: 18,
-                                                              child: CircularProgressIndicator(
-                                                                  strokeWidth:
-                                                                      2,
-                                                                  color: Colors
-                                                                      .white54))
-                                                        else
-                                                          Icon(Icons.water_drop,
-                                                              size: fs
-                                                                  ? 20
-                                                                  : kTaskbarIconSize,
-                                                              color: dropGlow &&
-                                                                      dropDayLeft >=
-                                                                          0
-                                                                  ? Colors
-                                                                      .lightBlueAccent
-                                                                  : (dropDayLeft >
-                                                                              0 &&
-                                                                          dropWeekLeft >
-                                                                              0
-                                                                      ? tbColor(
-                                                                          true)
-                                                                      : tbColor(
-                                                                          false))),
-                                                      ],
-                                                    ),
-                                                  ),
+                                              if (taskbar.showRotate)
+                                                TaskbarRotateButton(
+                                                  mode: screenModeOf(
+                                                      MediaQuery.sizeOf(
+                                                          context)),
+                                                  onPressed: toggleOrientation,
                                                 ),
-                                              ),
-                                            ),
-                                            if (taskbar.showRotate)
-                                              TaskbarRotateButton(
-                                                mode: screenModeOf(
-                                                    MediaQuery.sizeOf(context)),
-                                                onPressed: toggleOrientation,
-                                              ),
-                                          ]),
+                                            ]),
+                                      ),
                                     ),
-                                  ),
-                                  IconButton(
-                                      constraints: fs
-                                          ? null
-                                          : const BoxConstraints(
-                                              minWidth: 44,
-                                              minHeight: 48,
-                                              maxHeight: 48),
-                                      onPressed: toggleFs,
-                                      icon: Icon(
-                                          fs
-                                              ? Icons.fullscreen_exit
-                                              : Icons.fullscreen,
-                                          size: fs ? null : kTaskbarIconSize,
-                                          color: tbColor(true))),
+                                    IconButton(
+                                        constraints: fs
+                                            ? null
+                                            : const BoxConstraints(
+                                                minWidth: 44,
+                                                minHeight: 48,
+                                                maxHeight: 48),
+                                        onPressed: toggleFs,
+                                        icon: Icon(
+                                            fs
+                                                ? Icons.fullscreen_exit
+                                                : Icons.fullscreen,
+                                            size: fs ? null : kTaskbarIconSize,
+                                            color: tbColor(true))),
+                                  ]),
                                 ]),
-                              ]),
+                          ),
                         ),
                       ),
-                    ),
                     ),
                   ),
                 ),
 
               // owner 2026-11-20：进度条呼出/拖动热区向下跨过分界线，
               // 视频区与任务栏各占一半；靠近分界线横向拖动也能拖进度条。
-              if (!broken && !hideTaskbar && ui && !fs && _workAt(cur)['t'] == 'v')
+              if (!broken &&
+                  !hideTaskbar &&
+                  ui &&
+                  !fs &&
+                  _workAt(cur)['t'] == 'v')
                 Positioned(
                   left: 0,
                   right: 0,
-                  bottom:
-                      (_taskbarH > 0 ? _taskbarH : kTaskbarHeight) - 8,
+                  bottom: (_taskbarH > 0 ? _taskbarH : kTaskbarHeight) - 8,
                   height: 18,
                   child: LayoutBuilder(builder: (_, cc) {
-                    Offset at(double dx) =>
-                        Offset(dx, kScrubBubbleSpace);
+                    Offset at(double dx) => Offset(dx, kScrubBubbleSpace);
                     return GestureDetector(
                       // translucent：拖动归进度条，单击仍能落到任务栏按钮上
                       behavior: HitTestBehavior.translucent,
