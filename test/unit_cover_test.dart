@@ -119,7 +119,9 @@ void main() {
       final b = basic('l1', '(1) A/x',
           serverBase: 'http://nas:8090', coverVersion: 'v2', coverExt: 'png');
       expect(
-          basicCoverUrl(b), 'http://nas:8090/media/l1/(1) A/x/_cover/v2.png');
+          // 服务端把自定义封面写在「库根/_cover/」，而 /media/<库id>/ 已指向库根；
+          // 再拼 rel 会变成 <rel>/_cover/... → 404（实测）。
+          basicCoverUrl(b), 'http://nas:8090/media/l1/_cover/v2.png');
     });
 
     test('无自定义时用库内播放量最高的作品封面', () {

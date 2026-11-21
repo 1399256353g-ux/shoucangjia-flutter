@@ -206,8 +206,10 @@ String basicCoverUrl(BasicLib basic, {String preset = '', String firstThumb = ''
   final p = preset.trim();
   if (p.isNotEmpty) return p;
   final top = topPlayed(WorkPlaysStore.countsFor(basic.id));
+  // 服务端把自定义封面写在「库根/_cover/」，而 `/media/<库id>/` 已指向库根；
+  // 再拼 rel 会变成 `<rel>/_cover/...` → 404（实测 2026-11-21）。
   final pick = pickBasicCover(
-    rel: basic.rel,
+    rel: '',
     version: basic.coverVersion,
     ext: basic.coverExt,
     crawlerThumb: basic.crawlerCover,
