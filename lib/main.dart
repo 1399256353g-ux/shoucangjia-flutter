@@ -3998,7 +3998,14 @@ class _LibraryPageState extends State<LibraryPage> {
       }
       return cv.isEmpty ? '' : cfg.mediaUrl(cv, lib: b.id);
     }
-    return cfg.mediaUrl(pick.path, lib: b.id);
+    final url = cfg.mediaUrl(pick.path, lib: b.id);
+    CrashLog.instance.record(
+      'cover-basic id=${b.id} cv=${b.crawlerCover.isEmpty ? '-' : 'y'} '
+      'fc=${(_fcByLib[b.id] ?? '').isEmpty ? '-' : 'y'} '
+      'pick=${pick.path.isEmpty ? '-' : pick.path} url=${url.isEmpty ? '-' : 'y'}',
+      kind: 'cover',
+    );
+    return url;
   }
 
   /// 0.9.9 自动生成规则：单元库取整棵子树里本机播放量最高的基础库。
@@ -4290,6 +4297,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final fallback = _basicCoverUrl(b);
       if (fallback.isNotEmpty) return fallback;
     }
+    CrashLog.instance.record('cover-unit rel=${u.rel} EMPTY', kind: 'cover');
     return '';
   }
 
@@ -9428,6 +9436,10 @@ class _PlayerPageState extends State<PlayerPage>
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
     final name = authorNameOf(_workAt(cur));
+    CrashLog.instance.record(
+      'author-tap raw=${_workAt(cur)['a'] ?? ''} resolved=${name.isEmpty ? 'EMPTY' : 'ok'}',
+      kind: 'author',
+    );
     if (name.isEmpty) return;
     final resume = !paused;
     _userPaused = true;
