@@ -92,6 +92,13 @@ bool workNeedsFrameThumb(dynamic work) {
   return id.isNotEmpty;
 }
 
+/// 播放页海报层是否要建：只看**解析后的封面地址**，不看作品有没有 `th`。
+///
+/// 0.9.148 根因：播放页海报的显示条件写成 `it['th']` 非空，而视频作品大量
+/// 没有 `th`（封面走 `/api/thumb` 抽帧）→ 整层海报根本不建，首帧之前只有
+/// 黑色，就是「有声黑屏」。判定收敛到这个函数后，有封面就一定先铺海报。
+bool posterLayerVisible(String coverUrl) => coverUrl.trim().isNotEmpty;
+
 /// 作品封面最终地址（空串表示无封面）。
 String workCoverUrl(
   dynamic work, {

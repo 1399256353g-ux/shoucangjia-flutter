@@ -11947,6 +11947,17 @@ class _PlayerPageState extends State<PlayerPage>
                         ]);
                       }
                       if (it['t'] == 'v') {
+                        // 海报底图与卡片同一个解析入口（th → 图文首图 →
+                        // /api/thumb 抽帧）。
+                        //
+                        // 根因（0.9.148 复测后定位）：下面这层海报的显示条件还
+                        // 停留在旧口径 `it['th']`，而视频作品大量没有 `th`
+                        // （封面走 `/api/thumb` 抽帧）。于是作者/单元库网格里
+                        // 卡片明明有封面，播放页却**整层海报都不建**，首帧之前
+                        // 只有黑色 → 「有声黑屏」在这条入口必然复现、在基础库
+                        // 网格（作品都有 th）不复现。条件收敛到封面地址后，
+                        // 有封面就一定先铺海报。
+                        final posterCover = _posterCoverUrl(it);
                         return GestureDetector(
                           // 默认 deferToChild：只有子组件画到的像素才响应。
                           // 视频 contain 铺在中间时，四周黑边点下去没有任何
@@ -11975,7 +11986,7 @@ class _PlayerPageState extends State<PlayerPage>
                             RepaintBoundary(child: videoView()),
                             // 首帧没出来之前用海报盖住视频层：既挡掉起播黑屏，
                             // 也避免纹理先按错误比例画一帧再跳。
-                            if ((it['th'] ?? '').toString().isNotEmpty)
+                            if (posterLayerVisible(posterCover))
                               IgnorePointer(
                                 // 只有「首帧出来」+「视频轨报了尺寸」+
                                 // 「播放器比例已知」才让位：比例没到就淡出，
@@ -12008,10 +12019,6 @@ class _PlayerPageState extends State<PlayerPage>
                                         : BoxFit.contain;
                                     // 与网格卡片同一解析入口：视频缺 `th` 时走
                                     // `/api/thumb` 抽帧，URL 与卡片逐字符相同。
-                                    final cover = _posterCoverUrl(it);
-                                    if (cover.isEmpty) {
-                                      return _posterPreview(it, fit: fit);
-                                    }
                                     return CachedNetworkImage(
                                         cacheManager: DiziCache.manager,
                                         // 底图：与作品卡同一张 provider。进播放页
@@ -12020,7 +12027,7 @@ class _PlayerPageState extends State<PlayerPage>
                                         placeholder: (_, __) =>
                                             _posterPreview(it, fit: fit),
                                         imageUrl: withImageWidth(
-                                            cover, kPlayerImageWidth),
+                                            posterCover, kPlayerImageWidth),
                                         httpHeaders:
                                             cfg.headersFor(_libFor(it)),
                                         memCacheWidth:

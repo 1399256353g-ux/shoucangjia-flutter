@@ -70,4 +70,27 @@ void main() {
       expect(isVideoPath('a/b.jpg'), isFalse);
     });
   });
+
+  group('posterLayerVisible（播放页海报是否建层）', () {
+    test('视频无 th 但能抽帧时海报必须建（有声黑屏的回归点）', () {
+      final w = {
+        'id': 'w9',
+        't': 'v',
+        'th': '',
+        'm': ['A/VID/9.mp4'],
+      };
+      // 旧口径：按 `it['th']` 判定 → 空串 → 整层海报不建 → 首帧前全黑。
+      expect(posterLayerVisible('${w['th']}'), isFalse);
+      // 现口径：按解析后的封面地址判定 → 有地址就建层。
+      expect(
+        posterLayerVisible(workCoverUrl(w, lib: 'lib-027', urls: urls)),
+        isTrue,
+      );
+    });
+
+    test('真的没有封面时不建层，也不留空白填充', () {
+      expect(posterLayerVisible(''), isFalse);
+      expect(posterLayerVisible('   '), isFalse);
+    });
+  });
 }
