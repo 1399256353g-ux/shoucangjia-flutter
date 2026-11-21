@@ -7702,16 +7702,18 @@ class _PlayerPageState extends State<PlayerPage>
       final i = cur + d;
       if (i < 0 || i >= widget.works.length) continue;
       final it = _workAt(i);
-      final th = (it['th'] ?? '').toString();
-      if (th.isEmpty) continue;
       final lib = _libFor(it);
+      // 与网格/海报同一个解析入口（th → 图文首图 → 抽帧），否则缺 th 的
+      // 视频在这里就被跳过，进页时底图照样是空的。
+      final cover = _posterCoverUrl(it, lib: lib);
+      if (cover.isEmpty) continue;
       if (d == 0) {
         // 当前条只要那张「网格尺寸」底图：它就是播放页海报的 placeholder，
         // 命中后首帧零等待；从作者页/深链直接进播放页时也能提前缓存。
         try {
           precacheImage(
             thumbImageProvider(
-              withImageWidth(cfg.mediaUrl(th, lib: lib), kWorkImageWidth),
+              withImageWidth(cover, kWorkImageWidth),
               decodeWidth: previewW,
               headers: cfg.headersFor(lib),
               cacheManager: DiziCache.manager,
@@ -7725,7 +7727,7 @@ class _PlayerPageState extends State<PlayerPage>
       try {
         precacheImage(
           CachedNetworkImageProvider(
-            withImageWidth(cfg.mediaUrl(th, lib: lib), kPlayerImageWidth),
+            withImageWidth(cover, kPlayerImageWidth),
             headers: cfg.headersFor(lib),
             cacheManager: DiziCache.manager,
             maxWidth: memW,
@@ -10120,9 +10122,29 @@ class _PlayerPageState extends State<PlayerPage>
     return (size.width * dpr).round().clamp(360, 2160);
   }
 
+  /// 播放页封面地址：与网格卡片**同一个解析入口**。
+  ///
+  /// 根因（2026-11-21 复测 0.9.146 后定位）：网格卡片走 `workCoverUrl`
+  /// （`th` → 图文首图 → `/api/thumb` 抽帧），播放页却只读 `it['th']`。
+  /// 视频作品大量没有 `th`，于是网格里明明有图、播放页的底图 URL 却是空
+  /// 串——占位永远不可能命中，黑窗照旧。解析入口收敛到一处后，两边 URL
+  /// 与解码宽度都一致，缓存键才对得上。
+  String _posterCoverUrl(dynamic it, {String? lib}) {
+    if (it is! Map) return '';
+    final l = lib ?? _libFor(it);
+    return workCoverUrl(
+      it,
+      lib: l,
+      urls: WorkCoverUrls.standard(
+        mediaUrl: (path) => cfg.mediaUrl(path, lib: l),
+        rawUrl: (path) => cfg.u(path, lib: l).toString(),
+      ),
+    );
+  }
+
   /// 播放页海报的「零等待底图」。
   ///
-  /// 根因（2026-11-21 真机取证）：网格卡片按 `kWorkImageWidth` + 
+  /// 根因（2026-11-21 真机取证）：网格卡片按 `kWorkImageWidth` +
   /// `workCardDecodeWidth` 缓存缩略图，播放页海报按 `kPlayerImageWidth` +
   /// `_posterDecodeWidth` 请求——URL 与解码宽度都不同 → 图片缓存键不同 →
   /// 进播放页必须重新下载/解码，期间海报是空的，露出底层黑色 → 就是
@@ -10133,14 +10155,14 @@ class _PlayerPageState extends State<PlayerPage>
   /// 自然淡入覆盖。底图 provider 与 `WorkCard` 完全一致（同 URL + 同
   /// `ResizeImage` 宽度），命中即同步出图、无额外请求。
   Widget _posterPreview(dynamic it, {required BoxFit fit}) {
-    final th = (it['th'] ?? '').toString();
-    if (th.isEmpty) return const SizedBox.expand();
+    final cover = _posterCoverUrl(it);
+    if (cover.isEmpty) return const SizedBox.expand();
     final lib = _libFor(it);
     final align =
         fit == BoxFit.cover ? Alignment.topCenter : Alignment.center;
     return Image(
       image: thumbImageProvider(
-        withImageWidth(cfg.mediaUrl(th, lib: lib), kWorkImageWidth),
+        withImageWidth(cover, kWorkImageWidth),
         decodeWidth: workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
         headers: cfg.headersFor(lib),
         cacheManager: DiziCache.manager,
@@ -10524,15 +10546,16 @@ class _PlayerPageState extends State<PlayerPage>
   Widget _neighborPageFor(int i) {
     final it = _workAt(i);
     final lib = _libFor(it);
-    final th = (it['th'] ?? '').toString();
+    final cover = _posterCoverUrl(it, lib: lib);
     final memW = _posterDecodeWidth(context);
-    final key = '$i|${it['id'] ?? ''}|$lib|$th|$memW';
+    // 预载页与正式海报必须用同一个 URL/宽度，否则切到这一页时又要重下。
+    final key = '$i|${it['id'] ?? ''}|$lib|$cover|$memW';
     return _neighborPages.putIfAbsent(key, () {
       return _NeighborPage(
         index: i,
-        imageUrl: th.isEmpty
+        imageUrl: cover.isEmpty
             ? ''
-            : withImageWidth(cfg.mediaUrl(th, lib: lib), kPlayerPreloadWidth),
+            : withImageWidth(cover, kPlayerImageWidth),
         headers: cfg.headersFor(lib),
         memCacheWidth: memW,
         onAspect: (a) => _rememberCoverAspect(it, a),
@@ -11983,6 +12006,12 @@ class _PlayerPageState extends State<PlayerPage>
                                             VideoFit.fill
                                         ? BoxFit.cover
                                         : BoxFit.contain;
+                                    // 与网格卡片同一解析入口：视频缺 `th` 时走
+                                    // `/api/thumb` 抽帧，URL 与卡片逐字符相同。
+                                    final cover = _posterCoverUrl(it);
+                                    if (cover.isEmpty) {
+                                      return _posterPreview(it, fit: fit);
+                                    }
                                     return CachedNetworkImage(
                                         cacheManager: DiziCache.manager,
                                         // 底图：与作品卡同一张 provider。进播放页
@@ -11991,9 +12020,7 @@ class _PlayerPageState extends State<PlayerPage>
                                         placeholder: (_, __) =>
                                             _posterPreview(it, fit: fit),
                                         imageUrl: withImageWidth(
-                                            cfg.mediaUrl(it['th'].toString(),
-                                                lib: _libFor(it)),
-                                            kPlayerImageWidth),
+                                            cover, kPlayerImageWidth),
                                         httpHeaders:
                                             cfg.headersFor(_libFor(it)),
                                         memCacheWidth:
