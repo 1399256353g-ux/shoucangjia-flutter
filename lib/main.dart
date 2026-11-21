@@ -3914,6 +3914,15 @@ class _LibraryPageState extends State<LibraryPage> {
   String? warn;
   bool changed = false;
 
+  /// 主页单元库菜单的滚动控制器。刷新时列表必须保持挂载，否则位置归零。
+  final ScrollController _menuScroll = ScrollController();
+
+  /// 是否已经有过一次成功的快照。
+  /// 结构：首载（无快照）才整页转圈；之后所有 load() 都是后台刷新，
+  /// 列表与滚动位置一律保留 —— 这是「菜单滚动位置记忆」的根因所在。
+  bool _hasSnapshot = false;
+  bool _refreshing = false;
+
   /// J2：大库/基础库两级选择。v1 服务端没有 bigLibraries 时为 null，走原列表。
   LibraryTree? tree;
 
@@ -3945,6 +3954,7 @@ class _LibraryPageState extends State<LibraryPage> {
   void dispose() {
     StarStore.instance.removeListener(_onStarsChanged);
     coverRevision.removeListener(_onCoverChanged);
+    _menuScroll.dispose();
     super.dispose();
   }
 
@@ -4015,9 +4025,14 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Future<void> load() async {
     setState(() {
-      loading = true;
       err = null;
       warn = null;
+      // 已有快照时只标记刷新：列表保持挂载，滚动位置与首屏内容都不动。
+      if (_hasSnapshot) {
+        _refreshing = true;
+      } else {
+        loading = true;
+      }
     });
     _fcByLib.clear();
     try {
@@ -4112,15 +4127,30 @@ class _LibraryPageState extends State<LibraryPage> {
       setState(() {
         servers = use;
         libs = merged;
+        _hasSnapshot = true;
         if (failures.isNotEmpty) {
           warn = '部分连接失败：${failures.join('、')}（其余库已照常显示）';
         }
       });
     } catch (e) {
-      if (mounted) setState(() => err = '$e');
+      if (mounted) {
+        setState(() {
+          // 刷新失败时保留上次结果，不把已显示的菜单换成错误页。
+          if (_hasSnapshot) {
+            warn = '刷新失败：$e（显示的是上次结果）';
+          } else {
+            err = '$e';
+          }
+        });
+      }
     }
     await _loadTree();
-    if (mounted) setState(() => loading = false);
+    if (mounted) {
+      setState(() {
+        loading = false;
+        _refreshing = false;
+      });
+    }
   }
 
   /// 读取 v2 索引与本地星标；任何失败都只影响大库区，不影响已注册库。
@@ -4650,7 +4680,9 @@ class _LibraryPageState extends State<LibraryPage> {
   Widget _body() {
     if (err != null) return Center(child: Text('加载失败：$err'));
     if (loading) return const Center(child: CircularProgressIndicator());
-    return ListView(
+    final list = ListView(
+      controller: _menuScroll,
+      key: const PageStorageKey<String>('lib-menu-list'),
       children: [
         if (warn != null)
           Container(
@@ -4697,6 +4729,17 @@ class _LibraryPageState extends State<LibraryPage> {
           ),
       ],
     );
+    // 后台刷新：不换树、不改高度，只在顶部盖一条细进度条。
+    if (!_refreshing) return list;
+    return Stack(children: [
+      list,
+      const Positioned(
+        top: 0,
+        left: 0,
+        right: 0,
+        child: LinearProgressIndicator(minHeight: 2),
+      ),
+    ]);
   }
 
   Widget _libTile(Map<String, dynamic> l) {
