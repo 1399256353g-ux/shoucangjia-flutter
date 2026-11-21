@@ -247,7 +247,17 @@ class Cfg {
       return '/media/${Uri.encodeComponent(l)}/$rel';
     }
     final rest = path.substring(7);
-    if (rest.startsWith('$l/')) return path;
+    // 已带库段的媒体路径是自描述的：`/media/lib-012/...` 的库段就是
+    // 服务端路由依据（gallery_server 先看第一段是不是库 id）。
+    // 若再套当前库会得到 `/media/<当前库>/lib-012/...`，服务端把
+    // `lib-012` 当普通子目录拼进当前库根 → 404。主页单元库封面走的正是
+    // `cv` 下发的 `/media/lib-0xx/...`，默认库是 `douyin`，因此长期 404、
+    // 卡片只显示默认图标。已知库段一律原样保留。
+    final slash = rest.indexOf('/');
+    final head = slash >= 0 ? rest.substring(0, slash) : rest;
+    if (head.isNotEmpty && (_bindings.containsKey(head) || head == l)) {
+      return path;
+    }
     return '/media/${Uri.encodeComponent(l)}/$rest';
   }
 
@@ -3998,14 +4008,7 @@ class _LibraryPageState extends State<LibraryPage> {
       }
       return cv.isEmpty ? '' : cfg.mediaUrl(cv, lib: b.id);
     }
-    final url = cfg.mediaUrl(pick.path, lib: b.id);
-    CrashLog.instance.record(
-      'cover-basic id=${b.id} cv=${b.crawlerCover.isEmpty ? '-' : 'y'} '
-      'fc=${(_fcByLib[b.id] ?? '').isEmpty ? '-' : 'y'} '
-      'pick=${pick.path.isEmpty ? '-' : pick.path} url=${url.isEmpty ? '-' : 'y'}',
-      kind: 'cover',
-    );
-    return url;
+    return cfg.mediaUrl(pick.path, lib: b.id);
   }
 
   /// 0.9.9 自动生成规则：单元库取整棵子树里本机播放量最高的基础库。

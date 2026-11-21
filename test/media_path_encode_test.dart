@@ -42,6 +42,29 @@ void main() {
     });
   });
 
+  group('Cfg.media — 已带库段的路径', () {
+    test('已知库段原样保留，不再套当前库（否则 /media/douyin/lib-x/... 必 404）', () {
+      final c = Cfg()..lib = 'douyin';
+      c.bindLibrary('lib1', 'http://10.0.0.2:8090');
+      expect(c.media('/media/lib1/a/b.jpg'), '/media/lib1/a/b.jpg');
+      expect(c.media('/media/lib1/a/b.jpg', lib: 'douyin'),
+          '/media/lib1/a/b.jpg');
+    });
+
+    test('未知首段仍按当前库补齐（头像的 BASE 相对路径）', () {
+      final c = Cfg()..lib = 'douyin';
+      c.bindLibrary('douyin', 'http://10.0.0.2:8090');
+      expect(c.media('/media/(14) 作者/_avatar/x.jpg'),
+          '/media/douyin/(14) 作者/_avatar/x.jpg');
+    });
+
+    test('相对路径仍补当前库', () {
+      final c = Cfg()..lib = 'lib1';
+      c.bindLibrary('lib1', 'http://10.0.0.2:8090');
+      expect(c.media('_cover/v1.jpg'), '/media/lib1/_cover/v1.jpg');
+    });
+  });
+
   group('Cfg.mediaUrl', () {
     test('带 # 的文件名生成可解析的绝对地址', () {
       final c = Cfg();
