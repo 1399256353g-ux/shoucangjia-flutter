@@ -10641,8 +10641,8 @@ class _PlayerPageState extends State<PlayerPage>
         httpHeaders: cfg.headers,
         memCacheWidth: decodeW,
         fit: BoxFit.contain,
-        placeholder: (_, __) => const Center(
-            child: CircularProgressIndicator(color: Colors.white38)),
+        // owner 2026-11-21：图片不再显示中央缓冲圈，与视频一致（空占位即可）
+        placeholder: (_, __) => const SizedBox.shrink(),
         errorWidget: (_, __, ___) => retryBox());
   }
 
@@ -14659,8 +14659,8 @@ class _AuthorPageState extends State<AuthorPage> {
               imageUrl: cfg.mediaUrl(src, lib: srcLib.isEmpty ? null : srcLib),
               httpHeaders: cfg.headersFor(srcLib.isEmpty ? null : srcLib),
               fit: BoxFit.contain,
-              placeholder: (_, __) =>
-                  const CircularProgressIndicator(color: Colors.white38),
+              // owner 2026-11-21：同上，去掉图片中央缓冲圈
+              placeholder: (_, __) => const SizedBox.shrink(),
             ),
           ),
         ),
