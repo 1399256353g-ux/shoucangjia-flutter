@@ -1,8 +1,9 @@
 /// 自定义封面（`_cover/`）的请求体与文案（纯函数，便于单测）。
 ///
 /// 服务端 `/api/cover/set` 支持两种操作：
-///  - 设置：`{lib, work}` → 把该作品的图片压成 720px 宽 jpg，写入
-///    `<库>/_cover/<version>.jpg` 并更新 `_cover/current` 指针；
+///  - 设置：`{lib, work, at?, index?}` → 由服务端取图并压成 720px 宽 jpg，
+///    写入 `<库>/_cover/<version>.jpg` 并更新 `_cover/current` 指针；
+///    视频带 `at`（当前播放秒数）截当前帧，图文/单图带 `index` 取当前图；
 ///  - 清除：`{lib, clear:true}` → 只删 `_cover/current` 指针，
 ///    已生成的封面文件全部保留（回滚只需把指针指回旧版本）。
 ///
@@ -33,20 +34,34 @@ class CoverRequest {
   final CoverOp op;
   final CoverScope scope;
 
+  /// 视频截帧时间点（秒）。null 表示交给服务端选图（旧调用方）。
+  final double? at;
+
+  /// 图文/单图取第几张（0 基）。null 表示取第 1 张。
+  final int? index;
+
   const CoverRequest.set({
     required this.lib,
     required this.work,
     this.scope = CoverScope.basic,
+    this.at,
+    this.index,
   }) : op = CoverOp.set;
 
   const CoverRequest.clear({required this.lib, this.scope = CoverScope.basic})
       : work = '',
-        op = CoverOp.clear;
+        op = CoverOp.clear,
+        at = null,
+        index = null;
 
-  /// 请求体：清除只带 `clear:true`，设置带作品 id。
-  Map<String, dynamic> toBody() => op == CoverOp.clear
-      ? <String, dynamic>{'lib': lib, 'clear': true}
-      : <String, dynamic>{'lib': lib, 'work': work};
+  /// 请求体：清除只带 `clear:true`；设置带作品 id，并按需带截帧时间/图片序号。
+  Map<String, dynamic> toBody() {
+    if (op == CoverOp.clear) return <String, dynamic>{'lib': lib, 'clear': true};
+    final body = <String, dynamic>{'lib': lib, 'work': work};
+    if (at != null) body['at'] = at;
+    if (index != null) body['index'] = index;
+    return body;
+  }
 
   /// 参数是否够用（缺库或设置时缺作品 id 都不发请求）。
   bool get valid =>

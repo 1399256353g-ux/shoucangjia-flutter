@@ -10733,70 +10733,19 @@ class _PlayerPageState extends State<PlayerPage>
     showUi();
   }
 
-  /// 可见的封面入口：把原来的长按菜单项集中到一个底部面板。
-  /// 取「当前画面」作为封面：
-  /// - 视频：截取当前帧（media_kit screenshot）
-  /// - 图文/单图：取当前正在显示的那一张原图
-  Future<void> _applyCoverFromCurrent({required bool unitScope}) async {
-    final w = _workAt(cur);
-    final lib = _libFor(w);
-    final isV = w['t'] == 'v';
-    List<int>? bytes;
-    try {
-      if (isV) {
-        bytes = await player.screenshot(format: 'image/jpeg');
-      } else {
-        final pics = workMediaPaths(w);
-        if (pics.isNotEmpty) {
-          final i = img.clamp(0, pics.length - 1);
-          final r = await http.get(
-            Uri.parse(cfg.mediaUrl(pics[i], lib: lib)),
-            headers: cfg.headersFor(lib),
-          );
-          if (r.statusCode == 200) bytes = r.bodyBytes;
-        }
-      }
-    } catch (e) {
-      _toast('当前画面截取失败：$e');
-      return;
-    }
-    if (bytes == null || bytes.isEmpty) {
-      _toast('当前画面截取失败');
-      return;
-    }
-    final r = await uploadCoverBytes(
-      bytes: bytes,
-      url: cfg.u('/api/cover/upload', lib: lib).toString(),
-      headers: cfg.headersFor(lib),
-      libId: lib,
-      unitRel: unitScope ? _unitRelForLib(lib) : '',
+  /// 封面请求：视频带当前播放位置（秒）由服务端截帧；图文/单图带当前图序号。
+  CoverRequest _coverRequestFor(Map<String, dynamic> w, CoverScope scope) {
+    final isv = w['t'] == 'v';
+    return CoverRequest.set(
+      lib: _libFor(w),
+      work: '${w['id'] ?? ''}',
+      scope: scope,
+      at: isv ? pos.inMilliseconds / 1000.0 : null,
+      index: isv ? null : img,
     );
-    if (r.ok) coverRevision.value++;
-    _toast(r.message);
   }
 
-  /// 基础库所属单元库的相对路径（用于单元库封面上传）。
-  String _unitRelForLib(String lib) {
-    final m = _meta;
-    if (m == null) return '';
-    String? walk(UnitLibrary u) {
-      for (final b in u.basics) {
-        if (b.id == lib) return u.rel;
-      }
-      for (final c in u.children) {
-        final hit = walk(c);
-        if (hit != null && hit.isNotEmpty) return hit;
-      }
-      return null;
-    }
-
-    for (final u in m.units) {
-      final hit = walk(u);
-      if (hit != null && hit.isNotEmpty) return hit;
-    }
-    return '';
-  }
-
+  /// 可见的封面入口：把原来的长按菜单项集中到一个底部面板。
   void _openCoverSheet() {
     final w = _workAt(cur);
     final lib = _libFor(w);
@@ -10812,7 +10761,7 @@ class _PlayerPageState extends State<PlayerPage>
             subtitle: const Text('用当前作品图片作为基础库封面'),
             onTap: () {
               Navigator.of(ctx).pop();
-              _applyCoverFromCurrent(unitScope: false);
+              _applyCover(_coverRequestFor(w, CoverScope.basic));
             },
           ),
           ListTile(
@@ -10821,7 +10770,7 @@ class _PlayerPageState extends State<PlayerPage>
             subtitle: const Text('用当前作品图片作为所属单元库封面'),
             onTap: () {
               Navigator.of(ctx).pop();
-              _applyCoverFromCurrent(unitScope: true);
+              _applyCover(_coverRequestFor(w, CoverScope.unit));
             },
           ),
           ListTile(
@@ -10884,8 +10833,7 @@ class _PlayerPageState extends State<PlayerPage>
               subtitle: const Text('用当前作品图片作为基础库封面，不影响原文件'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _applyCover(CoverRequest.set(
-                    lib: _libFor(w), work: '${w['id'] ?? ''}'));
+                _applyCover(_coverRequestFor(w, CoverScope.basic));
               },
             ),
             // 0.9.29：自定义封面可撤销——只删 `_cover/current` 指针，已生成封面文件保留。
@@ -10905,11 +10853,7 @@ class _PlayerPageState extends State<PlayerPage>
               subtitle: const Text('上级单元库卡片改用这张图，不动作品原图'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _applyCover(CoverRequest.set(
-                  scope: CoverScope.unit,
-                  lib: _libFor(w),
-                  work: '${w['id'] ?? ''}',
-                ));
+                _applyCover(_coverRequestFor(w, CoverScope.unit));
               },
             ),
             ListTile(

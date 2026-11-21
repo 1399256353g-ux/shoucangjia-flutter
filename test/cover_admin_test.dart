@@ -12,6 +12,23 @@ void main() {
       expect(r.failText, '设置封面失败');
     });
 
+    test('视频：请求体带当前播放秒数（0 秒也要带上）', () {
+      final r = CoverRequest.set(lib: 'lib-001', work: 'w1', at: 12.5);
+      expect(r.toBody(), {'lib': 'lib-001', 'work': 'w1', 'at': 12.5});
+      expect(CoverRequest.set(lib: 'lib-001', work: 'w1', at: 0).toBody()['at'], 0);
+    });
+
+    test('图文/单图：请求体带当前图片序号', () {
+      final r = CoverRequest.set(lib: 'lib-001', work: 'w2', index: 3);
+      expect(r.toBody(), {'lib': 'lib-001', 'work': 'w2', 'index': 3});
+      expect(r.toBody().containsKey('at'), isFalse);
+    });
+
+    test('清除：即使带 at/index 也不发', () {
+      final r = CoverRequest.clear(lib: 'lib-001');
+      expect(r.toBody(), {'lib': 'lib-001', 'clear': true});
+    });
+
     test('清除：只带 clear 标记，不带 work', () {
       final r = CoverRequest.clear(lib: 'lib-001');
       expect(r.op, CoverOp.clear);
