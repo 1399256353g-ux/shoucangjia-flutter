@@ -18,6 +18,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'cover_admin.dart';
 import 'cover_cache.dart';
+import 'cover_crop_page.dart';
 import 'cover_upload.dart';
 import 'deleted_monitor.dart';
 import 'concurrency.dart';
@@ -7354,7 +7355,6 @@ class _PlayerPageState extends State<PlayerPage>
   Offset? _heartPos;
   int _lastStageTapAt = 0;
   Offset _lastStageTapPos = Offset.zero;
-  bool _tapWasPausedBefore = false;
   // P0 §5：爱心 700ms（参数见 player_controls.dart），数值由纯函数给出。
   late final AnimationController _heartAnim =
       AnimationController(vsync: this, duration: kHeartAnimDuration);
@@ -9389,7 +9389,9 @@ class _PlayerPageState extends State<PlayerPage>
             pos: pos);
     final action = stageTapAction(
       uiVisible: ui,
-      fullscreen: fs && _mobileStageTap,
+      // owner 2026-11-21：全屏下舞台任意位置（含视频矩形外的黑边/留白）
+      // 都只切换功能区显隐，桌面端不再「单击暂停」，与移动端一致。
+      fullscreen: fs,
       zoomed: _picZoom.isZoomed,
       doubleTap: isDouble,
     );
@@ -9401,11 +9403,8 @@ class _PlayerPageState extends State<PlayerPage>
         return;
       case StageTapAction.like:
         _lastStageTapAt = 0;
-        // 非「移动端全屏单击语义」时第一次单击已经切换过暂停；
-        // 双击按点击前状态恢复（Windows 全屏行为与窗口态一致，见 M3）。
-        if (!(fs && _mobileStageTap)) {
-          _restorePauseAfterTap(_tapWasPausedBefore);
-        }
+        // 全屏单击已不再改变播放状态（上面 fullscreen: fs），双击只点赞，
+        // 没有需要恢复的暂停切换。
         if (!_isLiked(w)) _setLiked(w, true, at: pos);
         showUi();
         return;
@@ -9422,7 +9421,6 @@ class _PlayerPageState extends State<PlayerPage>
       case StageTapAction.togglePause:
         _lastStageTapAt = now;
         _lastStageTapPos = pos ?? Offset.zero;
-        _tapWasPausedBefore = paused;
         hapticTap();
         togglePause();
         showUi();
@@ -9507,29 +9505,6 @@ class _PlayerPageState extends State<PlayerPage>
     _hideDeadline.clear();
     if (!mounted) return;
     setState(() => ui = false);
-  }
-
-  // 双击点赞时撤销第一次点击带来的暂停切换（视频流事件可能迟到，
-  // 因此这里直接按点击前状态强制对齐，不依赖 paused 是否已刷新）。
-  void _restorePauseAfterTap(bool wasPaused) {
-    final isV = _workAt(cur)['t'] == 'v';
-    _userPaused = wasPaused;
-    setState(() => paused = wasPaused);
-    if (wasPaused) {
-      pauseAuto();
-      PauseTrace.mark('user:double-tap-restore');
-      try {
-        Breadcrumb.mark('player:pause', 'L9215');
-        player.pause();
-      } catch (_) {}
-    } else {
-      _stallAttempts = 0;
-      try {
-        player.setRate(speed);
-        player.play();
-      } catch (_) {}
-      if (!isV && !manualPic) startAuto();
-    }
   }
 
   // M9：作者页跟手拖拽。拖动开始时透明路由即入栈（进度 0），位移由手指驱动。
@@ -10381,8 +10356,7 @@ class _PlayerPageState extends State<PlayerPage>
   }) {
     // 全屏时任务栏是半透明浮层（占 _taskbarH），信息必须整段让开，
     // 否则会与任务栏重叠。
-    final overlayBottom =
-        fs ? (_taskbarH > 0 ? _taskbarH : 56 + pad.bottom) + 12 : bottom;
+    final overlayBottom = fs ? _liveTaskbarHeight(pad) + 12 : bottom;
     // 作品缺 `a` 时统一从媒体路径 `%40作者` 回退；UI 与跳转必须用同一个名字，
     // 否则会出现「点头像能进、作者名显示空」的不一致。
     final authorName = authorNameOf(w);
@@ -10700,6 +10674,14 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 布局完成后测量底部任务栏真实高度（随简介展开/安全区变化）。
+  /// 任务栏高度的唯一取值口：实测值优先，首帧实测前用与任务栏
+  /// SizedBox 同源的估算（kTaskbarHeight + 底部安全区）。舞台 inset、
+  /// 全屏进度条/信息区避让都走这里，避免两套回退常量各差 1dp。
+  double _liveTaskbarHeight(EdgeInsets pad) => _taskbarH > 0
+      ? _taskbarH
+      : taskbarReservedHeight(
+          contentHeight: kTaskbarHeight, safeBottom: pad.bottom);
+
   void _scheduleTaskbarMeasure() {
     if (_taskbarMeasureScheduled) return;
     _taskbarMeasureScheduled = true;
@@ -10958,6 +10940,63 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
+  /// 打开固定比例截取框，确认后按选框提交封面（owner 2026-11-21 要求）。
+  ///
+  /// 预览图就是「即将被截取的那一帧」——视频取播放器当前帧
+  /// （`player.screenshot`），图文取当前这张图；都拿不到时退回海报封面
+  /// （与视频同帧比例）。拿不到任何预览就直接按整帧提交（旧行为）。
+  /// 比例常量与库卡片共用 [kLibraryCoverAspect]，入库后 `BoxFit.cover`
+  /// 刚好铺满，不会再被裁一次。
+  Future<void> _cropAndApplyCover(dynamic w0, CoverScope scope) async {
+    final w = w0 as Map<String, dynamic>;
+    // `at` / `index` 在打开截取框这一刻定格，选框期间播放位置前进也不影响。
+    final base = _coverRequestFor(w, scope);
+    final lib = _libFor(w);
+    final isv = w['t'] == 'v';
+    ImageProvider? preview;
+    if (isv) {
+      try {
+        final bytes = await player.screenshot();
+        if (bytes != null && bytes.isNotEmpty) preview = MemoryImage(bytes);
+      } catch (_) {}
+    } else {
+      final paths = workMediaPaths(w);
+      if (img >= 0 && img < paths.length && paths[img].isNotEmpty) {
+        preview = CachedNetworkImageProvider(
+          cfg.mediaUrl(paths[img], lib: lib),
+          headers: cfg.headersFor(lib),
+          cacheManager: DiziCache.manager,
+        );
+      }
+    }
+    final cover = _posterCoverUrl(w);
+    preview ??= cover.isEmpty
+        ? null
+        : thumbImageProvider(
+            withImageWidth(cover, kPlayerImageWidth),
+            decodeWidth: _posterDecodeWidth(context),
+            headers: cfg.headersFor(lib),
+            cacheManager: DiziCache.manager,
+          );
+    if (!mounted) return;
+    if (preview == null) {
+      await _applyCover(base);
+      return;
+    }
+    final res = await Navigator.of(context).push<CoverCropResult>(
+      MaterialPageRoute(builder: (_) => CoverCropPage(image: preview!)),
+    );
+    if (res == null || !mounted) return;
+    await _applyCover(CoverRequest.set(
+      lib: base.lib,
+      work: base.work,
+      scope: base.scope,
+      at: base.at,
+      index: base.index,
+      rect: res.rect,
+    ));
+  }
+
   /// 可见的封面入口：把原来的长按菜单项集中到一个底部面板。
   void _openCoverSheet() {
     final w = _workAt(cur);
@@ -10971,19 +11010,19 @@ class _PlayerPageState extends State<PlayerPage>
           ListTile(
             leading: const Icon(Icons.photo_size_select_actual_outlined),
             title: const Text('设为该库封面'),
-            subtitle: const Text('用当前作品图片作为基础库封面'),
+            subtitle: const Text('用当前画面框选作为基础库封面'),
             onTap: () {
               Navigator.of(ctx).pop();
-              _applyCover(_coverRequestFor(w, CoverScope.basic));
+              _cropAndApplyCover(w, CoverScope.basic);
             },
           ),
           ListTile(
             leading: const Icon(Icons.collections_bookmark_outlined),
             title: const Text('设为该单元库封面'),
-            subtitle: const Text('用当前作品图片作为所属单元库封面'),
+            subtitle: const Text('用当前画面框选作为所属单元库封面'),
             onTap: () {
               Navigator.of(ctx).pop();
-              _applyCover(_coverRequestFor(w, CoverScope.unit));
+              _cropAndApplyCover(w, CoverScope.unit);
             },
           ),
           ListTile(
@@ -11043,10 +11082,10 @@ class _PlayerPageState extends State<PlayerPage>
             ListTile(
               leading: const Icon(Icons.wallpaper_outlined),
               title: const Text('设为该库封面'),
-              subtitle: const Text('用当前作品图片作为基础库封面，不影响原文件'),
+              subtitle: const Text('用当前画面框选作为基础库封面，不影响原文件'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _applyCover(_coverRequestFor(w, CoverScope.basic));
+                _cropAndApplyCover(w, CoverScope.basic);
               },
             ),
             // 0.9.29：自定义封面可撤销——只删 `_cover/current` 指针，已生成封面文件保留。
@@ -11063,10 +11102,10 @@ class _PlayerPageState extends State<PlayerPage>
             ListTile(
               leading: const Icon(Icons.folder_special_outlined),
               title: const Text('设为该单元库封面'),
-              subtitle: const Text('上级单元库卡片改用这张图，不动作品原图'),
+              subtitle: const Text('上级单元库卡片改用这幅框选画面，不动作品原图'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _applyCover(_coverRequestFor(w, CoverScope.unit));
+                _cropAndApplyCover(w, CoverScope.unit);
               },
             ),
             ListTile(
@@ -11349,7 +11388,11 @@ class _PlayerPageState extends State<PlayerPage>
     if (!isV) {
       // owner 2026-11-18：图文的分段进度条也紧贴任务栏上缘（通栏细条）。
       return _picProgressFlush(
-          pics: pics, idx: idx, lift: fs ? _taskbarH : 0.0);
+          pics: pics,
+          idx: idx,
+          lift: fs
+              ? _liveTaskbarHeight(MediaQuery.paddingOf(context))
+              : 0.0);
     }
     // 非全屏视频：呼出式进度条（贴任务栏上缘、极细、不操作时不可见）。
     // 全屏保留旧进度条，避免破坏沉浸态已有的呼出/隐藏逻辑。
@@ -12586,7 +12629,7 @@ class _PlayerPageState extends State<PlayerPage>
                               top: fs ? 10 : 0,
                               bottom: fs ? 6 + pad.bottom : pad.bottom),
                           child: SizedBox(
-                            height: fs ? null : kTaskbarHeight - 1,
+                            height: fs ? null : kTaskbarContentHeight,
                             child: Column(
                                 mainAxisSize:
                                     fs ? MainAxisSize.min : MainAxisSize.max,

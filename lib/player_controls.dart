@@ -366,7 +366,13 @@ const Duration kMarqueePause = Duration(seconds: 2);
 const double kInfoBottomGap = 12;
 
 /// §4 底部任务栏。
-const double kTaskbarHeight = 56;
+///
+/// 高度只有一个来源：内容行 + 顶部 1dp 分割线。任务栏的 `SizedBox`、
+/// 舞台 inset 回退值 [`taskbarReservedHeight`] 都从这里推导，
+/// 任何一处改常量而另一处没跟上，`test/taskbar_layout_test.dart` 会红。
+const double kTaskbarDividerWidth = 1;
+const double kTaskbarContentHeight = 55;
+const double kTaskbarHeight = kTaskbarContentHeight + kTaskbarDividerWidth;
 const Color kTaskbarColor = Color(0xFF000000);
 const Color kTaskbarDividerColor = Color(0x1AFFFFFF);
 const double kTaskbarIconSize = 24;
