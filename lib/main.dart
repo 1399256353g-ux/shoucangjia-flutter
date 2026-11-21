@@ -9187,6 +9187,13 @@ class _PlayerPageState extends State<PlayerPage>
   // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停；
   // 320ms 内在相近位置再次点击视为双击：点赞并恢复到点击前的播放状态。
   void onStageTap([Offset? pos]) {
+    // 取证：舞台收到点击时记下当时的可见态。信息层同时有 pointer-down 日志，
+    // 两者对不上就说明点击被进度条热区/其它层吞掉后穿到了舞台。
+    CrashLog.instance.record(
+      'stage-tap ui=$ui fs=$fs paused=$paused swipe=$_pageSwiping '
+      'pos=${pos == null ? 'null' : '${pos.dx.toStringAsFixed(0)},${pos.dy.toStringAsFixed(0)}'}',
+      kind: 'author',
+    );
     // owner 2026-11-21：呼出的进度条要能被单击收回。
     // 进度条本身只认拖动（点按已不 seek），所以单击落到舞台时统一收起。
     if (_scrubActive || _scrubHover) {
@@ -11244,42 +11251,58 @@ class _PlayerPageState extends State<PlayerPage>
       height: kScrubHotZoneHeight + kScrubBubbleSpace,
       child: LayoutBuilder(builder: (_, c) {
         final width = c.maxWidth;
-        return MouseRegion(
-          // 桌面端：指针进入热区即放大成可拖状态，移出恢复细条。
-          onEnter: (_) {
-            if (_scrubHover) return;
-            if (fs && !ui) return; // 全屏清屏状态下不因悬停把进度条叫出来
-            setState(() => _scrubHover = true);
-          },
-          onExit: (_) {
-            if (!_scrubHover) return;
-            setState(() => _scrubHover = false);
-          },
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
-            // owner 2026-11-20：进度条只认「横向拖动」，不再响应点按。
-            // 之前热区一按下就 seek，导致点「展开简介」等靠近底部的按钮
-            // 会被当成跳转进度，表现为误触。
-            onHorizontalDragStart: (d) => _scrubStart(d.localPosition, width),
-            onHorizontalDragUpdate: (d) => _scrubMove(d.localPosition, width),
-            onHorizontalDragEnd: (_) => _scrubEnd(),
-            onHorizontalDragCancel: () => _scrubEnd(),
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              child: ScrubBar(
-                // P2：不拖动时直接订阅播放进度（ValueListenable），
-                // 播放中不再需要整页 setState 才能让进度条动。
-                fraction: _scrubActive ? _scrubFracVN : _progressVN,
-                active: active,
-                visible: active || _scrubThin || persistent,
-                labelFor: (f) => dur.inMilliseconds > 0
-                    ? '${fmt(dur * f)} / ${fmt(dur)}'
-                    : '',
+        return Stack(children: [
+          // 绘制层：轨道与气泡。气泡预留的 34dp 是**视觉空间**，必须不可
+          // 命中——整块 62dp 都当热区时，它会盖住上方信息区，头像/作者名
+          // 的点击被这里吞掉（无指针事件、无日志）。
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ScrubBar(
+                  // P2：不拖动时直接订阅播放进度（ValueListenable），
+                  // 播放中不再需要整页 setState 才能让进度条动。
+                  fraction: _scrubActive ? _scrubFracVN : _progressVN,
+                  active: active,
+                  visible: active || _scrubThin || persistent,
+                  labelFor: (f) => dur.inMilliseconds > 0
+                      ? '${fmt(dur * f)} / ${fmt(dur)}'
+                      : '',
+                ),
               ),
             ),
           ),
-        );
+          // 命中层：只有贴底的 kScrubHotZoneHeight 条带响应拖动/悬停。
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: kScrubHotZoneHeight,
+            child: MouseRegion(
+              // 桌面端：指针进入条带即放大成可拖状态，移出恢复细条。
+              onEnter: (_) {
+                if (_scrubHover) return;
+                if (fs && !ui) return; // 全屏清屏状态下不因悬停把进度条叫出来
+                setState(() => _scrubHover = true);
+              },
+              onExit: (_) {
+                if (!_scrubHover) return;
+                setState(() => _scrubHover = false);
+              },
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
+                // owner 2026-11-20：进度条只认「横向拖动」，不再响应点按。
+                onHorizontalDragStart: (d) =>
+                    _scrubStart(d.localPosition, width),
+                onHorizontalDragUpdate: (d) =>
+                    _scrubMove(d.localPosition, width),
+                onHorizontalDragEnd: (_) => _scrubEnd(),
+                onHorizontalDragCancel: () => _scrubEnd(),
+              ),
+            ),
+          ),
+        ]);
       }),
     );
   }
@@ -11715,14 +11738,17 @@ class _PlayerPageState extends State<PlayerPage>
     // 页内浮层坐标：舞台已让掉任务栏（stageInset），这里不能再加一次。
     // 单图图文没有进度层，信息区直接贴到舞台底部上方 10dp，不留空位。
     final noProgressLayer = !isV && pics.length <= 1;
-    // 视频非全屏只有 2.5dp 细条，排版不能让出旧的 30dp 时间行高度。
-    final progressLayerH = noProgressLayer
-        ? 0.0
-        : (!fs
-            ? kScrubThinHeight
-            : stageProgressOverlayHeight(hasChapter: chapterCount > 1)
-                .toDouble());
-    final infoBottomInPage = progressBottom + progressLayerH + 10;
+    // 非全屏进度条真正可命中的是贴底 kScrubHotZoneHeight 的条带（气泡预留
+    // 区只做绘制，见 _scrubOverlay）。信息区必须让开「条带」而不是 2.5dp
+    // 细线，否则头像下半截落在热区里，点击被整块吞掉（0.9.144 实测：
+    // 头像位置完全没有指针事件）。
+    final infoBottomInPage = stageInfoBottom(
+      fullscreen: fs,
+      hasProgressLayer: !noProgressLayer,
+      hasChapter: chapterCount > 1,
+      progressBottom: progressBottom,
+      hitStripHeight: kScrubHotZoneHeight,
+    );
     if (!broken) _scheduleTaskbarMeasure();
     // 邻页缓存只保留当前 ±2，避免滑动久后持有过多封面。
     _neighborPages.removeWhere((k, _) {

@@ -95,6 +95,75 @@ void main() {
     });
   });
 
+  group('T stageInfoBottom（信息区必须让开进度条命中条带）', () {
+    test('非全屏视频：让开 kScrubHotZoneHeight 条带，而非 2.5dp 细线', () {
+      final bottom = stageInfoBottom(
+        fullscreen: false,
+        hasProgressLayer: true,
+        hasChapter: false,
+        progressBottom: 0,
+        hitStripHeight: 28,
+      );
+      // 38 = 28 条带 + 10 间距；必须严格大于条带本身，否则头像会落进热区。
+      expect(bottom, 38);
+      expect(bottom, greaterThan(28));
+    });
+
+    test('安全区/内边距叠加，非法值退化为 0', () {
+      expect(
+          stageInfoBottom(
+            fullscreen: false,
+            hasProgressLayer: true,
+            hasChapter: false,
+            progressBottom: 34,
+            hitStripHeight: 28,
+          ),
+          72);
+      expect(
+          stageInfoBottom(
+            fullscreen: false,
+            hasProgressLayer: true,
+            hasChapter: false,
+            progressBottom: -5,
+            hitStripHeight: -1,
+          ),
+          10);
+    });
+
+    test('全屏按进度层实际高度让位（含集数标签）', () {
+      expect(
+          stageInfoBottom(
+            fullscreen: true,
+            hasProgressLayer: true,
+            hasChapter: false,
+            progressBottom: 0,
+            hitStripHeight: 28,
+          ),
+          40);
+      expect(
+          stageInfoBottom(
+            fullscreen: true,
+            hasProgressLayer: true,
+            hasChapter: true,
+            progressBottom: 0,
+            hitStripHeight: 28,
+          ),
+          58);
+    });
+
+    test('单图图文没有进度层：只留 10dp 间距', () {
+      expect(
+          stageInfoBottom(
+            fullscreen: false,
+            hasProgressLayer: false,
+            hasChapter: false,
+            progressBottom: 0,
+            hitStripHeight: 28,
+          ),
+          10);
+    });
+  });
+
   group('视频基准尺寸保持原比例', () {
     test('普通竖屏 9:16', () {
       final s = videoBaseSize(aspect: 9 / 16, referenceHeight: 720);

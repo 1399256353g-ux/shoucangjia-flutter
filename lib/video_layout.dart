@@ -193,3 +193,28 @@ double stageProgressBottomOffset({
 /// 供作者/标题信息行避让，避免压住进度条。
 double stageProgressOverlayHeight({bool hasChapter = false}) =>
     hasChapter ? 48 : 30;
+
+/// 页内信息区（头像/作者名/标题）底边到舞台底边的距离。
+///
+/// 关键点：非全屏进度条真正响应拖动的是贴底的一条**可命中条带**
+/// （[hitStripHeight]，见 `kScrubHotZoneHeight`），气泡预留区只做绘制。
+/// 信息区必须让开这条条带，而不是只让开 2.5dp 的视觉细线——否则头像/
+/// 作者名的下半截会落在条带里，点击被进度条热区整块吞掉（无任何指针
+/// 事件、也无日志），表现就是「点头像没反应」。
+double stageInfoBottom({
+  required bool fullscreen,
+  required bool hasProgressLayer,
+  required bool hasChapter,
+  required double progressBottom,
+  required double hitStripHeight,
+  double gap = 10,
+}) {
+  final base = progressBottom > 0 ? progressBottom : 0.0;
+  final g = gap > 0 ? gap : 0.0;
+  if (!hasProgressLayer) return base + g;
+  if (!fullscreen) {
+    final hit = hitStripHeight > 0 ? hitStripHeight : 0.0;
+    return base + hit + g;
+  }
+  return base + stageProgressOverlayHeight(hasChapter: hasChapter) + g;
+}
