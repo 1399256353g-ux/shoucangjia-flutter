@@ -4320,6 +4320,7 @@ class _LibraryPageState extends State<LibraryPage> {
         onOpenUnit: _openUnit,
         onToggleUnitStar: _toggleUnitStar,
         unitCoverOf: _unitCoverUrl,
+        headersOf: cfg.headersFor,
         coverUploader: uploadCoverFromPicker,
         onConfigureUnit: _openUnitCrawler,
       ),
@@ -4399,10 +4400,12 @@ class _LibraryPageState extends State<LibraryPage> {
       builder: (c) => UnitLibraryPage(
         unit: u,
         stars: stars.toSet(),
+        headersOf: cfg.headersFor,
         onOpenUnit: (sub) => Navigator.of(c).push(MaterialPageRoute<void>(
           builder: (_) => UnitLibraryPage(
             unit: sub,
             stars: stars.toSet(),
+            headersOf: cfg.headersFor,
             onOpenUnit: (s2) => _openUnit(s2),
             onToggleUnitStar: _toggleUnitStar,
             onTapBasic: (b) => _showBasicOn(c, b),
@@ -4720,6 +4723,7 @@ class _LibraryPageState extends State<LibraryPage> {
           UnitLibraryHomeView(
             tree: unitTree!,
             stars: stars.toSet(),
+            headersOf: cfg.headersFor,
             onOpenUnit: _openUnit,
             onToggleUnitStar: _toggleUnitStar,
             onTapBasic: _showBasic,

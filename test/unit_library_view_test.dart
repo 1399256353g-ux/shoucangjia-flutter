@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_tree.dart';
@@ -249,4 +250,24 @@ void main() {
           {'Authorization': 'Basic l1'});
     });
   });
+  testWidgets('库卡片封面必须带鉴权头（服务端要求 Basic，否则 401 永远空白）', (t) async {
+    final headers = {'Authorization': 'Basic test'};
+    await t.pumpWidget(host(UnitLibraryHomeView(
+      tree: tree,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (_) {},
+      onTapBasic: (_) {},
+      onOpenStars: () {},
+      unitCoverOf: (u) => 'http://10.0.0.2:8090/media/l1/a.jpg',
+      headersOf: ([lib]) => headers,
+    )));
+    final imgs =
+        t.widgetList<CachedNetworkImage>(find.byType(CachedNetworkImage));
+    expect(imgs, isNotEmpty);
+    for (final w in imgs) {
+      expect(w.httpHeaders, headers);
+    }
+  });
+
 }
