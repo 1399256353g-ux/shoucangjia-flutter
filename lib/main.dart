@@ -75,6 +75,7 @@ import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
 import 'ui_fade.dart';
 import 'immersive.dart';
+import 'instant_route.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'player_controls.dart';
@@ -4484,9 +4485,8 @@ class _LibraryPageState extends State<LibraryPage> {
             MaterialPageRoute<void>(
                 builder: (_) => AuthorPage(name: name, libs: [b.id]))),
         onPlay: (works, index) => Navigator.of(context).push(
-            MaterialPageRoute<void>(
-                builder: (_) =>
-                    PlayerPage(works: works, start: index, lib: b.id))),
+            instantRoute<void>(
+                (_) => PlayerPage(works: works, start: index, lib: b.id))),
       ),
     ));
   }
@@ -15302,8 +15302,8 @@ class _WorkGridState extends State<WorkGrid> {
             }
             // 播放器需要可变列表：续播时直接追加到它自己手里这份。
             final playerWorks = List.of(works, growable: true);
-            Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => PlayerPage(
+            Navigator.of(context).push(instantRoute(
+                (_) => PlayerPage(
                     works: playerWorks,
                     start: i,
                     lib: _libFor(w),
