@@ -9359,7 +9359,7 @@ class _PlayerPageState extends State<PlayerPage>
       showUi();
       return;
     }
-    hapticTap();
+    // owner 2026-11-22：移动端暂停不再震动（手感差），去掉触感反馈。
     togglePause();
     showUi();
     if (paused) _playHintAnim.forward(from: 0);
@@ -12313,13 +12313,7 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               ),
               // P0：常驻大播放图标只在全屏保留；非全屏改为 0.8s 淡出提示。
-              if (fs && paused && !broken)
-                const IgnorePointer(
-                  child: Center(
-                    child:
-                        Icon(Icons.play_arrow, size: 76, color: Colors.white30),
-                  ),
-                ),
+              // owner 2026-11-22：全屏暂停键与这枚白色三角重叠，删掉三角。
               // H14：不再弹独立音量模块，仅保留一个轻量读数提示（松手后自动消失）
               // O2：手机端中央大号播放/暂停圆钮，随控制层淡入淡出。
               // P0：中央大圆钮只在全屏出现；非全屏暂停只显示 0.8s 播放图标。
@@ -12352,18 +12346,14 @@ class _PlayerPageState extends State<PlayerPage>
                 ),
               // P0 §5：非全屏暂停提示——无背景大按钮，只一个播放图标，
               // 0.8s / Curves.easeOut 淡出（每次暂停重新计时）。
-              if (!fs && !broken && _playHintAnim.isAnimating)
-                Positioned.fill(
+              // owner 2026-11-22：非全屏暂停时要能看到半透明播放标（原来只在
+              // 0.8s 提示动画期间出现，之后就没有了），改为暂停期间常显。
+              if (!fs && !broken && paused)
+                const Positioned.fill(
                   child: IgnorePointer(
                     child: Center(
-                      child: AnimatedBuilder(
-                        animation: _playHintAnim,
-                        builder: (_, __) => Opacity(
-                          opacity: playHintOpacityAt(_playHintAnim.value),
-                          child: const Icon(Icons.play_arrow_rounded,
-                              size: 64, color: Colors.white),
-                        ),
-                      ),
+                      child: Icon(Icons.play_arrow_rounded,
+                          size: 64, color: Colors.white38),
                     ),
                   ),
                 ),
