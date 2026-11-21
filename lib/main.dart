@@ -11250,7 +11250,9 @@ class _PlayerPageState extends State<PlayerPage>
   Widget _scrubOverlay({required double progress, double lift = 0}) {
     final desktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
     // 全屏时进度条要跟功能区一起随时间隐藏；非全屏桌面端才常驻细条。
-    final persistent = desktop && (!fs || ui);
+    // owner 2026-11-21：全屏下进度条不能常驻——呼出后单击就该收起。
+    // 桌面端常驻只在非全屏保留（那时它是视频与任务栏的分界线）。
+    final persistent = desktop && !fs;
     final active = _scrubActive || (_scrubHover && (!fs || ui));
     return Positioned(
       left: 0,
