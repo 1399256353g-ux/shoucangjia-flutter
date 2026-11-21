@@ -4118,10 +4118,22 @@ class _LibraryPageState extends State<LibraryPage> {
       final url = cfg.mediaUrl(pick, lib: ownLib.isEmpty ? null : ownLib);
       if (url.isNotEmpty) return url;
     }
+    // owner 2026-11-21：单元库以前只传 firstThumb（服务端 `fc`，常指向视频），
+    // 从没把「爬虫封面 cv」传进来 —— 而 cv 才是真正有图片的那条链路。
+    // 这就是单元库卡片长期灰着的原因。
+    String crawlerOfUnit() {
+      for (final b in u.allBasics) {
+        final cv = b.crawlerCover.trim();
+        if (cv.isNotEmpty) return cv;
+      }
+      return '';
+    }
+
     final custom = pickUnitCover(
         rel: u.rel,
         version: u.node.coverVersion,
         ext: u.node.coverExt,
+        crawlerThumb: crawlerOfUnit(),
         firstThumb: _firstFcOfUnit(u)?.path ?? '');
     if (!custom.isEmpty) {
       // 子树第一张作品封面按所属基础库路由；自定义 `_cover/` 保持原解析。
