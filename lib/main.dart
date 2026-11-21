@@ -10126,6 +10126,11 @@ class _PlayerPageState extends State<PlayerPage>
                     valueListenable: authorAvatarRevision,
                     builder: (context, _, __) => avatarFor(w).isNotEmpty
                         ? GestureDetector(
+                            // owner 2026-11-21：头像/作者名的点击必须由「显式热区」
+                            // 保证。默认 deferToChild 依赖子组件自己命中，图片还在
+                            // 加载（占位为空）或加载失败时中心像素没有可命中对象，
+                            // 点击会穿透到舞台被当成暂停——表现就是「点头像没反应」。
+                            behavior: HitTestBehavior.opaque,
                             onTap: openAuthor,
                             child: ClipOval(
                                 child: CachedNetworkImage(
@@ -10152,6 +10157,7 @@ class _PlayerPageState extends State<PlayerPage>
                                             radius: 19,
                                             child: Icon(Icons.person)))))
                         : GestureDetector(
+                            behavior: HitTestBehavior.opaque,
                             onTap: openAuthor,
                             child: const CircleAvatar(
                                 radius: 19, child: Icon(Icons.person))),
@@ -10165,6 +10171,8 @@ class _PlayerPageState extends State<PlayerPage>
                         Row(children: [
                           Flexible(
                             child: GestureDetector(
+                              // 同上：文字区域也按整块热区命中，不依赖字形像素。
+                              behavior: HitTestBehavior.opaque,
                               onTap: openAuthor,
                               child: Text(
                                   authorLabel.isEmpty ? '@未知作者' : '@$authorLabel',
