@@ -7553,7 +7553,8 @@ class _PlayerPageState extends State<PlayerPage>
   void _seedVideoParams(Player p) {
     try {
       final vp = p.state.videoParams;
-      final info = parseVideoParams(dw: vp.dw, dh: vp.dh, aspect: vp.aspect);
+      final info = parseVideoParams(
+          dw: vp.dw, dh: vp.dh, aspect: vp.aspect, rotate: vp.rotate);
       if (info.displayWidth <= 1) return;
       _videoDw = info.displayWidth;
       // 尺寸已就绪，不需要再靠首帧事件重挂一次纹理。
@@ -7719,7 +7720,8 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.videoParams.listen((vp) {
       if (!identical(p, player)) return;
       if (!mounted) return;
-      final info = parseVideoParams(dw: vp.dw, dh: vp.dh, aspect: vp.aspect);
+      final info = parseVideoParams(
+          dw: vp.dw, dh: vp.dh, aspect: vp.aspect, rotate: vp.rotate);
       _videoDw = info.displayWidth;
       // 纹理参数第一次到达 = 真正的输出尺寸有了；此时重挂一次 Video，
       // 让纹理挂到已就绪的控制器上（否则首播可能一直黑屏，重进才好）。
@@ -14156,6 +14158,43 @@ class _AvatarCropGridPainter extends CustomPainter {
   bool shouldRepaint(_AvatarCropGridPainter oldDelegate) => false;
 }
 
+/// 作者页头像下方的小按钮（owner 2026-11-22）：与库封面入口一致的低调样式。
+class _AvatarAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _AvatarAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 12, color: color),
+            const SizedBox(width: 2),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 10.5,
+                    color: color,
+                    fontWeight: FontWeight.w500)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 class AuthorPage extends StatefulWidget {
   final String name;
   // 按库筛选后可能合并多个库；默认当前库
@@ -14245,6 +14284,7 @@ class _AuthorPageState extends State<AuthorPage> {
     if (choice == 'clear') {
       await AuthorAvatarStore.instance.clear(widget.name);
       if (!mounted) return;
+      authorAvatarRevision.value++;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('已清除手动头像')));
@@ -14292,6 +14332,8 @@ class _AuthorPageState extends State<AuthorPage> {
                   if (!ctx.mounted) return;
                   Navigator.of(ctx).pop();
                   if (!mounted) return;
+                  authorAvatarRevision.value++;
+                  setState(() {});
                   ScaffoldMessenger.of(context)
                     ..hideCurrentSnackBar()
                     ..showSnackBar(
@@ -14374,10 +14416,25 @@ class _AuthorPageState extends State<AuthorPage> {
     // 清掉本机覆盖，避免旧的手动头像继续遮住服务端新图。
     await AuthorAvatarStore.instance.clear(widget.name);
     if (!mounted) return;
+    authorAvatarRevision.value++;
     setState(() {
       if (r.path.isNotEmpty) av = r.path;
     });
     _toast(r.message);
+  }
+
+  /// owner 2026-11-22：「恢复自动」——清掉本机手动头像，回落到爬虫/自动生成。
+  ///
+  /// 清完立刻涨一次 [authorAvatarRevision]，作者页、播放页信息区与作品卡片
+  /// 三处同时换回自动头像；本机没有手动覆盖时按钮不显示。
+  Future<void> _restoreAutoAvatar() async {
+    await AuthorAvatarStore.instance.clear(widget.name);
+    if (!mounted) return;
+    authorAvatarRevision.value++;
+    setState(() {});
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('已恢复自动头像')));
   }
 
   /// J13：编辑简介（0–500 字，留空=清空），写回 authors.json。
@@ -14894,16 +14951,31 @@ class _AuthorPageState extends State<AuthorPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            GestureDetector(
-              onTap: () => _showAvatar(context),
-              onLongPress: () => _showAvatarMenu(context),
-              child: AuthorAvatar(
-                name: widget.name,
-                mediaPath: displayAv,
-                lib: primaryLib.isEmpty ? null : primaryLib,
-                size: AuthorAvatar.headerSize,
+            Column(mainAxisSize: MainAxisSize.min, children: [
+              GestureDetector(
+                onTap: () => _showAvatar(context),
+                onLongPress: () => _showAvatarMenu(context),
+                child: AuthorAvatar(
+                  name: widget.name,
+                  mediaPath: displayAv,
+                  lib: primaryLib.isEmpty ? null : primaryLib,
+                  size: AuthorAvatar.headerSize,
+                ),
               ),
-            ),
+              const SizedBox(height: 4),
+              // owner 2026-11-22：头像旁固定入口，与库封面入口同风格。
+              _AvatarAction(
+                icon: Icons.add_photo_alternate_outlined,
+                label: '设置头像',
+                onTap: () => _showAvatarMenu(context),
+              ),
+              if (manualAv.isNotEmpty)
+                _AvatarAction(
+                  icon: Icons.restart_alt,
+                  label: '恢复自动',
+                  onTap: _restoreAutoAvatar,
+                ),
+            ]),
             const SizedBox(width: 12),
             Expanded(
                 child: Column(

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'cover_cache.dart';
 import 'decode_plan.dart';
 import 'author_avatar.dart';
+import 'author_index.dart';
 import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
@@ -93,9 +94,15 @@ class _BasicLibPageState extends State<BasicLibPage>
   late final TabController _tabs =
       TabController(length: 2, vsync: this, initialIndex: 0);
   final ScrollController _worksScroll = ScrollController();
+  final ScrollController _authorScroll = ScrollController();
+  final TextEditingController _authorSearch = TextEditingController();
 
   List<Map<String, dynamic>> authors = [];
   List<dynamic> works = [];
+  /// 作者搜索词：仅本地过滤当前基础库的作者，不发请求（owner 2026-11-22）。
+  String _authorQuery = '';
+  List<Map<String, dynamic>>? _authorShownCache;
+  List<String> _authorShownKeys = const <String>[];
   /// 作者 → `av` 头像路径（`/api/authors.json` 下发；空表示无头像）。
   final Map<String, String> _authorAv = <String, String>{};
   /// 作者 → 兜底头像（该作者第一件作品的缩略图）。
@@ -126,6 +133,8 @@ class _BasicLibPageState extends State<BasicLibPage>
   void dispose() {
     _worksScroll.removeListener(_onScroll);
     _worksScroll.dispose();
+    _authorScroll.dispose();
+    _authorSearch.dispose();
     _tabs.dispose();
     super.dispose();
   }
@@ -150,10 +159,18 @@ class _BasicLibPageState extends State<BasicLibPage>
       for (final a in (j['authors'] as List? ?? const [])) {
         if (a is Map) list.add(Map<String, dynamic>.from(a));
       }
-      list.sort((x, y) => _int(y['works']).compareTo(_int(x['works'])));
+      // 有首字母索引条后，列表必须按名称分组排列，否则「跳到某字母」
+      // 会落在列表中间、上下都还有该字母的作者。作品数只作为同组内的次序。
+      list.sort((x, y) {
+        final c = compareAuthorNames(
+            '${x['name'] ?? x['name_raw'] ?? ''}', '${y['name'] ?? y['name_raw'] ?? ''}');
+        if (c != 0) return c;
+        return _int(y['works']).compareTo(_int(x['works']));
+      });
       if (!mounted) return;
       setState(() {
         authors = list;
+        _authorShownCache = null;
         loadingAuthors = false;
       });
     } catch (e) {
@@ -163,6 +180,39 @@ class _BasicLibPageState extends State<BasicLibPage>
         err = '$e';
       });
     }
+  }
+
+  /// 作者搜索结果（本地即时过滤，缓存到搜索词/源列表变化为止）。
+  List<Map<String, dynamic>> get _shownAuthors {
+    final cached = _authorShownCache;
+    if (cached != null) return cached;
+    final q = _authorQuery;
+    final list = q.trim().isEmpty
+        ? List<Map<String, dynamic>>.from(authors)
+        : authors
+            .where((a) => authorMatchesQuery(
+                '${a['name'] ?? a['name_raw'] ?? ''}', q))
+            .toList(growable: false);
+    _authorShownCache = list;
+    _authorShownKeys = [
+      for (final a in list) '${a['name'] ?? a['name_raw'] ?? ''}',
+    ];
+    return list;
+  }
+
+  void _setAuthorQuery(String v) {
+    if (v == _authorQuery) return;
+    setState(() {
+      _authorQuery = v;
+      _authorShownCache = null;
+    });
+    if (_authorScroll.hasClients) _authorScroll.jumpTo(0);
+  }
+
+  void _clearAuthorQuery() {
+    if (_authorQuery.isEmpty) return;
+    _authorSearch.clear();
+    _setAuthorQuery('');
   }
 
   /// 作者头像索引：`/api/authors.json` 的 `av`（索引文件里没有头像）。
@@ -346,17 +396,39 @@ class _BasicLibPageState extends State<BasicLibPage>
           child: Text(err ?? '该基础库下没有作者',
               style: const TextStyle(fontSize: 12, color: Colors.grey)));
     }
-    return GridView.builder(
-      padding: const EdgeInsets.all(12),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 180,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childAspectRatio: 0.86,
-      ),
-      itemCount: authors.length,
-      itemBuilder: (c, i) {
-        final a = authors[i];
+    final shown = _shownAuthors;
+    final letters = authorIndexLetters(_authorShownKeys);
+    final starts = authorGroupStarts(_authorShownKeys);
+    return Column(children: [
+      _authorSearchBar(),
+      Expanded(
+        child: LayoutBuilder(builder: (c, cons) {
+          if (shown.isEmpty) {
+            return Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Text('无匹配作者',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 8),
+                TextButton(
+                    key: const ValueKey('basic-author-empty-clear'),
+                    onPressed: _clearAuthorQuery,
+                    child: const Text('清除搜索')),
+              ]),
+            );
+          }
+          return Stack(children: [
+        GridView.builder(
+          controller: _authorScroll,
+          padding: const EdgeInsets.all(12),
+          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: 180,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 0.86,
+          ),
+          itemCount: shown.length,
+          itemBuilder: (c, i) {
+        final a = shown[i];
         final name = '${a['name'] ?? a['name_raw'] ?? ''}'.trim();
         final sub = _kindsLabel(a);
         final scheme = Theme.of(c).colorScheme;
@@ -454,8 +526,113 @@ class _BasicLibPageState extends State<BasicLibPage>
             ),
           ),
         );
-      },
+          },
+        ),
+            if (letters.length > 1)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 22,
+                child: _authorIndexBar(letters, starts, cons.maxWidth),
+              ),
+          ]);
+        }),
+      ),
+    ]);
+  }
+
+  /// 作者搜索框（本地过滤，不发请求）。
+  Widget _authorSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: SizedBox(
+        height: 38,
+        child: TextField(
+          key: const ValueKey('basic-author-search'),
+          controller: _authorSearch,
+          onChanged: _setAuthorQuery,
+          textInputAction: TextInputAction.search,
+          style: const TextStyle(fontSize: 12.5),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: '搜索本库作者',
+            hintStyle: const TextStyle(fontSize: 12.5, color: Colors.grey),
+            prefixIcon: const Icon(Icons.search, size: 18),
+            prefixIconConstraints:
+                const BoxConstraints(minWidth: 34, minHeight: 34),
+            suffixIcon: _authorQuery.isEmpty
+                ? null
+                : IconButton(
+                    key: const ValueKey('basic-author-search-clear'),
+                    tooltip: '清除',
+                    icon: const Icon(Icons.close, size: 16),
+                    onPressed: _clearAuthorQuery,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 30, minHeight: 30),
+                  ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            filled: true,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+      ),
     );
+  }
+
+  /// 右侧竖排首字母索引条；点字母滚到该字母首位作者。
+  Widget _authorIndexBar(
+      List<String> letters, Map<String, int> starts, double viewportWidth) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final l in letters)
+              GestureDetector(
+                key: ValueKey('basic-author-index-$l'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => _jumpToAuthorLetter(l, starts, viewportWidth),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                  child: Text(l,
+                      style: TextStyle(
+                          fontSize: letters.length > 18 ? 8.5 : 9.5,
+                          height: 1.15,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurfaceVariant
+                              .withValues(alpha: 0.75))),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _jumpToAuthorLetter(
+      String letter, Map<String, int> starts, double viewportWidth) {
+    final idx = starts[letter];
+    if (idx == null) return;
+    final max = _authorScroll.hasClients
+        ? _authorScroll.position.maxScrollExtent
+        : 0.0;
+    final target = authorGridOffsetForIndex(
+      index: idx,
+      viewportWidth: viewportWidth,
+      maxScrollExtent: max,
+    );
+    _authorScroll.animateTo(target,
+        duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
   }
 
   /// 作者卡片头像：有 `av` 用 `av`（带鉴权、按显示尺寸解码），
@@ -517,41 +694,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     }
     final shown = filtered;
     return Column(children: [
-      _typeFilterBar(),
-      // owner 2026-11-19：排序入口恢复，默认按入库时间（新的在前）。
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        child: Row(children: [
-          const Text('排序', style: TextStyle(fontSize: 12)),
-          const SizedBox(width: 8),
-          DropdownButton<WorkSort>(
-            key: const ValueKey('basic-works-sort'),
-            value: _sortMode,
-            isDense: true,
-            underline: const SizedBox.shrink(),
-            style: const TextStyle(fontSize: 12),
-            items: [
-              for (final s in workSortOrder)
-                DropdownMenuItem(
-                  key: ValueKey('basic-sort-${s.name}'),
-                  value: s,
-                  child: Text(workSortLabel(s)),
-                ),
-            ],
-            onChanged: (v) {
-              if (v == null || v == _sortMode) return;
-              setState(() {
-                _sortMode = v;
-                _filteredCache = null;
-              });
-              _prefetchFirstScreen();
-            },
-          ),
-          const Spacer(),
-          Text('${shown.length} 件',
-              style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        ]),
-      ),
+      _worksTopBar(shown),
       if (shown.isEmpty)
         Expanded(
           child: Center(
@@ -688,49 +831,102 @@ class _BasicLibPageState extends State<BasicLibPage>
     _prefetchFirstScreen();
   }
 
-  Widget _typeFilterBar() {
+  /// owner 2026-11-22：类型筛选、排序、总数压成一行（约 40dp），
+  /// 把竖向空间让给作品网格。类型仍是多选，排序仍保留三项。
+  Widget _worksTopBar(List<dynamic> shown) {
+    final typeLabel = _typeFilter.isEmpty
+        ? '类型筛选'
+        : '类型 ${_typeFilter.length}';
     return SizedBox(
-      height: 46,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
+      height: 40,
+      child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10),
-        children: [
-          Center(
-            child: FilterChip(
-              key: const ValueKey('basic-type-all'),
-              label: Text('全部 ${works.length}',
-                  style: const TextStyle(fontSize: 12)),
-              selected: _typeFilter.isEmpty,
-              showCheckmark: false,
-              onSelected: (_) => _clearTypeFilter(),
-            ),
-          ),
-          for (final type in _typeOrder)
-            Padding(
-              padding: const EdgeInsets.only(left: 6),
-              child: Center(
-                child: FilterChip(
+        child: Row(children: [
+          MenuAnchor(
+            key: const ValueKey('basic-type-menu-anchor'),
+            alignmentOffset: const Offset(0, 4),
+            menuChildren: [
+              MenuItemButton(
+                key: const ValueKey('basic-type-all'),
+                onPressed: _clearTypeFilter,
+                leadingIcon: Icon(
+                  _typeFilter.isEmpty
+                      ? Icons.check
+                      : Icons.check_box_outline_blank,
+                  size: 16,
+                ),
+                child: Text('全部 ${works.length}',
+                    style: const TextStyle(fontSize: 12)),
+              ),
+              for (final type in _typeOrder)
+                CheckboxMenuButton(
                   key: ValueKey('basic-type-$type'),
-                  label: Text('${_typeLabel(type)} ${_countOf(type)}',
-                      style: const TextStyle(fontSize: 12)),
-                  selected: _typeFilter.contains(type),
-                  showCheckmark: false,
-                  onSelected: _countOf(type) == 0 && !_typeFilter.contains(type)
+                  value: _typeFilter.contains(type),
+                  onChanged: _countOf(type) == 0 && !_typeFilter.contains(type)
                       ? null
                       : (_) => _toggleType(type),
+                  child: Text('${_typeLabel(type)} ${_countOf(type)}',
+                      style: const TextStyle(fontSize: 12)),
                 ),
+            ],
+            builder: (ctx, controller, _) => TextButton.icon(
+              key: const ValueKey('basic-type-menu'),
+              onPressed: () =>
+                  controller.isOpen ? controller.close() : controller.open(),
+              icon: const Icon(Icons.tune, size: 16),
+              label: Text(typeLabel, style: const TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
-          if (_typeFilter.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 6),
-              child: Center(
-                child: TextButton(
-                    onPressed: _clearTypeFilter,
-                    child: const Text('清除', style: TextStyle(fontSize: 12))),
+          ),
+          const SizedBox(width: 2),
+          MenuAnchor(
+            key: const ValueKey('basic-sort-menu-anchor'),
+            alignmentOffset: const Offset(0, 4),
+            menuChildren: [
+              for (final s in workSortOrder)
+                MenuItemButton(
+                  key: ValueKey('basic-sort-${s.name}'),
+                  onPressed: () {
+                    if (s == _sortMode) return;
+                    setState(() {
+                      _sortMode = s;
+                      _filteredCache = null;
+                    });
+                    _prefetchFirstScreen();
+                  },
+                  leadingIcon: Icon(
+                    s == _sortMode
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 16,
+                  ),
+                  child: Text(workSortLabel(s),
+                      style: const TextStyle(fontSize: 12)),
+                ),
+            ],
+            builder: (ctx, controller, _) => TextButton.icon(
+              key: const ValueKey('basic-works-sort'),
+              onPressed: () =>
+                  controller.isOpen ? controller.close() : controller.open(),
+              icon: const Icon(Icons.sort, size: 16),
+              label: Text(workSortLabel(_sortMode),
+                  style: const TextStyle(fontSize: 12)),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
-        ],
+          ),
+          const Spacer(),
+          Text('共 ${shown.length} 件',
+              key: const ValueKey('basic-works-count'),
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ]),
       ),
     );
   }

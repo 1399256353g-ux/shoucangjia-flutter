@@ -122,16 +122,28 @@ Rect videoContentRect(Size box, double? aspect) {
 /// 两个消费方（首帧事件、切预缓冲槽位时的主动同步）必须用同一套解释，
 /// 否则会出现「事件路径已经就绪、快照路径还认为没就绪」，海报层一边撤
 /// 一边盖。`displayWidth <= 1` 表示视频轨还没有输出尺寸。
+///
+/// **旋转必须在这里折算**（owner 2026-11-22）：手机拍的 .mov 大量是
+/// 1920×1080 编码 + 旋转 90°/270° 元数据；media_kit 的纹理已经按旋转
+/// 输出成竖屏（`media_kit_video` 在 90/270 时交换 dw/dh 去设置输出尺寸），
+/// 但 `videoParams.dw/dh` 仍是未旋转的编码尺寸。若直接拿 dw/dh 当排版比例，
+/// `Video(fit: BoxFit.fill)` 会把 9:16 的画面塞进 16:9 的框 → 整条被拉伸。
 typedef VideoParamsInfo = ({double displayWidth, double? aspect});
 
-VideoParamsInfo parseVideoParams({int? dw, int? dh, double? aspect}) {
-  final width = (dw ?? 0).toDouble();
+VideoParamsInfo parseVideoParams(
+    {int? dw, int? dh, double? aspect, int? rotate}) {
+  final quarterTurn = rotate != null && rotate % 180 != 0;
+  final width = quarterTurn
+      ? (dh ?? dw ?? 0).toDouble()
+      : (dw ?? 0).toDouble();
   double? a;
   if (aspect != null && aspect.isFinite && aspect > 0) {
     a = aspect;
   } else if (dw != null && dh != null && dh > 0) {
     a = dw / dh;
   }
+  // 90/270 度：纹理宽高已交换，比例取倒数。
+  if (a != null && quarterTurn) a = 1 / a;
   return (displayWidth: width, aspect: a);
 }
 

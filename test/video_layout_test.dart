@@ -205,5 +205,22 @@ void main() {
       expect(bad.displayWidth, 1920);
       expect(bad.aspect, isNull);
     });
+
+    test('旋转 90/270：纹理宽高交换，比例取倒数（竖拍 .mov）', () {
+      final i = parseVideoParams(dw: 1920, dh: 1080, rotate: -90);
+      expect(i.displayWidth, 1080);
+      expect(i.aspect, closeTo(9 / 16, 1e-9));
+      final j = parseVideoParams(dw: 1920, dh: 1080, rotate: 270);
+      expect(j.displayWidth, 1080);
+      expect(j.aspect, closeTo(9 / 16, 1e-9));
+    });
+
+    test('旋转 0/180 不改变比例', () {
+      for (final r in [0, 180, -180, null]) {
+        final i = parseVideoParams(dw: 1920, dh: 1080, rotate: r);
+        expect(i.displayWidth, 1920, reason: 'rotate=$r');
+        expect(i.aspect, closeTo(16 / 9, 1e-9), reason: 'rotate=$r');
+      }
+    });
   });
 }
