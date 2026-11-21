@@ -3986,8 +3986,11 @@ class _LibraryPageState extends State<LibraryPage> {
   /// （本机播放量最高的作品，有图文作品时优先图文图片）。
   String _basicCoverUrl(BasicLib b) {
     final top = topPlayed(WorkPlaysStore.countsFor(b.id));
+    // owner 2026-11-21：基础库的封面在「库根/_cover/」下，而 cfg.mediaUrl 的
+    // `/media/<库id>/` 已经指向库根；再拼 rel 会变成 `<rel>/_cover/...` → 404。
+    // 实测：不带 rel 的地址返回 200 image/jpeg。
     final pick = pickBasicCover(
-      rel: b.rel,
+      rel: '',
       version: b.coverVersion,
       ext: b.coverExt,
       bestThumb: top?.thumb ?? '',
