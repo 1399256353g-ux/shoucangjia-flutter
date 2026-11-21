@@ -6543,7 +6543,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     _ordered = sortAuthorEntries(authors,
         metric: _metric, works: (e) => _num(e.value['n']), name: (e) => e.key);
     if (resetShown) {
-      _shown = initialGridCount(_ordered.length);
+      _shown = _initialShown(_ordered.length);
     } else if (_shown > _ordered.length) {
       _shown = _ordered.length;
     }
@@ -6596,6 +6596,17 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final d = DateTime.fromMillisecondsSinceEpoch(sec * 1000).toLocal();
     String p(int v) => v.toString().padLeft(2, '0');
     return '${d.year}-${p(d.month)}-${p(d.day)}';
+  }
+
+  /// 首屏渲染条数：桌面端直接全量。
+  ///
+  /// 桌面端（Windows/Linux/macOS）的列表由鼠标滚轮驱动，滚动事件不保证
+  /// 触发 `_maybeLoadMore`，分页会把作者卡在首屏 60 个——owner 反馈
+  /// 「Windows 版只显示 60 个」就是这个。移动端仍按页追加。
+  int _initialShown(int total) {
+    final desktop =
+        Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+    return desktop ? total : initialGridCount(total);
   }
 
   /// 当前分页实际渲染条数（夹紧到总数）。
