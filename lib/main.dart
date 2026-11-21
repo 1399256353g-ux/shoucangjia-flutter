@@ -84,6 +84,7 @@ import 'player_layers.dart';
 import 'pause_trace.dart';
 import 'preload_policy.dart';
 import 'preload_plan.dart';
+import 'preload_pool.dart';
 import 'video_prefetch.dart';
 import 'swipe_control.dart';
 import 'video_layout.dart';
@@ -8405,13 +8406,33 @@ class _PlayerPageState extends State<PlayerPage>
     _preloadRunning = true;
     final gen = ++_preloadGen;
     try {
-      final targets = preloadCandidates(
-        index: cur,
+      // P3：池决策只走 `preload_pool.dart`（常驻哪几条 / 还缺哪几条），
+      // 播放页只负责把计划落到槽位。槽位身份用「忙键 → 缓存键」两级，
+      // 保证正在预载的条目不会被重复排队。
+      final plan = planPreloadPool(
+        current: cur,
         count: widget.works.length,
-        perSide: AppSettings.preloadPerSide,
         direction: _preloadDir,
+        maxSlots: preloadSlotBudget(AppSettings.preloadMemoryMb),
+        perSide: AppSettings.preloadPerSide,
+        slots: <PoolSlotState>[
+          for (final s in _slots)
+            PoolSlotState(
+              sid: s.sid,
+              index: _preloadCache.entryOfSlot(s.sid)?.index ?? -1,
+              key: _preloadBusy[s] ??
+                  _preloadCache.keyOfSlot(s.sid) ??
+                  '',
+              busy: _preloadBusy.containsKey(s),
+              active: identical(s, _active),
+            ),
+        ],
+        keyOf: (i) => preloadKeyFor(_workAt(i), _libFor(_workAt(i))),
+        hasMedia: (i) =>
+            workPlayable(_workAt(i)) &&
+            preloadMediaPath(_workAt(i)) != null,
       );
-      for (final idx in targets) {
+      for (final idx in plan.preload) {
         if (!mounted || gen != _preloadGen) return;
         if (idx == cur || idx < 0 || idx >= widget.works.length) continue;
         final w = _workAt(idx);
