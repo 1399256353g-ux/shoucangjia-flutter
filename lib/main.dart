@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show File, Platform;
+import 'dart:io' show Directory, File, Platform;
 import 'dart:math' show Random, max, min;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -6952,6 +6952,28 @@ class PlayerPage extends StatefulWidget {
 
 /// G18：两个播放器槽位。A 播放当前作品，B 在后台静音预缓冲下一条；
 /// 切条时交换槽位，预缓冲好的媒体无需重新打开即可起播。
+/// 把 mpv 的解封装缓存落到磁盘（优先 SSD），减少「未命中预载池」时
+/// 起始段仍要从机械盘随机读的等待。只影响播放器参数，不动任何媒体文件。
+///
+/// owner 2026-11-22：热媒体常驻不现实（每个库都可能访问），先做磁盘缓存。
+Future<void> _setupMpvDiskCache(Player p) async {
+  try {
+    final np = p.platform;
+    if (np is! NativePlayer) return;
+    final dir = await getTemporaryDirectory();
+    final cacheDir = '${dir.path}${Platform.pathSeparator}mpv-cache';
+    try {
+      await Directory(cacheDir).create(recursive: true);
+    } catch (_) {}
+    await np.setProperty('cache', 'yes');
+    await np.setProperty('cache-on-disk', 'yes');
+    await np.setProperty('cache-dir', cacheDir);
+    // 单条 64MB 头部缓存，回读 32MB；SSD 上这点写入可以忽略。
+    await np.setProperty('demuxer-max-bytes', '67108864');
+    await np.setProperty('demuxer-max-back-bytes', '33554432');
+  } catch (_) {}
+}
+
 class _PlaybackSlot {
   final String tag;
   final int sid;
@@ -6976,6 +6998,8 @@ class _PlaybackSlot {
           hwdec: hwdecFor(mode, androidCopy: Platform.isAndroid)),
     );
     PerfDiagnostics.instance.slotCreated();
+    // 每个槽位创建后立刻配置磁盘缓存（异步，不阻塞起播）。
+    unawaited(_setupMpvDiskCache(player));
   }
 }
 
