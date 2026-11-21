@@ -12041,7 +12041,11 @@ class _PlayerPageState extends State<PlayerPage>
                             RepaintBoundary(child: videoView()),
                             // 首帧没出来之前用海报盖住视频层：既挡掉起播黑屏，
                             // 也避免纹理先按错误比例画一帧再跳。
-                            if (posterLayerVisible(posterCover))
+                            // owner 2026-11-22：海报层只服务视频起播遮黑。
+                            // 图文作品的位置永远不前进，`_firstFrameSeen` 一直为
+                            // false → 海报永远盖在真实图片上，看起来就是「开始
+                            // 时变暗一下」。图文不再挂海报层。
+                            if (it['t'] == 'v' && posterLayerVisible(posterCover))
                               IgnorePointer(
                                 // 只有「首帧出来」+「视频轨报了尺寸」+
                                 // 「播放器比例已知」才让位：比例没到就淡出，
