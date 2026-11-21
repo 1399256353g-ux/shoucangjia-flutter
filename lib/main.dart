@@ -14060,12 +14060,18 @@ class _AuthorPageState extends State<AuthorPage> {
   bool loading = true;
   LibMeta? meta;
   // J-A3：作者主页头部上滑自动收起为紧凑条（头像 + 名字 + 等级）。
-  bool _headerCollapsed = false;
-  // P 修复：
-  // - 外部滚动控制器，收起后能读到实时的 maxScrollExtent；
-  // - 收起动画结束（260ms）后再判定一次，避免“收起→范围变小→锁死”。
+  // 0.9.153：状态改成 ValueNotifier，滚动回调只重建信息栏，不再整页 setState。
+  final ValueNotifier<bool> _headerCollapsed = ValueNotifier<bool>(false);
+  // P 修复：外部滚动控制器，收起后能读到实时的 maxScrollExtent。
   final ScrollController _authorScroll = ScrollController();
-  Timer? _headerRecheck;
+  // 0.9.153：量出展开/收起两态的真实高度。收起会让 maxScrollExtent 等量变小，
+  // 判定必须预留这份余量，否则「收起→到底→展开」会逐帧自激（边缘闪烁）。
+  double _headerExpandedH = 0;
+  double _headerCollapsedH = 0;
+  double get _headerExtent {
+    final d = _headerExpandedH - _headerCollapsedH;
+    return d > 0 ? d : 0;
+  }
 
   // K2：多选模式与已选作品；K3：手动名单（作品 id）。
   bool selectingWorks = false;
@@ -14340,22 +14346,9 @@ class _AuthorPageState extends State<AuthorPage> {
 
   @override
   void dispose() {
-    _headerRecheck?.cancel();
+    _headerCollapsed.dispose();
     _authorScroll.dispose();
     super.dispose();
-  }
-
-  // P 修复：收起动画结束后再判定一次滚动范围，避免“收起→范围变小→锁死”。
-  void _scheduleHeaderRecheck() {
-    _headerRecheck?.cancel();
-    _headerRecheck = Timer(const Duration(milliseconds: 260), () {
-      if (!mounted || !_headerCollapsed) return;
-      final ok = _authorScroll.hasClients &&
-          _authorScroll.position.maxScrollExtent > 0 &&
-          _authorScroll.position.pixels <
-              _authorScroll.position.maxScrollExtent;
-      if (!ok) setState(() => _headerCollapsed = false);
-    });
   }
 
   Future<void> load() async {
@@ -14734,7 +14727,7 @@ class _AuthorPageState extends State<AuthorPage> {
   Widget _authorHeader(BuildContext context) {
     final grade =
         AuthorGrade.fromStats(meta?.stats[widget.name], works: works.length);
-    if (_headerCollapsed) {
+    if (_headerCollapsed.value) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
         child: Row(children: [
@@ -14886,7 +14879,21 @@ class _AuthorPageState extends State<AuthorPage> {
                 duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOutCubic,
                 alignment: Alignment.topCenter,
-                child: _authorHeader(context),
+                // 0.9.153：只重建信息栏本身（滚动回调不再 setState 整页）。
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: _headerCollapsed,
+                  builder: (_, __, ___) => _MeasuredSize(
+                    onSize: (s) {
+                      // 布局阶段只记数值，不写状态；下一帧滚动判定读它。
+                      if (_headerCollapsed.value) {
+                        _headerCollapsedH = s.height;
+                      } else {
+                        _headerExpandedH = s.height;
+                      }
+                    },
+                    child: _authorHeader(context),
+                  ),
+                ),
               ),
               const Divider(height: 1),
               if (works.isNotEmpty)
@@ -14991,21 +14998,22 @@ class _AuthorPageState extends State<AuthorPage> {
                       n is OverscrollNotification) {
                     final m = n.metrics;
                     final action = headerActionFor(
-                      collapsed: _headerCollapsed,
+                      collapsed: _headerCollapsed.value,
                       pixels: m.pixels,
                       maxScrollExtent: m.maxScrollExtent,
                       delta: n is ScrollUpdateNotification
                           ? (n.scrollDelta ?? 0)
                           : 0,
-                      overscroll:
-                          n is OverscrollNotification && n.overscroll < 0,
+                      // 边缘 overscroll 不分方向：已到端点即稳定态，收起态需要展开。
+                      overscroll: n is OverscrollNotification,
+                      headerExtent: _headerExtent,
                     );
-                    if (action == HeaderAction.collapse && !_headerCollapsed) {
-                      setState(() => _headerCollapsed = true);
-                      _scheduleHeaderRecheck();
+                    if (action == HeaderAction.collapse &&
+                        !_headerCollapsed.value) {
+                      _headerCollapsed.value = true;
                     } else if (action == HeaderAction.expand &&
-                        _headerCollapsed) {
-                      setState(() => _headerCollapsed = false);
+                        _headerCollapsed.value) {
+                      _headerCollapsed.value = false;
                     }
                   }
                   return false;
@@ -15441,5 +15449,37 @@ class _WorkGridState extends State<WorkGrid> {
         return card;
       },
     );
+  }
+}
+
+/// 0.9.153：量出头部两态的真实高度。
+///
+/// 为何需要：`AnimatedSize` 动画的是外层高度，子节点始终按最终尺寸布局，
+/// 所以这里读到的是稳定值而不是动画中间值。布局阶段只回调数值、不触发重建。
+class _MeasuredSize extends SingleChildRenderObjectWidget {
+  const _MeasuredSize({required this.onSize, required Widget child})
+      : super(child: child);
+  final ValueChanged<Size> onSize;
+  @override
+  _RenderMeasuredSize createRenderObject(BuildContext context) =>
+      _RenderMeasuredSize(onSize);
+  @override
+  void updateRenderObject(
+      BuildContext context, _RenderMeasuredSize renderObject) {
+    renderObject.onSize = onSize;
+  }
+}
+
+class _RenderMeasuredSize extends RenderProxyBox {
+  _RenderMeasuredSize(this.onSize);
+  ValueChanged<Size> onSize;
+  Size? _last;
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size != _last) {
+      _last = size;
+      onSize(size);
+    }
   }
 }
