@@ -186,4 +186,24 @@ void main() {
       expect(videoBaseSize(aspect: double.nan), const Size(720, 720));
     });
   });
+
+  group('parseVideoParams（视频参数解释统一）', () {
+    test('dw/dh 推导比例，displayWidth 用于判定是否就绪', () {
+      final i = parseVideoParams(dw: 1920, dh: 1080);
+      expect(i.displayWidth, 1920);
+      expect(i.aspect, closeTo(16 / 9, 1e-9));
+    });
+
+    test('aspect 优先于 dw/dh 推导', () {
+      final i = parseVideoParams(dw: 1920, dh: 1080, aspect: 1.5);
+      expect(i.aspect, 1.5);
+    });
+
+    test('参数缺失/非法时 displayWidth=0、aspect=null（未就绪）', () {
+      expect(parseVideoParams(), (displayWidth: 0.0, aspect: null));
+      final bad = parseVideoParams(dw: 1920, dh: 0, aspect: double.nan);
+      expect(bad.displayWidth, 1920);
+      expect(bad.aspect, isNull);
+    });
+  });
 }

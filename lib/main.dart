@@ -7078,6 +7078,8 @@ class _PlayerPageState extends State<PlayerPage>
   bool _appForeground = true;
   int _stallAttempts = 0;
   static const int _stallMaxAttempts = 3;
+  // 当前挂着的健康检查允许几次自救（起播确认 2 次、播放中掉线 3 次）。
+  int _stallCheckMax = _stallMaxAttempts - 1;
   Timer? _stallTimer;
   bool loading = true;
   bool muted = false;
@@ -7542,15 +7544,40 @@ class _PlayerPageState extends State<PlayerPage>
     return lib.isEmpty ? _curLib : lib;
   }
 
+  /// 把槽位上「已经发生过的」视频参数同步到页面状态。
+  ///
+  /// 预缓冲用 `open(play: false)`，首帧在切过去之前就解出来了：media_kit 的
+  /// `videoParams` 事件不会重放，而页面是在 `_bindPlayer()` 之后才开始订阅。
+  /// 不主动读一次的话 `_videoDw` 永远停在 0，海报层按「视频轨还没报尺寸」
+  /// 一直盖着 —— 现象就是停在封面、音频在播、无任何报错。
+  void _seedVideoParams(Player p) {
+    try {
+      final vp = p.state.videoParams;
+      final info = parseVideoParams(dw: vp.dw, dh: vp.dh, aspect: vp.aspect);
+      if (info.displayWidth <= 1) return;
+      _videoDw = info.displayWidth;
+      // 尺寸已就绪，不需要再靠首帧事件重挂一次纹理。
+      _videoGenSynced = true;
+      final a = info.aspect;
+      if (a == null || a <= 0) return;
+      _videoAspect = a;
+      _rememberPlayerAspect(_workAt(cur), a);
+    } catch (_) {}
+  }
+
   /// G18：监听当前活动槽位。切换预缓冲槽位时先解绑旧槽位，避免
   /// 旧播放器迟到的 completed/position 事件干扰新作品。
-  void _bindPlayer() {
+  void _bindPlayer({bool seedVideoParams = false}) {
     for (final s in _playerSubs) {
       s.cancel();
     }
     _playerSubs.clear();
     final p = player;
     p.setPlaylistMode(PlaylistMode.none);
+    // 命中预缓冲槽位时，该媒体在 open(play:false) 阶段就已经解码出首帧，
+    // videoParams 事件早在订阅之前发过了。只订阅「后续事件」会让
+    // _videoDw 永远停在 0 → 海报层不撤 → 看着就是「卡在封面、音频在播」。
+    if (seedVideoParams) _seedVideoParams(p);
     _playerSubs.add(p.stream.completed.listen((done) {
       if (!identical(p, player)) return;
       if (!done || !mounted) return;
@@ -7594,9 +7621,9 @@ class _PlayerPageState extends State<PlayerPage>
       if (!mounted || _opening) return;
       if (_workAt(cur)['t'] != 'v') return;
       if (v) {
-        // 真正恢复播放：清空自救计数，并把残留的「暂停」显示纠正回来。
-        _stallTimer?.cancel();
-        _stallAttempts = 0;
+        // 播放器报「在播」不等于画面在动：mpv 管线掉线时仍会报 playing=true。
+        // 所以这里不再取消健康检查、也不清空自救计数——统一交给
+        // _scheduleStartupCheck 用「位置是否前进」判定，进度确认后才清零。
         if (paused &&
             !_userPaused &&
             !_pausedByBackground &&
@@ -7692,17 +7719,15 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.videoParams.listen((vp) {
       if (!identical(p, player)) return;
       if (!mounted) return;
-      _videoDw = (vp.dw ?? 0).toDouble();
+      final info = parseVideoParams(dw: vp.dw, dh: vp.dh, aspect: vp.aspect);
+      _videoDw = info.displayWidth;
       // 纹理参数第一次到达 = 真正的输出尺寸有了；此时重挂一次 Video，
       // 让纹理挂到已就绪的控制器上（否则首播可能一直黑屏，重进才好）。
       if (_videoDw > 1 && !_videoGenSynced) {
         _videoGenSynced = true;
         setState(() => _videoGen++);
       }
-      final a = vp.aspect ??
-          ((vp.dw != null && vp.dh != null && vp.dh! > 0)
-              ? vp.dw! / vp.dh!
-              : null);
+      final a = info.aspect;
       if (a == null || a <= 0) return;
       final curWork = _workAt(cur);
       final before = _videoAspectFor(curWork);
@@ -7772,6 +7797,9 @@ class _PlayerPageState extends State<PlayerPage>
   /// 立刻重开会打断正在缓冲的播放器，所以先等 1.2s；期间恢复播放则取消。
   void _scheduleStallCheck() {
     _stallTimer?.cancel();
+    // 本次检查允许的自救次数（起播确认与「播放中掉线」预算不同，
+    // 补 play 后复查要沿用同一份预算，避免绕过上限）。
+    _stallCheckMax = _stallMaxAttempts;
     final my = _openToken;
     // owner 2026-11-20：mpv 在缓冲/换码流期间会短暂报 playing=false，
     // 只看这个标志会把「正在播」误判成「卡死」，于是重开媒体 →
@@ -7796,7 +7824,10 @@ class _PlayerPageState extends State<PlayerPage>
         if (cur2 > atMs) atMs = cur2;
       } catch (_) {}
       // 位置有前进 = 实际在播，不再动作
-      if (atMs - baseMs >= 300) return;
+      if (atMs - baseMs >= 300) {
+        _stallAttempts = 0;
+        return;
+      }
       if (playing) return;
       _applyStallRecovery(
         stallRecoveryAction(
@@ -7814,11 +7845,73 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
+  /// 起播确认：播放命令发出后，用「位置是否前进」确认真的放起来了。
+  ///
+  /// 与 [_scheduleStallCheck] 共用同一个 `_stallTimer`（不新增守卫/兜底定时器），
+  /// 区别只在触发点：这里是 open 完成、play() 已返回，那里是播放器报
+  /// playing=false。判据统一为「一个窗口内位置没前进 ≥300ms」。
+  ///
+  /// 为什么不能看 playing：mpv 在管线卡死时仍可能报 playing=true，旧逻辑
+  /// 会因此直接 return，页面就永久停在封面、也没有任何提示。
+  ///
+  /// 自救上限取 2（补 play 两次），不做 reopen：起播阶段重开整条媒体在
+  /// 机械盘上要重读一遍文件头，代价远大于收益，2 次仍不动就直接给
+  /// 可见的失败态（可点重试）。
+  void _scheduleStartupCheck({int? limit}) {
+    _stallTimer?.cancel();
+    final max = limit ?? (_stallMaxAttempts - 1);
+    _stallCheckMax = max;
+    final my = _openToken;
+    final baseMs = pos.inMilliseconds;
+    _stallTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted || my != _openToken) return;
+      if (_opening || _failure != null) return;
+      if (_workAt(cur)['t'] != 'v') return;
+      if (_userPaused || _pausedByBackground || !_appForeground) return;
+      var atMs = pos.inMilliseconds;
+      var hasMedia = dur.inMilliseconds > 0 || pos.inMilliseconds > 0;
+      var completed = false;
+      try {
+        completed = player.state.completed;
+        final st = player.state.position.inMilliseconds;
+        if (st > atMs) atMs = st;
+        hasMedia = hasMedia ||
+            player.state.duration.inMilliseconds > 0 ||
+            st > 0;
+      } catch (_) {}
+      if (completed) return;
+      // 位置在走 = 真的在播：恢复自救计数后收工。
+      if (atMs - baseMs >= 300) {
+        _stallAttempts = 0;
+        return;
+      }
+      // 正在缓冲：属于正常加载，交给缓冲/超时链路，不判卡死。
+      if (_buffering) return;
+      PauseTrace.mark('stuck:startup id=${_watchIdFor(_workAt(cur))} '
+          'userPaused=$_userPaused hasMedia=$hasMedia attempts=$_stallAttempts');
+      _applyStallRecovery(
+        stallRecoveryAction(
+          userPaused: _userPaused,
+          backgroundPaused: _pausedByBackground,
+          failed: _failure != null,
+          opening: _opening,
+          appForeground: _appForeground,
+          playerPlaying: false,
+          hasMedia: hasMedia,
+          attempts: _stallAttempts,
+          maxAttempts: max,
+        ),
+        maxAttempts: max,
+      );
+    });
+  }
+
   /// 执行自救：先补 play，再重开当前媒体，最多 [_stallMaxAttempts] 次。
-  Future<void> _applyStallRecovery(StallRecoveryAction action) async {
+  Future<void> _applyStallRecovery(StallRecoveryAction action,
+      {int maxAttempts = _stallMaxAttempts}) async {
     switch (action) {
       case StallRecoveryAction.none:
-        if (_stallAttempts >= _stallMaxAttempts && !_userPaused) {
+        if (_stallAttempts >= maxAttempts && !_userPaused) {
           // 自救用尽：不再静默停住，给出明确可重试的失败态。
           PauseTrace.mark('stall:giveup');
           _showFailure(unknownFailure);
@@ -7834,6 +7927,8 @@ class _PlayerPageState extends State<PlayerPage>
           await player.setRate(speed);
           await player.play();
         } catch (_) {}
+        // 补 play 后复查：仍然不动就继续计数，直到给出失败态。
+        if (mounted) _scheduleStartupCheck(limit: _stallCheckMax);
         return;
       case StallRecoveryAction.reopen:
         _stallAttempts++;
@@ -8440,7 +8535,8 @@ class _PlayerPageState extends State<PlayerPage>
       final target = cachedSlot;
       _slotActive = _slots.indexOf(target);
       _preloadCache.removeSlot(target.sid);
-      _bindPlayer();
+      // 预缓冲槽位已解出首帧：把已有的视频参数同步过来（见 _seedVideoParams）。
+      _bindPlayer(seedVideoParams: true);
       PauseTrace.mark('open:stop-old-slot(sid=${old.sid})');
       try {
         await old.player.stop();
@@ -8580,6 +8676,12 @@ class _PlayerPageState extends State<PlayerPage>
 
         _blackGuard = Timer(const Duration(milliseconds: 2600), () => check());
       }
+    }
+    // 起播确认：play() 已返回不代表画面在动（个别作品 mpv 会一直报
+    // playing=true 却不推进位置）。用同一个 _stallTimer 按位置复查，
+    // 3 秒内起不来就给可见失败态，不再无限停在封面。
+    if (w['t'] == 'v' && my == _openToken && _failure == null) {
+      _scheduleStartupCheck();
     }
     if (mounted && my == _openToken && _failure == null) {
       setState(() {
@@ -11336,7 +11438,9 @@ class _PlayerPageState extends State<PlayerPage>
     // 全屏时进度条要跟功能区一起随时间隐藏；非全屏桌面端才常驻细条。
     // owner 2026-11-21：全屏下进度条不能常驻——呼出后单击就该收起。
     // 桌面端常驻只在非全屏保留（那时它是视频与任务栏的分界线）。
-    final persistent = desktop && !fs;
+    // owner 2026-11-22：全屏不再用「呼出式」——进度条跟任务栏一起常驻，
+    // 随功能区一起显示、一起在自动隐藏时间到后消失；非全屏保持原样。
+    final persistent = ui && (desktop || fs);
     final active = _scrubActive || (_scrubHover && (!fs || ui));
     return Positioned(
       left: 0,

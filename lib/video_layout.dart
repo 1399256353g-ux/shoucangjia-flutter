@@ -117,6 +117,24 @@ Rect videoContentRect(Size box, double? aspect) {
   return Rect.fromLTWH(0, top, box.width, h);
 }
 
+/// 播放器上报的视频参数，换算成「是否已就绪」与「排版比例」。
+///
+/// 两个消费方（首帧事件、切预缓冲槽位时的主动同步）必须用同一套解释，
+/// 否则会出现「事件路径已经就绪、快照路径还认为没就绪」，海报层一边撤
+/// 一边盖。`displayWidth <= 1` 表示视频轨还没有输出尺寸。
+typedef VideoParamsInfo = ({double displayWidth, double? aspect});
+
+VideoParamsInfo parseVideoParams({int? dw, int? dh, double? aspect}) {
+  final width = (dw ?? 0).toDouble();
+  double? a;
+  if (aspect != null && aspect.isFinite && aspect > 0) {
+    a = aspect;
+  } else if (dw != null && dh != null && dh > 0) {
+    a = dw / dh;
+  }
+  return (displayWidth: width, aspect: a);
+}
+
 /// 视频纹理的基准渲染尺寸：固定高度 [referenceHeight]，宽度按源比例换算。
 ///
 /// 之前用 `width.clamp(64, 8192)`：极宽/极窄视频会被夹住宽度，而高度不变，
