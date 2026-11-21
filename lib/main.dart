@@ -7867,9 +7867,18 @@ class _PlayerPageState extends State<PlayerPage>
     final baseMs = pos.inMilliseconds;
     _stallTimer = Timer(const Duration(milliseconds: 1200), () {
       if (!mounted || my != _openToken) return;
-      if (_opening || _failure != null) return;
+      if (_failure != null) return;
       if (_workAt(cur)['t'] != 'v') return;
       if (_userPaused || _pausedByBackground || !_appForeground) return;
+      // 打开/缓冲期间还不能判定「卡死」：大文件（如 3.3 GB / 25 Mbps）
+      // 首帧要等 demuxer 缓存填满，这时位置本来就还没前进。旧逻辑在这两
+      // 种状态下直接 return，等于把唯一的起播观察点扔掉了 —— 真卡住时
+      // 反而没有任何复查，页面就停在封面。改成用同一个 _stallTimer 继续
+      // 观察，不新增第二个守卫。
+      if (_opening || _buffering) {
+        _scheduleStartupCheck(limit: max);
+        return;
+      }
       var atMs = pos.inMilliseconds;
       var hasMedia = dur.inMilliseconds > 0 || pos.inMilliseconds > 0;
       var completed = false;
@@ -7887,8 +7896,6 @@ class _PlayerPageState extends State<PlayerPage>
         _stallAttempts = 0;
         return;
       }
-      // 正在缓冲：属于正常加载，交给缓冲/超时链路，不判卡死。
-      if (_buffering) return;
       PauseTrace.mark('stuck:startup id=${_watchIdFor(_workAt(cur))} '
           'userPaused=$_userPaused hasMedia=$hasMedia attempts=$_stallAttempts');
       _applyStallRecovery(
