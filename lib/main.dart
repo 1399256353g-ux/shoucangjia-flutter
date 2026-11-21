@@ -10177,6 +10177,55 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
+  /// 是否已为某条作品建过邻页（决定图文落页时该用哪张「已解码」的底图）。
+  bool _neighborPageBuilt(int i) => _neighborPages.keys.any((k) {
+        final bar = k.indexOf('|');
+        return bar > 0 && k.substring(0, bar) == '$i';
+      });
+
+  /// 图文/单图作品落页的「零等待底图」。
+  ///
+  /// 根因（owner 2026-11-21 反馈「图已经显示过，落页还要黑一下」）：
+  /// 邻页铺的是封面（`w=1080` + 屏幕解码宽度），落页后当前页却换成原图
+  /// 地址 + 另一解码宽度 → 图片缓存键不同 → 必须重下一次；期间
+  /// `CachedNetworkImage` 的 placeholder 是空的，舞台底色就是纯黑。
+  ///
+  /// 这里不新增任何定时器/兜底，只补一层**已经解码过**的同图底图：
+  ///  - 从网格点开：作品卡的 440px 版本已在 ImageCache；
+  ///  - 上下滑入：邻页的 1080px 版本刚刚显示过。
+  /// 原图解码完成后由 CachedNetworkImage 自然覆盖（与视频海报同一套两级渲染）。
+  Widget _picPreview(dynamic it, String path, {String? lib}) {
+    final cover = _posterCoverUrl(it);
+    if (cover.isEmpty) return const SizedBox.shrink();
+    // 只有「底图就是当前这张」才铺，多图作品翻到第二张以后不能拿首图冒充。
+    final pageUrl = cfg.mediaUrl(path, lib: lib);
+    if (withImageWidth(cover, kPlayerImageWidth) !=
+        withImageWidth(pageUrl, kPlayerImageWidth)) {
+      return const SizedBox.shrink();
+    }
+    final ImageProvider provider = _neighborPageBuilt(cur)
+        ? thumbImageProvider(
+            withImageWidth(cover, kPlayerImageWidth),
+            decodeWidth: _posterDecodeWidth(context),
+            headers: cfg.headersFor(lib),
+            cacheManager: DiziCache.manager,
+          )
+        : thumbImageProvider(
+            withImageWidth(cover, kWorkImageWidth),
+            decodeWidth:
+                workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
+            headers: cfg.headersFor(lib),
+            cacheManager: DiziCache.manager,
+          );
+    return Image(
+      image: provider,
+      fit: BoxFit.contain,
+      alignment: Alignment.center,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+    );
+  }
+
   /// 页内浮层：作者头像/文案/音乐 + 右侧互动栏（含全屏旧信息行）。
   ///
   /// 放进每一页自己的 Stack，滑动时随视频整页位移——抖音的文案是跟着
@@ -10610,6 +10659,7 @@ class _PlayerPageState extends State<PlayerPage>
   // 图文单张渲染：GIF 用 Image.network 才能播放动画，其余走缓存图
   Widget picView(String path, {String? lib}) {
     final url = cfg.mediaUrl(path, lib: lib);
+    final it = _workAt(cur);
     // 原图可能几千像素宽，按屏幕宽度解码，避免大图整张进内存导致卡顿/闪退。
     final screenW = MediaQuery.sizeOf(context).width;
     final decodeW = (screenW * MediaQuery.devicePixelRatioOf(context)).round();
@@ -10644,8 +10694,10 @@ class _PlayerPageState extends State<PlayerPage>
         httpHeaders: cfg.headers,
         memCacheWidth: decodeW,
         fit: BoxFit.contain,
-        // owner 2026-11-21：图片不再显示中央缓冲圈，与视频一致（空占位即可）
-        placeholder: (_, __) => const SizedBox.shrink(),
+        // owner 2026-11-21：图片不再显示中央缓冲圈；但也不能留空——空的
+        // placeholder 会露出舞台黑底，就是「图已经出现过、落页又黑一下」。
+        // 这里铺一张已在缓存里的同图底图（与视频海报同一套两级渲染）。
+        placeholder: (_, __) => _picPreview(it, path, lib: lib),
         errorWidget: (_, __, ___) => retryBox());
   }
 
