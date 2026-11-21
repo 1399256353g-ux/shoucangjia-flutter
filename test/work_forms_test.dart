@@ -227,4 +227,58 @@ void main() {
       expect(workTypeCounts([w])[workFilterCollection], 1);
     });
   });
+
+  group('作品排序（owner 2026-11-19：默认入库时间，新的在前）', () {
+    test('workIngestMs：srcAt 优先，秒级自动换算成毫秒', () {
+      expect(workIngestMs({'srcAt': 1700000000000}), 1700000000000);
+      expect(workIngestMs({'srcAt': 1700000000}), 1700000000000);
+      expect(workIngestMs({'srcAt': 0, 'updatedAt': 1700000005000}),
+          1700000005000);
+    });
+
+    test('workIngestMs：只有日期字符串时按当天 0 点计', () {
+      final ms = DateTime(2026, 11, 17).millisecondsSinceEpoch;
+      expect(workIngestMs({'d': '2026-11-17'}), ms);
+      expect(workIngestMs({'d': '20261117'}), ms);
+      expect(workIngestMs({'d': ''}), 0);
+      expect(workIngestMs(null), 0);
+    });
+
+    test('默认排序：入库时间新的在前，无时间条目保持服务端原序', () {
+      final list = <dynamic>[
+        {'id': 'a', 'srcAt': 1700000000003},
+        {'id': 'b'},
+        {'id': 'c', 'srcAt': 1700000000002},
+        {'id': 'd'},
+        {'id': 'e', 'srcAt': 1700000000001},
+      ];
+      final sorted = sortWorks(list, WorkSort.ingest);
+      expect([for (final w in sorted) w['id']], ['a', 'c', 'e', 'b', 'd']);
+    });
+
+    test('播放量降序，同值保持原序', () {
+      final list = <dynamic>[
+        {'id': 'a', 'pl': 5},
+        {'id': 'b', 'plays': 9},
+        {'id': 'c', 'pl': 5},
+      ];
+      expect([for (final w in sortWorks(list, WorkSort.plays)) w['id']],
+          ['b', 'a', 'c']);
+    });
+
+    test('标题升序，不改动入参', () {
+      final list = <dynamic>[
+        {'id': 'a', 'ti': 'B'},
+        {'id': 'b', 'ti': 'A'},
+      ];
+      final sorted = sortWorks(list, WorkSort.title);
+      expect([for (final w in sorted) w['id']], ['b', 'a']);
+      expect([for (final w in list) w['id']], ['a', 'b']);
+    });
+
+    test('排序选择器文案与顺序', () {
+      expect(workSortOrder, [WorkSort.ingest, WorkSort.plays, WorkSort.title]);
+      expect(workSortOrder.map(workSortLabel).toList(), ['入库时间', '播放量', '标题']);
+    });
+  });
 }

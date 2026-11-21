@@ -94,4 +94,27 @@ void main() {
           greaterThan(stageProgressOverlayHeight()));
     });
   });
+
+  group('视频基准尺寸保持原比例', () {
+    test('普通竖屏 9:16', () {
+      final s = videoBaseSize(aspect: 9 / 16, referenceHeight: 720);
+      expect(s.height, closeTo(720, 0.001));
+      expect(s.width / s.height, closeTo(9 / 16, 0.0001));
+    });
+
+    test('极宽/极窄比例不再被 clamp 拉变形', () {
+      for (final a in <double>[0.12, 0.3, 1.0, 4.0, 12.0]) {
+        final s = videoBaseSize(aspect: a, referenceHeight: 720, maxSide: 4096);
+        expect(s.width / s.height, closeTo(a, 0.0001));
+        expect(s.width, lessThanOrEqualTo(4096.0001));
+        expect(s.height, lessThanOrEqualTo(4096.0001));
+      }
+    });
+
+    test('比例未知时退化为方形，不抛异常', () {
+      expect(videoBaseSize(aspect: null), const Size(720, 720));
+      expect(videoBaseSize(aspect: 0), const Size(720, 720));
+      expect(videoBaseSize(aspect: double.nan), const Size(720, 720));
+    });
+  });
 }

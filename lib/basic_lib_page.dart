@@ -89,7 +89,9 @@ class _BasicLibPageState extends State<BasicLibPage>
   // 避免大库（几百到上千件）翻页时内存与解码压力叠加导致崩溃。
   static const int _pageSize = 60;
 
-  late final TabController _tabs = TabController(length: 2, vsync: this);
+  // owner 2026-11-19：「作品」在前，「作者」在后；进入基础库默认停在作品页。
+  late final TabController _tabs =
+      TabController(length: 2, vsync: this, initialIndex: 0);
   final ScrollController _worksScroll = ScrollController();
 
   List<Map<String, dynamic>> authors = [];
@@ -240,6 +242,7 @@ class _BasicLibPageState extends State<BasicLibPage>
         if (reset) works = [];
         works.addAll(batch);
         total = _int(j['total']);
+        _filteredCache = null;
         loadingWorks = false;
         loadingMore = false;
         // 类型数量只在作品变化时算一次（原来是每次 build 扫 4 遍全列表）。
@@ -315,9 +318,12 @@ class _BasicLibPageState extends State<BasicLibPage>
         bottom: TabBar(
           controller: _tabs,
           tabs: [
-            // owner 2026-11-19：作品页放第一位，进入基础库默认看作品。
-            Tab(text: '作品 ${total > 0 ? total : b.works}'),
-            Tab(text: '作者 ${loadingAuthors ? '' : authors.length}'),
+            Tab(
+                key: const ValueKey('basic-tab-works'),
+                text: '作品 ${total > 0 ? total : b.works}'),
+            Tab(
+                key: const ValueKey('basic-tab-authors'),
+                text: '作者 ${loadingAuthors ? '' : authors.length}'),
           ],
         ),
       ),
@@ -518,19 +524,26 @@ class _BasicLibPageState extends State<BasicLibPage>
         child: Row(children: [
           const Text('排序', style: TextStyle(fontSize: 12)),
           const SizedBox(width: 8),
-          DropdownButton<int>(
+          DropdownButton<WorkSort>(
+            key: const ValueKey('basic-works-sort'),
             value: _sortMode,
             isDense: true,
             underline: const SizedBox.shrink(),
             style: const TextStyle(fontSize: 12),
-            items: const [
-              DropdownMenuItem(value: 0, child: Text('入库时间')),
-              DropdownMenuItem(value: 1, child: Text('播放量')),
-              DropdownMenuItem(value: 2, child: Text('标题')),
+            items: [
+              for (final s in workSortOrder)
+                DropdownMenuItem(
+                  key: ValueKey('basic-sort-${s.name}'),
+                  value: s,
+                  child: Text(workSortLabel(s)),
+                ),
             ],
             onChanged: (v) {
               if (v == null || v == _sortMode) return;
-              setState(() => _sortMode = v);
+              setState(() {
+                _sortMode = v;
+                _filteredCache = null;
+              });
               _prefetchFirstScreen();
             },
           ),
@@ -646,52 +659,32 @@ class _BasicLibPageState extends State<BasicLibPage>
   static String _typeLabel(String type) => workFilterLabel(type);
 
   /// 本地过滤后的作品列表；筛选为空时即全部作品。
-  /// 作品排序：0 入库时间（默认，新的在前）、1 播放量、2 标题。
-  int _sortMode = 0;
+  /// 排序：入库时间（默认，新的在前）、播放量、标题。
+  WorkSort _sortMode = WorkSort.ingest;
 
-  int _ingestMs(dynamic w) {
-    final at = (w is Map) ? w['srcAt'] : null;
-    final n = at is num ? at.toInt() : int.tryParse('${at ?? ''}') ?? 0;
-    if (n > 0) return n;
-    // 没有时间戳时用日期字符串兜底（形如 2026-11-17）。
-    final d = '${(w is Map) ? (w['d'] ?? '') : ''}';
-    return int.tryParse(d.replaceAll('-', '')) ?? 0;
-  }
+  /// 排序/筛选结果缓存：作品分页追加、类型筛选、排序方式变化时置空，
+  /// build 与首屏预热只读缓存，避免每次重排整张列表（大库上千件）。
+  List<dynamic>? _filteredCache;
 
-  List<dynamic> get filtered {
-    final base = _typeFilter.isEmpty
-        ? works
-        : works.where((w) => _typeFilter.contains(_workType(w))).toList();
-    final out = List<dynamic>.from(base);
-    switch (_sortMode) {
-      case 1:
-        out.sort((a, b) =>
-            _int(b is Map ? b['pl'] ?? b['plays'] : 0).compareTo(
-                _int(a is Map ? a['pl'] ?? a['plays'] : 0)));
-        break;
-      case 2:
-        out.sort((a, b) => '${a is Map ? a['ti'] ?? '' : ''}'
-            .compareTo('${b is Map ? b['ti'] ?? '' : ''}'));
-        break;
-      default:
-        // 入库时间：新的在前
-        out.sort((a, b) => _ingestMs(b).compareTo(_ingestMs(a)));
-    }
-    return out;
-  }
+  List<dynamic> get filtered => _filteredCache ??=
+      sortWorks(filterWorksByType(works, _typeFilter), _sortMode);
 
   int _countOf(String type) => _typeCounts[type] ?? 0;
 
   void _toggleType(String type) {
     setState(() {
       if (!_typeFilter.add(type)) _typeFilter.remove(type);
+      _filteredCache = null;
     });
     _prefetchFirstScreen();
   }
 
   void _clearTypeFilter() {
     if (_typeFilter.isEmpty) return;
-    setState(_typeFilter.clear);
+    setState(() {
+      _typeFilter.clear();
+      _filteredCache = null;
+    });
     _prefetchFirstScreen();
   }
 

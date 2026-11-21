@@ -1,6 +1,9 @@
-/// 删除监测：解析服务端 `/api/deleted.json`（来自抖音库 `_deleted.log`）。
+/// 删除监测：解析服务端 `/api/deleted.json`（来自各单元库 `_deleted.log`）。
 ///
 /// 只读日志，不删除/不改动媒体；App 里只展示「已删除/取消收藏」记录。
+///
+/// 记录里的 `at` 是爬虫**发现**该作品被删除/不可见的时间，也就是「哪一次同步
+/// 发现的」；页面按分钟聚合成「本次同步」分组，避免只看到一串无来源的时间。
 class DeletedEntry {
   final String at;
   final String author;
@@ -11,6 +14,9 @@ class DeletedEntry {
   final String link;
   final String cover;
 
+  /// 发现该记录的单元库（服务端新版下发 `lib`；旧记录为空）。
+  final String libName;
+
   const DeletedEntry({
     required this.at,
     required this.author,
@@ -20,9 +26,13 @@ class DeletedEntry {
     required this.collection,
     required this.link,
     required this.cover,
+    this.libName = '',
   });
 
   bool get hasCover => cover.trim().isNotEmpty;
+
+  /// `at` 的毫秒时间戳；无法解析时为 0。
+  int get atMs => DateTime.tryParse(at)?.millisecondsSinceEpoch ?? 0;
 
   /// `2026-11-17T01:06:37.489Z` → `11-17 09:06`（本地时区）。
   String get atLabel {
@@ -32,6 +42,47 @@ class DeletedEntry {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
   }
+
+  /// 同步批次键：精确到分钟。同一轮爬虫通常在同一分钟内写入多条。
+  String get syncKey => syncKeyOf(at);
+
+  String get syncLabel => syncLabelOf(at);
+
+  /// 列表里单行来源：`同步发现 11-20 22:57 · 库 (2) douyin`。
+  String get foundLabel {
+    final parts = <String>['同步发现 ${atLabel.isEmpty ? '时间未知' : atLabel}'];
+    if (libName.trim().isNotEmpty) parts.add('库 ${libName.trim()}');
+    return parts.join(' · ');
+  }
+
+  DeletedEntry copyWith({String? libName}) => DeletedEntry(
+        at: at,
+        author: author,
+        date: date,
+        title: title,
+        workId: workId,
+        collection: collection,
+        link: link,
+        cover: cover,
+        libName: libName ?? this.libName,
+      );
+}
+
+/// 同步批次键（UTC 分钟，避免时区切换导致同一批拆开）。
+String syncKeyOf(String at) {
+  final t = DateTime.tryParse(at);
+  if (t == null) return at;
+  final u = t.toUtc();
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${u.year}-${two(u.month)}-${two(u.day)}T${two(u.hour)}:${two(u.minute)}';
+}
+
+String syncLabelOf(String at) {
+  final t = DateTime.tryParse(at);
+  if (t == null) return at;
+  final l = t.toLocal();
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
 }
 
 class DeletedReport {
@@ -39,8 +90,14 @@ class DeletedReport {
   final int updated;
   final List<DeletedEntry> items;
 
+  /// 读取链路最终用的地址（诊断用，不参与展示逻辑）。
+  final String source;
+
   const DeletedReport(
-      {required this.total, required this.updated, required this.items});
+      {required this.total,
+      required this.updated,
+      required this.items,
+      this.source = ''});
 
   static const empty = DeletedReport(total: 0, updated: 0, items: []);
 
@@ -50,17 +107,90 @@ class DeletedReport {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
   }
+
+  /// 最近一次同步发现（按 `at` 最大）。
+  String get lastDiscoveryLabel {
+    int best = 0;
+    String label = '';
+    for (final e in items) {
+      final ms = e.atMs;
+      if (ms > best) {
+        best = ms;
+        label = e.atLabel;
+      }
+    }
+    return label;
+  }
 }
 
-DeletedReport parseDeletedReport(dynamic raw) {
-  if (raw is! Map) return DeletedReport.empty;
-  final list = raw['items'];
+/// 按「同步批次」聚合后的列表（保持输入顺序：服务端已按时间倒序）。
+class DeletedSyncGroup {
+  final String key;
+  final String label;
+  final List<DeletedEntry> items;
+
+  const DeletedSyncGroup(
+      {required this.key, required this.label, required this.items});
+}
+
+List<DeletedSyncGroup> groupDeletedBySync(List<DeletedEntry> items) {
+  final out = <DeletedSyncGroup>[];
+  final byKey = <String, int>{};
+  for (final e in items) {
+    final key = e.syncKey;
+    final at = byKey[key];
+    if (at == null) {
+      byKey[key] = out.length;
+      out.add(DeletedSyncGroup(
+          key: key,
+          label: e.syncLabel,
+          items: <DeletedEntry>[e]));
+    } else {
+      out[at].items.add(e);
+      // 同一分钟内先出现的记录已经给了标签；保留更早（更准确）的那条。
+      if (out[at].label.isEmpty) {
+        out[at] = DeletedSyncGroup(
+            key: key, label: e.syncLabel, items: out[at].items);
+      }
+    }
+  }
+  return out;
+}
+
+/// 去重：同一作品如果被同一轮同步重复写入，只保留一条。
+/// 不同轮次（不同分钟）的重复记录保留，便于看出「删了又出现」。
+List<DeletedEntry> dedupeDeletedEntries(Iterable<DeletedEntry> items) {
+  final seen = <String>{};
+  final out = <DeletedEntry>[];
+  for (final e in items) {
+    final key = e.workId.isNotEmpty
+        ? '${e.workId}|${e.syncKey}'
+        : '${e.author}|${e.title}|${e.syncKey}';
+    if (!seen.add(key)) continue;
+    out.add(e);
+  }
+  return out;
+}
+
+dynamic _itemsOf(dynamic raw) {
+  if (raw is List) return raw;
+  if (raw is! Map) return null;
+  for (final key in const ['items', 'records', 'deleted', 'list']) {
+    final v = raw[key];
+    if (v is List) return v;
+  }
+  return null;
+}
+
+DeletedReport parseDeletedReport(dynamic raw, {String source = ''}) {
+  final list = _itemsOf(raw);
   final out = <DeletedEntry>[];
   if (list is List) {
     for (final e in list) {
       if (e is! Map) continue;
+      final at = '${e['at'] ?? ''}';
       out.add(DeletedEntry(
-        at: '${e['at'] ?? ''}',
+        at: at,
         author: '${e['a'] ?? ''}',
         date: '${e['d'] ?? ''}',
         title: '${e['t'] ?? ''}',
@@ -68,10 +198,19 @@ DeletedReport parseDeletedReport(dynamic raw) {
         collection: '${e['c'] ?? ''}',
         link: '${e['u'] ?? ''}',
         cover: '${e['th'] ?? ''}',
+        libName: '${e['lib'] ?? ''}',
       ));
     }
   }
-  final total = (raw['total'] as num?)?.toInt() ?? out.length;
-  final updated = (raw['updated'] as num?)?.toInt() ?? 0;
-  return DeletedReport(total: total, updated: updated, items: out);
+  final deduped = dedupeDeletedEntries(out);
+  final total = raw is Map
+      ? ((raw['total'] as num?)?.toInt() ?? deduped.length)
+      : deduped.length;
+  final updated = raw is Map
+      ? ((raw['updated'] as num?)?.toInt() ??
+          int.tryParse('${raw['updated'] ?? ''}') ??
+          0)
+      : 0;
+  return DeletedReport(
+      total: total, updated: updated, items: deduped, source: source);
 }

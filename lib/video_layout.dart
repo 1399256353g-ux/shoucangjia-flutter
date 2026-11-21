@@ -65,6 +65,17 @@ VideoFit videoFitFor({double? aspect, VideoFit? mode, double? containerAspect}) 
   return aspect > portraitAspectThreshold ? VideoFit.contain : VideoFit.fill;
 }
 
+/// 铺满的竖屏视频是否应该锚到顶部。
+///
+/// 抖音的竖屏视频始终从屏幕顶部开始（与状态栏/灵动岛融合），
+/// 比例多出来的部分只从底部裁掉；横屏/适应模式仍居中。
+bool videoTopAnchored({required double? aspect, required VideoFit fit}) =>
+    fit == VideoFit.fill &&
+    aspect != null &&
+    aspect.isFinite &&
+    aspect > 0 &&
+    aspect <= portraitAspectThreshold;
+
 /// 播放视口高度 = 屏幕高 − 底部任务栏高度（含 SafeArea）。
 /// 结果夹在 [0, screenHeight] 内，异常尺寸时退化为 0。
 double videoViewportHeight({
@@ -104,6 +115,34 @@ Rect videoContentRect(Size box, double? aspect) {
   final h = box.width / aspect;
   final top = (box.height - h) / 2;
   return Rect.fromLTWH(0, top, box.width, h);
+}
+
+/// 视频纹理的基准渲染尺寸：固定高度 [referenceHeight]，宽度按源比例换算。
+///
+/// 之前用 `width.clamp(64, 8192)`：极宽/极窄视频会被夹住宽度，而高度不变，
+/// `Video(fit: fill)` 就会把画面拉伸变形。这里只在整张基准图超过
+/// [maxSide] 时**等比缩小**，任何比例下都保持宽高比不变。
+Size videoBaseSize({
+  required double? aspect,
+  double referenceHeight = 720,
+  double maxSide = 4096,
+}) {
+  final h0 = referenceHeight.isFinite && referenceHeight > 0
+      ? referenceHeight
+      : 720.0;
+  if (aspect == null || !aspect.isFinite || aspect <= 0) {
+    return Size(h0, h0);
+  }
+  var w = h0 * aspect;
+  var h = h0;
+  final longest = w > h ? w : h;
+  final limit = maxSide.isFinite && maxSide > 64 ? maxSide : 4096.0;
+  if (longest > limit) {
+    final k = limit / longest;
+    w *= k;
+    h *= k;
+  }
+  return Size(w, h);
 }
 
 /// 底栏相对屏幕底部的内缩量：把栏贴在画面下沿。

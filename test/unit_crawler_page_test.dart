@@ -40,6 +40,9 @@ Widget host(http.Client client) => MaterialApp(
 void main() {
   testWidgets('无脚本时同步设置置灰并提示 J17', (t) async {
     final client = MockClient((req) async {
+      if (req.url.path == '/api/settings') {
+        return http.Response(jsonEncode({'collections': <dynamic>[]}), 200);
+      }
       expect(req.url.path, '/api/unit/crawler');
       expect(req.url.queryParameters['unit'], 'big-01');
       expect(req.url.queryParameters['rel'], '(1) A');
@@ -64,6 +67,10 @@ void main() {
   testWidgets('有脚本时可保存并选择脚本', (t) async {
     var posts = 0;
     final client = MockClient((req) async {
+      if (req.url.path == '/api/settings') {
+        return http.Response(jsonEncode({'collections': <dynamic>[]}), 200);
+      }
+      expect(req.url.path, '/api/unit/crawler');
       if (req.method == 'POST') {
         posts++;
         return http.Response(jsonEncode(state(scripts: [

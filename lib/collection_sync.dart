@@ -81,3 +81,78 @@ List<CollectionSyncInfo> setAllSync(List<CollectionSyncInfo> rows, bool value) {
       )
   ];
 }
+
+/// 同步源/单元库匹配用的归一化名：去掉序号、`@`、首尾空白与大小写差异。
+String syncUnitKey(String raw) {
+  var s = raw.trim();
+  while (s.startsWith('@')) {
+    s = s.substring(1).trim();
+  }
+  s = s.replaceFirst(
+      RegExp(r'^[(（\[【]\s*\d{1,4}\s*[)）\]】]\s*[._\-·]?\s*'), '');
+  s = s.replaceFirst(RegExp(r'^\d{1,4}\s*[.、]\s*'), '');
+  return s.trim().toLowerCase();
+}
+
+List<String> _unitKeys(String unitName, String unitRel) {
+  final keys = <String>[];
+  void add(String s) {
+    final k = syncUnitKey(s);
+    if (k.isNotEmpty && !keys.contains(k)) keys.add(k);
+  }
+
+  add(unitName);
+  final segs = unitRel
+      .replaceAll('\\', '/')
+      .split('/')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  if (segs.isNotEmpty) add(segs.last);
+  // 有些单元库是多级目录（分类/子分类），用全部段做包含匹配。
+  for (final s in segs) {
+    add(s);
+  }
+  return keys;
+}
+
+/// 单个单元库应该展示/管理的同步源。
+///
+/// - 目录名与同步源同名（去掉序号后）→ 只显示该同步源；
+/// - 顶级单元库（`(2) douyin` 这类只有一段的库）→ 显示全部同步源；
+/// - 找不到同名项时退回「包含」匹配；
+/// - 仍无线索则返回空列表，页面明确提示「未找到同名同步源」，
+///   不把账号全部同步源错误地塞进无关单元库。
+List<CollectionSyncInfo> syncCollectionsForUnit(
+  List<CollectionSyncInfo> rows, {
+  required String unitName,
+  required String unitRel,
+}) {
+  if (rows.isEmpty) return const <CollectionSyncInfo>[];
+  final keys = _unitKeys(unitName, unitRel);
+  final exact = <CollectionSyncInfo>[
+    for (final r in rows)
+      if (keys.contains(syncUnitKey(r.name))) r,
+  ];
+  if (exact.isNotEmpty) return exact;
+  final segs = unitRel
+      .replaceAll('\\', '/')
+      .split('/')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  // 只有抖音库根这种「本身就是同步源容器」的顶级单元库才展示全部；
+  // 其它无关库根不应把账号全部同步源塞进来。
+  final unitKey = syncUnitKey(unitName);
+  final isSyncRoot = unitKey == 'douyin' || unitKey.contains('抖音');
+  if (segs.length <= 1 && isSyncRoot) return rows;
+  final fuzzy = <CollectionSyncInfo>[
+    for (final r in rows)
+      if (keys.any((k) {
+        final n = syncUnitKey(r.name);
+        return n.isNotEmpty && (n.contains(k) || k.contains(n));
+      }))
+        r,
+  ];
+  return fuzzy;
+}

@@ -71,6 +71,17 @@ void main() {
         VideoFit.contain,
       );
     });
+
+    test('铺满的竖屏视频锚到顶部，横屏/适应居中', () {
+      expect(
+          videoTopAnchored(aspect: 9 / 16, fit: VideoFit.fill), isTrue);
+      expect(videoTopAnchored(aspect: 0.7, fit: VideoFit.fill), isTrue);
+      expect(
+          videoTopAnchored(aspect: 16 / 9, fit: VideoFit.fill), isFalse);
+      expect(
+          videoTopAnchored(aspect: 9 / 16, fit: VideoFit.contain), isFalse);
+      expect(videoTopAnchored(aspect: null, fit: VideoFit.fill), isFalse);
+    });
   });
 
   group('B videoViewportHeight', () {

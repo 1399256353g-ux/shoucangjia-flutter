@@ -100,4 +100,44 @@ void main() {
     expect(rows.where((e) => e.account).length, 1);
     expect(rows.length, 2);
   });
+
+  test('同步源按单元库目录名匹配（去掉序号/@）', () {
+    final rows = parseCollectionSettings({
+      'collections': [
+        {'idx': 1, 'name': '其他', 'count': 10, 'sync': true},
+        {'idx': 2, 'name': '丝', 'count': 20, 'sync': true},
+        {'idx': 4, 'name': '南宁', 'count': 5, 'sync': false},
+      ],
+    });
+    expect(syncUnitKey('(2) 丝'), '丝');
+    expect(syncUnitKey('@丝'), '丝');
+    expect(syncUnitKey('（02）丝'), '丝');
+
+    final silk = syncCollectionsForUnit(rows,
+        unitName: '(2) 丝', unitRel: '(2) douyin/(2) 丝');
+    expect(silk.map((e) => e.idx), [2]);
+
+    final nanning = syncCollectionsForUnit(rows,
+        unitName: '南宁', unitRel: '(2) douyin/(4) 南宁');
+    expect(nanning.map((e) => e.idx), [4]);
+  });
+
+  test('顶级单元库展示全部同步源；无同名项时回退包含匹配', () {
+    final rows = parseCollectionSettings({
+      'collections': [
+        {'idx': 1, 'name': '其他', 'count': 10, 'sync': true},
+        {'idx': 2, 'name': '丝', 'count': 20, 'sync': true},
+      ],
+    });
+    expect(
+        syncCollectionsForUnit(rows,
+                unitName: '(2) douyin', unitRel: '(2) douyin')
+            .map((e) => e.idx),
+        [1, 2]);
+    expect(
+        syncCollectionsForUnit(rows,
+                unitName: '丝袜合集', unitRel: '(2) douyin/丝袜合集')
+            .map((e) => e.idx),
+        [2]);
+  });
 }

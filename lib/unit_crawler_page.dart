@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'home_action.dart';
+import 'collection_sync_panel.dart';
 import 'unit_crawler.dart';
 import 'unit_library.dart';
 
@@ -15,6 +16,8 @@ class UnitCrawlerPage extends StatefulWidget {
   final UnitLibrary unit;
   final String base;
   final Map<String, String> headers;
+  /// 当前注册库 id；同步源读写走 `/api/settings?lib=`。
+  final String libId;
   final http.Client? client;
 
   const UnitCrawlerPage({
@@ -22,6 +25,7 @@ class UnitCrawlerPage extends StatefulWidget {
     required this.unit,
     required this.base,
     required this.headers,
+    this.libId = '',
     this.client,
   });
 
@@ -200,6 +204,18 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     const SizedBox(height: 8),
                     // 同步频率：快检只扫新增/删除，全量才完整抓取。
                     _ScheduleSummary(schedule: schedule),
+                    const Divider(height: 28),
+                    // owner 2026-11-21：同步源选择并入每个单元库的爬虫设置，
+                    // 不再保留设置页里的全局「同步源选择」入口。
+                    CollectionSyncPanel(
+                      base: widget.base,
+                      headers: widget.headers,
+                      libId: widget.libId,
+                      unitName: widget.unit.name,
+                      unitRel: widget.unit.rel,
+                      client: widget.client,
+                    ),
+                    const Divider(height: 28),
                     SwitchListTile(
                       key: const ValueKey('unit-crawler-quick'),
                       contentPadding: EdgeInsets.zero,

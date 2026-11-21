@@ -181,6 +181,101 @@ String workFilterType(dynamic work) {
   }
 }
 
+/// 基础库作品页的排序方式（owner 2026-11-19：默认入库时间，新的在前）。
+enum WorkSort { ingest, plays, title }
+
+/// 排序选择器展示顺序：入库时间、播放量、标题。
+const List<WorkSort> workSortOrder = [
+  WorkSort.ingest,
+  WorkSort.plays,
+  WorkSort.title,
+];
+
+String workSortLabel(WorkSort sort) {
+  switch (sort) {
+    case WorkSort.ingest:
+      return '入库时间';
+    case WorkSort.plays:
+      return '播放量';
+    case WorkSort.title:
+      return '标题';
+  }
+}
+
+int _intOf(dynamic v) {
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v.trim()) ?? 0;
+  return 0;
+}
+
+/// 时间戳统一到毫秒：`srcAt` 是毫秒，旧数据可能是秒。
+int _msOf(dynamic v) {
+  final n = _intOf(v);
+  if (n <= 0) return 0;
+  if (n >= 100000000000) return n; // 毫秒级（约 1e12）
+  if (n >= 1000000000) return n * 1000; // 秒级（约 1e9）
+  return 0;
+}
+
+/// 作品「入库时间」（毫秒）：`srcAt` → `scanAt`/`updatedAt` → 日期字符串。
+///
+/// 服务端 `/api/lib/<id>/works.json` 的 `srcAt` 由爬虫/手动记录生成；
+/// 索引里只有日期（`d`，形如 `2026-11-17`）时按当天 0 点计，
+/// 两者都缺失时返回 0，由排序保持原始（服务端）顺序，不抖动。
+int workIngestMs(dynamic work) {
+  if (work is! Map) return 0;
+  for (final key in const ['srcAt', 'scanAt', 'updatedAt']) {
+    final ms = _msOf(work[key]);
+    if (ms > 0) return ms;
+  }
+  final d = '${work['d'] ?? work['date'] ?? ''}'.trim();
+  if (d.isNotEmpty) {
+    final m = RegExp(r'^(\d{4})[-/.]?(\d{2})[-/.]?(\d{2})').firstMatch(d);
+    if (m != null) {
+      return DateTime(int.parse(m[1]!), int.parse(m[2]!),
+              int.parse(m[3]!))
+          .millisecondsSinceEpoch;
+    }
+  }
+  return 0;
+}
+
+/// 作品播放量：`pl` 优先，其次 `plays`。
+int workPlayCount(dynamic work) {
+  if (work is! Map) return 0;
+  final n = _intOf(work['pl']);
+  return n > 0 ? n : _intOf(work['plays']);
+}
+
+String workTitle(dynamic work) =>
+    work is Map ? '${work['ti'] ?? ''}' : '';
+
+/// 返回排好序的新列表（不改动入参）。
+///
+/// 同值时保持服务端原始顺序（用原下标兜底），避免每次 build 重排后
+/// 没有时间戳的条目来回跳动。
+List<dynamic> sortWorks(List<dynamic> works, WorkSort sort) {
+  final indexed = <MapEntry<int, dynamic>>[
+    for (var i = 0; i < works.length; i++) MapEntry(i, works[i]),
+  ];
+  int cmp(dynamic a, dynamic b) {
+    switch (sort) {
+      case WorkSort.ingest:
+        return workIngestMs(b).compareTo(workIngestMs(a));
+      case WorkSort.plays:
+        return workPlayCount(b).compareTo(workPlayCount(a));
+      case WorkSort.title:
+        return workTitle(a).compareTo(workTitle(b));
+    }
+  }
+
+  indexed.sort((a, b) {
+    final c = cmp(a.value, b.value);
+    return c != 0 ? c : a.key.compareTo(b.key);
+  });
+  return <dynamic>[for (final e in indexed) e.value];
+}
+
 /// 空集合表示不过滤；多选时并按命中。
 List<dynamic> filterWorksByType(List<dynamic> works, Set<String> selected) {
   if (selected.isEmpty) return List<dynamic>.from(works);
