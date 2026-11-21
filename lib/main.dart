@@ -9290,6 +9290,15 @@ class _PlayerPageState extends State<PlayerPage>
   // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停；
   // 320ms 内在相近位置再次点击视为双击：点赞并恢复到点击前的播放状态。
   void onStageTap([Offset? pos]) {
+    // owner 2026-11-21：呼出的进度条要能被单击收回。
+    // 进度条本身只认拖动（点按已不 seek），所以单击落到舞台时统一收起。
+    if (_scrubActive || _scrubHover) {
+      _scrubThinTimer?.cancel();
+      setState(() {
+        _scrubActive = false;
+        _scrubHover = false;
+      });
+    }
     // P0：非全屏走抖音式仲裁（250ms 单击判定，双击只点赞不暂停）；
     // 全屏分支完全保持原行为，不进入下面的新逻辑。
     if (!fs) {
