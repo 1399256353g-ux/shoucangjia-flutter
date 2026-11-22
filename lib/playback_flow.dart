@@ -110,6 +110,24 @@ StallRecoveryAction stallRecoveryAction({
       : StallRecoveryAction.reopen;
 }
 
+/// 起播窗口内「还在灌首帧」的判据。
+///
+/// 大文件（3.3 GB / 25 Mbps）在机械盘上先填 demuxer 缓存，位置一直是 0，
+/// 但缓存本身在增长——这不是卡死。只在位置没前进、缓存确实增长、且顺延
+/// 次数未超上限时返回 true；顺延上限防止无限等待掩盖真正的卡死。
+bool startupStillFilling({
+  required int positionMs,
+  required int basePositionMs,
+  required int bufferMs,
+  required int baseBufferMs,
+  required int waits,
+  int maxWaits = 2,
+  int minProgressMs = 300,
+}) =>
+    waits < maxWaits &&
+    positionMs - basePositionMs < minProgressMs &&
+    bufferMs - baseBufferMs >= minProgressMs;
+
 /// O3：iOS 启动 1.5 秒内仍未播放时是否应重开一次。
 ///
 /// 只在「媒体已就绪（duration > 0）、位置仍停在开头、用户没有暂停、

@@ -149,4 +149,58 @@ void main() {
       expect(text, contains('stall:retryPlay#1'));
     });
   });
+
+  group('startupStillFilling（起播窗口内是否仍在灌首帧）', () {
+    test('位置未动、缓存增长 → 还在灌，继续观察', () {
+      expect(
+        startupStillFilling(
+          positionMs: 0,
+          basePositionMs: 0,
+          bufferMs: 2000,
+          baseBufferMs: 0,
+          waits: 0,
+        ),
+        isTrue,
+      );
+    });
+
+    test('位置已前进 ≥300ms → 不是「仍在灌」，交给正常路径收工', () {
+      expect(
+        startupStillFilling(
+          positionMs: 400,
+          basePositionMs: 0,
+          bufferMs: 4000,
+          baseBufferMs: 0,
+          waits: 0,
+        ),
+        isFalse,
+      );
+    });
+
+    test('缓存没长（真卡死）→ 不豁免', () {
+      expect(
+        startupStillFilling(
+          positionMs: 0,
+          basePositionMs: 0,
+          bufferMs: 1200,
+          baseBufferMs: 1200,
+          waits: 0,
+        ),
+        isFalse,
+      );
+    });
+
+    test('顺延已达上限 → 不再豁免，必须给出 stuck 判定', () {
+      expect(
+        startupStillFilling(
+          positionMs: 0,
+          basePositionMs: 0,
+          bufferMs: 9000,
+          baseBufferMs: 1000,
+          waits: 2,
+        ),
+        isFalse,
+      );
+    });
+  });
 }

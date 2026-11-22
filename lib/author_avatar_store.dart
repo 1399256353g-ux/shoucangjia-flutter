@@ -65,6 +65,13 @@ String encodeAuthorAvatarOverrides(Map<String, String> m) {
   return jsonEncode(out);
 }
 
+/// 服务端自定义头像的媒体地址特征：`/media/<lib>/@manual-avatar/<作者>/_avatar/...`。
+///
+/// 2026-11-22：上传的头像由服务端注册后，作者页与索引都会返回这个前缀，
+/// 客户端据此判断「恢复自动」是否有服务端覆盖需要清理。
+bool isManualAvatarPath(String? path) =>
+    (path ?? '').contains('/@manual-avatar/');
+
 /// 作者头像来源优先级：手动覆盖 > 作品自带 `av`/爬虫作者头像 > 自动兜底图。
 ///
 /// B3（owner 2026-11-19）：此前播放页先看作品自带 `av` 再看手动覆盖，

@@ -74,6 +74,14 @@ void main() {
     expect(AuthorAvatarStore.instance.count, 0);
   });
 
+  test('服务端自定义头像路径识别（/@manual-avatar/ 前缀）', () {
+    expect(isManualAvatarPath('/media/lib-001/@manual-avatar/x/_avatar/a.jpg'),
+        isTrue);
+    expect(isManualAvatarPath('/media/lib-001/x/_avatar/a.jpg'), isFalse);
+    expect(isManualAvatarPath(null), isFalse);
+    expect(isManualAvatarPath(''), isFalse);
+  });
+
   test('写入本机偏好，重新读取后仍在', () async {
     await AuthorAvatarStore.instance
         .setPath('作者C', '/media/lib-003/作者C/av.jpg');

@@ -4497,9 +4497,8 @@ class _LibraryPageState extends State<LibraryPage> {
         onOpenAuthor: (name) => Navigator.of(context).push(
             MaterialPageRoute<void>(
                 builder: (_) => AuthorPage(name: name, libs: [b.id]))),
-        onPlay: (works, index) => Navigator.of(context).push(
-            instantRoute<void>(
-                (_) => PlayerPage(works: works, start: index, lib: b.id))),
+        onPlay: (works, index) => Navigator.of(context).push(instantRoute<void>(
+            (_) => PlayerPage(works: works, start: index, lib: b.id))),
       ),
     ));
   }
@@ -7760,7 +7759,8 @@ class _PlayerPageState extends State<PlayerPage>
     if (_coverPrefetchFor == cur) return;
     _coverPrefetchFor = cur;
     final memW = _posterDecodeWidth(context);
-    final previewW = workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context));
+    final previewW =
+        workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context));
     for (var d = -3; d <= 3; d++) {
       final i = cur + d;
       if (i < 0 || i >= widget.works.length) continue;
@@ -7868,7 +7868,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 自救上限取 2（补 play 两次），不做 reopen：起播阶段重开整条媒体在
   /// 机械盘上要重读一遍文件头，代价远大于收益，2 次仍不动就直接给
   /// 可见的失败态（可点重试）。
-  void _scheduleStartupCheck({int? limit}) {
+  void _scheduleStartupCheck({int? limit, int bufferBase = -1, int waits = 0}) {
     _stallTimer?.cancel();
     final max = limit ?? (_stallMaxAttempts - 1);
     _stallCheckMax = max;
@@ -7885,24 +7885,42 @@ class _PlayerPageState extends State<PlayerPage>
       // 反而没有任何复查，页面就停在封面。改成用同一个 _stallTimer 继续
       // 观察，不新增第二个守卫。
       if (_opening || _buffering) {
-        _scheduleStartupCheck(limit: max);
+        _scheduleStartupCheck(limit: max, bufferBase: bufferBase, waits: waits);
         return;
       }
       var atMs = pos.inMilliseconds;
       var hasMedia = dur.inMilliseconds > 0 || pos.inMilliseconds > 0;
+      var bufferMs = 0;
       var completed = false;
       try {
         completed = player.state.completed;
         final st = player.state.position.inMilliseconds;
         if (st > atMs) atMs = st;
-        hasMedia = hasMedia ||
-            player.state.duration.inMilliseconds > 0 ||
-            st > 0;
+        // 解封装缓存：大文件（3.3 GB / 25 Mbps）首帧前位置一直是 0，
+        // 但 demuxer 缓存会持续增长。它增长说明文件在读、不是卡死。
+        bufferMs = player.state.buffer.inMilliseconds;
+        hasMedia =
+            hasMedia || player.state.duration.inMilliseconds > 0 || st > 0;
       } catch (_) {}
       if (completed) return;
       // 位置在走 = 真的在播：恢复自救计数后收工。
       if (atMs - baseMs >= 300) {
         _stallAttempts = 0;
+        return;
+      }
+      // 位置还没动，但缓存还在长 = 还在灌首帧，继续用同一个 _stallTimer
+      // 观察（最多让 2 个窗口 ≈2.4s，避免无限顺延掩盖真正的卡死）。
+      final bufBase = bufferBase < 0 ? 0 : bufferBase;
+      if (startupStillFilling(
+        positionMs: atMs,
+        basePositionMs: baseMs,
+        bufferMs: bufferMs,
+        baseBufferMs: bufBase,
+        waits: waits,
+      )) {
+        PauseTrace.mark('startup:filling buffer=$bufferMs waits=$waits');
+        _scheduleStartupCheck(
+            limit: max, bufferBase: bufferMs, waits: waits + 1);
         return;
       }
       PauseTrace.mark('stuck:startup id=${_watchIdFor(_workAt(cur))} '
@@ -8325,14 +8343,39 @@ class _PlayerPageState extends State<PlayerPage>
 
   int get _preloadByteLimit => AppSettings.preloadMemoryMb * 1024 * 1024;
 
-  /// 为预加载挑一个槽位：优先淘汰最远的缓存条目并复用其槽位，
-  /// 否则在预算内新建，最后复用空闲槽位。
-  _PlaybackSlot? _slotForPreload() {
+  /// 为预加载挑一个槽位，按「长池 → 复用空闲 → 淘汰池外条目」三级。
+  ///
+  /// 0.9.157 之前的顺序把「淘汰」放在第一步：预算还剩 3 个槽位时，第二条
+  /// 预载也会先把刚就绪的最近邻淘汰掉再复用同一个槽位，于是池里永远只剩
+  /// 「最后预载的那一条」。真机日志即为此：`ready(i=1)` → `stop-idle` →
+  /// `ready(i=2)` 都在同一个 `sid=1` 上，滑到下一条时池必然不命中。
+  ///
+  /// [keepKeys] 是池计划声明要常驻的条目键：即便走到淘汰，也不能拿它们
+  /// 当牺牲品（否则计划与分配各说一套）。
+  _PlaybackSlot? _slotForPreload({Set<String> keepKeys = const <String>{}}) {
+    final maxSlots = preloadSlotBudget(AppSettings.preloadMemoryMb);
+    // 一、预算未满就长池：只要还能放得下一条，就不该为了省一个槽位去
+    // 淘汰已经解码好的邻居。
+    if (_slots.length < maxSlots &&
+        _preloadCache.canFit(preloadEntryBytes, byteLimit: _preloadByteLimit)) {
+      final sid = _slotSeq++;
+      final s = _PlaybackSlot('s$sid', sid: sid, mode: _decodeMode);
+      _slots.add(s);
+      return s;
+    }
+    // 二、复用完全空闲的槽位（没有缓存条目的）。
+    for (final s in _slots) {
+      if (identical(s, _active)) continue;
+      if (_preloadBusy.containsKey(s)) continue;
+      if (_preloadCache.containsSlot(s.sid)) continue;
+      return s;
+    }
+    // 三、池已满：淘汰最远、且不在池计划内的条目。
     final victim = _preloadCache.evictionSlot(
       current: cur,
       direction: _preloadDir,
       protectedSlots: <int>{_active.sid},
-      protectedKeys: _preloadBusy.values.toSet(),
+      protectedKeys: <String>{..._preloadBusy.values, ...keepKeys},
     );
     if (victim != null) {
       final slot = _slotBySid(victim);
@@ -8343,18 +8386,9 @@ class _PlayerPageState extends State<PlayerPage>
         return slot;
       }
     }
-    final maxSlots = preloadSlotBudget(AppSettings.preloadMemoryMb);
-    if (_slots.length < maxSlots &&
-        _preloadCache.canFit(preloadEntryBytes, byteLimit: _preloadByteLimit)) {
-      final sid = _slotSeq++;
-      final s = _PlaybackSlot('s$sid', sid: sid, mode: _decodeMode);
-      _slots.add(s);
-      return s;
-    }
-    // 预算已满但也没有可淘汰条目：复用空闲的非活动槽位。
+    // 四、最后兜底：任意非活动、非忙的槽位（缓存账本已不可信时用）。
     for (final s in _slots) {
       if (identical(s, _active)) continue;
-      if (s.sid == _active.sid) continue;
       if (_preloadBusy.containsKey(s)) continue;
       _preloadCache.removeSlot(s.sid);
       return s;
@@ -8443,6 +8477,7 @@ class _PlayerPageState extends State<PlayerPage>
       // P3：池决策只走 `preload_pool.dart`（常驻哪几条 / 还缺哪几条），
       // 播放页只负责把计划落到槽位。槽位身份用「忙键 → 缓存键」两级，
       // 保证正在预载的条目不会被重复排队。
+      String keyOf(int i) => preloadKeyFor(_workAt(i), _libFor(_workAt(i)));
       final plan = planPreloadPool(
         current: cur,
         count: widget.works.length,
@@ -8454,17 +8489,14 @@ class _PlayerPageState extends State<PlayerPage>
             PoolSlotState(
               sid: s.sid,
               index: _preloadCache.entryOfSlot(s.sid)?.index ?? -1,
-              key: _preloadBusy[s] ??
-                  _preloadCache.keyOfSlot(s.sid) ??
-                  '',
+              key: _preloadBusy[s] ?? _preloadCache.keyOfSlot(s.sid) ?? '',
               busy: _preloadBusy.containsKey(s),
               active: identical(s, _active),
             ),
         ],
-        keyOf: (i) => preloadKeyFor(_workAt(i), _libFor(_workAt(i))),
+        keyOf: keyOf,
         hasMedia: (i) =>
-            workPlayable(_workAt(i)) &&
-            preloadMediaPath(_workAt(i)) != null,
+            workPlayable(_workAt(i)) && preloadMediaPath(_workAt(i)) != null,
       );
       // 池计划是槽位生命周期的唯一决策源：池外空闲槽位立即释放，
       // 不再靠 `_slotForPreload()` 的「预算满就复用」隐式回收
@@ -8472,6 +8504,8 @@ class _PlayerPageState extends State<PlayerPage>
       if (plan.release.isNotEmpty) {
         _releaseSlots((s) => plan.release.contains(s.sid));
       }
+      // 池计划要常驻的条目是分配时的硬约束：走到淘汰也不能拿它们开刀。
+      final keepKeys = <String>{for (final i in plan.hold) keyOf(i)};
       for (final idx in plan.preload) {
         if (!mounted || gen != _preloadGen) return;
         if (idx == cur || idx < 0 || idx >= widget.works.length) continue;
@@ -8482,7 +8516,7 @@ class _PlayerPageState extends State<PlayerPage>
         final key = preloadKeyFor(w, _libFor(w));
         if (_preloadCache.containsKey(key)) continue;
         if (_preloadBusy.containsValue(key)) continue;
-        final slot = _slotForPreload();
+        final slot = _slotForPreload(keepKeys: keepKeys);
         if (slot == null) return;
         await _preloadInto(slot, idx, key, gen, path);
       }
@@ -10332,12 +10366,12 @@ class _PlayerPageState extends State<PlayerPage>
     final cover = _posterCoverUrl(it);
     if (cover.isEmpty) return const SizedBox.expand();
     final lib = _libFor(it);
-    final align =
-        fit == BoxFit.cover ? Alignment.topCenter : Alignment.center;
+    final align = fit == BoxFit.cover ? Alignment.topCenter : Alignment.center;
     return Image(
       image: thumbImageProvider(
         withImageWidth(cover, kWorkImageWidth),
-        decodeWidth: workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
+        decodeWidth:
+            workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
         headers: cfg.headersFor(lib),
         cacheManager: DiziCache.manager,
       ),
@@ -10783,9 +10817,7 @@ class _PlayerPageState extends State<PlayerPage>
     return _neighborPages.putIfAbsent(key, () {
       return _NeighborPage(
         index: i,
-        imageUrl: cover.isEmpty
-            ? ''
-            : withImageWidth(cover, kPlayerImageWidth),
+        imageUrl: cover.isEmpty ? '' : withImageWidth(cover, kPlayerImageWidth),
         headers: cfg.headersFor(lib),
         memCacheWidth: memW,
         onAspect: (a) => _rememberCoverAspect(it, a),
@@ -11451,9 +11483,7 @@ class _PlayerPageState extends State<PlayerPage>
       return _picProgressFlush(
           pics: pics,
           idx: idx,
-          lift: fs
-              ? _liveTaskbarHeight(MediaQuery.paddingOf(context))
-              : 0.0);
+          lift: fs ? _liveTaskbarHeight(MediaQuery.paddingOf(context)) : 0.0);
     }
     // 非全屏视频：呼出式进度条（贴任务栏上缘、极细、不操作时不可见）。
     // 全屏保留旧进度条，避免破坏沉浸态已有的呼出/隐藏逻辑。
@@ -12286,7 +12316,8 @@ class _PlayerPageState extends State<PlayerPage>
                             // 图文作品的位置永远不前进，`_firstFrameSeen` 一直为
                             // false → 海报永远盖在真实图片上，看起来就是「开始
                             // 时变暗一下」。图文不再挂海报层。
-                            if (it['t'] == 'v' && posterLayerVisible(posterCover))
+                            if (it['t'] == 'v' &&
+                                posterLayerVisible(posterCover))
                               IgnorePointer(
                                 // 只有「首帧出来」+「视频轨报了尺寸」+
                                 // 「播放器比例已知」才让位：比例没到就淡出，
@@ -14049,6 +14080,37 @@ Future<AuthorEditResult> uploadAuthorBio({
   return AuthorEditResult(true, '简介已更新', path: saved);
 }
 
+/// 2026-11-22：清除服务端自定义头像（恢复「爬虫 → 自动」）。
+///
+/// 服务端会删注册项与 `@manual-avatar/<作者>` 目录，并让作者索引重新生成；
+/// 没有覆盖时同样返回 ok（幂等），客户端可无条件调用。
+Future<AuthorEditResult> clearAuthorAvatar({
+  required String libId,
+  required String author,
+}) async {
+  http.Response r;
+  try {
+    r = await http.post(
+      cfg.u('/api/author/avatar/clear', lib: libId),
+      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
+      body: jsonEncode({'lib': libId, 'author': author}),
+    );
+  } catch (e) {
+    return AuthorEditResult(false, '清除头像失败：$e');
+  }
+  Map<String, dynamic> j = const {};
+  try {
+    final d = jsonDecode(r.body);
+    if (d is Map<String, dynamic>) j = d;
+  } catch (_) {}
+  if (r.statusCode != 200 || j['ok'] != true) {
+    final msg =
+        j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
+    return AuthorEditResult(false, '清除头像失败：$msg');
+  }
+  return const AuthorEditResult(true, '已恢复自动头像');
+}
+
 /// J12b：方形裁切页。确定后返回 PNG 字节（短边 ≥512）。
 class AvatarCropPage extends StatefulWidget {
   final List<int> bytes;
@@ -14296,9 +14358,7 @@ class _AvatarAction extends StatelessWidget {
             const SizedBox(width: 2),
             Text(label,
                 style: TextStyle(
-                    fontSize: 10.5,
-                    color: color,
-                    fontWeight: FontWeight.w500)),
+                    fontSize: 10.5, color: color, fontWeight: FontWeight.w500)),
           ]),
         ),
       ),
@@ -14359,11 +14419,20 @@ class _AuthorPageState extends State<AuthorPage> {
   /// 0.9.41：本机手动头像（作者主页长按头像设置）。
   String get manualAv => AuthorAvatarStore.instance.pathFor(widget.name) ?? '';
 
+  /// 服务端自定义头像（上传后注册，跨设备生效）。
+  bool get serverManualAv => isManualAvatarPath(av);
+
+  /// 是否有任何手动来源需要「恢复自动」——本机覆盖或服务端注册。
+  bool get canRestoreAvatar => manualAv.isNotEmpty || serverManualAv;
+
+  /// 爬虫/自动头像（load() 后的原始 av）；上传/恢复时用来回滚显示。
+  String _crawledAv = '';
+
   /// 真正用于展示/放大的头像：手动 > 爬虫 av > 自动兜底。
   String get effectiveAv => manualAv.isNotEmpty ? manualAv : displayAv;
 
   Future<void> _showAvatarMenu(BuildContext context) async {
-    final has = manualAv.isNotEmpty;
+    final has = canRestoreAvatar;
     final choice = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -14385,7 +14454,7 @@ class _AuthorPageState extends State<AuthorPage> {
           if (has)
             ListTile(
               leading: const Icon(Icons.restart_alt),
-              title: const Text('清除手动头像（回到自动）'),
+              title: const Text('清除自定义头像（回到自动）'),
               onTap: () => Navigator.of(ctx).pop('clear'),
             ),
         ]),
@@ -14393,12 +14462,7 @@ class _AuthorPageState extends State<AuthorPage> {
     );
     if (!mounted) return;
     if (choice == 'clear') {
-      await AuthorAvatarStore.instance.clear(widget.name);
-      if (!mounted) return;
-      authorAvatarRevision.value++;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('已清除手动头像')));
+      await _restoreAutoAvatar();
     } else if (choice == 'pick') {
       _pickAvatarImage(context);
     } else if (choice == 'upload') {
@@ -14534,15 +14598,24 @@ class _AuthorPageState extends State<AuthorPage> {
     _toast(r.message);
   }
 
-  /// owner 2026-11-22：「恢复自动」——清掉本机手动头像，回落到爬虫/自动生成。
+  /// owner 2026-11-22：「恢复自动」——清掉本机手动头像**与服务端注册**，
+  /// 回落到爬虫/自动生成。服务端没有覆盖时接口幂等返回 ok。
   ///
   /// 清完立刻涨一次 [authorAvatarRevision]，作者页、播放页信息区与作品卡片
-  /// 三处同时换回自动头像；本机没有手动覆盖时按钮不显示。
+  /// 三处同时换回自动头像；本机与服务端都没有覆盖时按钮不显示。
   Future<void> _restoreAutoAvatar() async {
+    final lib = primaryLib.isEmpty ? cfg.lib : primaryLib;
+    if (lib.isNotEmpty) {
+      final r = await clearAuthorAvatar(libId: lib, author: widget.name);
+      if (!r.ok) {
+        if (mounted) _toast(r.message);
+        return;
+      }
+    }
     await AuthorAvatarStore.instance.clear(widget.name);
     if (!mounted) return;
+    setState(() => av = _crawledAv);
     authorAvatarRevision.value++;
-    setState(() {});
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('已恢复自动头像')));
@@ -14674,6 +14747,8 @@ class _AuthorPageState extends State<AuthorPage> {
         postStat('visit', widget.name, lib: lib);
       } catch (_) {}
     }
+    // 记下爬虫/自动头像，上传自定义后仍保留，供「恢复自动」回滚显示。
+    if (!isManualAvatarPath(av)) _crawledAv = av;
     if (primaryLib.isNotEmpty) {
       try {
         meta = await LibMeta.load(primaryLib);
@@ -15080,7 +15155,7 @@ class _AuthorPageState extends State<AuthorPage> {
                 label: '设置头像',
                 onTap: () => _showAvatarMenu(context),
               ),
-              if (manualAv.isNotEmpty)
+              if (canRestoreAvatar)
                 _AvatarAction(
                   icon: Icons.restart_alt,
                   label: '恢复自动',
@@ -15677,14 +15752,13 @@ class _WorkGridState extends State<WorkGrid> {
             }
             // 播放器需要可变列表：续播时直接追加到它自己手里这份。
             final playerWorks = List.of(works, growable: true);
-            Navigator.of(context).push(instantRoute(
-                (_) => PlayerPage(
-                    works: playerWorks,
-                    start: i,
-                    lib: _libFor(w),
-                    onNeedMore: widget.onNeedMoreWorks == null
-                        ? null
-                        : () => widget.onNeedMoreWorks!(playerWorks))));
+            Navigator.of(context).push(instantRoute((_) => PlayerPage(
+                works: playerWorks,
+                start: i,
+                lib: _libFor(w),
+                onNeedMore: widget.onNeedMoreWorks == null
+                    ? null
+                    : () => widget.onNeedMoreWorks!(playerWorks))));
           },
         );
         // K2：选择圈与选中描边（画在卡片外层，不改 WorkCard 本身）。
