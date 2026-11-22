@@ -105,5 +105,39 @@ void main() {
       expect(plan.preload, [6, 4]);
       expect(plan.hold.length <= poolMaxSlots, isTrue);
     });
+
+    test('停靠的旧活动槽位算常驻：不释放也不重复预载', () {
+      // 0.9.159：切条时旧活动槽位改为 pause+mute 停靠并登记账本，
+      // 它和预载槽位一样是「池里已就位的邻居」。若账本漏登记，这里
+      // 会看到 release 里出现 sid=1、preload 里又排上 index=1。
+      final plan = planPreloadPool(
+        current: 2,
+        count: 10,
+        direction: 1,
+        slots: const [
+          PoolSlotState(sid: 2, index: 2, key: 'lib|2', active: true),
+          PoolSlotState(sid: 3, index: 3, key: 'lib|3'),
+          PoolSlotState(sid: 1, index: 1, key: 'lib|1'),
+        ],
+        keyOf: keyOf,
+      );
+      expect(plan.hold, [2, 3, 1]);
+      expect(plan.release, isEmpty);
+      expect(plan.preload, isEmpty);
+    });
+
+    test('活动槽位入账本不会把它算成可复用的空槽', () {
+      final plan = planPreloadPool(
+        current: 2,
+        count: 10,
+        direction: 1,
+        slots: const [
+          PoolSlotState(sid: 2, index: 2, key: 'lib|2', active: true),
+        ],
+        keyOf: keyOf,
+      );
+      expect(plan.release, isEmpty);
+      expect(plan.preload, [3, 1]);
+    });
   });
 }

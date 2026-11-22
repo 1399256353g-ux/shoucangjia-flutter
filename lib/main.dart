@@ -7042,6 +7042,12 @@ class _PlayerPageState extends State<PlayerPage>
   /// 首帧是否真的出来了（位置开始走动）。出来之前一直用海报盖住视频层，
   /// 避免「黑屏一下 / 缓冲圈闪一下 / 比例跳一下」的起播观感。
   bool _firstFrameSeen = false;
+
+  /// 本次 open() 下发时刻：首帧到达时用它算起播耗时（写入 pause.log）。
+  DateTime? _openStartedAt;
+
+  /// 本次 open() 是否命中预载池（仅用于起播耗时的分组统计）。
+  bool _poolHit = false;
   Timer? _blackGuard;
   _PlaybackSlot get _active => _slots[_slotActive];
   // 对播放页其余代码保持原有 player / vc 接口，内部指向当前活动槽位
@@ -7677,6 +7683,14 @@ class _PlayerPageState extends State<PlayerPage>
       // 采用 500ms 位置门槛 + 短淡出，兼顾「不露黑」与「不拖沓」。
       if (!_firstFrameSeen && position.inMilliseconds >= 500) {
         _firstFrameSeen = true;
+        final t0 = _openStartedAt;
+        if (t0 != null) {
+          _openStartedAt = null;
+          // 起播耗时：open() 下发 → 位置确认前进 0.5s。命中池与全新 open
+          // 都走这一条，`pool=1` 即池命中，下一轮直接用这个数验收。
+          PauseTrace.mark('firstframe:ms=${DateTime.now().difference(t0).inMilliseconds}'
+              ' pool=${_poolHit ? 1 : 0}');
+        }
         if (mounted) setState(() {});
       }
       pos = position;
@@ -8123,6 +8137,9 @@ class _PlayerPageState extends State<PlayerPage>
     _slowBufferTimer?.cancel();
     _slowBufferTimer = null;
     PauseTrace.mark('failure:${f.kind.name}');
+    // 失败的槽位不能继续当作「已就绪」留在池里，否则切条会命中一个
+    // 出不了画的槽位；重试走 open() 会重新登记。
+    _preloadCache.removeSlot(_active.sid);
     try {
       Breadcrumb.mark('player:pause', 'L7783');
       player.pause();
@@ -8219,6 +8236,17 @@ class _PlayerPageState extends State<PlayerPage>
     _invalidatePreload();
     if (!stopIdle) return;
     _releaseSlots((_) => true);
+  }
+
+  /// 把「某槽位现在装着哪一条」写入缓存账本。
+  ///
+  /// 池计划（[planPreloadPool]）只认账本判断条目是否常驻，所以活动槽位与
+  /// 刚停靠的旧活动槽位都必须登记；否则池计划会把它们当空槽重新 open。
+  /// 同一槽位只保留一条登记（先清后写），避免 sid 复用时出现两条记录。
+  void _markSlotResident(int sid, int index, String key) {
+    if (key.isEmpty || index < 0) return;
+    _preloadCache.removeSlot(sid);
+    _preloadCache.put(PreloadEntry(slot: sid, index: index, key: key));
   }
 
   /// 释放满足 [pick] 的非活动槽位：stop + dispose，并从槽位表移除。
@@ -8527,6 +8555,9 @@ class _PlayerPageState extends State<PlayerPage>
 
   Future<void> open(int i, {bool saveProgress = true}) async {
     if (widget.works.isEmpty || i < 0 || i >= widget.works.length) return;
+    // 切条前的条目身份：旧活动槽位要被「停靠」进池，登记时用它的序号与键。
+    final fromIndex = cur;
+    final fromKey = preloadKeyFor(_workAt(cur), _libFor(_workAt(cur)));
     // 非用户暂停自救：正常切条/重开时重置计数；自救触发的 reopen 保留计数，
     // 否则「重开 → 又停 → 再重开」会无限循环。
     final switching = i != cur;
@@ -8563,6 +8594,7 @@ class _PlayerPageState extends State<PlayerPage>
       _mediaToken = -1;
       _pausedByBackground = false;
       PauseTrace.mark('open:stop-current(broken)');
+      _preloadCache.removeSlot(_active.sid);
       try {
         await player.stop();
       } catch (_) {}
@@ -8606,6 +8638,8 @@ class _PlayerPageState extends State<PlayerPage>
     _videoGenSynced = false;
     _firstFrameSeen = false;
     _opening = true;
+    _openStartedAt = DateTime.now();
+    _poolHit = canUsePreload;
     setState(() {
       cur = i;
       _setPicIndex(0);
@@ -8638,13 +8672,23 @@ class _PlayerPageState extends State<PlayerPage>
       final old = _active;
       final target = cachedSlot;
       _slotActive = _slots.indexOf(target);
-      _preloadCache.removeSlot(target.sid);
+      // 活动条也登记进账本：池计划只看账本判断常驻，活动槽位不入账就会
+      // 被当成空槽，预载可能往它上面 open（或把它算成不存在）。
+      _markSlotResident(target.sid, i, key);
       // 预缓冲槽位已解出首帧：把已有的视频参数同步过来（见 _seedVideoParams）。
       _bindPlayer(seedVideoParams: true);
-      PauseTrace.mark('open:stop-old-slot(sid=${old.sid})');
-      try {
-        await old.player.stop();
-      } catch (_) {}
+      // 旧活动槽位不再 stop()：stop 会卸载媒体，它立刻变成池外空槽，下一轮
+      // 预载又得为同一条重新 open（每次切条多一个解码器 + 一次 open，回滑的
+      // 「秒开」只能等下一次预载）。改为停靠：暂停 + 静音，媒体留在解码器里，
+      // 账本按它自己的序号/键登记，回滑直接命中。释放仍走 _releaseSlots()。
+      if (!identical(old, target)) {
+        _markSlotResident(old.sid, fromIndex, fromKey);
+        PauseTrace.mark('open:park-old(sid=${old.sid},i=$fromIndex)');
+        try {
+          await old.player.pause();
+          await old.player.setVolume(0);
+        } catch (_) {}
+      }
       _mediaToken = my;
       setState(() {
         pos = Duration.zero;
@@ -8698,6 +8742,12 @@ class _PlayerPageState extends State<PlayerPage>
     }
     if (my != _openToken) return;
     if (_failure != null) return;
+    if (!canUsePreload) {
+      // 新开媒体（非池命中）：这一槽位的旧登记已随 stop() 失效，先作废；
+      // 视频按实际条目重新登记，图文不占池位。
+      _preloadCache.removeSlot(_active.sid);
+      if (w['t'] == 'v') _markSlotResident(_active.sid, i, key);
+    }
     _loadTimeout?.cancel();
     _loadTimeout = null;
     // I3：等首帧/时长就绪再起播，避免解码器刚启动就推进造成画面抽搐。
