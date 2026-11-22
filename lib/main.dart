@@ -1378,9 +1378,9 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _edit([ServerConn? old]) async {
     final label = TextEditingController(text: old?.label ?? '');
     final base =
-        TextEditingController(text: old?.base ?? 'http://192.168.2.4:8090');
-    final user = TextEditingController(text: old?.user ?? cfg.user);
-    final pass = TextEditingController(text: old?.pass ?? cfg.pass);
+        TextEditingController(text: old?.base ?? '');
+    final user = TextEditingController(text: old?.user ?? '');
+    final pass = TextEditingController(text: old?.pass ?? '');
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -1395,7 +1395,7 @@ class _SettingsPageState extends State<SettingsPage> {
             TextField(
                 controller: base,
                 decoration: const InputDecoration(
-                    labelText: '地址', hintText: 'http://192.168.2.4:8090')),
+                    labelText: '地址', hintText: 'http://<服务器地址>:8090')),
             const SizedBox(height: 8),
             TextField(
                 controller: user,
@@ -1514,7 +1514,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('多网络连接'), actions: [
+      appBar: AppBar(title: const Text('网络连接'), actions: [
         IconButton(
             icon: const Icon(Icons.add),
             tooltip: '添加连接',
@@ -3048,7 +3048,7 @@ class SettingsHubPage extends StatelessWidget {
       body: ListView(children: [
         ListTile(
           leading: const Icon(Icons.dns),
-          title: const Text('多网络连接'),
+          title: const Text('网络连接'),
           subtitle: Text(cfg.base.isEmpty
               ? '未设置 · 可添加多个 NAS 地址并聚合库'
               : '${cfg.base} · 可添加多个地址并聚合库'),
@@ -4661,7 +4661,7 @@ class _LibraryPageState extends State<LibraryPage> {
               icon: const Icon(Icons.refresh), onPressed: load, tooltip: '刷新'),
           IconButton(
               icon: const Icon(Icons.dns_outlined),
-              tooltip: '多网络连接',
+              tooltip: '网络连接',
               onPressed: () async {
                 await Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const SettingsPage()));
@@ -9661,6 +9661,10 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// M1：立即收起功能区（取消自动隐藏计时器，避免残留定时器再触发）。
   void hideUiNow() {
+    // 与进度条同步收起：清掉拖动/悬停状态，避免残留让进度条“粘”在屏幕上
+    _scrubActive = false;
+    _scrubHover = false;
+    _scrubThinTimer?.cancel();
     hideTimer?.cancel();
     hideTimer = null;
     _hideDeadline.clear();
@@ -11663,6 +11667,9 @@ class _PlayerPageState extends State<PlayerPage>
   /// 全屏（spec=false）保持旧视觉与旧拖动语义。
   /// 呼出式进度条浮层：底部 28dp 热区，整条宽度可拖。
   Widget _scrubOverlay({required double progress, double lift = 0}) {
+    // owner 2026-11-22：全屏下进度条完全跟随功能区——功能区隐藏时，
+    // 进度条与拖动热区都要一起消失，热区也不能再把进度条「呼出」回来。
+    if (fs && !ui) return const SizedBox.shrink();
     final desktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
     // 全屏时进度条要跟功能区一起随时间隐藏；非全屏桌面端才常驻细条。
     // owner 2026-11-21：全屏下进度条不能常驻——呼出后单击就该收起。
