@@ -80,9 +80,19 @@ class CrashLog extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 崩溃日志落盘路径：Windows 固定 E 盘（不写 C 盘），其它平台临时目录。
+  /// 启动时注入的日志目录（应用支持目录，见 `main()`）。
+  ///
+  /// Android 上 `Directory.systemTemp` 指向 `/data/local/tmp` 一类不可写
+  /// 目录，写入被静默吞掉 —— 结果就是 crash.log / pause.log 一条都没有，
+  /// 真机取证只能靠猜。改为启动后注入 `getApplicationSupportDirectory()`。
+  static String? logDirOverride;
+
+  /// 崩溃日志落盘路径：Windows 固定 E 盘（不写 C 盘），其它平台用注入目录。
   static String get logDir =>
-      Platform.isWindows ? r'E:\Dizi\logs' : '${Directory.systemTemp.path}/dizi_logs';
+      logDirOverride ??
+      (Platform.isWindows
+          ? r'E:\Dizi\logs'
+          : '${Directory.systemTemp.path}/dizi_logs');
   static String get logPath => '$logDir/crash.log';
 
   /// 追加一条到本地日志文件；超过 2 MB 先截断，避免无限增长。

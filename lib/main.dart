@@ -104,6 +104,14 @@ Future<void> main() async {
   final perf = PerfDiagnostics.instance..markAppStart();
   // 0.9.23：先装崩溃兜底，后面任何初始化出错都能记下来而不是整屏灰掉
   installCrashGuard();
+  // 诊断日志目录：Android 的 systemTemp 不可写，crash.log / pause.log 会
+  // 静默丢失。启动时一次性把 CrashLog/PauseTrace 落到应用支持目录。
+  if (!Platform.isWindows) {
+    try {
+      final logDir = await getApplicationSupportDirectory();
+      CrashLog.logDirOverride = logDir.path;
+    } catch (_) {}
+  }
   // 崩溃前现场：原生崩溃不会进 FlutterError，这里把关键动作落盘。
   await Breadcrumb.init();
   if (Breadcrumb.lastSessionCrashed && Breadcrumb.lastSessionTail.isNotEmpty) {
@@ -8192,13 +8200,32 @@ class _PlayerPageState extends State<PlayerPage>
   void _cancelPreload({bool stopIdle = true}) {
     _invalidatePreload();
     if (!stopIdle) return;
+    _releaseSlots((_) => true);
+  }
+
+  /// 释放满足 [pick] 的非活动槽位：stop + dispose，并从槽位表移除。
+  ///
+  /// 这是槽位释放的唯一路径（[_cancelPreload] 与池计划释放共用）。
+  /// 0.9.156 之前这里有两个缺陷：
+  /// 1. `_preloadBusy` 是按 `_PlaybackSlot` 对象索引的，却用 `s.sid` 去查，
+  ///    判断永远为 false → 正在预载的槽位会被 dispose（预载随即失败）；
+  /// 2. `drop` 收集表从未写入，于是播放器被 dispose 了却仍留在 `_slots`，
+  ///    变成「幽灵槽位」——后续 `_slotForPreload()` 会把它再分配出去，
+  ///    预载在已释放的播放器上 open → 异常 → 缓存永远登记不上。
+  /// 两者叠加的结果就是「池里看着有播放器、切条却一次都没命中」。
+  int _releaseSlots(bool Function(_PlaybackSlot s) pick) {
     final activeSid = _active.sid;
     final drop = <_PlaybackSlot>[];
     for (final s in _slots) {
       // 用对象身份判断，避免 sid 复用（解码重建/槽位回收）时误停正在播放的槽位。
       if (identical(s, _active)) continue;
-      // 正在预载的槽位不在这里停，交给预载流程自己收尾。
-      if (_preloadBusy.containsKey(s.sid)) continue;
+      // 正在预载的槽位交给预载流程自己收尾（按对象身份）。
+      if (_preloadBusy.containsKey(s)) continue;
+      if (!pick(s)) continue;
+      drop.add(s);
+    }
+    if (drop.isEmpty) return 0;
+    for (final s in drop) {
       _preloadCache.removeSlot(s.sid);
       PauseTrace.mark('preload:stop-idle(sid=${s.sid})');
       try {
@@ -8212,6 +8239,7 @@ class _PlayerPageState extends State<PlayerPage>
     final idx = _slots.indexWhere((s) => s.sid == activeSid);
     _slotActive = idx < 0 ? 0 : idx;
     PerfDiagnostics.instance.slotsReleased(drop.length);
+    return drop.length;
   }
 
   _PlaybackSlot? _slotBySid(int sid) {
@@ -8379,7 +8407,12 @@ class _PlayerPageState extends State<PlayerPage>
         }
         await Future<void>.delayed(preloadReadyInterval);
       }
-      if (!ready) return false;
+      if (!ready) {
+        // 解封装迟迟没给出时长：登记不上缓存 → 切条时必然重新 open。
+        // 这条标记是真机判断「池为什么没命中」的第一手证据。
+        PauseTrace.mark('preload:not-ready(sid=${slot.sid},i=$idx)');
+        return false;
+      }
       // 再给解码器一点时间铺好首帧，命中时直接出画面。
       await Future<void>.delayed(preloadFirstFrameDelay);
       if (!mounted ||
@@ -8389,6 +8422,7 @@ class _PlayerPageState extends State<PlayerPage>
         return false;
       }
       _preloadCache.put(PreloadEntry(slot: slot.sid, index: idx, key: key));
+      PauseTrace.mark('preload:ready(sid=${slot.sid},i=$idx)');
       return true;
     } catch (_) {
       try {
@@ -8432,6 +8466,12 @@ class _PlayerPageState extends State<PlayerPage>
             workPlayable(_workAt(i)) &&
             preloadMediaPath(_workAt(i)) != null,
       );
+      // 池计划是槽位生命周期的唯一决策源：池外空闲槽位立即释放，
+      // 不再靠 `_slotForPreload()` 的「预算满就复用」隐式回收
+      // （那条路径会留下仍在 `_slots` 里、却已被 stop 的槽位）。
+      if (plan.release.isNotEmpty) {
+        _releaseSlots((s) => plan.release.contains(s.sid));
+      }
       for (final idx in plan.preload) {
         if (!mounted || gen != _preloadGen) return;
         if (idx == cur || idx < 0 || idx >= widget.works.length) continue;
