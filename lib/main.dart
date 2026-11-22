@@ -3955,9 +3955,8 @@ class _LibraryPageState extends State<LibraryPage> {
   /// J3：旧注册表默认收起，只在需要管理时展开。
   bool legacyOpen = false;
 
-  /// G：服务端 `/api/libraries.json` 下发的基础库第一张作品封面（`fc`）。
-  /// 仅作无手动封面/无播放数据时的最后兜底，避免卡片空白。
-  final Map<String, String> _fcByLib = <String, String>{};
+  /// G：服务端 `/api/libraries.json` 下发的基础库第一张作品封面（`fc`）
+  /// 现在由 `BasicLib.firstCover` 携带（单一来源），不再另存一份映射。
 
   @override
   void initState() {
@@ -4007,7 +4006,7 @@ class _LibraryPageState extends State<LibraryPage> {
       bestThumb: top?.thumb ?? '',
       crawlerThumb: b.crawlerCover,
       // G：没手动封面、没播放数据时用服务端下发的第一张作品封面。
-      firstThumb: _fcByLib[b.id] ?? '',
+      firstThumb: b.firstCover,
     );
     if (pick.isEmpty) {
       // 兜底：只要服务端给了爬虫封面（cv），就直接用它，避免任何挑选逻辑
@@ -4058,7 +4057,6 @@ class _LibraryPageState extends State<LibraryPage> {
         loading = true;
       }
     });
-    _fcByLib.clear();
     try {
       final sp = await SharedPreferences.getInstance();
       final all = migrateLegacy(
@@ -4130,9 +4128,6 @@ class _LibraryPageState extends State<LibraryPage> {
         for (final raw in (treeJson['basicLibraries'] as List?) ?? const []) {
           if (raw is! Map) continue;
           final id = '${raw['id'] ?? ''}'.trim();
-          // G：第一张作品封面（服务端 `fc`，已带 /media/<lib>/ 前缀）。
-          final fc = '${raw['fc'] ?? ''}'.trim();
-          if (id.isNotEmpty && fc.isNotEmpty) _fcByLib[id] = fc;
           final s = byBase['${raw['_serverBase'] ?? ''}'];
           if (id.isEmpty || s == null) continue;
           bindings[id] = {
@@ -4258,7 +4253,7 @@ class _LibraryPageState extends State<LibraryPage> {
   /// G：单元库子树里第一个非空的 `fc`（第一张作品封面）。
   ({String lib, String path})? _firstFcOfUnit(UnitLibrary u) {
     for (final b in u.allBasics) {
-      final fc = (_fcByLib[b.id] ?? '').trim();
+      final fc = b.firstCover.trim();
       if (fc.isNotEmpty) return (lib: b.id, path: fc);
     }
     return null;

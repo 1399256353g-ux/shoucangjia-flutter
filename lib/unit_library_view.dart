@@ -203,11 +203,14 @@ Map<String, String> unitHeadersOf(
 ///  1. [preset]：调用方已解析好的地址（手动 `_cover/` 等）；
 ///  2. 爬虫脚本抓到的封面（服务端索引 `cv`）；
 ///  3. 本库「App 播放量最高」作品的封面（有图文作品时优先图文图片）；
-///  4. 空串 → 卡片回退默认图标。
+///  4. 服务端下发的首张作品封面 `fc`（[BasicLib.firstCover]）；
+///  5. 空串 → 卡片回退默认图标。
 String basicCoverUrl(BasicLib basic, {String preset = '', String firstThumb = ''}) {
   final p = preset.trim();
   if (p.isNotEmpty) return p;
   final top = topPlayed(WorkPlaysStore.countsFor(basic.id));
+  // `fc` 只在调用方没指定时兜底用，保证「库 → 封面」只有一套取値口径。
+  final fb = firstThumb.trim().isNotEmpty ? firstThumb : basic.firstCover;
   // 服务端把自定义封面写在「库根/_cover/」，而 `/media/<库id>/` 已指向库根；
   // 再拼 rel 会变成 `<rel>/_cover/...` → 404（实测 2026-11-21）。
   final pick = pickBasicCover(
@@ -216,7 +219,7 @@ String basicCoverUrl(BasicLib basic, {String preset = '', String firstThumb = ''
     ext: basic.coverExt,
     crawlerThumb: basic.crawlerCover,
     bestThumb: top?.thumb ?? '',
-    firstThumb: firstThumb,
+    firstThumb: fb,
   );
   if (pick.isEmpty) return '';
   return absoluteMediaUrl(basic.serverBase, lib: basic.id, path: pick.path);
@@ -962,7 +965,8 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     );
     if (basicN > 0) {
       for (final b in unit.basics.take(basicN)) {
-        final cover = basicCoverUrl(b, preset: widget.coverOf?.call(b) ?? '');
+        final cover = basicCoverUrl(b,
+            preset: widget.coverOf?.call(b) ?? '', firstThumb: b.firstCover);
         add(basicUrls, basicHeaders, cover,
             widget.headersOf?.call(b.id) ?? const <String, String>{});
       }
@@ -1216,6 +1220,7 @@ class BasicLibCard extends StatelessWidget {
               url: basicCoverUrl(
                 basic,
                 preset: coverUrlOf?.call(basic) ?? coverUrl,
+                firstThumb: basic.firstCover,
               ),
               headers: headers,
               fallbackIcon: Icons.folder_outlined,

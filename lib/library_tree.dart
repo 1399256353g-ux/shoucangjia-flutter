@@ -27,6 +27,9 @@ class BasicLib {
   /// 0.9.9：爬虫脚本抓到的封面（作品目录 `cover.jpg`，服务端索引 `cv` 下发）；
   /// 空串表示没有。优先级介于手动封面与自动封面之间。
   final String crawlerCover;
+  /// G：服务端 `/api/libraries.json` 下发的「首张作品封面」（`fc`，已带
+  /// `/media/<lib>/` 前缀，且保证是图片）。只在手动/爬虫/播放量都拿不到图时兜底。
+  final String firstCover;
   /// J7：来源连接（多 IP 聚合时用于路由与去重展示）。
   final String serverId;
   final String serverBase;
@@ -42,6 +45,7 @@ class BasicLib {
     this.coverVersion = '',
     this.coverExt = 'jpg',
     this.crawlerCover = '',
+    this.firstCover = '',
     this.serverId = '',
     this.serverBase = '',
     this.serverLabel = '',
@@ -56,6 +60,7 @@ class BasicLib {
         'works': works,
         if (coverVersion.isNotEmpty) 'cover': {'v': coverVersion, 'e': coverExt},
         if (crawlerCover.isNotEmpty) 'cv': crawlerCover,
+        if (firstCover.isNotEmpty) 'fc': firstCover,
         if (serverId.isNotEmpty) '_serverId': serverId,
         if (serverBase.isNotEmpty) '_serverBase': serverBase,
         if (serverLabel.isNotEmpty) '_serverLabel': serverLabel,
@@ -123,6 +128,7 @@ class LibraryTree {
         coverVersion: coverPointerOf(raw['cover']).version,
         coverExt: coverPointerOf(raw['cover']).ext,
         crawlerCover: '${raw['cv'] ?? ''}'.trim(),
+        firstCover: '${raw['fc'] ?? ''}'.trim(),
         serverId: '${raw['_serverId'] ?? ''}'.trim(),
         serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
         serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
