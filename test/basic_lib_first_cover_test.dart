@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shoucangjia/library_tree.dart';
+import 'package:shoucangjia/source_lib.dart';
 import 'package:shoucangjia/unit_library_view.dart';
 import 'package:shoucangjia/work_plays.dart';
 
@@ -96,5 +97,18 @@ void main() {
     await t.pump();
     final img = t.widget<CachedNetworkImage>(find.byType(CachedNetworkImage));
     expect(img.imageUrl, contains('/media/lib-029/%40a/VID/cover.jpg'));
+  });
+
+  test('basicLibFromRef 保留 fc（单元库树构建不丢封面）', () {
+    const ref = BasicLibRef(
+      id: 'lib-029',
+      name: '(5) 强奸',
+      rel: '(5) 强奸',
+      firstCover: '/media/lib-029/x/cover.jpg',
+    );
+    final b = basicLibFromRef(ref);
+    expect(b.id, 'lib-029');
+    expect(b.firstCover, '/media/lib-029/x/cover.jpg');
+    expect(b.authors, 0);
   });
 }

@@ -12,6 +12,10 @@ class BasicLibRef {
   final String bigId;
   /// 基础库绝对路径；用于换算到其它坐标系（如库根 rel）。
   final String path;
+  /// 服务端下发的首张作品封面（`fc`，已是 `/media/<lib>/...` 的图片路径）。
+  /// 0.9.163 起 `BasicLib.firstCover` 是唯一下发口径；转成 `BasicLib` 时
+  /// 必须一并带上，否则单元库页的卡片会退化成空白占位。
+  final String firstCover;
 
   const BasicLibRef({
     required this.id,
@@ -19,6 +23,7 @@ class BasicLibRef {
     required this.rel,
     this.bigId = '',
     this.path = '',
+    this.firstCover = '',
   });
 
   @override
@@ -84,8 +89,13 @@ List<BasicLibRef> basicsUnderBase(
     final rel = relUnderBase(basePath, path);
     if (rel.isEmpty) continue;
     final name = diskNameOf(rel, rawName, where: 'BasicLibRef');
-    out.add(
-        BasicLibRef(id: id, name: name, rel: rel, bigId: bigId, path: path));
+    out.add(BasicLibRef(
+        id: id,
+        name: name,
+        rel: rel,
+        bigId: bigId,
+        path: path,
+        firstCover: '${e['fc'] ?? ''}'.trim()));
   }
   out.sort((a, b) => a.rel.compareTo(b.rel));
   return out;

@@ -509,14 +509,7 @@ class LibMeta {
               // 「单元库归属」用的基础库列表。
               final root = '${ljm['root'] ?? ''}'.trim();
               final basicList = <BasicLib>[
-                for (final b in basics)
-                  BasicLib(
-                      id: b.id,
-                      name: b.name,
-                      rel: b.rel,
-                      bigId: b.bigId,
-                      authors: 0,
-                      works: 0),
+                for (final b in basics) basicLibFromRef(b),
               ];
               var unitBasics = basicList;
               var rootBasics = const <BasicLibRef>[];
@@ -526,14 +519,7 @@ class LibMeta {
                 rootBasics = basicsUnderBase(ljm, root);
                 if (rootBasics.isNotEmpty) {
                   unitBasics = <BasicLib>[
-                    for (final b in rootBasics)
-                      BasicLib(
-                          id: b.id,
-                          name: b.name,
-                          rel: b.rel,
-                          bigId: b.bigId,
-                          authors: 0,
-                          works: 0),
+                    for (final b in rootBasics) basicLibFromRef(b),
                   ];
                 }
               }

@@ -1,5 +1,6 @@
 import 'disk_name.dart';
 import 'lib_cover.dart';
+import 'source_lib.dart';
 
 // 「大库 / 基础库」两级选择模型（纯函数，便于单测）。
 //
@@ -66,6 +67,21 @@ class BasicLib {
         if (serverLabel.isNotEmpty) '_serverLabel': serverLabel,
       };
 }
+
+/// 把 `BasicLibRef` 转成页面用的 `BasicLib`（单元库树构建时用）。
+///
+/// 统计字段由调用方补（树构建阶段没有 0 值以外的数据），但封面 `fc` 必须
+/// 原样带过来 —— 单元库页基础库卡片只读 `BasicLib.firstCover`。
+BasicLib basicLibFromRef(BasicLibRef r, {int authors = 0, int works = 0}) =>
+    BasicLib(
+      id: r.id,
+      name: r.name,
+      rel: r.rel,
+      bigId: r.bigId,
+      authors: authors,
+      works: works,
+      firstCover: r.firstCover,
+    );
 
 class BigLib {
   final String id;

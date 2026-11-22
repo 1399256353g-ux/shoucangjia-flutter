@@ -62,6 +62,21 @@ void main() {
     expect(basicLibForMedia(list, '/media/unknown/@a/x.jpg'), isNull);
   });
 
+  test('basicsUnderBase 保留服务端 fc', () {
+    final libs = {
+      'basicLibraries': [
+        {
+          'id': 'lib-029',
+          'name': '(5) 强奸',
+          'path': '$base/(5) 强奸',
+          'fc': '/media/lib-029/%40%E8%BF%B7/VID/cover.jpg',
+        },
+      ],
+    };
+    final refs = basicsUnderBase(libs, base);
+    expect(refs.single.firstCover, '/media/lib-029/%40%E8%BF%B7/VID/cover.jpg');
+  });
+
   test('basicLibLabel 去掉编号并支持空名回落', () {
     final list = basicsUnderBase(libraries, base);
     final shoe = list.firstWhere((e) => e.id == 'lib-016');
