@@ -111,4 +111,29 @@ void main() {
     expect(b.firstCover, '/media/lib-029/x/cover.jpg');
     expect(b.authors, 0);
   });
+
+  test('basicsUnderBase/basicLibFromRef 保留来源连接（卡片自己拼地址要靠它）', () {
+    final refs = basicsUnderBase({
+      'basicLibraries': [
+        {
+          'id': 'lib-029',
+          'name': 'Rape & Date Rape',
+          'path': '/root/A',
+          'big_id': 'big-01',
+          'fc': '/media/lib-029/a/cover.jpg',
+          '_serverId': 's1',
+          '_serverBase': 'http://nas:8090',
+          '_serverLabel': 'NAS',
+        },
+      ],
+    }, '/root');
+    expect(refs, hasLength(1));
+    expect(refs.single.serverBase, 'http://nas:8090');
+    expect(refs.single.serverLabel, 'NAS');
+    expect(refs.single.serverId, 's1');
+    // 缺 base 时 `basicCoverUrl` 只能返回空串 → 灰卡；这里断言整条链能拼出地址。
+    final b = basicLibFromRef(refs.single);
+    expect(b.serverBase, 'http://nas:8090');
+    expect(basicCoverUrl(b), 'http://nas:8090/media/lib-029/a/cover.jpg');
+  });
 }

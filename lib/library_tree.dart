@@ -81,6 +81,11 @@ BasicLib basicLibFromRef(BasicLibRef r, {int authors = 0, int works = 0}) =>
       authors: authors,
       works: works,
       firstCover: r.firstCover,
+      // 连接信息必须跟着走：卡片自己的兜底解析（`basicCoverUrl` →
+      // `absoluteMediaUrl`）靠 `serverBase` 拼地址，缺了就是空串 → 灰卡。
+      serverId: r.serverId,
+      serverBase: r.serverBase,
+      serverLabel: r.serverLabel,
     );
 
 class BigLib {

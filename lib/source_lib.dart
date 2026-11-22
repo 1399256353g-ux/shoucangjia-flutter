@@ -16,6 +16,11 @@ class BasicLibRef {
   /// 0.9.163 起 `BasicLib.firstCover` 是唯一下发口径；转成 `BasicLib` 时
   /// 必须一并带上，否则单元库页的卡片会退化成空白占位。
   final String firstCover;
+  /// 来源连接：媒体/接口按基础库路由到各自服务器。转成 `BasicLib` 时一并
+  /// 带上，否则单元库页的卡片没有 base 就拼不出封面地址（0.9.164 遗留）。
+  final String serverId;
+  final String serverBase;
+  final String serverLabel;
 
   const BasicLibRef({
     required this.id,
@@ -24,6 +29,9 @@ class BasicLibRef {
     this.bigId = '',
     this.path = '',
     this.firstCover = '',
+    this.serverId = '',
+    this.serverBase = '',
+    this.serverLabel = '',
   });
 
   @override
@@ -95,7 +103,10 @@ List<BasicLibRef> basicsUnderBase(
         rel: rel,
         bigId: bigId,
         path: path,
-        firstCover: '${e['fc'] ?? ''}'.trim()));
+        firstCover: '${e['fc'] ?? ''}'.trim(),
+        serverId: '${e['_serverId'] ?? ''}'.trim(),
+        serverBase: '${e['_serverBase'] ?? ''}'.trim(),
+        serverLabel: '${e['_serverLabel'] ?? ''}'.trim()));
   }
   out.sort((a, b) => a.rel.compareTo(b.rel));
   return out;
