@@ -102,4 +102,76 @@ void main() {
       expect(b.normalized(display), isNull);
     });
   });
+
+  group('containDisplayRect', () {
+    test('竖图放进横向区域：高度贴合、水平居中、留黑边', () {
+      final r = containDisplayRect(const Size(1080, 1920), const Size(1000, 400));
+      expect(r.height, closeTo(400, 1e-6));
+      expect(r.width, closeTo(1080 * 400 / 1920, 1e-6));
+      expect(r.top, closeTo(0, 1e-6));
+      expect(r.left, closeTo((1000 - 1080 * 400 / 1920) / 2, 1e-6));
+      expect(r.width / r.height, closeTo(1080 / 1920, 1e-6));
+    });
+
+    test('横图放进竖向区域：宽度贴合、垂直居中', () {
+      final r = containDisplayRect(const Size(1920, 1080), const Size(400, 900));
+      expect(r.width, closeTo(400, 1e-6));
+      expect(r.height, closeTo(1080 * 400 / 1920, 1e-6));
+      expect(r.left, closeTo(0, 1e-6));
+      expect(r.top, closeTo((900 - 1080 * 400 / 1920) / 2, 1e-6));
+    });
+
+    test('非法尺寸返回空矩形（页面据此走「画面尺寸异常」）', () {
+      expect(containDisplayRect(Size.zero, const Size(100, 100)), Rect.zero);
+      expect(containDisplayRect(const Size(10, 10), Size.zero), Rect.zero);
+    });
+  });
+
+  group('构图链：选框 → 归一化 → 图片像素', () {
+    // 9:16 竖屏源（视频作品常见）放在 1000×400 的横向可用区里，
+    // 两侧各约 387.5 的黑边——选框只在图片显示矩形内活动。
+    const image = Size(1080, 1920);
+    final shown = containDisplayRect(image, const Size(1000, 400));
+
+    test('选框在显示区内的相对位置 = 图片像素的相对位置', () {
+      // 取显示区上半部的一个框（人脸通常在上面）
+      final box = CoverCropBox(
+        Rect.fromLTWH(shown.width * 0.25, shown.height * 0.10,
+            shown.width * 0.5, shown.width * 0.5 / kLibraryCoverAspect),
+        kLibraryCoverAspect,
+      );
+      final n = box.normalized(shown.size)!;
+      expect(n[0], closeTo(0.25, 1e-6));
+      expect(n[1], closeTo(0.10, 1e-6));
+      expect(n[2], closeTo(0.5, 1e-6));
+      // 换算回源图像素：框住的就是源图这一块
+      final px = Rect.fromLTWH(n[0] * image.width, n[1] * image.height,
+          n[2] * image.width, n[3] * image.height);
+      expect(px.left, closeTo(image.width * 0.25, 1e-6));
+      expect(px.top, closeTo(image.height * 0.10, 1e-6));
+      // 入库裁切比例必须还是库卡片比例（不会被卡片再裁一次）
+      expect(px.width / px.height, closeTo(kLibraryCoverAspect, 1e-6));
+    });
+
+    test('黑边偏移不参与归一化（框贴右边界仍落在图片内）', () {
+      final box = CoverCropBox.initial(shown.size, kLibraryCoverAspect)
+          .moved(const Offset(9999, 0), shown.size);
+      final n = box.normalized(shown.size)!;
+      expect(n[0] + n[2], closeTo(1.0, 1e-6));
+      final pxRight = (n[0] + n[2]) * image.width;
+      expect(pxRight, closeTo(image.width, 1e-6));
+    });
+
+    test('不同显示尺寸下，同一构图归一化结果一致', () {
+      const wide = Size(1400, 500);
+      final shownWide = containDisplayRect(image, wide);
+      final a = CoverCropBox.initial(shown.size, kLibraryCoverAspect)
+          .normalized(shown.size)!;
+      final b = CoverCropBox.initial(shownWide.size, kLibraryCoverAspect)
+          .normalized(shownWide.size)!;
+      for (var i = 0; i < 4; i++) {
+        expect(b[i], closeTo(a[i], 1e-6), reason: '元素 $i');
+      }
+    });
+  });
 }

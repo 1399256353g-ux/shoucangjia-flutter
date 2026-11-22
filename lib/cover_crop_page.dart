@@ -128,7 +128,7 @@ class _CoverCropPageState extends State<CoverCropPage> {
                         ? 1.0
                         : cons.maxHeight - 24 - 104,
                   );
-                  final imageRect = _containRect(
+                  final imageRect = containDisplayRect(
                     Size(img.width.toDouble(), img.height.toDouble()),
                     area,
                   ).translate(12, 12);
@@ -238,17 +238,6 @@ class _CoverCropPageState extends State<CoverCropPage> {
     );
   }
 
-  /// `BoxFit.contain` 的显示矩形（在给定可用区域内居中）。
-  static Rect _containRect(Size src, Size area) {
-    if (src.width <= 0 || src.height <= 0) return Rect.zero;
-    if (area.width <= 0 || area.height <= 0) return Rect.zero;
-    final scale = math_min(area.width / src.width, area.height / src.height);
-    final w = src.width * scale;
-    final h = src.height * scale;
-    return Rect.fromLTWH((area.width - w) / 2, (area.height - h) / 2, w, h);
-  }
-
-  static double math_min(double a, double b) => a < b ? a : b;
 }
 
 /// 选框外侧压暗（内部保持原亮度）。

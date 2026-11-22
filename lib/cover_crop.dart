@@ -17,6 +17,22 @@ const double kLibraryCoverAspect = 1.02;
 /// 截取框的最小边（显示像素）。太小说明用户没真正框选，按整帧处理。
 const double kCoverCropMinEdge = 44;
 
+/// `BoxFit.contain` 的显示矩形：源图 [src] 在可用区域 [area] 内等比缩放并居中。
+///
+/// 截取页必须用这个矩形作为「图片坐标系」——选框是它的局部坐标，
+/// 归一化后再乘回图片像素尺寸，才能保证「选框构图 = 入库卡片构图」。
+/// 抽成纯函数是为了让这条链路可单测（页面布局与协议换算共用同一口径）。
+Rect containDisplayRect(Size src, Size area) {
+  if (src.width <= 0 || src.height <= 0) return Rect.zero;
+  if (area.width <= 0 || area.height <= 0) return Rect.zero;
+  final scale =
+      math.min(area.width / src.width, area.height / src.height);
+  if (scale <= 0 || !scale.isFinite) return Rect.zero;
+  final w = src.width * scale;
+  final h = src.height * scale;
+  return Rect.fromLTWH((area.width - w) / 2, (area.height - h) / 2, w, h);
+}
+
 /// 截取框的四个角（缩放时以对角为锚点）。
 enum CropCorner { topLeft, topRight, bottomLeft, bottomRight }
 

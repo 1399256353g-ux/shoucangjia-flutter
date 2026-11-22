@@ -174,7 +174,9 @@ String unitCoverUrl(
     version: unit.node.coverVersion,
     ext: unit.node.coverExt,
     bestThumb: top?.thumb ?? '',
-    firstThumb: top == null ? firstThumb : '',
+    // 首张作品封面始终作为「最后一级」传入：有播放记录但那张记录的缩略图
+    // 不可用（视频路径/空）时，仍能落到库内第一张作品的图上，而不是空白卡片。
+    firstThumb: firstThumb,
   );
   if (pick.isEmpty) return '';
   final basics = unit.allBasics;
@@ -214,7 +216,7 @@ String basicCoverUrl(BasicLib basic, {String preset = '', String firstThumb = ''
     ext: basic.coverExt,
     crawlerThumb: basic.crawlerCover,
     bestThumb: top?.thumb ?? '',
-    firstThumb: top == null ? firstThumb : '',
+    firstThumb: firstThumb,
   );
   if (pick.isEmpty) return '';
   return absoluteMediaUrl(basic.serverBase, lib: basic.id, path: pick.path);

@@ -77,6 +77,7 @@ import 'ui_auto_hide.dart';
 import 'ui_fade.dart';
 import 'immersive.dart';
 import 'instant_route.dart';
+import 'gesture_verdict.dart';
 import 'volume_control.dart';
 import 'playback_menu.dart';
 import 'player_controls.dart';
@@ -9771,14 +9772,32 @@ class _PlayerPageState extends State<PlayerPage>
   ///   b) 到了信息层但抬手被别的手势抢走；
   ///   c) onTap 进了却在中途抛异常（界面无变化、日志也没有）。
   /// 指针级日志 + onTap 首行 + 异常记录，一次即可区分。
+  ///
+  /// 2026-11-22：`pointer-down/up` 只说明指针进了信息层，**不代表点击**。
+  /// 一次竖向上滑曾留下两行 `author-tap[...]` 被读成「点了没反应」，
+  /// 所以抬手时补一个明确的 `gesture=tap|swipe|hold` 判定。
   Offset? _diagPointer;
+  Offset? _diagDownPoint;
+  DateTime? _diagDownAt;
 
   void _authorTapDiag(String stage, {Object? error}) {
     try {
       final p = _diagPointer;
+      final down = _diagDownPoint;
+      final at = _diagDownAt;
+      var gesture = '';
+      if (stage == 'pointer-up' && p != null && down != null && at != null) {
+        final v = gestureVerdict(
+          down: down,
+          up: p,
+          held: DateTime.now().difference(at),
+        );
+        gesture =
+            ' gesture=${gestureVerdictName(v)} dx=${(p.dx - down.dx).toStringAsFixed(0)} dy=${(p.dy - down.dy).toStringAsFixed(0)}';
+      }
       CrashLog.instance.record(
         'author-tap[$stage] pos=${p == null ? 'null' : '${p.dx.toStringAsFixed(0)},${p.dy.toStringAsFixed(0)}'} '
-        'ui=$ui fs=$fs paused=$paused'
+        'ui=$ui fs=$fs paused=$paused$gesture'
         '${error == null ? '' : ' err=$error'}',
         kind: 'author',
       );
@@ -10554,6 +10573,8 @@ class _PlayerPageState extends State<PlayerPage>
               behavior: HitTestBehavior.translucent,
               onPointerDown: (e) {
                 _diagPointer = e.localPosition;
+                _diagDownPoint = e.localPosition;
+                _diagDownAt = DateTime.now();
                 _authorTapDiag('pointer-down');
               },
               onPointerUp: (e) {

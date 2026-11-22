@@ -201,9 +201,20 @@ String firstWorkCoverPath(List<dynamic> works) {
   return '';
 }
 
+/// 最后一级兜底：第一张作品的封面（只收图片）。
+///
+/// 只在「自定义 / 爬虫 / 播放量最高」都拿不到可用图片时才被用到；
+/// 视频路径（mp4/mov…）当封面只会一直渲染失败，因此直接判为无图。
+CoverPick pickFirstWorkCover(String firstThumb) {
+  final fb = firstThumb.trim();
+  if (!isCoverImagePath(fb)) return const CoverPick.none();
+  return CoverPick(fb);
+}
+
 /// 基础库封面：
 ///  - 有自定义版本 → `_cover/<version>.<ext>`；
 ///  - 否则取本机播放量最高的作品缩略图（[bestThumb]，由 WorkPlaysStore 提供）；
+///  - 再退到第一张作品的封面（[firstThumb]）；
 ///  - 都没有 → 空（显示默认图）。
 CoverPick pickBasicCover({
   required String rel,
@@ -217,16 +228,14 @@ CoverPick pickBasicCover({
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
   final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
   if (pick.isNotEmpty) return CoverPick(pick);
-  // 无播放数据时的兜底：第一张作品的封面（仅图片）。
-  final fb = firstThumb.trim();
-  if (fb.isNotEmpty && !isCoverImagePath(fb)) return const CoverPick.none();
-  if (fb.isNotEmpty) return CoverPick(fb);
-  return const CoverPick.none();
+  // 高优先级来源都不可用时的兜底：第一张作品的封面（仅图片）。
+  return pickFirstWorkCover(firstThumb);
 }
 
 /// 单元库（上级文件夹）封面：
 ///  - 有自定义版本 → `_cover/<version>.<ext>`；
 ///  - 否则取子树内本机播放量最高的作品缩略图（[bestThumb]，整棵子树合并）；
+///  - 再退到子树里第一张作品的封面（[firstThumb]）；
 ///  - 都没有 → 空（显示默认图）。
 CoverPick pickUnitCover({
   required String rel,
@@ -240,9 +249,5 @@ CoverPick pickUnitCover({
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
   final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
   if (pick.isNotEmpty) return CoverPick(pick);
-  // 无播放数据时的兜底：第一张作品的封面（仅图片）。
-  final fb = firstThumb.trim();
-  if (fb.isNotEmpty && !isCoverImagePath(fb)) return const CoverPick.none();
-  if (fb.isNotEmpty) return CoverPick(fb);
-  return const CoverPick.none();
+  return pickFirstWorkCover(firstThumb);
 }

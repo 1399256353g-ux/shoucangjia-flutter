@@ -195,5 +195,35 @@ void main() {
               .path,
           'top.jpg');
     });
+
+    test('高优先级来源是视频/空时，仍落到第一张作品封面', () {
+      // 有播放记录但记录里的缩略图是视频路径（fc 指向 mp4 的老数据）
+      expect(
+          pickUnitCover(
+                  rel: '(8) X', bestThumb: 'a/top.mp4', firstThumb: 'f.jpg')
+              .path,
+          'f.jpg');
+      expect(
+          pickBasicCover(
+                  rel: '', bestThumb: 'a/top.mp4', firstThumb: 'f.jpg')
+              .path,
+          'f.jpg');
+      // 爬虫封面也是视频时同样跳过
+      expect(
+          pickBasicCover(
+                  rel: '',
+                  crawlerThumb: 'a/cv.mp4',
+                  bestThumb: '',
+                  firstThumb: 'f.jpg')
+              .path,
+          'f.jpg');
+    });
+
+    test('第一张作品封面是视频/空时判为无图（不拼出必 404 的地址）', () {
+      expect(pickBasicCover(rel: '', firstThumb: 'a/x.mp4').isEmpty, isTrue);
+      expect(pickBasicCover(rel: '', firstThumb: '   ').isEmpty, isTrue);
+      expect(pickUnitCover(rel: '(8) X', firstThumb: 'a/x.mov').isEmpty, isTrue);
+      expect(pickFirstWorkCover('a/y.png').path, 'a/y.png');
+    });
   });
 }
