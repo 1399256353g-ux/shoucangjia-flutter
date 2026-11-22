@@ -3,10 +3,11 @@
 // 背景：`fc` 原来只存在主页状态里的 `_fcByLib` 映射，单元库页的基础库卡片
 // 拿不到 → 索引里「有 thumb/cover 但无媒体」的库卡片一直空白。现在统一由
 // `BasicLib.firstCover` 携带，卡片解析链路（`basicCoverUrl`）直接使用。
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shoucangjia/library_tree.dart';
-import 'package:shoucangjia/lib_cover.dart';
 import 'package:shoucangjia/unit_library_view.dart';
 import 'package:shoucangjia/work_plays.dart';
 
@@ -77,5 +78,23 @@ void main() {
       firstCover: '/media/lib-029/a/VID/clip.mp4',
     );
     expect(basicCoverUrl(videoFc), isEmpty);
+  });
+
+  testWidgets('单元库页基础库卡片：请求的封面就是 fc', (t) async {
+    final b = BasicLib(
+      id: 'lib-029',
+      name: 'Rape & Date Rape',
+      rel: '(1) A/(5) Rape & Date Rape',
+      bigId: 'big-01',
+      authors: 1,
+      works: 1,
+      serverBase: 'http://nas:8090',
+      firstCover: '/media/lib-029/%40a/VID/cover.jpg',
+    );
+    await t.pumpWidget(
+        MaterialApp(home: Scaffold(body: BasicLibCard(basic: b, onTap: () {}))));
+    await t.pump();
+    final img = t.widget<CachedNetworkImage>(find.byType(CachedNetworkImage));
+    expect(img.imageUrl, contains('/media/lib-029/%40a/VID/cover.jpg'));
   });
 }
