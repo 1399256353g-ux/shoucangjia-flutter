@@ -8820,7 +8820,10 @@ class _PlayerPageState extends State<PlayerPage>
       // iOS：音频在走、视频轨却始终没有尺寸（黑屏有声）。先重建纹理，
       // 仍不出画面才降级软解；不主动强制软解。
       _blackGuard?.cancel();
-      if (Platform.isIOS && w['t'] == 'v') {
+      // owner 2026-11-22：Android 也会出现「有声音、画面卡在封面」——视频轨
+      // 始终没报尺寸。看门狗原先只挂 iOS，现在两端都挂：先重建一次纹理，
+      // 仍无画面才降级软解（真坏了才降级，不主动强制）。
+      if ((Platform.isIOS || Platform.isAndroid) && w['t'] == 'v') {
         void check() {
           if (!mounted || my != _openToken || _failure != null) return;
           if (paused || loading || _videoDw > 1) return;
