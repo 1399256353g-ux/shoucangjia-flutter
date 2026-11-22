@@ -7882,7 +7882,11 @@ class _PlayerPageState extends State<PlayerPage>
   /// 自救上限取 2（补 play 两次），不做 reopen：起播阶段重开整条媒体在
   /// 机械盘上要重读一遍文件头，代价远大于收益，2 次仍不动就直接给
   /// 可见的失败态（可点重试）。
-  void _scheduleStartupCheck({int? limit, int bufferBase = -1, int waits = 0}) {
+  void _scheduleStartupCheck(
+      {int? limit,
+      int bufferBase = -1,
+      int fillWaits = 0,
+      int warmWaits = 0}) {
     _stallTimer?.cancel();
     final max = limit ?? (_stallMaxAttempts - 1);
     _stallCheckMax = max;
@@ -7899,7 +7903,11 @@ class _PlayerPageState extends State<PlayerPage>
       // 反而没有任何复查，页面就停在封面。改成用同一个 _stallTimer 继续
       // 观察，不新增第二个守卫。
       if (_opening || _buffering) {
-        _scheduleStartupCheck(limit: max, bufferBase: bufferBase, waits: waits);
+        _scheduleStartupCheck(
+            limit: max,
+            bufferBase: bufferBase,
+            fillWaits: fillWaits,
+            warmWaits: warmWaits);
         return;
       }
       var atMs = pos.inMilliseconds;
@@ -7917,28 +7925,51 @@ class _PlayerPageState extends State<PlayerPage>
             hasMedia || player.state.duration.inMilliseconds > 0 || st > 0;
       } catch (_) {}
       if (completed) return;
-      // 位置在走 = 真的在播：恢复自救计数后收工。
-      if (atMs - baseMs >= 300) {
-        _stallAttempts = 0;
-        return;
-      }
-      // 位置还没动，但缓存还在长 = 还在灌首帧，继续用同一个 _stallTimer
-      // 观察（最多让 2 个窗口 ≈2.4s，避免无限顺延掩盖真正的卡死）。
+      // 位置没前进时分两种「还没起播」：数据没到位（缓存没覆盖当前位置、
+      // 但仍在增长）→ filling；数据早已到位（缓存已覆盖当前位置，I/O 不是
+      // 瓶颈）→ warming。旧判据只看缓存增量，整段已缓存的条目增量可能为 0，
+      // 反而比冷文件更早被判成卡死。两条都继续用同一个 _stallTimer 观察，
+      // 各自限额；只有数据侧完全无进展才判卡死。
       final bufBase = bufferBase < 0 ? 0 : bufferBase;
-      if (startupStillFilling(
+      final signal = startupSignal(
         positionMs: atMs,
         basePositionMs: baseMs,
         bufferMs: bufferMs,
         baseBufferMs: bufBase,
-        waits: waits,
-      )) {
-        PauseTrace.mark('startup:filling buffer=$bufferMs waits=$waits');
-        _scheduleStartupCheck(
-            limit: max, bufferBase: bufferMs, waits: waits + 1);
-        return;
+        fillWaits: fillWaits,
+        warmWaits: warmWaits,
+      );
+      switch (signal) {
+        case StartupSignal.advancing:
+          // 位置在走 = 真的在播：恢复自救计数后收工。
+          _stallAttempts = 0;
+          return;
+        case StartupSignal.warming:
+          _stallAttempts = 0;
+          PauseTrace.mark('startup:warm buffer=$bufferMs '
+              'cover=${bufferMs - atMs} waits=$warmWaits');
+          _scheduleStartupCheck(
+              limit: max,
+              bufferBase: bufferMs,
+              fillWaits: fillWaits,
+              warmWaits: warmWaits + 1);
+          return;
+        case StartupSignal.filling:
+          _stallAttempts = 0;
+          PauseTrace.mark('startup:filling buffer=$bufferMs waits=$fillWaits');
+          _scheduleStartupCheck(
+              limit: max,
+              bufferBase: bufferMs,
+              fillWaits: fillWaits + 1,
+              warmWaits: warmWaits);
+          return;
+        case StartupSignal.stalled:
+          break;
       }
       PauseTrace.mark('stuck:startup id=${_watchIdFor(_workAt(cur))} '
-          'userPaused=$_userPaused hasMedia=$hasMedia attempts=$_stallAttempts');
+          'userPaused=$_userPaused hasMedia=$hasMedia buffer=$bufferMs '
+          'cover=${bufferMs - atMs} fill=$fillWaits warm=$warmWaits '
+          'attempts=$_stallAttempts');
       _applyStallRecovery(
         stallRecoveryAction(
           userPaused: _userPaused,

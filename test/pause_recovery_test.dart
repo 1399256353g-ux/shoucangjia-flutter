@@ -150,56 +150,95 @@ void main() {
     });
   });
 
-  group('startupStillFilling（起播窗口内是否仍在灌首帧）', () {
-    test('位置未动、缓存增长 → 还在灌，继续观察', () {
+  group('startupSignal（起播窗口判定）', () {
+    test('缓存已覆盖当前位置 → warming（慢在解码，不是 I/O）', () {
+      // 0.9.159 的真实场景：3.3 GB 条目整段已缓存，增量 0，
+      // buffer 596s 而位置还在 0 → 旧判据直接判卡死。
       expect(
-        startupStillFilling(
+        startupSignal(
           positionMs: 0,
           basePositionMs: 0,
-          bufferMs: 2000,
-          baseBufferMs: 0,
-          waits: 0,
+          bufferMs: 596000,
+          baseBufferMs: 596000,
         ),
-        isTrue,
+        StartupSignal.warming,
       );
     });
 
-    test('位置已前进 ≥300ms → 不是「仍在灌」，交给正常路径收工', () {
+    test('缓存未覆盖、但仍在增长 → filling（还在灌首帧）', () {
       expect(
-        startupStillFilling(
+        startupSignal(
+          positionMs: 0,
+          basePositionMs: 0,
+          bufferMs: 900,
+          baseBufferMs: 0,
+        ),
+        StartupSignal.filling,
+      );
+    });
+
+    test('位置已前进 ≥300ms → advancing', () {
+      expect(
+        startupSignal(
           positionMs: 400,
           basePositionMs: 0,
           bufferMs: 4000,
           baseBufferMs: 0,
-          waits: 0,
         ),
-        isFalse,
+        StartupSignal.advancing,
       );
     });
 
-    test('缓存没长（真卡死）→ 不豁免', () {
+    test('数据侧完全无进展 → stalled（真卡死）', () {
       expect(
-        startupStillFilling(
+        startupSignal(
           positionMs: 0,
           basePositionMs: 0,
-          bufferMs: 1200,
-          baseBufferMs: 1200,
-          waits: 0,
+          bufferMs: 500,
+          baseBufferMs: 500,
         ),
-        isFalse,
+        StartupSignal.stalled,
       );
     });
 
-    test('顺延已达上限 → 不再豁免，必须给出 stuck 判定', () {
+    test('warming 顺延到上限 → stalled，不再无限等待', () {
       expect(
-        startupStillFilling(
+        startupSignal(
           positionMs: 0,
           basePositionMs: 0,
-          bufferMs: 9000,
-          baseBufferMs: 1000,
-          waits: 2,
+          bufferMs: 596000,
+          baseBufferMs: 596000,
+          warmWaits: 2,
         ),
-        isFalse,
+        StartupSignal.stalled,
+      );
+    });
+
+    test('filling 顺延到上限 → stalled', () {
+      // 位置 10s、缓存只到 11s（未覆盖），增量 500ms 但额度已用完。
+      expect(
+        startupSignal(
+          positionMs: 10000,
+          basePositionMs: 10000,
+          bufferMs: 11000,
+          baseBufferMs: 10500,
+          fillWaits: 2,
+        ),
+        StartupSignal.stalled,
+      );
+    });
+
+    test('warming 与 filling 额度互不占用', () {
+      // filling 额度用完，但数据已覆盖 → 仍按 warming 处理。
+      expect(
+        startupSignal(
+          positionMs: 0,
+          basePositionMs: 0,
+          bufferMs: 596000,
+          baseBufferMs: 596000,
+          fillWaits: 2,
+        ),
+        StartupSignal.warming,
       );
     });
   });

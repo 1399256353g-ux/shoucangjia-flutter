@@ -110,23 +110,64 @@ StallRecoveryAction stallRecoveryAction({
       : StallRecoveryAction.reopen;
 }
 
-/// 起播窗口内「还在灌首帧」的判据。
+/// 起播观察窗口（一个 1.2 s 窗口）的判定结果。
 ///
-/// 大文件（3.3 GB / 25 Mbps）在机械盘上先填 demuxer 缓存，位置一直是 0，
-/// 但缓存本身在增长——这不是卡死。只在位置没前进、缓存确实增长、且顺延
-/// 次数未超上限时返回 true；顺延上限防止无限等待掩盖真正的卡死。
-bool startupStillFilling({
+/// 起播阶段只有「位置是否前进」是可靠的健康信号（mpv 管线卡死时仍可能报
+/// playing=true）。位置没前进时分两种「还没起播」的原因，必须分开看：
+///
+/// - 数据没到位（缓存还没覆盖当前位置、但仍在增长）→ [filling]
+/// - 数据早已到位（缓存已覆盖当前位置，I/O 不是瓶颈）→ [warming]
+///
+/// 后者是 0.9.159 的误判来源：整段已缓存的 3.3 GB 条目，缓存增量可能是 0，
+/// 旧判据只比「缓存增量」→ 文件越完整判得越快，反而比冷文件更早被记成
+/// `stuck:startup` 并重复补 play。判据按「是否已被数据卡住」排序，
+/// 而不是只看增量。
+enum StartupSignal {
+  /// 位置已前进 ≥ [minProgressMs]：真的在播。
+  advancing,
+
+  /// 位置未动，但缓存已覆盖当前位置（数据不是瓶颈）：解码/渲染预热中。
+  warming,
+
+  /// 位置未动，缓存尚未覆盖当前位置但仍在增长：仍在灌首帧。
+  filling,
+
+  /// 位置不动且数据侧无进展：真卡死。
+  stalled,
+}
+
+/// 起播窗口内单个窗口的判定。
+///
+/// 顺延次数分别计入，防止无限等待掩盖真正的卡死：
+/// [maxWarmWaits] 给「数据已就位、解码慢」的预热，[maxFillWaits] 给
+/// 「缓存还在灌」的等待。
+StartupSignal startupSignal({
   required int positionMs,
   required int basePositionMs,
   required int bufferMs,
   required int baseBufferMs,
-  required int waits,
-  int maxWaits = 2,
+  int fillWaits = 0,
+  int warmWaits = 0,
   int minProgressMs = 300,
-}) =>
-    waits < maxWaits &&
-    positionMs - basePositionMs < minProgressMs &&
-    bufferMs - baseBufferMs >= minProgressMs;
+  int coverMarginMs = 1500,
+  int maxFillWaits = 2,
+  int maxWarmWaits = 2,
+}) {
+  if (positionMs - basePositionMs >= minProgressMs) {
+    return StartupSignal.advancing;
+  }
+  // 数据已覆盖当前位置：慢在解码/渲染，不在 I/O。
+  if (bufferMs - positionMs >= coverMarginMs) {
+    return warmWaits < maxWarmWaits
+        ? StartupSignal.warming
+        : StartupSignal.stalled;
+  }
+  // 数据还没跟上，但在增长：确实还在灌首帧。
+  if (bufferMs - baseBufferMs >= minProgressMs && fillWaits < maxFillWaits) {
+    return StartupSignal.filling;
+  }
+  return StartupSignal.stalled;
+}
 
 /// O3：iOS 启动 1.5 秒内仍未播放时是否应重开一次。
 ///
