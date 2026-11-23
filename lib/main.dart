@@ -8158,6 +8158,13 @@ class _PlayerPageState extends State<PlayerPage>
   /// 说法不一致——那属于「用检测兜住结构问题」。现在直接派生自
   /// [PlaybackPhase.showsLoading]，写入点归零：相位前进，界面才前进。
   bool get loading => _phase.showsLoading;
+
+  /// 界面是否要表现「暂停中」。
+  ///
+  /// 相位机第 3 步（owner 2026-11-23）：显示层不能再看用户意图 [paused]，
+  /// 而要看**实际相位**。意图是「用户想不想播」，若播放器还在播（相位 playing），
+  /// 界面却画暂停图标，就又是两套说法分叉。
+  bool get _showsPaused => _phase.showsPaused;
   bool muted = false;
   double volume = 100;
   double lastVol = 100;
@@ -8466,14 +8473,19 @@ class _PlayerPageState extends State<PlayerPage>
   // G12：加载超时 / 播放器报错提示与重试
   PlaybackFailure? _failure;
   Timer? _loadTimeout;
-  // P2：缓冲状态只驱动一个小角落的提示层，独立于位置/时长，
-  // 切换缓冲态不再整页重建。
-  final ValueNotifier<bool> _bufferingVN = ValueNotifier<bool>(false);
-  final ValueNotifier<bool> _slowBufferVN = ValueNotifier<bool>(false);
-  bool get _buffering => _bufferingVN.value;
-  set _buffering(bool v) => _bufferingVN.value = v;
-  bool get _slowBuffer => _slowBufferVN.value;
-  set _slowBuffer(bool v) => _slowBufferVN.value = v;
+  /// 缓冲中：**唯一真源是相位**（[PlaybackPhase.buffering]）。
+  ///
+  /// 以前这里有 `_buffering` / `_slowBuffer` 两个 ValueNotifier（而且没有
+  /// 任何 `ValueListenableBuilder` 消费，等于两个普通布尔量）外加 5 处写入。
+  /// 相位里 `buffering` 事件早已就位，继续并行维护只会让两套说法分叉，
+  /// 所以这里改为派生：相位进入 buffering 就是缓冲，离开就不是。
+  bool get _buffering => _phase.showsBuffering;
+
+  /// 弱网缓冲（缓冲超过 [slowBufferThreshold] 仍未恢复）。
+  ///
+  /// 这不是兜底定时器：它只做「同一个 buffering 相位持续了多久」的计时，
+  /// 进入/离开缓冲都由相位驱动（见 [_feed]），计时本身不改变任何状态。
+  bool _slowBuffer = false;
   Timer? _slowBufferTimer;
   // J9：当前库的基础库/统计，用于信息行的来源词条与等级词条
   LibMeta? _meta;
@@ -8775,22 +8787,9 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.buffering.listen((b) {
       if (!identical(p, player)) return;
       if (!mounted) return;
-      if (!b) {
-        _slowBufferTimer?.cancel();
-        _slowBufferTimer = null;
-        // 只改 ValueNotifier：提示层自行消失，视频/信息/任务栏不重建。
-        _feed(PlaybackEvent.bufferEnd);
-        _buffering = false;
-        _slowBuffer = false;
-        return;
-      }
-      if (_buffering) return;
-      _feed(PlaybackEvent.bufferStart);
-      _buffering = true;
-      _slowBufferTimer?.cancel();
-      _slowBufferTimer = Timer(slowBufferThreshold, () {
-        if (mounted && _buffering) _slowBuffer = true;
-      });
+      // 缓冲起止只喂事件，缓冲态本身由相位表达（[_feed] 里统一处理
+      // 弱网计时与复位），监听回调不再自己维护布尔量。
+      _feed(b ? PlaybackEvent.bufferStart : PlaybackEvent.bufferEnd);
     }));
     // O4：跟踪视频显示宽高比，供手机端任务栏贴画面下沿。
     _playerSubs.add(p.stream.videoParams.listen((vp) {
@@ -9231,6 +9230,24 @@ class _PlayerPageState extends State<PlayerPage>
     final next = nextPhase(_phase, e);
     if (next == _phase) return;
     _phase = next;
+    // 弱网计时跟着相位走：只在「刚进入缓冲」时起表，离开缓冲立刻复位。
+    // 这样 `_slowBuffer` 不可能与相位分叉，也不需要各处手动清。
+    // 它只作为「跳过预热」的判断输入（见 [_scheduleVideoPrefetch]），
+    // 不参与任何渲染，所以这里不需要 setState。
+    if (next == PlaybackPhase.buffering) {
+      if (!_slowBuffer) {
+        _slowBufferTimer?.cancel();
+        _slowBufferTimer = Timer(slowBufferThreshold, () {
+          if (!mounted) return;
+          if (_phase != PlaybackPhase.buffering) return;
+          _slowBuffer = true;
+        });
+      }
+    } else {
+      _slowBufferTimer?.cancel();
+      _slowBufferTimer = null;
+      _slowBuffer = false;
+    }
     final wantsPause = next == PlaybackPhase.paused;
     final wantsPlay = next == PlaybackPhase.playing;
     final contradiction = (wantsPause && !paused) || (wantsPlay && paused);
@@ -9248,8 +9265,6 @@ class _PlayerPageState extends State<PlayerPage>
     _loadTimeout?.cancel();
     _loadTimeout = null;
     _cancelVideoPrefetch();
-    _slowBufferTimer?.cancel();
-    _slowBufferTimer = null;
     PauseTrace.mark('failure:${f.kind.name}');
     // 失败的槽位不能继续当作「已就绪」留在池里，否则切条会命中一个
     // 出不了画的槽位；重试走 open() 会重新登记。
@@ -9261,8 +9276,6 @@ class _PlayerPageState extends State<PlayerPage>
     _feed(PlaybackEvent.error);
     setState(() {
       _failure = f;
-      _buffering = false;
-      _slowBuffer = false;
       _pausedIntent = true;
     });
   }
@@ -9315,8 +9328,6 @@ class _PlayerPageState extends State<PlayerPage>
     setState(() {
       _failure = null;
       _pausedIntent = false;
-      _buffering = false;
-      _slowBuffer = false;
     });
     await open(cur);
   }
@@ -9324,13 +9335,10 @@ class _PlayerPageState extends State<PlayerPage>
   void _retryPlayback() {
     if (!mounted) return;
     _loadTimeout?.cancel();
-    _slowBufferTimer?.cancel();
-    // 失败后重试同样是一次重开。
+    // 失败后重试同样是一次重开（相位随之离开 buffering，弱网态自动复位）。
     _feed(PlaybackEvent.open);
     setState(() {
       _failure = null;
-      _buffering = false;
-      _slowBuffer = false;
     });
     open(cur);
   }
@@ -9725,8 +9733,6 @@ class _PlayerPageState extends State<PlayerPage>
         captionOpen = false;
         _pausedIntent = true;
         _failure = null;
-        _buffering = false;
-        _slowBuffer = false;
         pos = Duration.zero;
         dur = Duration.zero;
       });
@@ -9745,7 +9751,6 @@ class _PlayerPageState extends State<PlayerPage>
     _pausedByBackground = false;
     autoTimer?.cancel();
     _loadTimeout?.cancel();
-    _slowBufferTimer?.cancel();
     _preloadTimer?.cancel();
     _preloadTimer = null;
     manualPic = false;
@@ -9774,8 +9779,6 @@ class _PlayerPageState extends State<PlayerPage>
       pos = Duration.zero;
       dur = Duration.zero;
       _failure = null;
-      _buffering = false;
-      _slowBuffer = false;
       dropDayLeft = 1;
       dropWeekLeft = 3;
       dropTotal = 0;
@@ -11535,8 +11538,6 @@ class _PlayerPageState extends State<PlayerPage>
     _progressVN.dispose();
     _posVN.dispose();
     _durVN.dispose();
-    _bufferingVN.dispose();
-    _slowBufferVN.dispose();
     super.dispose();
   }
 
@@ -12624,7 +12625,7 @@ class _PlayerPageState extends State<PlayerPage>
     switch (slot) {
       case TaskbarSlot.play:
         // M3/O2：桌面端播放/暂停常驻任务栏主位；手机端由画面中央大圆钮承担。
-        return TaskbarPlayButton(paused: paused, onPressed: togglePause);
+        return TaskbarPlayButton(paused: _showsPaused, onPressed: togglePause);
       case TaskbarSlot.episodes:
         // J5：视频合集章节——`1/12` 单入口，点击弹出集数列表。
         return TaskbarEpisodeButton(
@@ -14042,7 +14043,7 @@ class _PlayerPageState extends State<PlayerPage>
                             decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: Colors.black.withValues(alpha: 0.45)),
-                            child: Icon(paused ? Icons.play_arrow : Icons.pause,
+                            child: Icon(_showsPaused ? Icons.play_arrow : Icons.pause,
                                 size: 44, color: Colors.white70),
                           ),
                         ),
@@ -14054,7 +14055,7 @@ class _PlayerPageState extends State<PlayerPage>
               // 0.8s / Curves.easeOut 淡出（每次暂停重新计时）。
               // owner 2026-11-22：非全屏暂停时要能看到半透明播放标（原来只在
               // 0.8s 提示动画期间出现，之后就没有了），改为暂停期间常显。
-              if (!fs && !broken && paused)
+              if (!fs && !broken && _showsPaused)
                 const Positioned.fill(
                   child: IgnorePointer(
                     child: Center(
@@ -14175,7 +14176,7 @@ class _PlayerPageState extends State<PlayerPage>
                                                 tbBtnW: tbBtnW,
                                                 taskbar: taskbar,
                                                 chapterCount: chapterCount,
-                                                paused: paused,
+                                                paused: _showsPaused,
                                                 speed: speed,
                                                 muted: muted,
                                                 volume: volume,
