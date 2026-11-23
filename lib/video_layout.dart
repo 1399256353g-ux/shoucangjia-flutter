@@ -256,3 +256,24 @@ double stageInfoBottom({
   if (!hasProgressLayer) return base + g;
   return base + stageProgressOverlayHeight(hasChapter: hasChapter) + g;
 }
+
+/// 画面失真度：渲染基准框的宽高比相对源比例的偏差（0 = 完全不变形）。
+///
+/// 这是「拉伸」的唯一量化判据，替代截图目测：
+///  `Video(fit: BoxFit.fill)` 会把画面拉满它所在的框，因此只要框的宽高比
+///  与源比例不一致，画面就被拉伸了。[videoBaseSize] 按源比例算框，所以正常
+///  情况下结果恒为 0；一旦有人把宽度 clamp 回去（0.9.x 曾有这段代码），
+///  这个函数会立刻给出非 0 值。
+///
+/// 返回值是**相对偏差**：0.02 表示偏差 2%（超出即视为拉伸）。
+double videoDistortion({required double? sourceAspect, required Size base}) {
+  if (sourceAspect == null || !sourceAspect.isFinite || sourceAspect <= 0) {
+    return 0;
+  }
+  if (base.width <= 0 || base.height <= 0) return 0;
+  final boxAspect = base.width / base.height;
+  return ((boxAspect - sourceAspect) / sourceAspect).abs();
+}
+
+/// 拉伸判据的日志阈值：偏差超过 2% 才算拉伸（与视频参数重排阈值一致）。
+const double kStretchTolerance = 0.02;

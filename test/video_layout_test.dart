@@ -244,4 +244,43 @@ void main() {
       }
     });
   });
+
+  group('拉伸判据（不看画面，只看渲染框比例）', () {
+    test('基准框按源比例生成 → 失真恒为 0', () {
+      for (final a in [9 / 16, 16 / 9, 3 / 4, 1.0, 21 / 9]) {
+        final base = videoBaseSize(aspect: a);
+        expect(videoDistortion(sourceAspect: a, base: base), closeTo(0, 1e-9),
+            reason: 'aspect=$a');
+      }
+    });
+
+    test('极宽/极窄也不失真（旧的宽度 clamp 一定会失败）', () {
+      for (final a in [0.15, 0.25, 8.0, 12.0]) {
+        final base = videoBaseSize(aspect: a);
+        expect(videoDistortion(sourceAspect: a, base: base),
+            lessThan(kStretchTolerance),
+            reason: 'aspect=$a 拉伸判据应通过');
+      }
+    });
+
+    test('框被夹住时能报出具体偏差（判据本身有效）', () {
+      // 9:16 的画面被塞进 16:9 的框：0.5625 → 1.7778，偏差 216%
+      final bad = videoDistortion(
+          sourceAspect: 9 / 16, base: const Size(1280, 720));
+      expect(bad, greaterThan(kStretchTolerance));
+      expect(bad, closeTo((16 / 9) / (9 / 16) - 1, 1e-9));
+      // 2% 边界两侧
+      final ok = videoDistortion(
+          sourceAspect: 1.0, base: const Size(1000, 1000 * 1.02));
+      expect(ok, closeTo(0.0196, 1e-3));
+      expect(ok, lessThan(kStretchTolerance));
+    });
+
+    test('比例缺失或框尺寸非法时返回 0，不误报', () {
+      expect(videoDistortion(sourceAspect: null, base: const Size(10, 10)), 0);
+      expect(videoDistortion(sourceAspect: 0.5, base: Size.zero), 0);
+      expect(
+          videoDistortion(sourceAspect: double.nan, base: const Size(9, 16)), 0);
+    });
+  });
 }

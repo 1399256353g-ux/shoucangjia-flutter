@@ -8028,7 +8028,11 @@ Future<void> _setupMpvDiskCache(Player p) async {
     } catch (_) {}
     await np.setProperty('cache', 'yes');
     await np.setProperty('cache-on-disk', 'yes');
-    await np.setProperty('cache-dir', cacheDir);
+    // mpv 0.38 起 `cache-dir` 已改名为 `demuxer-cache-dir`，旧名只保留兼容
+    // 并在每次创建播放器时抛一条 warn（0.9.197 设备日志里实测到这条）。
+    // 继续用旧名意味着磁盘缓存目录随时可能失效，且日志里多一行噪音；
+    // 这里直接用**新名**，失败时由外层 catch 兜住（不写第二套兜底属性）。
+    await np.setProperty('demuxer-cache-dir', cacheDir);
     // 单条 64MB 头部缓存，回读 32MB；SSD 上这点写入可以忽略。
     await np.setProperty('demuxer-max-bytes', '67108864');
     await np.setProperty('demuxer-max-back-bytes', '33554432');
@@ -8860,6 +8864,14 @@ class _PlayerPageState extends State<PlayerPage>
       final curWork = _workAt(cur);
       final before = _videoAspectFor(curWork);
       _rememberPlayerAspect(curWork, a);
+      // 拉伸判据（非内容判据）：渲染框按源比例算，正常应为 0。
+      // 一旦 >2%，说明有人把框的宽度/高度夹住了，画面必定变形。
+      // 记一条可量化日志，验收不必看画面。
+      final dist = videoDistortion(
+          sourceAspect: a, base: videoBaseSize(aspect: a));
+      if (dist > kStretchTolerance) {
+        PauseTrace.mark('stretch:dist=${(dist * 100).toStringAsFixed(2)}%');
+      }
       // 已是同一比例（或只在 2% 内摆动）就不重排，避免像素级跳动。
       if (before != null && (before - a).abs() / before < 0.02) return;
       setState(() => _videoAspect = a);
