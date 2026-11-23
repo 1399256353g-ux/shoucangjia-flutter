@@ -248,6 +248,8 @@ Map<String, Map<String, String>> buildBindings({
       'user': s.user,
       'pass': s.pass,
       'server': s.id,
+      // owner 2026-11-24：首页媒体库卡片要显示连接名，绑定必须带上它。
+      'label': s.title,
     };
   }
   return out;

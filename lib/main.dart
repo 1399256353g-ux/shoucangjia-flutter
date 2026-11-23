@@ -228,7 +228,7 @@ class Cfg {
   }
 
   void bindLibrary(String libId, String base,
-      {String? user, String? pass, String? server}) {
+      {String? user, String? pass, String? server, String? label}) {
     final b = normalizeBase(base);
     if (libId.isEmpty || b.isEmpty) return;
     _bindings[libId] = {
@@ -236,12 +236,28 @@ class Cfg {
       'user': user ?? this.user,
       'pass': pass ?? this.pass,
       'server': server ?? '',
+      'label': label ?? '',
     };
   }
 
   String baseFor([String? libId]) {
     final l = libId ?? lib;
     return _bindings[l]?['base'] ?? base;
+  }
+
+  /// 该库所属连接的 id；未绑定时回落到当前连接。
+  ///
+  /// owner 2026-11-24：首页卡片必须按「连接」归组，否则层级会错位——
+  /// 节点没有连接标识时，`buildUnitTree` 会把第一层目录当媒体库卡片。
+  String serverIdFor([String? libId]) {
+    final l = libId ?? lib;
+    return _bindings[l]?['server'] ?? '';
+  }
+
+  /// 该库所属连接的显示名；未绑定时返回空串（由调用方决定兜底文案）。
+  String serverLabelFor([String? libId]) {
+    final l = libId ?? lib;
+    return _bindings[l]?['label'] ?? '';
   }
 
   /// P5：断开某条连接后，清掉它名下的库路由与凭据，
@@ -633,7 +649,10 @@ class LibMeta {
               final nodes = marks.isEmpty
                   ? nodesFromV2(ljm, root: base)
                   : nodesFromMarks(marks,
-                      covers: markCovers, serverBase: cfg.base);
+                      covers: markCovers,
+                      serverBase: cfg.base,
+                      serverId: cfg.serverIdFor(cfg.lib),
+                      serverLabel: cfg.serverLabelFor(cfg.lib));
               final tree = buildUnitTree(
                   nodes: nodes,
                   basics: unitBasics,
@@ -4957,6 +4976,7 @@ class _LibraryPageState extends State<LibraryPage> {
             'user': s.user,
             'pass': s.pass,
             'server': s.id,
+            'label': s.title,
           };
         }
       }
@@ -5421,7 +5441,8 @@ class _LibraryPageState extends State<LibraryPage> {
       cfg.bindLibrary(cfg.lib, sb,
           user: '${l['_serverUser'] ?? cfg.user}',
           pass: '${l['_serverPass'] ?? cfg.pass}',
-          server: '${l['_serverId'] ?? ''}');
+          server: '${l['_serverId'] ?? ''}',
+          label: '${l['_serverLabel'] ?? ''}');
     }
     final sp = await SharedPreferences.getInstance();
     await sp.setString('lib', cfg.lib);
@@ -12710,6 +12731,34 @@ class _PlayerPageState extends State<PlayerPage>
           width: fs ? 46 : tbBtnW,
           onPressed: _showPlaybackSettings,
         );
+      // owner 2026-11-24：三个开关直接摆在任务栏，不再只藏在菜单里。
+      case TaskbarSlot.autoplay:
+        // 自动连播：用「列表+播放」的实心图标，与循环/乱序明显区分。
+        return TaskbarToggleButton(
+          icon: Icons.skip_next_rounded,
+          label: '自动连播',
+          active: autoplay && !loopOne,
+          width: fs ? 46 : tbBtnW,
+          onPressed: loopOne ? () {} : toggleAutoplay,
+        );
+      case TaskbarSlot.loop:
+        // 单条循环：带「1」的环形箭头，一眼可辨。
+        return TaskbarToggleButton(
+          icon: Icons.repeat_one_rounded,
+          label: '单条循环',
+          active: loopOne,
+          width: fs ? 46 : tbBtnW,
+          onPressed: toggleLoop,
+        );
+      case TaskbarSlot.shuffle:
+        // 乱序：交叉箭头。
+        return TaskbarToggleButton(
+          icon: Icons.shuffle_rounded,
+          label: '乱序播放',
+          active: shuffle,
+          width: fs ? 46 : tbBtnW,
+          onPressed: toggleShuffle,
+        );
       case TaskbarSlot.sound:
         // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）。
         return TaskbarSoundButton(
@@ -12825,6 +12874,9 @@ class _PlayerPageState extends State<PlayerPage>
         TaskbarSlot.play => '播放/暂停',
         TaskbarSlot.episodes => '选集',
         TaskbarSlot.settings => '播放设置 ${speedLabel(speed)}',
+        TaskbarSlot.autoplay => '自动连播',
+        TaskbarSlot.loop => '单条循环',
+        TaskbarSlot.shuffle => '乱序播放',
         TaskbarSlot.sound => '声音',
         TaskbarSlot.volume => '音量',
         TaskbarSlot.drop => '送一颗小水滴',
@@ -12840,6 +12892,12 @@ class _PlayerPageState extends State<PlayerPage>
         _showChapters();
       case TaskbarSlot.settings:
         _showPlaybackSettings();
+      case TaskbarSlot.autoplay:
+        if (!loopOne) toggleAutoplay();
+      case TaskbarSlot.loop:
+        toggleLoop();
+      case TaskbarSlot.shuffle:
+        toggleShuffle();
       case TaskbarSlot.sound:
         toggleMute();
       case TaskbarSlot.volume:
@@ -13566,6 +13624,10 @@ class _PlayerPageState extends State<PlayerPage>
       if (taskbar.showPlayPause) TaskbarSlot.play,
       if (workChapterCount(w) > 1) TaskbarSlot.episodes,
       TaskbarSlot.settings,
+      // owner 2026-11-24：三个播放开关直接上栏，不再只藏在弹窗里。
+      TaskbarSlot.autoplay,
+      TaskbarSlot.loop,
+      TaskbarSlot.shuffle,
       if (_volumeUi) TaskbarSlot.sound,
       if (_volumeUi) TaskbarSlot.volume,
       TaskbarSlot.drop,
@@ -13575,13 +13637,19 @@ class _PlayerPageState extends State<PlayerPage>
       TaskbarSlot.play: 48,
       TaskbarSlot.episodes: fs ? 46.0 : tbBtnW,
       TaskbarSlot.settings: fs ? 46.0 : tbBtnW,
+      TaskbarSlot.autoplay: fs ? 46.0 : tbBtnW,
+      TaskbarSlot.loop: fs ? 46.0 : tbBtnW,
+      TaskbarSlot.shuffle: fs ? 46.0 : tbBtnW,
       TaskbarSlot.sound: fs ? 48.0 : tbBtnW,
       // 桌面端音量模块固定 104dp，明显比其他按钮宽，必须按真实宽度算。
       TaskbarSlot.volume: 104,
       TaskbarSlot.drop: fs ? 48.0 : tbBtnW,
       TaskbarSlot.display: taskbar.showRotate ? (fs ? 46.0 : tbBtnW) : 48,
     };
-    // 桌面端允许全部可见；移动端最多 5 个（owner 规格）。
+    // 桌面端允许全部可见；移动端按宽度取舍。
+    // owner 2026-11-24：加入自动连播/单条循环/乱序三个开关后，旧的「最多
+    // 5 个」会把常用按钮挤进「更多」菜单。上限放宽到 8，真正的约束交给
+    // 宽度（放不下才进菜单），但全屏键无论如何都保留。
     final tbPlan = taskbarPlan(
       items: tbSlots,
       availableWidth: viewSize.width -
@@ -13589,7 +13657,7 @@ class _PlayerPageState extends State<PlayerPage>
           pad.right -
           (fs ? 24 : kTaskbarSidePadding * 2),
       widthOf: (s) => tbWidthOf[s] ?? tbBtnW,
-      maxVisible: taskbar.showRotate ? 5 : 99,
+      maxVisible: taskbar.showRotate ? 8 : 99,
     );
     // A/T：任务栏实底后，视频舞台内缩到栏上方（首帧栏高未知，测量后校正）；
     // 移动端全屏为沉浸式，任务栏隐藏、舞台铺满屏幕。
@@ -14245,8 +14313,38 @@ class _PlayerPageState extends State<PlayerPage>
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             for (final slot in tbPlan.visible)
+                                              if (slot != TaskbarSlot.display)
+                                                _taskbarSlotWidget(
+                                                  slot: slot,
+                                                  fs: fs,
+                                                  tbBtnW: tbBtnW,
+                                                  taskbar: taskbar,
+                                                  chapterCount: chapterCount,
+                                                  paused: _showsPaused,
+                                                  speed: speed,
+                                                  muted: muted,
+                                                  volume: volume,
+                                                  toggleFs: toggleFs,
+                                                  toggleOrientation:
+                                                      toggleOrientation,
+                                                ),
+                                            if (tbPlan.hasOverflow)
+                                              TaskbarMoreButton(
+                                                key: const ValueKey(
+                                                    'taskbar-more'),
+                                                items: tbPlan.overflow,
+                                                labelOf: _taskbarSlotLabel,
+                                                onSelected: (s) =>
+                                                    _taskbarSlotAction(s),
+                                              ),
+                                            // owner 2026-11-24：全屏键固定最右侧。
+                                            // 原来它排在传入顺序末尾、又紧贴左边，
+                                            // 窄屏取舍后跑到左端，手很难按到。
+                                            const Spacer(),
+                                            if (tbPlan.visible
+                                                .contains(TaskbarSlot.display))
                                               _taskbarSlotWidget(
-                                                slot: slot,
+                                                slot: TaskbarSlot.display,
                                                 fs: fs,
                                                 tbBtnW: tbBtnW,
                                                 taskbar: taskbar,
@@ -14258,15 +14356,6 @@ class _PlayerPageState extends State<PlayerPage>
                                                 toggleFs: toggleFs,
                                                 toggleOrientation:
                                                     toggleOrientation,
-                                              ),
-                                            if (tbPlan.hasOverflow)
-                                              TaskbarMoreButton(
-                                                key: const ValueKey(
-                                                    'taskbar-more'),
-                                                items: tbPlan.overflow,
-                                                labelOf: _taskbarSlotLabel,
-                                                onSelected: (s) =>
-                                                    _taskbarSlotAction(s),
                                               ),
                                           ]),
                                     ),

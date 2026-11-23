@@ -126,7 +126,7 @@ void _m3DesktopTests() {
       expect(policy.showRotate, isFalse);
     });
 
-    test('移动端策略：O2 后任务栏不再有播放/暂停，只保留横竖屏', () {
+    test('移动端策略：任务栏不放播放/暂停（由点击屏幕承担），只保留横竖屏', () {
       for (final p in [
         taskbarPolicyFor(isAndroid: true, isIOS: false),
         taskbarPolicyFor(isAndroid: false, isIOS: true),

@@ -186,6 +186,56 @@ class TaskbarSettingsButton extends StatelessWidget {
   }
 }
 
+/// 任务栏开关按钮：自动连播 / 单条循环 / 乱序。
+///
+/// owner 2026-11-24：这三个开关原来只藏在「播放设置」弹窗里，任务栏上
+/// 看不到，看上去像被删了。精简是把同类项合并，不是把功能藏起来——
+/// 状态一目了然的东西应该直接摆在栏上。
+///
+/// 视觉约定：开启 = 实底白字（高对比）；关闭 = 半透明图标（低调不抢镜）。
+class TaskbarToggleButton extends StatelessWidget {
+  const TaskbarToggleButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onPressed,
+    this.width = kTaskbarTouchTarget,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onPressed;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = width < kTaskbarTouchTarget ? kTaskbarTouchTarget : width;
+    final color = active ? Colors.white : Colors.white38;
+    return Tooltip(
+      message: active ? '$label（开）' : '$label（关）',
+      child: Semantics(
+        button: true,
+        toggled: active,
+        label: label,
+        child: GestureDetector(
+          key: Key('taskbar-toggle-$label'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: SizedBox(
+            width: w,
+            height: 48,
+            child: Center(
+              child: Icon(icon, size: 20, color: color),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 任务栏声音按钮：点击静音；长按/左右拖动调音量（桌面端）。
 /// 移动端不渲染（音量交给系统音量键）。
 class TaskbarSoundButton extends StatelessWidget {
@@ -298,8 +348,8 @@ class TaskbarDisplayButton extends StatelessWidget {
 /// M3：任务栏平台策略。
 ///
 /// Windows/桌面端保持原交互：播放/暂停按钮必须常驻任务栏，横竖屏按钮
-/// 一律不渲染；Android/iOS 只显示横竖屏按钮（O2：手机端播放/暂停改由
-/// 画面中央大圆钮承担，任务栏不再重复放置）。把规则集中在这里，避免
+/// 一律不渲染；Android/iOS 只显示横竖屏按钮（O2：手机端播放/暂停由
+/// **点击屏幕**承担，任务栏不再重复放置）。把规则集中在这里，避免
 /// 调用点各自判断导致桌面端误出横屏按钮。
 class TaskbarPolicy {
   const TaskbarPolicy({required this.isAndroid, required this.isIOS});

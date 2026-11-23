@@ -28,8 +28,17 @@ enum TaskbarSlot {
   /// 剧集 `1/12`，点击弹集数列表。
   episodes,
 
-  /// 播放设置（倍速/循环/连播/乱序），显示当前倍速。
+  /// 播放设置（倍速），显示当前倍速。
   settings,
+
+  /// 自动连播开关（owner 2026-11-24：必须直接可见，不能只藏在菜单里）。
+  autoplay,
+
+  /// 单条循环开关。
+  loop,
+
+  /// 乱序播放开关。
+  shuffle,
 
   /// 声音（点击静音 / 长按拖动调音量）。
   sound,
@@ -52,12 +61,17 @@ enum TaskbarSlot {
 /// - 播放设置是规格里点名"可以并入更多菜单"的那一个，所以排最后。
 const Map<TaskbarSlot, int> kKeepPriority = {
   TaskbarSlot.play: 0,
+  // 全屏键固定最右侧，且必须始终可见（owner 2026-11-24：它曾被挤到左端）。
   TaskbarSlot.display: 1,
-  TaskbarSlot.episodes: 2,
-  TaskbarSlot.sound: 3,
-  TaskbarSlot.drop: 4,
-  TaskbarSlot.volume: 5,
-  TaskbarSlot.settings: 6,
+  // 三个播放开关是日常高频操作，优先级高于选集与声音。
+  TaskbarSlot.autoplay: 2,
+  TaskbarSlot.loop: 3,
+  TaskbarSlot.shuffle: 4,
+  TaskbarSlot.episodes: 5,
+  TaskbarSlot.sound: 6,
+  TaskbarSlot.drop: 7,
+  TaskbarSlot.volume: 8,
+  TaskbarSlot.settings: 9,
 };
 
 /// 「更多」按钮的固定宽度（触达 ≥44dp）。

@@ -412,10 +412,14 @@ List<LibNode> nodesFromMarks(
   Iterable<String> marks, {
   Map<String, String> covers = const <String, String>{},
   String serverBase = '',
+  String serverId = '',
+  String serverLabel = '',
 }) {
   final out = <LibNode>[];
   final seen = <String>{};
   final base = serverBase.trim();
+  final sid = serverId.trim();
+  final slabel = serverLabel.trim();
   for (final raw in marks) {
     final rel = splitRel(raw).join('/');
     if (rel.isEmpty || !seen.add(rel)) continue;
@@ -426,6 +430,10 @@ List<LibNode> nodesFromMarks(
       name: splitRel(rel).last,
       coverUrl: u.startsWith('/media/') ? u : '',
       serverBase: base,
+      // owner 2026-11-24：节点必须带连接标识，否则 buildUnitTree 退回
+      // 「第一层目录当卡片」的旧形态，把下级单元库错标成「媒体库」。
+      serverId: sid,
+      serverLabel: slabel,
     ));
   }
   return out;
