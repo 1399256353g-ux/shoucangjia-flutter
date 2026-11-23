@@ -8140,7 +8140,14 @@ class _PlayerPageState extends State<PlayerPage>
   PlaybackPhase _phase = PlaybackPhase.idle;
   /// 最近一次相位不一致的比对结果（仅用于诊断日志，不参与显示）。
   String _phaseMismatch = '';
-  bool loading = true;
+
+  /// 起播 loading：**唯一真源是相位**，不再单独维护布尔量。
+  ///
+  /// 以前 `loading` 在六处被各自赋值（open 命中/未命中、失败、不可播放、
+  /// 重试、软解重建），与相位并行推进时只能靠 `_feed` 的比对去发现两套
+  /// 说法不一致——那属于「用检测兜住结构问题」。现在直接派生自
+  /// [PlaybackPhase.showsLoading]，写入点归零：相位前进，界面才前进。
+  bool get loading => _phase.showsLoading;
   bool muted = false;
   double volume = 100;
   double lastVol = 100;
@@ -9205,21 +9212,22 @@ class _PlayerPageState extends State<PlayerPage>
   /// `loading / paused / _buffering` 写入点收敛成一个事件入口，
   /// 相位由 [nextPhase] 纯函数推进，避免各处 `if` 各自拍脑袋。
   ///
-  /// 本步不改变界面：`_phase` 只写日志。第 2 步才让 `showsLoading` /
-  /// `showsPaused` 接管显示，届时删除对应旧布尔量。
+  /// 起播 loading 已由 [loading] 派生自相位（单一真源）；[paused] 则相反，
+  /// 它是**用户意图**（点暂停/切后台/失败），相位由意图与播放器事件共同
+  /// 推出。这里只核对「真矛盾」：相位说暂停而意图是播放，或相位说在播
+  /// 而意图是暂停——ready/opening 这些过渡相位不参与比对，避免把正常
+  /// 过渡记成告警淹没真正的问题。
   void _feed(PlaybackEvent e) {
     final next = nextPhase(_phase, e);
     if (next == _phase) return;
     _phase = next;
-    // 并行期的一致性核对：相位说该转圈，旧布尔量也该在转圈。
-    final boolLoading = next.showsLoading;
-    final boolPaused = next.showsPaused;
-    if (boolLoading != loading || boolPaused != paused) {
-      _phaseMismatch = 'phase=${next.name} '
-          'loading=$loading/${boolLoading ? 1 : 0} '
-          'paused=$paused/${boolPaused ? 1 : 0}';
+    final wantsPause = next == PlaybackPhase.paused;
+    final wantsPlay = next == PlaybackPhase.playing;
+    final contradiction = (wantsPause && !paused) || (wantsPlay && paused);
+    if (contradiction) {
+      _phaseMismatch = 'phase=${next.name} paused=$paused';
       Breadcrumb.mark('phase:mismatch', _phaseMismatch);
-    } else {
+    } else if (_phaseMismatch.isNotEmpty) {
       _phaseMismatch = '';
     }
   }
@@ -9243,7 +9251,6 @@ class _PlayerPageState extends State<PlayerPage>
     _feed(PlaybackEvent.error);
     setState(() {
       _failure = f;
-      loading = false;
       _buffering = false;
       _slowBuffer = false;
       paused = true;
@@ -9297,7 +9304,6 @@ class _PlayerPageState extends State<PlayerPage>
     _feed(PlaybackEvent.open);
     setState(() {
       _failure = null;
-      loading = true;
       paused = false;
       _buffering = false;
       _slowBuffer = false;
@@ -9313,7 +9319,6 @@ class _PlayerPageState extends State<PlayerPage>
     _feed(PlaybackEvent.open);
     setState(() {
       _failure = null;
-      loading = true;
       _buffering = false;
       _slowBuffer = false;
     });
@@ -9708,7 +9713,6 @@ class _PlayerPageState extends State<PlayerPage>
         cur = i;
         _setPicIndex(0);
         captionOpen = false;
-        loading = false;
         paused = true;
         _failure = null;
         _buffering = false;
@@ -9754,8 +9758,7 @@ class _PlayerPageState extends State<PlayerPage>
       cur = i;
       _setPicIndex(0);
       captionOpen = false;
-      // 缓存命中说明首帧已就绪，直接显示画面，不闪加载圈
-      loading = !canUsePreload;
+      // 缓存命中 → mediaReady → 相位 ready，不再转圈；未命中 → opening 仍在转圈。
       paused = false;
       // P2 §11：新页进度归零，绝不用上一条的进度渲染进度条。
       pos = Duration.zero;
@@ -9958,7 +9961,6 @@ class _PlayerPageState extends State<PlayerPage>
       final keepsPaused = paused && (w['t'] == 'v' || _pausedByBackground);
       _feed(keepsPaused ? PlaybackEvent.pause : PlaybackEvent.play);
       setState(() {
-        loading = false;
         // 若打开过程中被切到后台，保持暂停，等回前台再恢复
         if (w['t'] != 'v' && !_pausedByBackground) paused = false;
       });
