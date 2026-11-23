@@ -79,6 +79,7 @@ import 'work_card.dart';
 import 'work_key.dart';
 import 'multi_server.dart';
 import 'playback_flow.dart';
+import 'playback_state.dart';
 import 'pic_zoom.dart';
 import 'playback_error.dart';
 import 'perf_diagnostics.dart';
@@ -8103,6 +8104,15 @@ class _PlayerPageState extends State<PlayerPage>
   // 当前挂着的健康检查允许几次自救（起播确认 2 次、播放中掉线 3 次）。
   int _stallCheckMax = _stallMaxAttempts - 1;
   Timer? _stallTimer;
+  /// 显式播放相位（`playback_state.dart`）。owner 2026-11-23：
+  /// 播放页有 59 个布尔量、18 个定时器、102 处 setState 互相猜状态，
+  /// 这是「暂停不灵敏 / 点击被吞 / 卡封面」的结构性来源。
+  ///
+  /// 接线分三步，本字段是第 1 步：相位与旧布尔量**并行**推进，
+  /// 只在日志里比对，不改变任何显示。确认一致后第 2 步才切显示源。
+  PlaybackPhase _phase = PlaybackPhase.idle;
+  /// 最近一次相位不一致的比对结果（仅用于诊断日志，不参与显示）。
+  String _phaseMismatch = '';
   bool loading = true;
   bool muted = false;
   double volume = 100;
@@ -8638,6 +8648,7 @@ class _PlayerPageState extends State<PlayerPage>
             !_userPaused &&
             !_pausedByBackground &&
             _failure == null) {
+          _feed(PlaybackEvent.play);
           setState(() => paused = false);
         }
         return;
@@ -8650,6 +8661,7 @@ class _PlayerPageState extends State<PlayerPage>
           backgroundPaused: _pausedByBackground,
           failed: _failure != null,
           opening: _opening)) {
+        _feed(PlaybackEvent.pause);
         if (!paused) setState(() => paused = true);
         return;
       }
@@ -8678,6 +8690,7 @@ class _PlayerPageState extends State<PlayerPage>
       // 采用 500ms 位置门槛 + 短淡出，兼顾「不露黑」与「不拖沓」。
       if (!_firstFrameSeen && position.inMilliseconds >= 500) {
         _firstFrameSeen = true;
+        _feed(PlaybackEvent.progress);
         final t0 = _openStartedAt;
         if (t0 != null) {
           _openStartedAt = null;
@@ -8722,11 +8735,13 @@ class _PlayerPageState extends State<PlayerPage>
         _slowBufferTimer?.cancel();
         _slowBufferTimer = null;
         // 只改 ValueNotifier：提示层自行消失，视频/信息/任务栏不重建。
+        _feed(PlaybackEvent.bufferEnd);
         _buffering = false;
         _slowBuffer = false;
         return;
       }
       if (_buffering) return;
+      _feed(PlaybackEvent.bufferStart);
       _buffering = true;
       _slowBufferTimer?.cancel();
       _slowBufferTimer = Timer(slowBufferThreshold, () {
@@ -8996,6 +9011,7 @@ class _PlayerPageState extends State<PlayerPage>
       case StallRecoveryAction.retryPlay:
         _stallAttempts++;
         PauseTrace.mark('stall:retryPlay#$_stallAttempts');
+        _feed(PlaybackEvent.play);
         if (paused) setState(() => paused = false);
         try {
           final at = pos.inMilliseconds > 800 ? pos : player.state.position;
@@ -9089,6 +9105,7 @@ class _PlayerPageState extends State<PlayerPage>
       Breadcrumb.mark('player:pause', 'L7706');
       player.pause();
     } catch (_) {}
+    _feed(PlaybackEvent.pause);
     if (mounted) setState(() => paused = true);
   }
 
@@ -9098,6 +9115,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (!mounted) return;
     PauseTrace.mark('background:resume');
     final isV = _workAt(cur)['t'] == 'v';
+    _feed(PlaybackEvent.play);
     setState(() => paused = false);
     try {
       if (isV) {
@@ -9154,6 +9172,31 @@ class _PlayerPageState extends State<PlayerPage>
     ContinueWatchingStore.remove(_libFor(w), _watchIdFor(w));
   }
 
+  /// 推进播放相位（第 1 步：与旧布尔量并行，只记录不显示）。
+  ///
+  /// owner 2026-11-23 要求停止「补丁堆叠」。这里的做法是把散落的
+  /// `loading / paused / _buffering` 写入点收敛成一个事件入口，
+  /// 相位由 [nextPhase] 纯函数推进，避免各处 `if` 各自拍脑袋。
+  ///
+  /// 本步不改变界面：`_phase` 只写日志。第 2 步才让 `showsLoading` /
+  /// `showsPaused` 接管显示，届时删除对应旧布尔量。
+  void _feed(PlaybackEvent e) {
+    final next = nextPhase(_phase, e);
+    if (next == _phase) return;
+    _phase = next;
+    // 并行期的一致性核对：相位说该转圈，旧布尔量也该在转圈。
+    final boolLoading = next.showsLoading;
+    final boolPaused = next.showsPaused;
+    if (boolLoading != loading || boolPaused != paused) {
+      _phaseMismatch = 'phase=${next.name} '
+          'loading=$loading/${boolLoading ? 1 : 0} '
+          'paused=$paused/${boolPaused ? 1 : 0}';
+      Breadcrumb.mark('phase:mismatch', _phaseMismatch);
+    } else {
+      _phaseMismatch = '';
+    }
+  }
+
   // G12：展示失败提示并停止转圈；重试时整条媒体重新打开。
   void _showFailure(PlaybackFailure f) {
     if (!mounted) return;
@@ -9170,6 +9213,7 @@ class _PlayerPageState extends State<PlayerPage>
       Breadcrumb.mark('player:pause', 'L7783');
       player.pause();
     } catch (_) {}
+    _feed(PlaybackEvent.error);
     setState(() {
       _failure = f;
       loading = false;
@@ -9666,6 +9710,7 @@ class _PlayerPageState extends State<PlayerPage>
     _opening = true;
     _openStartedAt = DateTime.now();
     _poolHit = canUsePreload;
+    _feed(PlaybackEvent.open);
     setState(() {
       cur = i;
       _setPicIndex(0);
@@ -9867,6 +9912,8 @@ class _PlayerPageState extends State<PlayerPage>
       _scheduleStartupCheck();
     }
     if (mounted && my == _openToken && _failure == null) {
+      _feed(PlaybackEvent.mediaReady);
+      _feed(PlaybackEvent.play);
       setState(() {
         loading = false;
         // 若打开过程中被切到后台，保持暂停，等回前台再恢复
