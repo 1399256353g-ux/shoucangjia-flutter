@@ -43,7 +43,7 @@ void main() {
       onOpenStars: () => opened = 'stars',
     )));
 
-    // P3：首页标题已按 owner 术语改为「媒体库」（顶级节点＝媒体库根）。
+    // P3：首页标题已按 owner 术语改为「媒体库」（顶级单元库＝媒体库根）。
     expect(find.text('媒体库'), findsOneWidget);
     expect(find.byKey(const ValueKey('starred-entry')), findsOneWidget);
     expect(find.text('1 个'), findsOneWidget);

@@ -228,7 +228,7 @@ UnitLibrary? buildUnitTree({
     return UnitLibrary(node: n, basics: own, children: kids);
   }
 
-  // 5. 顶级节点＝第一层路径段（没有节点声明时用默认 SECRET）。
+  // 5. 顶级单元库＝第一层路径段（没有节点声明时用默认 SECRET）。
   final roots = <LibNode>[];
   for (final n in sortedNodes) {
     if (n.segments.length == 1) roots.add(n);
@@ -471,7 +471,7 @@ Map<String, String> unitKeyByBasic(UnitLibrary root) {
 ///
 /// 作者卡、基础库卡、播放页信息行都必须从这里取词条，禁止各自解析，
 /// 否则会出现「作者词条是基础库、基础库词条是单元库」的不一致。
-/// P1：单元库 id → 顶级节点 id（顶级节点＝媒体库根，向下继承词条色）。
+/// P1：单元库 id → 顶级单元库 id（顶级单元库＝媒体库根，向下继承词条色）。
 ///
 /// 判定只看树结构：根的直接子节点就是各连接的媒体库根；SECRET 自身没有
 /// 上级，按空串处理（它只承载「无归属基础库」兜底）。同名/`node:` 前缀的
@@ -526,7 +526,7 @@ class UnitBadgeRegistry {
   /// 单元库配色顺序（不含顶级 SECRET）：作者词条与基础库卡片共用。
   static final List<String> order = <String>[];
 
-  /// P1：单元库 id → 所属顶级节点 id（顶级节点＝媒体库根）。
+  /// P1：单元库 id → 所属顶级单元库 id（顶级单元库＝媒体库根）。
   /// 只由结构关系算出，不看任何目录名文本。
   static final Map<String, String> topOf = <String, String>{};
 

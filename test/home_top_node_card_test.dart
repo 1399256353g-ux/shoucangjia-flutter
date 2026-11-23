@@ -53,7 +53,7 @@ void main() {
     expect(find.byType(CachedNetworkImage), findsNothing);
   });
 
-  testWidgets('设了封面的顶级节点卡片才加载封面图', (t) async {
+  testWidgets('设了封面的顶级单元库卡片才加载封面图', (t) async {
     await t.pumpWidget(host(UnitLibraryHomeView(
       tree: tree,
       stars: const {},
@@ -68,7 +68,7 @@ void main() {
     expect(find.byKey(const ValueKey('unit-cover-tint')), findsNothing);
   });
 
-  testWidgets('顶级节点卡片显示连接状态', (t) async {
+  testWidgets('顶级单元库卡片显示连接状态', (t) async {
     await t.pumpWidget(host(UnitLibraryHomeView(
       tree: tree,
       stars: const {},

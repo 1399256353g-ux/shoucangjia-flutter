@@ -111,21 +111,8 @@ TaskbarPolicy taskbarPolicyFor({
 // 只服务非全屏；全屏分支沿用旧值，不调用以下任何一项。
 // ---------------------------------------------------------------------------
 
-/// §5 单击延迟：首次 tap 延迟 250ms 判定单击，期间收到第二次 tap 即取消单击。
-const int kStageSingleTapDelayMs = 250;
-
-/// §5 双击窗口与位移上限（与 likes.dart 的 320ms/80px 独立，P0 用 250ms）。
-const int kStageDoubleTapWindowMs = 250;
-const double kStageDoubleTapMaxDistance = 80;
-
 /// §5 暂停提示：暂停时只显示播放图标，0.8s / Curves.easeOut 淡出。
 const int kPlayHintFadeMs = 800;
-
-/// §5 双击爱心：700ms，scale 0.6→1.15→1.0，上浮 60dp，opacity 1→0。
-const Duration kHeartAnimDuration = Duration(milliseconds: 700);
-const double kHeartSize = 58;
-const Color kHeartColor = Color(0xFFFF3B5C);
-const double kHeartRiseDistance = 60;
 
 /// §3 进度条：常态 2dp / 白 60%（#99FFFFFF）/ 圆角 1dp；
 /// 按住或拖动 4dp / 全白 / 圆角 2dp。
@@ -193,61 +180,6 @@ const TextStyle kSeekBubbleTextStyle = TextStyle(
   color: Colors.white,
   fontFeatures: [FontFeature.tabularFigures()],
 );
-
-/// P0 单击/双击仲裁（纯逻辑，便于单测）。
-///
-/// 第一次 tap 记为 pending，等待 [windowMs]；窗口内出现第二次 tap 且位移
-/// 不超过 [maxDistance] 则判定双击并清空 pending（单击被取消）。
-class StageTapArbiter {
-  StageTapArbiter({
-    this.windowMs = kStageDoubleTapWindowMs,
-    this.maxDistance = kStageDoubleTapMaxDistance,
-  });
-
-  final int windowMs;
-  final double maxDistance;
-
-  int? _pendingMs;
-  Offset? _pendingPos;
-
-  bool get hasPending => _pendingMs != null;
-
-  /// 记录一次 tap；返回 true 表示构成双击（调用方必须取消已排队的单击）。
-  bool registerTap({required int nowMs, required Offset pos}) {
-    final last = _pendingMs;
-    final lastPos = _pendingPos;
-    if (last != null &&
-        lastPos != null &&
-        nowMs - last < windowMs &&
-        (pos - lastPos).distance < maxDistance) {
-      clear();
-      return true;
-    }
-    _pendingMs = nowMs;
-    _pendingPos = pos;
-    return false;
-  }
-
-  void clear() {
-    _pendingMs = null;
-    _pendingPos = null;
-  }
-}
-
-/// §5 爱心缩放：前 40% easeOut 0.6→1.15，后 60% elasticOut 1.15→1.0。
-double heartScaleAt(double t) {
-  final x = t.clamp(0.0, 1.0);
-  if (x < 0.4) {
-    return 0.6 + (1.15 - 0.6) * Curves.easeOut.transform(x / 0.4);
-  }
-  return 1.15 - (1.15 - 1.0) * Curves.elasticOut.transform((x - 0.4) / 0.6);
-}
-
-/// §5 爱心不透明度：1→0 线性。
-double heartOpacityAt(double t) => 1 - t.clamp(0.0, 1.0);
-
-/// §5 爱心上浮位移（向上为负，共 60dp）。
-double heartRiseOffsetAt(double t) => -kHeartRiseDistance * t.clamp(0.0, 1.0);
 
 /// §5 暂停提示不透明度：1→0，0.8s，Curves.easeOut。
 double playHintOpacityAt(double t) =>

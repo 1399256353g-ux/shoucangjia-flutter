@@ -23,7 +23,7 @@ import 'app_settings.dart';
 /// P1：词条层级。四种词条**形状与尺寸完全一致**，差异只在边框/底纹，
 /// 保证「层级一眼可辨、位置与排版不动」。
 enum LibEntryKind {
-  /// 顶级节点（连接的媒体库根）：实线粗边框 + 轻微底纹。
+  /// 顶级单元库（连接的媒体库根）：实线粗边框 + 轻微底纹。
   top,
 
   /// 中间层单元库：实线细边框。
@@ -115,7 +115,7 @@ const Map<LibEntryKind, EntryStyle> kDefaultEntryStyle =
 class LibraryBadge {
   static const String prefsKey = 'lib_colors_v1';
 
-  /// P1：顶级节点（媒体库根）词条色。与单元库/基础库的自定义色分开存：
+  /// P1：顶级单元库（媒体库根）词条色。与单元库/基础库的自定义色分开存：
   /// 顶级色是**向下继承**的默认值，单元库/基础库自己设了色才覆盖它。
   static const String topPrefsKey = 'lib_top_colors_v1';
 
@@ -145,7 +145,7 @@ class LibraryBadge {
   /// 用户在设置里为某个库自定义的颜色；id -> ARGB。
   static final Map<String, int> custom = <String, int>{};
 
-  /// 顶级节点（媒体库根）自定义色；topId -> ARGB。
+  /// 顶级单元库（媒体库根）自定义色；topId -> ARGB。
   static final Map<String, int> topCustom = <String, int>{};
 
   /// P1：基础库（末梢）词条自定义色；basicId -> ARGB。
@@ -210,7 +210,7 @@ class LibraryBadge {
     }
   }
 
-  /// 单元库 → 所属顶级节点 id。由 `UnitBadgeRegistry.setFrom` 填入，
+  /// 单元库 → 所属顶级单元库 id。由 `UnitBadgeRegistry.setFrom` 填入，
   /// 只做数据查询，不在这里解析目录名。
   static final Map<String, String> topOfUnit = <String, String>{};
 
@@ -287,7 +287,7 @@ class LibraryBadge {
       final c = custom[unitId] ?? custom[rel] ?? custom[prefixed];
       if (c != null) return c;
     }
-    // P1：自己没设色 → 继承所属顶级节点的词条色（顶级设了才有）。
+    // P1：自己没设色 → 继承所属顶级单元库的词条色（顶级设了才有）。
     final topId = topOfUnit[unitId] ?? topOfUnit[rel] ?? topOfUnit[prefixed];
     final inherited = topId == null ? null : topColorFor(topId);
     if (inherited != null) return inherited;
@@ -320,9 +320,9 @@ class LibraryBadge {
     );
   }
 
-  /// P1：单元库 id → 词条层级（顶级节点 / 中间单元库 / 其它）。
+  /// P1：单元库 id → 词条层级（顶级单元库 / 中间单元库 / 其它）。
   ///
-  /// 判定只看 [topOfUnit] 这张结构表：一个单元库自己就是顶级节点时，
+  /// 判定只看 [topOfUnit] 这张结构表：一个单元库自己就是顶级单元库时，
   /// 表里会有 `unitId → unitId`；否则它是下级单元库。
   static LibEntryKind entryKindOfUnit(String unitId) {
     if (unitId.isEmpty || unitId == 'secret') return LibEntryKind.other;
@@ -336,7 +336,7 @@ class LibraryBadge {
         : LibEntryKind.unit;
   }
 
-  /// 顶级节点自定义色；没设过返回 null（调用方继续走自动配色/继承链）。
+  /// 顶级单元库自定义色；没设过返回 null（调用方继续走自动配色/继承链）。
   static int? topColorFor(String topId) {
     if (topId.isEmpty) return null;
     final rel = topId.startsWith('node:') ? topId.substring(5) : topId;
@@ -344,7 +344,7 @@ class LibraryBadge {
   }
 
   /// 基础库词条色：自己的自定义色优先，其次继承所属上级单元库 →
-  /// 顶级节点色，最后才是自动配色（顺序不可倒置：越具体越优先）。
+  /// 顶级单元库色，最后才是自动配色（顺序不可倒置：越具体越优先）。
   static int basicColorFor(String basicId, String unitId,
       {List<String> order = const []}) {
     if (basicId.isNotEmpty) {
@@ -352,7 +352,7 @@ class LibraryBadge {
       if (c != null) return c;
     }
     // P1 分发规则：上级单元库自定义色只有它是末梢时才分发到这里；
-    // 非末梢单元库只影响自己那层，基础库继续继承顶级节点色。
+    // 非末梢单元库只影响自己那层，基础库继续继承顶级单元库色。
     if (unitId.isNotEmpty && !canDistribute(unitId)) {
       final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
       final topId = topOfUnit[unitId] ??
@@ -387,7 +387,7 @@ class LibraryBadge {
     } catch (_) {}
   }
 
-  /// 设置/清除顶级节点颜色。清空即撤销该顶级节点的向下继承。
+  /// 设置/清除顶级单元库颜色。清空即撤销该顶级单元库的向下继承。
   static Future<void> setTopColor(String topId, int? argb) async {
     if (topId.isEmpty) return;
     final rel = topId.startsWith('node:') ? topId.substring(5) : topId;

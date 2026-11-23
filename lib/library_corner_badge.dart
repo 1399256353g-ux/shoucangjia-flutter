@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 角标表达「这是个什么层级的库」。所以角标只按种类区分，
 /// 形状与尺寸在所有层级保持一致，仅图案（与可选颜色）不同。
 enum LibBadgeKind {
-  /// 顶级节点（连接的媒体库根）。
+  /// 顶级单元库（连接的媒体库根）。
   top,
 
   /// 中间层单元库。
@@ -69,7 +69,7 @@ class LibraryCornerBadge {
 
   /// 从库属性判定层级。
   ///
-  /// - `isTop`：该库就是连接根（顶级节点）。
+  /// - `isTop`：该库就是连接根（顶级单元库）。
   /// - `unitRel` 非空且不是顶级 → 中间层单元库。
   /// - 其余（末梢基础库 / 未知）→ basic。
   ///

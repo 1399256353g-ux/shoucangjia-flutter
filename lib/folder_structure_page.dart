@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'home_action.dart';
 
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
-/// 供 owner 指定「节点文件夹」（单元库）。默认只有 SECRET 顶级节点。
+/// 供 owner 指定「节点文件夹」（单元库）。默认只有 SECRET 顶级单元库。
 ///
 /// 数据：`GET /api/folders` → { root, top:{name,rel}, folders:[{rel,name,depth,authors,isNode,dirs}] }
 /// 保存：`POST /api/nodes` body {nodes:[rel,...]}
@@ -619,7 +619,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                           const Icon(Icons.layers_outlined, size: 18),
                           const SizedBox(width: 8),
                           Expanded(
-                            child: Text('顶级节点：$topName',
+                            child: Text('顶级单元库：$topName',
                                 style: const TextStyle(
                                     fontSize: 12, fontWeight: FontWeight.w600)),
                           ),
@@ -631,7 +631,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
                         child: Text(
-                            '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级节点是当前媒体库的根节点，默认名称为 SECRET；接入多个媒体库时，每个库各有自己的顶级节点。'
+                            '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级单元库是当前媒体库的根节点，默认名称为 SECRET；接入多个媒体库时，每个库各有自己的顶级单元库。'
                             '「基础库」目录固定排除，不能设为节点。',
                             style: TextStyle(fontSize: 11, color: Colors.grey)),
                       ),

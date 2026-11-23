@@ -16,9 +16,11 @@ void main() {
     expect(find.text('同步源选择'), findsNothing);
     expect(find.text('媒体库与爬虫'), findsOneWidget);
     expect(find.textContaining('收藏夹'), findsNothing);
-    // 双击点赞开关（0.9.19）：默认开启，可在设置里关掉。列表懒加载，先滚到可见。
-    await tester.scrollUntilVisible(find.text('双击点赞'), 200,
+    // 双击点赞（0.9.19 引入）已在 0.9.174 按 owner 要求整体移除：
+    // 设置里不应再出现该开关，避免出现「有开关但画面已无点赞」的死配置。
+    await tester.scrollUntilVisible(find.text('推荐数量'), 200,
         scrollable: find.byType(Scrollable).first);
-    expect(find.text('双击点赞'), findsOneWidget);
+    expect(find.text('双击点赞'), findsNothing);
+    expect(find.text('点赞'), findsNothing);
   });
 }

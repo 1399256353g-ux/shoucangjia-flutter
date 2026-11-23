@@ -2,7 +2,10 @@
 ///
 /// 抖音式全屏：功能区隐藏时单击只呼出功能区；功能区显示时单击只收起
 /// 功能区，不改变播放状态。非全屏仍保留「单击暂停/继续」。
-/// 双击点赞（G9）与图片放大后单击复位（G14）优先于上述规则。
+/// 图片放大后单击复位（G14）优先于上述规则。
+///
+/// 2026-11-23：双击点赞已移除，`doubleTap` 参数保留为兼容位，任何调用方
+/// 都应传 false；`like` 分支因此不可达，只作为穷尽枚举保留。
 library;
 
 enum StageTapAction {
@@ -15,7 +18,7 @@ enum StageTapAction {
   /// 非全屏且功能区显示时单击：暂停/继续。
   togglePause,
 
-  /// 双击：点赞，并保证功能区可见。
+  /// 历史分支：超喜欢（点赞）。点赞功能已移除，正常路径不会再返回它。
   like,
 
   /// 图片放大时单击：恢复原始大小。
@@ -32,11 +35,12 @@ StageTapAction stageTapAction({
   required bool uiVisible,
   required bool fullscreen,
   required bool zoomed,
-  required bool doubleTap,
+  // 双击点赞移除后此参数不再参与判定；保留签名只为不改老调用点，
+  // 新代码请一律传 false（传 true 也不会再返回 like）。
+  bool doubleTap = false,
 }) {
   if (zoomed) return StageTapAction.resetZoom;
-  if (!uiVisible && !doubleTap) return StageTapAction.showUi;
-  if (doubleTap) return StageTapAction.like;
+  if (!uiVisible) return StageTapAction.showUi;
   if (fullscreen) return StageTapAction.hideUi;
   return StageTapAction.togglePause;
 }

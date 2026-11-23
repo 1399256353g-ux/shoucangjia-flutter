@@ -1,89 +1,42 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/player_controls.dart';
+import 'package:shoucangjia/stage_tap.dart';
 
 /// P0：非全屏抖音式手感（数值见 DOUYIN_VISUAL_SPEC.md §3/§5）。
 void main() {
-  group('§5 单击/双击仲裁', () {
-    test('单击延迟固定为 250ms', () {
-      expect(kStageSingleTapDelayMs, 250);
-      expect(kStageDoubleTapWindowMs, 250);
+  group('§5 舞台点击：双击点赞移除后只剩单一路径', () {
+    test('暂停提示固定 0.8s', () {
+      expect(kPlayHintFadeMs, 800);
     });
 
-    test('第一次点击不立即构成双击，记入 pending', () {
-      final a = StageTapArbiter();
-      expect(a.registerTap(nowMs: 1000, pos: const Offset(10, 10)), isFalse);
-      expect(a.hasPending, isTrue);
-    });
-
-    test('250ms 内相近位置第二次点击 => 双击并清空 pending', () {
-      final a = StageTapArbiter();
-      a.registerTap(nowMs: 1000, pos: const Offset(10, 10));
-      expect(a.registerTap(nowMs: 1200, pos: const Offset(20, 12)), isTrue);
-      expect(a.hasPending, isFalse);
-    });
-
-    test('超过窗口不构成双击（视为新的单击）', () {
-      final a = StageTapArbiter();
-      a.registerTap(nowMs: 1000, pos: const Offset(10, 10));
-      expect(a.registerTap(nowMs: 1300, pos: const Offset(10, 10)), isFalse);
-      expect(a.hasPending, isTrue);
-    });
-
-    test('位移超过 80px 不构成双击', () {
-      final a = StageTapArbiter();
-      a.registerTap(nowMs: 1000, pos: const Offset(0, 0));
-      expect(a.registerTap(nowMs: 1100, pos: const Offset(100, 0)), isFalse);
-    });
-
-    test('clear 取消待定单击（拖动/翻页时调用）', () {
-      final a = StageTapArbiter();
-      a.registerTap(nowMs: 1000, pos: Offset.zero);
-      a.clear();
-      expect(a.hasPending, isFalse);
-    });
-  });
-
-  group('§5 双击爱心参数', () {
-    test('时长 700ms、尺寸 58dp、颜色 #FFFF3B5C、上浮 60dp', () {
-      expect(kHeartAnimDuration, const Duration(milliseconds: 700));
-      expect(kHeartSize, 58);
-      expect(kHeartColor, const Color(0xFFFF3B5C));
-      expect(kHeartRiseDistance, 60);
-    });
-
-    test('前 40% easeOut：0.6 → 1.15', () {
-      expect(heartScaleAt(0), closeTo(0.6, 1e-9));
-      expect(heartScaleAt(0.4), closeTo(1.15, 1e-9));
-      final mid = heartScaleAt(0.2);
-      expect(mid, greaterThan(0.6));
-      expect(mid, lessThan(1.15));
-    });
-
-    test('后 60% elasticOut 回弹并收在 1.0', () {
-      expect(heartScaleAt(1.0), closeTo(1.0, 1e-9));
-      // elasticOut 会先冲过 1.0 再回落：0.4~1.0 之间应出现 <1.0 的回弹。
-      var minV = 1.0;
-      for (var i = 40; i <= 100; i++) {
-        final v = heartScaleAt(i / 100);
-        if (v < minV) minV = v;
-      }
-      expect(minV, lessThan(1.0));
-    });
-
-    test('opacity 1→0、位移 0→-60dp', () {
-      expect(heartOpacityAt(0), 1);
-      expect(heartOpacityAt(1), 0);
-      expect(heartOpacityAt(0.5), closeTo(0.5, 1e-9));
-      expect(heartRiseOffsetAt(0), 0);
-      expect(heartRiseOffsetAt(1), -60);
-      expect(heartRiseOffsetAt(0.5), closeTo(-30, 1e-9));
+    test('stageTapAction 无双击：单击即呼出/收起/暂停', () {
+      expect(
+        stageTapAction(
+            uiVisible: true, fullscreen: true, zoomed: false, doubleTap: false),
+        StageTapAction.hideUi,
+      );
+      expect(
+        stageTapAction(
+            uiVisible: false,
+            fullscreen: false,
+            zoomed: false,
+            doubleTap: false),
+        StageTapAction.showUi,
+      );
+      expect(
+        stageTapAction(
+            uiVisible: true,
+            fullscreen: false,
+            zoomed: false,
+            doubleTap: false),
+        StageTapAction.togglePause,
+      );
     });
   });
 
   group('§5 暂停播放图标淡出', () {
     test('0.8s easeOut，从 1 淡到 0', () {
-      expect(kPlayHintFadeMs, 800);
       expect(playHintOpacityAt(0), 1);
       expect(playHintOpacityAt(1), 0);
       // easeOut 前段下降更快：t=0.5 时剩余不透明度 < 0.5（线性剩余 0.5）。

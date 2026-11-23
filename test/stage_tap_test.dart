@@ -44,16 +44,17 @@ void main() {
       );
     });
 
-    test('双击点赞优先于收起/呼出，全屏也生效', () {
-      for (final fullscreen in [true, false]) {
-        for (final uiVisible in [true, false]) {
+    test('双击点赞已移除：doubleTap 传 true 也不再返回 like', () {
+      // 函数已忽略 doubleTap；任何组合都不应再产生点赞动作。
+      for (final fs in [true, false]) {
+        for (final ui in [true, false]) {
           expect(
             stageTapAction(
-                uiVisible: uiVisible,
-                fullscreen: fullscreen,
+                uiVisible: ui,
+                fullscreen: fs,
                 zoomed: false,
                 doubleTap: true),
-            StageTapAction.like,
+            isNot(StageTapAction.like),
           );
         }
       }

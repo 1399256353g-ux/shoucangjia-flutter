@@ -39,7 +39,7 @@ void main() {
     LibraryBadge.topOfUnit.clear();
   });
 
-  test('顶级节点色向下继承给其下单元库（结构表，不看名称文本）', () {
+  test('顶级单元库色向下继承给其下单元库（结构表，不看名称文本）', () {
     final root = _tree();
     final topOf = topOfUnitIds(root);
     expect(topOf['TOP'], 'TOP');
@@ -53,7 +53,7 @@ void main() {
 
     // 未设自定义色的下级单元库继承顶级色
     expect(LibraryBadge.colorForUnit('TOP/MID'), 0xFF112233);
-    // 另一个顶级节点不受影响
+    // 另一个顶级单元库不受影响
     expect(LibraryBadge.colorForUnit('OTHER'), isNot(0xFF112233));
   });
 

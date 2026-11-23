@@ -245,10 +245,10 @@ class UnitLibraryHomeView extends StatefulWidget {
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
   final CoverUploader? coverUploader;
 
-  /// P3：顶级节点卡片的连接状态文案（如「已连接」「已断连」）；空串不显示。
+  /// P3：顶级单元库卡片的连接状态文案（如「已连接」「已断连」）；空串不显示。
   final String Function(UnitLibrary unit)? statusOf;
 
-  /// P3：顶级节点卡片只用 owner 设过的封面（自定义 `_cover/` 或服务端
+  /// P3：顶级单元库卡片只用 owner 设过的封面（自定义 `_cover/` 或服务端
   /// `cover.u`）；空串表示未设封面 → 卡片用词条色块占位，**不取自动封面**。
   final UnitCoverOf? topCoverOf;
 
@@ -368,7 +368,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
           child: Row(children: [
             const Icon(Icons.layers_outlined, size: 18),
             const SizedBox(width: 6),
-            // P3：首页只列顶级节点（＝各连接的媒体库根）。
+            // P3：首页只列顶级单元库（＝各连接的媒体库根）。
             const Text('媒体库',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
             const Spacer(),
@@ -400,8 +400,8 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
               final u = units[i];
               final coverLib =
                   u.allBasics.isNotEmpty ? u.allBasics.first.id : '';
-              // P3：首页卡片＝顶级节点卡片。只用 owner 设过的封面，
-              // 未设则用该顶级节点的词条色块占位，不再拿作品图冒充库封面。
+              // P3：首页卡片＝顶级单元库卡片。只用 owner 设过的封面，
+              // 未设则用该顶级单元库的词条色块占位，不再拿作品图冒充库封面。
               final tint = LibraryBadge.topColorFor(u.id) ??
                   LibraryBadge.colorForUnit(u.id,
                       order: UnitBadgeRegistry.order);
@@ -655,11 +655,11 @@ class UnitLibraryCard extends StatelessWidget {
   /// C2：本地选图上传封面（为空不显示按钮）。
   final VoidCallback? onSetCover;
 
-  /// P3：首页顶级节点卡片。为 true 时**不使用自动封面**，
+  /// P3：首页顶级单元库卡片。为 true 时**不使用自动封面**，
   /// 未设置封面就用词条色块占位（[fallbackTint]），避免首页拿作品图充当库封面。
   final bool topCard;
 
-  /// 无封面时的占位底色（顶级节点＝词条色）；为空则回退通用灰。
+  /// 无封面时的占位底色（顶级单元库＝词条色）；为空则回退通用灰。
   final int? fallbackTint;
 
   /// 连接状态文案（如「已连接」「已断连」）；空串不显示。
@@ -805,7 +805,7 @@ class _UnitCoverFill extends StatelessWidget {
   /// 卡片的逻辑显示宽度（单元库 260 / 基础库 220），决定解码宽度。
   final double displayWidth;
 
-  /// P3：无封面时的占位底色（顶级节点用词条色块，不用自动封面）。
+  /// P3：无封面时的占位底色（顶级单元库用词条色块，不用自动封面）。
   final int? tint;
 
   const _UnitCoverFill({
@@ -1225,7 +1225,7 @@ class BasicLibCard extends StatelessWidget {
     // K17：有单元库就用单元库词条；没有则回退到「库名」灰色词条。
     //
     // P1：末梢基础库词条颜色优先级＝本库自定义 → 上级单元库自定义 →
-    // 顶级节点继承 → 自动配色；层级外观固定为 basic（形状/尺寸与上层一致，
+    // 顶级单元库继承 → 自动配色；层级外观固定为 basic（形状/尺寸与上层一致，
     // 只改边框/底纹）。
     final hasUnit = unitLabel.isNotEmpty;
     final text = LibraryBadge.labelWithEmoji(

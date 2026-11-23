@@ -11,7 +11,6 @@ void main() {
     expect(AppSettings.hideUiSec, 3);
     expect(AppSettings.keyLabel(PlayerAction.next), 'J');
     expect(AppSettings.actionFor(LogicalKeyboardKey.keyJ), PlayerAction.next);
-    expect(AppSettings.doubleTapLike, isTrue);
   });
 
   test('json round trip', () {
@@ -19,14 +18,10 @@ void main() {
     AppSettings.imageIntervalSec = 7;
     AppSettings.hideUiSec = 5;
     AppSettings.bind(PlayerAction.mute, LogicalKeyboardKey.keyN.keyId);
-    AppSettings.doubleTapLike = false;
     AppSettings.stripLibIndex = false;
     final j = AppSettings.toJson();
-    expect(j['doubleTapLike'], isFalse);
     AppSettings.resetDefaults();
-    expect(AppSettings.doubleTapLike, isTrue);
     AppSettings.applyJson(j);
-    expect(AppSettings.doubleTapLike, isFalse);
     expect(AppSettings.stripLibIndex, isFalse);
     expect(AppSettings.defaultSpeed, 1.5);
     expect(AppSettings.imageIntervalSec, 7);
@@ -44,7 +39,6 @@ void main() {
     expect(AppSettings.defaultSpeed, 3.0);
     expect(AppSettings.imageIntervalSec, 1);
     expect(AppSettings.hideUiSec, 30);
-    expect(AppSettings.doubleTapLike, isTrue);
     expect(AppSettings.keyLabel(PlayerAction.next), 'J');
   });
 

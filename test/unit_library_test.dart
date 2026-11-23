@@ -31,7 +31,7 @@ void main() {
   });
 
   group('buildUnitTree 层级与收敛', () {
-    test('顶级节点成单元库，基础库挂在最深节点下', () {
+    test('顶级单元库成单元库，基础库挂在最深节点下', () {
       final nodes = [
         const LibNode(id: 'big-01', rel: '(1) A', name: '(1) A'),
         const LibNode(id: 'grp-01', rel: '(1) A/(9) 子节点', name: '(9) 子节点'),

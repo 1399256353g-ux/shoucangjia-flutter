@@ -77,7 +77,7 @@ void main() {
 
     // 本层词条用它自己的色
     expect(LibraryBadge.colorForUnit('TOP/MID'), 0xFFFF0000);
-    // 但它下面的基础库不吃这个色，继续继承顶级节点色
+    // 但它下面的基础库不吃这个色，继续继承顶级单元库色
     expect(LibraryBadge.basicColorFor('basic-under-mid', 'TOP/MID'),
         0xFF112233);
     // 更深的末梢基础库同样只吃顶级继承色

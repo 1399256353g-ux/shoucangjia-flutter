@@ -67,7 +67,7 @@ import 'unit_library.dart';
 import 'unit_library_view.dart';
 import 'header_collapse.dart';
 import 'work_card.dart';
-import 'likes.dart';
+import 'work_key.dart';
 import 'multi_server.dart';
 import 'playback_flow.dart';
 import 'pic_zoom.dart';
@@ -1759,11 +1759,11 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   /// 0.9.9：词条配色按**单元库**（作者来源词条）配置，不再按旧注册库。
   List<UnitLibrary> units = const [];
 
-  /// P1：顶级节点（媒体库根）与末梢基础库各一组，配合向下继承。
+  /// P1：顶级单元库（媒体库根）与末梢基础库各一组，配合向下继承。
   List<UnitLibrary> tops = const [];
   List<BasicLib> basics = const [];
 
-  /// P2：按顶级节点分组——每个顶级节点下的单元库与基础库，
+  /// P2：按顶级单元库分组——每个顶级单元库下的单元库与基础库，
   /// 只按树结构归组，不看任何目录名文本。
   final Map<String, List<UnitLibrary>> unitsByTop = <String, List<UnitLibrary>>{};
   final Map<String, List<BasicLib>> basicsByTop = <String, List<BasicLib>>{};
@@ -1797,7 +1797,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
           for (final u in m.units)
             if (u.id != 'secret') u
         ];
-        // P1：顶级节点＝媒体库根＝SECRET 的直接子节点（结构事实，不看名字）。
+        // P1：顶级单元库＝媒体库根＝SECRET 的直接子节点（结构事实，不看名字）。
         tops = [
           for (final u in (root?.children ?? const <UnitLibrary>[]))
             if (!u.isEmpty) u
@@ -1806,8 +1806,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
           for (final u in m.units)
             if (u.id != 'secret') ...u.basics
         ];
-        // P2：按顶级节点分组（结构归组）。子单元库顺序按树深度优先；
-        // 不属于任何顶级节点的单元库归入「其它」。
+        // P2：按顶级单元库分组（结构归组）。子单元库顺序按树深度优先；
+        // 不属于任何顶级单元库的单元库归入「其它」。
         unitsByTop.clear();
         basicsByTop.clear();
         final grouped = <String>{};
@@ -1873,7 +1873,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Text(
-                        '词条按三层组织：顶级节点（媒体库根）设色后向下继承给其下所有'
+                        '词条按三层组织：顶级单元库（媒体库根）设色后向下继承给其下所有'
                         '单元库/基础库；单元库可各自覆盖；基础库自己的颜色优先级最高。'
                         '分发规则：只有末梢单元库（没有下级单元库）的设色会向下分发，'
                         '非末梢单元库的设色只作用于本层，作品/作者仍取末梢或继承色。'
@@ -1884,7 +1884,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   _entryStyleSection(),
                   const SizedBox(height: 8),
                   const _SectionHeader('按媒体库设置词条色'),
-                  // P2：按顶级节点分类——每个媒体库根一节，展开就是它的
+                  // P2：按顶级单元库分类——每个媒体库根一节，展开就是它的
                   // 单元库与基础库；不依赖任何名称文本，只按树结构归组。
                   for (final t in tops) _topSection(t),
                   if (tops.isEmpty && units.isEmpty)
@@ -1895,7 +1895,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                           style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ),
                   if (otherUnits.isNotEmpty || otherBasics.isNotEmpty) ...[
-                    const _SectionHeader('其它（不属于任何顶级节点）'),
+                    const _SectionHeader('其它（不属于任何顶级单元库）'),
                     for (final u in otherUnits) _libTile(u),
                     for (final b in otherBasics) _basicTile(b),
                   ],
@@ -1904,10 +1904,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     );
   }
 
-  /// P2：一个顶级节点的分组——它自己的词条、下级单元库、基础库。
+  /// P2：一个顶级单元库的分组——它自己的词条、下级单元库、基础库。
   Widget _entryStyleSection() {
     const labels = <LibEntryKind, String>{
-      LibEntryKind.top: '顶级节点（媒体库根）',
+      LibEntryKind.top: '顶级单元库（媒体库根）',
       LibEntryKind.unit: '单元库',
       LibEntryKind.basic: '基础库（末梢）',
       LibEntryKind.other: '其它（作者卡等）',
@@ -2036,7 +2036,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionHeader('顶级节点 · $name'),
+        _SectionHeader('顶级单元库 · $name'),
         _libTile(top, isTop: true),
         if (subUnits.isNotEmpty)
           const Padding(
@@ -2148,7 +2148,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     );
   }
 
-  /// P1：末梢基础库词条——自己设色优先，否则继承单元库/顶级节点。
+  /// P1：末梢基础库词条——自己设色优先，否则继承单元库/顶级单元库。
   Widget _basicTile(BasicLib b, {bool indent = false}) {
     final unitId = meta?.basicToUnit[b.id] ?? '';
     final color = LibraryBadge.basicColorFor(b.id, unitId, order: _order);
@@ -3265,29 +3265,6 @@ class _StripIndexTileState extends State<_StripIndexTile> {
   }
 }
 
-/// 设置：播放页双击点赞开关（关闭后双击按两次单击处理）。
-class _DoubleTapLikeTile extends StatefulWidget {
-  const _DoubleTapLikeTile();
-  @override
-  State<_DoubleTapLikeTile> createState() => _DoubleTapLikeTileState();
-}
-
-class _DoubleTapLikeTileState extends State<_DoubleTapLikeTile> {
-  @override
-  Widget build(BuildContext context) {
-    return SwitchListTile(
-      secondary: const Icon(Icons.favorite_border),
-      title: const Text('双击点赞'),
-      subtitle: const Text('播放页双击画面点赞并弹红心；关闭后双击按两次单击处理'),
-      value: AppSettings.doubleTapLike,
-      onChanged: (v) async {
-        setState(() => AppSettings.doubleTapLike = v);
-        await AppSettings.save();
-      },
-    );
-  }
-}
-
 /// 推荐页每批数量：0 或空 = 默认 40，上限 500（服务端上限 1000）。
 const int kRecommendDefaultCount = 40;
 const int kRecommendMaxCount = 500;
@@ -3504,7 +3481,6 @@ class SettingsHubPage extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const DeletedMonitorPage())),
         ),
         const _StripIndexTile(),
-        const _DoubleTapLikeTile(),
         const _RecommendCountTile(),
         const Divider(),
         ListTile(
@@ -3547,14 +3523,14 @@ class CustomizationHubPage extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.sell_outlined),
           title: const Text('库词条配色'),
-          subtitle: const Text('按顶级节点分类 · 向下继承 · 末梢才分发'),
+          subtitle: const Text('按顶级单元库分类 · 向下继承 · 末梢才分发'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const LibraryBadgeColorsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.workspaces_outline),
           title: const Text('库角标'),
-          subtitle: const Text('顶级节点 / 单元库 / 基础库的图案与颜色 · 立即生效'),
+          subtitle: const Text('顶级单元库 / 单元库 / 基础库的图案与颜色 · 立即生效'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const CornerBadgeSettingsPage())),
         ),
@@ -4033,7 +4009,7 @@ class CornerBadgeSettingsPage extends StatefulWidget {
 
 class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
   static const _kindLabels = <LibBadgeKind, String>{
-    LibBadgeKind.top: '顶级节点（媒体库根）',
+    LibBadgeKind.top: '顶级单元库（媒体库根）',
     LibBadgeKind.unit: '单元库（中间层）',
     LibBadgeKind.basic: '基础库（末梢）',
     LibBadgeKind.other: '其它（非库语境）',
@@ -4820,7 +4796,7 @@ class _LibraryPageState extends State<LibraryPage> {
     return null;
   }
 
-  /// P3：顶级节点卡片的连接状态。只按节点自带的连接标识查当前连接表，
+  /// P3：顶级单元库卡片的连接状态。只按节点自带的连接标识查当前连接表，
   /// 不看任何目录名文本；查不到就不显示（不猜）。
   String _topNodeStatus(UnitLibrary u) {
     final id = u.node.serverId.trim();
@@ -4832,7 +4808,7 @@ class _LibraryPageState extends State<LibraryPage> {
     return '';
   }
 
-  /// P3：首页顶级节点卡片专用封面——**只认 owner 设过的封面**。
+  /// P3：首页顶级单元库卡片专用封面——**只认 owner 设过的封面**。
   ///
   /// 顺序：服务端 `cover.u`（owner 手动指定）> 自定义 `_cover/<version>`。
   /// 两者都没有就返回空串，卡片用词条色块占位；不取爬虫封面/作品图，
@@ -7738,13 +7714,13 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// 视频层可用比例：只有播放器报过的才作数。
   double? _videoAspectFor(dynamic w) {
-    final a = _playerAspectByWork[_likeKeyFor(w)];
+    final a = _playerAspectByWork[_workKeyFor(w)];
     return (a != null && a > 0) ? a : null;
   }
 
   /// 封面显示比例：封面 → 播放器 → 上次播放器上报值。
   double? _coverAspectFor(dynamic w) {
-    final key = _likeKeyFor(w);
+    final key = _workKeyFor(w);
     final cover = _coverAspectByWork[key];
     if (cover != null && cover > 0) return cover;
     final player = _playerAspectByWork[key];
@@ -7755,7 +7731,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 记住封面比例（邻近页封面解析时回填）；与已有值相差 <2% 时不覆盖。
   void _rememberCoverAspect(dynamic w, double a) {
     if (a <= 0 || !a.isFinite) return;
-    final key = _likeKeyFor(w);
+    final key = _workKeyFor(w);
     final old = _coverAspectByWork[key];
     if (old != null && old > 0 && (old - a).abs() / old < 0.02) return;
     _coverAspectByWork[key] = a;
@@ -7764,7 +7740,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 记住播放器比例；与已有值相差 <2% 时不覆盖，避免来回抖动。
   void _rememberPlayerAspect(dynamic w, double a) {
     if (a <= 0 || !a.isFinite) return;
-    final key = _likeKeyFor(w);
+    final key = _workKeyFor(w);
     final old = _playerAspectByWork[key];
     if (old != null && old > 0 && (old - a).abs() / old < 0.02) return;
     _playerAspectByWork[key] = a;
@@ -7966,17 +7942,8 @@ class _PlayerPageState extends State<PlayerPage>
             .chain(CurveTween(curve: Curves.elasticOut)),
         weight: 60),
   ]).animate(_dropAnim);
-  // G9：双击点赞（仅本地标记）。红心在点击位置弹一下并淡出。
-  final Set<String> likedKeys = <String>{};
-  Offset? _heartPos;
-  int _lastStageTapAt = 0;
-  Offset _lastStageTapPos = Offset.zero;
-  // P0 §5：爱心 700ms（参数见 player_controls.dart），数值由纯函数给出。
-  late final AnimationController _heartAnim =
-      AnimationController(vsync: this, duration: kHeartAnimDuration);
-  // P0（非全屏）：单击延迟 250ms 判定、双击取消单击、双击不暂停。
-  final StageTapArbiter _stageTapArbiter = StageTapArbiter();
-  Timer? _singleTapTimer;
+  // 2026-11-23 owner：去掉双击点赞后，不再需要双击仲裁与红心动画。
+  // 单击仍是唯一判定路径（呼出/收起功能区、非全屏暂停），双击就是两次单击。
   // P0（非全屏）：暂停时只显示播放图标，0.8s / easeOut 淡出。
   late final AnimationController _playHintAnim = AnimationController(
       vsync: this, duration: const Duration(milliseconds: kPlayHintFadeMs));
@@ -7985,9 +7952,6 @@ class _PlayerPageState extends State<PlayerPage>
   Timer? _lpTimer;
   bool _suppressStageTap = false;
 
-  /// 第一下单击是否真的切换了暂停（用于双击时还原）
-  bool _pendingTapPaused = false;
-  bool _pendingTapWasPaused = false;
   bool _menuVisible = false;
   late final AnimationController _menuAnim = AnimationController(
       vsync: this,
@@ -8048,7 +8012,6 @@ class _PlayerPageState extends State<PlayerPage>
     _fromAuthor = widget.fromAuthor;
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
-    _loadLikes();
     _ensureMetaFor(_curLib);
     _bindPlayer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -9673,10 +9636,9 @@ class _PlayerPageState extends State<PlayerPage>
     _navAt = now;
   }
 
-  String _likeKeyFor(dynamic w) =>
-      workLikeKey(lib: _libFor(w), id: '${(w is Map ? w['id'] : null) ?? ''}');
-
-  bool _isLiked(dynamic w) => likedKeys.contains(_likeKeyFor(w));
+  /// 作品唯一键（库/作品 id），只服务本机比例与隐藏集合等内存映射。
+  String _workKeyFor(dynamic w) =>
+      workKey(lib: _libFor(w), id: '${(w is Map ? w['id'] : null) ?? ''}');
 
   // P1：非全屏互动栏的收藏标记（本机内存态，暂不写服务端）。
 
@@ -9731,8 +9693,7 @@ class _PlayerPageState extends State<PlayerPage>
     final now = DateTime.now().millisecondsSinceEpoch;
     if (!mounted || !_lpTracker.shouldFire(now)) return;
     _lpTracker.fire();
-    // 触发长按即取消待定单击；长按期间与菜单打开后都不暂停。
-    _cancelPendingSingleTap();
+    // 长按期间与菜单打开后都不暂停（抬起不再当作单击）。
     _suppressStageTap = true;
     hapticTap();
     _openStageMenu();
@@ -9778,7 +9739,7 @@ class _PlayerPageState extends State<PlayerPage>
         break;
       case '举报':
         // 举报只做本地记录，不联网、不上报服务端。
-        debugPrint('[report] local-only work=${_likeKeyFor(w)}');
+        debugPrint('[report] local-only work=${_workKeyFor(w)}');
         _toast('已记录举报（仅本地，未联网）');
         break;
     }
@@ -9787,7 +9748,7 @@ class _PlayerPageState extends State<PlayerPage>
   /// 不感兴趣：写入本机集合 `hidden_works_v1`，刷新列表后生效；
   /// 当前会话内直接跳到下一条，抖音同款手感。
   Future<void> _hideCurrentWork(dynamic w) async {
-    final key = _likeKeyFor(w);
+    final key = _workKeyFor(w);
     if (key.isEmpty) {
       _toast('缺少作品标识，无法隐藏');
       return;
@@ -9916,13 +9877,8 @@ class _PlayerPageState extends State<PlayerPage>
       _menuAnim.stop();
       _menuAnim.value = 0;
     }
-    // P2 §11：爱心/双击判定不带进下一条。
-    _heartPos = null;
-    _heartAnim.stop();
-    _heartAnim.value = 0;
-    _lastStageTapAt = 0;
-    _stageTapArbiter.clear();
-    _cancelPendingSingleTap();
+    // §11：长按/点击抑制状态不带进下一条（点赞与双击仲裁已移除）。
+    _suppressStageTap = false;
     _lpTimer?.cancel();
     _lpTracker.cancel();
     // P2 §12：新页从可见功能区开始，重新计时。
@@ -10090,39 +10046,6 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
-  Future<void> _loadLikes() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final keys = parseLikedKeys(sp.getStringList(kLikedWorksPrefsKey));
-      if (mounted)
-        setState(() => likedKeys
-          ..clear()
-          ..addAll(keys));
-    } catch (_) {}
-  }
-
-  Future<void> _setLiked(dynamic w, bool liked, {Offset? at}) async {
-    final key = _likeKeyFor(w);
-    if (key.isEmpty) return;
-    final next = updateLikedKeys(likedKeys, key, liked: liked);
-    setState(() {
-      likedKeys
-        ..clear()
-        ..addAll(next);
-    });
-    if (liked && at != null) {
-      hapticTap();
-      setState(() => _heartPos = at);
-      _heartAnim.forward(from: 0);
-    } else if (!liked) {
-      hapticSelect();
-    }
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setStringList(kLikedWorksPrefsKey, next);
-    } catch (_) {}
-  }
-
   // 全屏且功能隐藏时，第一次点击只呼出功能区，第二次才暂停；
   // 320ms 内在相近位置再次点击视为双击：点赞并恢复到点击前的播放状态。
   void onStageTap([Offset? pos]) {
@@ -10142,10 +10065,12 @@ class _PlayerPageState extends State<PlayerPage>
         _scrubHover = false;
       });
     }
-    // P0：非全屏走抖音式仲裁（250ms 单击判定，双击只点赞不暂停）；
-    // 全屏分支完全保持原行为，不进入下面的新逻辑。
+    // 2026-11-23：双击点赞已移除。舞台点击只有一条路径——
+    // 非全屏走 _onStageTapNonFullscreen（沉浸/长按抑制/缩放复位/单击暂停），
+    // 全屏只切换功能区显隐。双击 = 两次单击，不出现「暂停又播放」的抖动，
+    // 因为每次单击都独立走 _singleStageTap。
     if (!fs) {
-      // P2：沉浸态下第一次点按只恢复功能区，不暂停/点赞。
+      // P2：沉浸态下第一次点按只恢复功能区，不暂停。
       final fromImmersive = _immAtDown;
       _immAtDown = false;
       if (fromImmersive) {
@@ -10158,113 +10083,55 @@ class _PlayerPageState extends State<PlayerPage>
       return;
     }
     focus.requestFocus();
-    final w = _workAt(cur);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    // M1：全屏单击只切换功能区显隐，不暂停；非全屏保持单击暂停。
-    // 双击仍可点赞，即使第一次单击已把全屏功能区收起。
-    // 设置里可关闭双击点赞：关闭时双击退化为两次单击（显隐功能区/暂停）。
-    final isDouble = AppSettings.doubleTapLike &&
-        isStageDoubleTap(
-            nowMs: now,
-            lastMs: _lastStageTapAt,
-            lastPos: _lastStageTapAt > 0 ? _lastStageTapPos : null,
-            pos: pos);
-    final action = stageTapAction(
+    // M1：全屏单击只切换功能区显隐，不暂停（保留 G14 缩放复位）。
+    switch (stageTapAction(
       uiVisible: ui,
       // owner 2026-11-21：全屏下舞台任意位置（含视频矩形外的黑边/留白）
       // 都只切换功能区显隐，桌面端不再「单击暂停」，与移动端一致。
       fullscreen: fs,
       zoomed: _picZoom.isZoomed,
-      doubleTap: isDouble,
-    );
-    switch (action) {
+      doubleTap: false,
+    )) {
       case StageTapAction.resetZoom:
-        // G14：图片放大时单击只恢复原始大小，不暂停/双击点赞
         _resetPicZoom();
-        _lastStageTapAt = 0;
-        return;
-      case StageTapAction.like:
-        _lastStageTapAt = 0;
-        // 全屏单击已不再改变播放状态（上面 fullscreen: fs），双击只点赞，
-        // 没有需要恢复的暂停切换。
-        if (!_isLiked(w)) _setLiked(w, true, at: pos);
-        showUi();
-        return;
-      case StageTapAction.showUi:
-        showUi();
-        _lastStageTapAt = 0;
         return;
       case StageTapAction.hideUi:
-        // 记录这次点击，使紧接着的第二次点击仍可判定为双击点赞。
-        _lastStageTapAt = now;
-        _lastStageTapPos = pos ?? Offset.zero;
         hideUiNow();
         return;
+      // 下面两个分支在全屏 + 无双击时不可达；保留穷尽分支，避免将来
+      // 语义变更时静默漏处理。
+      case StageTapAction.showUi:
+        showUi();
+        return;
       case StageTapAction.togglePause:
-        _lastStageTapAt = now;
-        _lastStageTapPos = pos ?? Offset.zero;
         hapticTap();
         togglePause();
+        showUi();
+        return;
+      case StageTapAction.like:
+        // 双击点赞已移除：这里不再有点赞动作，只保证功能区可见。
         showUi();
         return;
     }
   }
 
-  /// P0：非全屏单击/双击仲裁。首次点击延迟 250ms 判定单击，双击取消单击；
-  /// 双击只点赞（位置=点击点）、不暂停，也不恢复任何暂停状态。
+  /// 非全屏单击：沉浸恢复 / 长按抑制 / 图片缩放复位 / 暂停继续。
+  ///
+  /// 2026-11-23：原本这里还有 250ms 双击仲裁（双击点赞）。点赞删除后，
+  /// 仲裁窗口没有第二个用途，直接取消——单击立即生效，不再有 250ms 延迟。
   void _onStageTapNonFullscreen(Offset? pos) {
     focus.requestFocus();
     // P1b：长按已弹菜单/评论面板时，抬起不当作单击（不暂停）。
     if (_suppressStageTap) {
       _suppressStageTap = false;
-      _cancelPendingSingleTap();
       return;
     }
-    final at = pos ?? Offset.zero;
     // G14：图片放大时单击只恢复原始大小
     if (_picZoom.isZoomed) {
-      _cancelPendingSingleTap();
       _resetPicZoom();
       return;
     }
-    // 设置里关闭双击点赞时无需等待仲裁窗口，直接走单击。
-    if (!AppSettings.doubleTapLike) {
-      _cancelPendingSingleTap();
-      _singleStageTap();
-      return;
-    }
-    final w = _workAt(cur);
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (_stageTapArbiter.registerTap(nowMs: now, pos: at)) {
-      _cancelPendingSingleTap();
-      // 第一下已经暂停了：双击语义是「点赞」，所以要还原播放状态
-      if (_pendingTapPaused && paused != _pendingTapWasPaused) {
-        _pendingTapPaused = false;
-        togglePause();
-      }
-      if (!_isLiked(w)) _setLiked(w, true, at: at);
-      showUi();
-      return;
-    }
-    // owner 2026-11-20：单击立即生效，不再等 250ms 仲裁窗口
-    //（等待期间任何扰动都会让这次点击「像丢包一样」消失）。
-    // 双击的第二下再把刚才的暂停/继续还原，然后点赞。
-    _pendingTapWasPaused = paused;
-    _pendingTapPaused = ui;
     _singleStageTap();
-    _singleTapTimer?.cancel();
-    _singleTapTimer =
-        Timer(const Duration(milliseconds: kStageSingleTapDelayMs), () {
-      _stageTapArbiter.clear();
-      _pendingTapPaused = false;
-    });
-  }
-
-  /// 取消已排队但尚未触发的单击（双击、拖动、翻页时调用）。
-  void _cancelPendingSingleTap() {
-    _singleTapTimer?.cancel();
-    _singleTapTimer = null;
-    _stageTapArbiter.clear();
   }
 
   /// 非全屏单击：功能区隐藏时先呼出；否则暂停/继续。
@@ -10323,8 +10190,7 @@ class _PlayerPageState extends State<PlayerPage>
       edgeWidth: kAuthorDragEdge,
     );
     if (!allowed) return;
-    // P0：左滑拉作者页时取消单击判定，避免“滑一下却切了暂停”。
-    _cancelPendingSingleTap();
+    // 左滑起手后指针位移已超过单击阈值，不会再落到单击路径。
     if (_authorDrag != null) return;
     final name = '${_workAt(cur)['a'] ?? ''}';
     if (name.isEmpty) return;
@@ -10829,8 +10695,6 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// M5：只在状态真正变化时重建，避免滚动通知每帧触发 setState。
   void _setPageSwiping(bool value) {
-    // P0：一旦开始翻页手势，取消尚未触发的单击判定，避免拖完再跳一次暂停。
-    if (value) _cancelPendingSingleTap();
     // P2：翻页中立即退出沉浸，松手后重新计时。
     if (value) {
       _immTimer?.cancel();
@@ -10983,12 +10847,10 @@ class _PlayerPageState extends State<PlayerPage>
     _saveWatchProgress(force: true);
     WatchProgressStore.flush();
     _dropAnim.dispose();
-    _heartAnim.dispose();
     _playHintAnim.dispose();
     _menuAnim.dispose();
     _commentAnim.dispose();
     _lpTimer?.cancel();
-    _singleTapTimer?.cancel();
     autoTimer?.cancel();
     hideTimer?.cancel();
     _immTimer?.cancel();
@@ -11316,15 +11178,6 @@ class _PlayerPageState extends State<PlayerPage>
                               Text('${w['d']}',
                                   style: const TextStyle(
                                       fontSize: 11, color: Colors.white54)),
-                            ],
-                            // G9：本地喜欢标记，点红心可取消
-                            if (_isLiked(w)) ...[
-                              const SizedBox(width: 6),
-                              GestureDetector(
-                                onTap: () => _setLiked(w, false),
-                                child: const Icon(Icons.favorite,
-                                    size: 14, color: Color(0xFFFF3B5C)),
-                              ),
                             ],
                           ]),
                           // T2：来源词条（单元库）+ 等级词条，半透明不遮画面
@@ -13272,32 +13125,6 @@ class _PlayerPageState extends State<PlayerPage>
               // 缓冲态只在诊断里记录，不再占用画面中心。
               // G12：加载超时/解码失败/网络失败 —— 给出重试入口
               if (_failure != null) _failureOverlay(),
-              // G9 / P0 §5：双击位置的红心反馈（58dp、#FFFF3B5C、700ms、
-              // scale 0.6→1.15→1.0、上浮 60dp、opacity 1→0）。
-              if (_heartPos != null)
-                Positioned(
-                  left: _heartPos!.dx - kHeartSize / 2,
-                  top: _heartPos!.dy - kHeartSize / 2,
-                  child: IgnorePointer(
-                    child: AnimatedBuilder(
-                      animation: _heartAnim,
-                      builder: (_, __) {
-                        final t = _heartAnim.value;
-                        return Opacity(
-                          opacity: heartOpacityAt(t),
-                          child: Transform.translate(
-                            offset: Offset(0, heartRiseOffsetAt(t)),
-                            child: Transform.scale(
-                              scale: heartScaleAt(t),
-                              child: const Icon(Icons.favorite,
-                                  size: kHeartSize, color: kHeartColor),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ),
               // G15：移动端调光遮罩（只压暗画面，不影响控件）
               if (_mobileSwipe && brightness < 100)
                 Positioned.fill(
