@@ -27,31 +27,6 @@ String authorSourceSummary(Iterable<String> libs) {
   return n >= 2 ? '来自 $n 个库' : '';
 }
 
-/// 作品按 `_lib` 分组，保持**首次出现顺序**（各库拉取顺序稳定，UI 不乱跳）。
-///
-/// 返回 `lib → works`；`_lib` 缺失的作品归到 [fallbackLib]。
-Map<String, List<Map<String, dynamic>>> groupWorksByLib(
-  Iterable<dynamic> works, {
-  String fallbackLib = '',
-}) {
-  final out = <String, List<Map<String, dynamic>>>{};
-  final order = <String>[];
-  for (final w in works) {
-    if (w is! Map) continue;
-    final m = Map<String, dynamic>.from(w);
-    var lib = '${m['_lib'] ?? ''}'.trim();
-    if (lib.isEmpty) lib = fallbackLib.trim();
-    if (!out.containsKey(lib)) order.add(lib);
-    out.putIfAbsent(lib, () => <Map<String, dynamic>>[]).add(m);
-  }
-  // 按首次出现顺序重建，避免 Dart Map 字面量插入顺序以外的意外。
-  final ordered = <String, List<Map<String, dynamic>>>{};
-  for (final l in order) {
-    ordered[l] = out[l]!;
-  }
-  return ordered;
-}
-
 /// 合并多个库拉回来的作品：按作品 id 去重，**先到先得**（调用方按
 /// primaryLib 优先的顺序拉取即可实现「主库优先」）。
 ///

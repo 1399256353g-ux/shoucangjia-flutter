@@ -16119,7 +16119,6 @@ class _AuthorPageState extends State<AuthorPage> {
   }
 
   Future<void> load() async {
-    final seen = <String>{};
     works = [];
     bio = '';
     bioAt = 0;
@@ -16128,6 +16127,13 @@ class _AuthorPageState extends State<AuthorPage> {
     primaryLib = '';
     // 重新拉取时来源筛选归零：库可能增减，旧选择不一定还成立。
     libFilter = '';
+    // 各库作品先分别收齐，再统一交给 mergeAuthorWorks 合并。
+    //
+    // 之前这里是「边拉边用 seen 集合去重」——与 author_merge.dart 里那份
+    // 带单测的合并规则是同一件事的第二份实现。两份实现的好处是零，代价是
+    // 改规则时必然漏一处：这里改了就与单测脱节，单测绿着、真实路径却是另一套。
+    // 现在只保留一份：按 _libs 顺序传入，先到先得 = 主库优先，语义不变。
+    final perLib = <List<Map<String, dynamic>>>[];
     for (final lib in _libs) {
       try {
         final r = await http.get(cfg.u('/api/authors.json', lib: lib),
@@ -16145,14 +16151,16 @@ class _AuthorPageState extends State<AuthorPage> {
         if (bio.isEmpty) bio = (m['bio'] ?? '').toString();
         if (av.isEmpty) av = (m['av'] ?? '').toString();
         if (primaryLib.isEmpty) primaryLib = lib;
-        for (final w in ((m['works'] as List?) ?? const [])) {
-          final id = '${(w as Map)['id'] ?? ''}';
-          if (id.isNotEmpty && !seen.add(id)) continue;
-          works.add({...Map<String, dynamic>.from(w), '_lib': lib});
-        }
+        // 本库作品打上 `_lib` 后整批交给合并器；去重与顺序由它保证。
+        perLib.add([
+          for (final w in ((m['works'] as List?) ?? const []))
+            if (w is Map)
+              {...Map<String, dynamic>.from(w), '_lib': lib},
+        ]);
         postStat('visit', widget.name, lib: lib);
       } catch (_) {}
     }
+    works = mergeAuthorWorks(perLib);
     // 记下爬虫/自动头像，上传自定义后仍保留，供「恢复自动」回滚显示。
     if (!isManualAvatarPath(av)) _crawledAv = av;
     if (primaryLib.isNotEmpty) {

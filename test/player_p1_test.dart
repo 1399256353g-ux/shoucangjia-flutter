@@ -22,108 +22,43 @@ void main() {
     });
   });
 
-  group('P1 §2 信息区', () {
-    test('文案最大宽度 = 屏宽 − 右栏 84 − 左边距 12', () {
-      expect(infoAreaMaxWidth(375), 279);
-      expect(infoAreaMaxWidth(320), 224);
-      expect(infoAreaMaxWidth(0), 0);
-      expect(infoAreaMaxWidth(double.nan), 0);
-      expect(kInfoLeftMargin, 12);
-      expect(kMusicIconSize, 16);
-      expect(kMusicIconGap, 6);
-      expect(kMusicFontSize, 13);
-      expect(kInfoSecondaryColor, const Color(0xE6FFFFFF));
-      expect(kMarqueeSpeed, 40);
-      expect(kMarqueePause, const Duration(seconds: 2));
-      expect(kInfoBottomGap, 12);
+  group('P1 §2 信息区：无第二套实现', () {
+    // 与「去点赞」同一类问题：`player_controls.dart` 里的 PlayerInfoPanel /
+    // MarqueeText / 文案展开判定曾是播放页信息区的**第二套实现**，而真正
+    // 渲染在 main.dart 里的信息区从来没用过它们。于是测试绿着、界面上那块
+    // 组件永远不出现——测试在为一个不存在的界面作证。
+    //
+    // 现在整块删除，并把「确实只有一套」变成可执行断言：
+    //  - lib/ 下不得再出现 PlayerInfoPanel / MarqueeText；
+    //  - 信息区宽度常量仍只有 kRailReservedWidth（舞台长按热区要用）。
+    test('lib/ 下没有任何信息区第二套实现', () {
+      final lib = Directory('lib');
+      final hits = <String>[];
+      for (final f in lib.listSync(recursive: true)) {
+        if (f is! File || !f.path.endsWith('.dart')) continue;
+        final src = f.readAsStringSync();
+        if (src.contains('PlayerInfoPanel') || src.contains('class MarqueeText')) {
+          hits.add(f.path);
+        }
+      }
+      expect(hits, isEmpty);
     });
 
-    test('跑马灯位移：滚动 40px/s，到末尾停 2s 后重来', () {
-      // 文本 140，可视 100 → 距离 40 → 滚动 1s，周期 3s。
-      expect(
-          marqueeOffsetAt(
-              elapsedSeconds: 0, textWidth: 140, viewWidth: 100),
-          0);
-      expect(
-          marqueeOffsetAt(
-              elapsedSeconds: 0.5, textWidth: 140, viewWidth: 100),
-          -20);
-      expect(
-          marqueeOffsetAt(
-              elapsedSeconds: 1.0, textWidth: 140, viewWidth: 100),
-          -40);
-      expect(
-          marqueeOffsetAt(
-              elapsedSeconds: 2.5, textWidth: 140, viewWidth: 100),
-          -40);
-      expect(
-          marqueeOffsetAt(
-              elapsedSeconds: 3.0, textWidth: 140, viewWidth: 100),
-          0);
-      // 不超宽不滚
-      expect(
-          marqueeOffsetAt(
-              elapsedSeconds: 1.5, textWidth: 80, viewWidth: 100),
-          0);
-      expect(
-          marqueeCycleSeconds(textWidth: 140, viewWidth: 100), closeTo(3, 1e-9));
-      expect(
-          marqueeCycleSeconds(textWidth: 80, viewWidth: 100), 0);
-    });
+    test('信息区宽度预留仍只有一处来源', () {
+      // 84 = 44 头像 + 10 右边距 + 余量；舞台长按热区的 rightInset 仍在用。
+      expect(kRailReservedWidth, 84);
 
-    test('文案行数：超过 2 行才需要展开', () {
-      const style = TextStyle(fontSize: 14, height: 1.35);
-      expect(captionNeedsExpand('短文案', style, 200), isFalse);
-      final long = List.filled(80, '很长的文案').join();
-      expect(captionNeedsExpand(long, style, 200), isTrue);
-      expect(kCaptionMaxLines, 2);
-      expect(kCaptionFontSize, 14);
-      expect(kCaptionHeight, 1.35);
-    });
-
-    testWidgets('作者/文案/音乐渲染，展开按钮可达', (tester) async {
-      const long = '这是一段会超过两行显示范围的文案内容，'
-          '用来验证展开按钮会出现并且点击后进入全文模式。';
-      var toggled = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: Align(
-            alignment: Alignment.bottomLeft,
-            child: PlayerInfoPanel(
-              author: '张三',
-              caption: long,
-              music: '张三 的原声',
-              maxWidth: infoAreaMaxWidth(375),
-              onToggleExpand: () => toggled++,
-            ),
-          ),
-        ),
-      ));
-      expect(find.text('@张三'), findsOneWidget);
-      expect(find.byIcon(Icons.music_note), findsOneWidget);
-      expect(find.text('展开'), findsOneWidget);
-      await tester.tap(find.text('展开'));
-      expect(toggled, 1);
-    });
-
-    testWidgets('320 窄屏不溢出', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: MediaQuery(
-          data: const MediaQueryData(size: Size(320, 640)),
-          child: Scaffold(
-            body: Align(
-              alignment: Alignment.bottomLeft,
-              child: PlayerInfoPanel(
-                author: '一个很长很长的作者名字用来测试省略',
-                caption: '文案也很长，需要在窄屏下自动省略而不是溢出屏幕边界。',
-                music: '一段同样很长很长的音乐名称用于跑马灯测试',
-                maxWidth: infoAreaMaxWidth(320),
-              ),
-            ),
-          ),
-        ),
-      ));
-      expect(tester.takeException(), isNull);
+      final lib = Directory('lib');
+      final decls = <String>[];
+      for (final f in lib.listSync(recursive: true)) {
+        if (f is! File || !f.path.endsWith('.dart')) continue;
+        for (final line in f.readAsLinesSync()) {
+          if (line.startsWith('const double kRailReservedWidth')) {
+            decls.add(f.path);
+          }
+        }
+      }
+      expect(decls.length, 1, reason: '常量只允许声明一次');
     });
   });
 

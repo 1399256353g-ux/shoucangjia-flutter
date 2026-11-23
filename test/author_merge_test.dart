@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/author_merge.dart';
 
@@ -17,37 +19,6 @@ void main() {
       expect(authorSourceSummary(const ['lib-001']), '');
       expect(authorSourceSummary(const ['lib-001', 'lib-002']), '来自 2 个库');
       expect(authorSourceSummary(const ['a', 'b', 'c']), '来自 3 个库');
-    });
-  });
-
-  group('groupWorksByLib', () {
-    test('按 _lib 分组且保持首次出现顺序', () {
-      final works = [
-        {'id': 'w1', '_lib': 'lib-002'},
-        {'id': 'w2', '_lib': 'lib-001'},
-        {'id': 'w3', '_lib': 'lib-002'},
-      ];
-      final g = groupWorksByLib(works);
-      expect(g.keys.toList(), ['lib-002', 'lib-001']);
-      expect(g['lib-002']!.map((e) => e['id']), ['w1', 'w3']);
-      expect(g['lib-001']!.map((e) => e['id']), ['w2']);
-    });
-
-    test('缺 _lib 的作品归到 fallback，非 Map 条目跳过', () {
-      final g = groupWorksByLib(
-        [
-          {'id': 'w1'},
-          'not-a-map',
-          {'id': 'w2', '_lib': ''},
-        ],
-        fallbackLib: 'lib-009',
-      );
-      expect(g.keys.toList(), ['lib-009']);
-      expect(g['lib-009']!.map((e) => e['id']), ['w1', 'w2']);
-    });
-
-    test('空输入返回空映射', () {
-      expect(groupWorksByLib(const []), isEmpty);
     });
   });
 
@@ -126,6 +97,35 @@ void main() {
         {'id': 'w2', '_lib': 'lib-001'},
       ]);
       expect(opts.map((e) => e.key), ['lib-001']);
+    });
+  });
+  _loadPathContract();
+}
+
+void _loadPathContract() {
+  // 作者页加载路径与合并规则必须是同一份实现（0.9.199）。
+  //
+  // 这段不是普通单测：它读 `lib/main.dart` 的真实源码，断言作者页
+  // 走的是 mergeAuthorWorks，而不是自己再写一遍 `seen` 去重循环。
+  // 一旦有人把那份循环加回来，这里立刻变红——单测再绿也说明不了
+  // 真实路径用的是它。
+  group('作者页加载路径只用一份合并规则', () {
+    final src = File('lib/main.dart').readAsStringSync();
+
+    test('作者页调用 mergeAuthorWorks', () {
+      expect(src.contains('mergeAuthorWorks('), isTrue);
+    });
+
+    test('作者页不再自己维护去重集合', () {
+      // 旧实现的特征行：`if (id.isNotEmpty && !seen.add(id)) continue;`
+      expect(src.contains('!seen.add(id)'), isFalse);
+    });
+
+    test('合并器每家只收一次（_libs 顺序即主库优先）', () {
+      final i = src.indexOf('works = mergeAuthorWorks(perLib);');
+      expect(i, greaterThan(0));
+      // 收集循环必须出现在合并调用之前，而不是边拉边写 works。
+      expect(src.indexOf('perLib.add(['), lessThan(i));
     });
   });
 }
