@@ -120,6 +120,27 @@ List<String> pushMpvDigest(
   return next;
 }
 
+/// 从 mpv 诊断尾部里取出真实的 HTTP 状态码（取不到返回 null）。
+///
+/// `stream.error` 只说「Failed to open」，但 mpv 的 `ffmpeg` 前缀日志里有
+/// 一行 `http: HTTP error 404 Not Found`。这一行就是「传输层已经告诉了我们
+/// 确切原因」的唯一证据，所以先把状态码抽出来，再交给失败分类去校正。
+///
+/// 只认 401/403/404/410：其它码（500/503…）既可能是临时故障也可能不是，
+/// 归到「网络」仍是最合理的回答，不为它们另造分支。
+int? httpStatusFromMpvTail(List<String> tail) {
+  for (final line in tail) {
+    final s = line.toLowerCase();
+    final i = s.indexOf('http error ');
+    if (i < 0) continue;
+    final m = RegExp(r'http error (\d{3})').firstMatch(s.substring(i));
+    if (m == null) continue;
+    final code = int.tryParse(m.group(1)!);
+    if (code == 401 || code == 403 || code == 404 || code == 410) return code;
+  }
+  return null;
+}
+
 /// 媒体地址的**形状**指标：只记长度与字符类别计数，不含任何内容。
 ///
 /// 用途：判断「mpv 打不开」是否源于地址形态（例如未转义的空格 / 非 ASCII

@@ -2,7 +2,19 @@
 ///
 /// 弱网、超时、解码失败在界面上给出不同标题/说明，并统一提供重试入口。
 /// 纯逻辑，方便单元测试；不依赖 Flutter 与播放器实现。
-enum PlaybackFailureKind { network, decode, timeout, data, unknown }
+///
+/// `missing` / `denied` 与 `network` 分开：传输层已经明确告诉我们
+/// 「服务端没有这个文件」（404/410）或「拒绝了这次取流」（401/403）时，
+/// 再说「请检查网络」就是把用户引到错误的排查方向上。
+enum PlaybackFailureKind {
+  network,
+  decode,
+  timeout,
+  data,
+  missing,
+  denied,
+  unknown,
+}
 
 class PlaybackFailure {
   final PlaybackFailureKind kind;
@@ -11,7 +23,12 @@ class PlaybackFailure {
 
   const PlaybackFailure(this.kind, this.title, this.detail);
 
-  bool get retryable => kind != PlaybackFailureKind.data;
+  /// 重试是否有意义：数据异常、文件不存在、鉴权被拒都重试不出结果，
+  /// 反复点只会白等一轮超时。
+  bool get retryable =>
+      kind != PlaybackFailureKind.data &&
+      kind != PlaybackFailureKind.missing &&
+      kind != PlaybackFailureKind.denied;
 
   @override
   String toString() => 'PlaybackFailure($kind, $title, $detail)';
@@ -34,6 +51,43 @@ const PlaybackFailure timeoutFailure = PlaybackFailure(
 
 const PlaybackFailure unknownFailure = PlaybackFailure(
     PlaybackFailureKind.unknown, '加载失败', '播放出错了，请重试');
+
+/// 服务端明确回答「没有这个文件」（404/410）：不是网络问题，重试也没用。
+const PlaybackFailure mediaMissingFailure = PlaybackFailure(
+    PlaybackFailureKind.missing,
+    '媒体文件不存在',
+    '服务器上没有这个文件（可能已被移动或删除），上滑查看其他作品');
+
+/// 服务端拒绝取流（401/403）：连接凭据失效或该文件不可读。
+const PlaybackFailure mediaDeniedFailure = PlaybackFailure(
+    PlaybackFailureKind.denied, '无权访问该媒体', '服务端拒绝了这次取流，请重新连接或稍后再试');
+
+/// 传输层状态码 → 失败类型。只认「能确定原因」的码，其余交给文本分类。
+///
+/// 这是 HTTP 状态与提示文案之间的**唯一映射口**：404 不等于网络故障，
+/// 401/403 不等于文件丢失，两者与「连不上」必须分开。
+PlaybackFailure? failureForHttpStatus(int? status) {
+  if (status == null) return null;
+  if (status == 404 || status == 410) return mediaMissingFailure;
+  if (status == 401 || status == 403) return mediaDeniedFailure;
+  return null;
+}
+
+/// 用传输层证据校正已经分好的失败类型。
+///
+/// 播放器的 `stream.error` 只说「打不开」，分类只能靠措辞猜；而 mpv 内部日志
+/// 带着真实的 HTTP 状态。所有失败路径都汇到 `_showFailure`，在那里统一做一次
+/// 校正——不在各条错误回调里各猜一遍。
+PlaybackFailure withTransportStatus(PlaybackFailure f, int? status) {
+  final exact = failureForHttpStatus(status);
+  if (exact == null) return f;
+  // 已确定的解码/数据缺失结论不被覆盖：状态码只用来纠正「网络」这种模糊归类。
+  if (f.kind == PlaybackFailureKind.decode ||
+      f.kind == PlaybackFailureKind.data) {
+    return f;
+  }
+  return exact;
+}
 
 /// G20：单条作品数据异常，重试无意义，直接提示上/下滑切换。
 const PlaybackFailure workDataFailure = PlaybackFailure(

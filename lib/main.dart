@@ -9311,16 +9311,16 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   // G12：展示失败提示并停止转圈；重试时整条媒体重新打开。
-  void _showFailure(PlaybackFailure f) {
+  void _showFailure(PlaybackFailure raw) {
     if (!mounted) return;
     _loadTimeout?.cancel();
     _loadTimeout = null;
     _cancelVideoPrefetch();
-    // 分类结果要留，但只有 `failure:network` 这三个字无法定位问题：
-    // 本轮就卡在这里——`pause.log` 只记了分类名，原始错误文本一个字没留，
-    // 于是「到底是解码器不支持 x86、还是取流被拒」完全无从判断。
-    // 记一条脱敏摘要：去掉 URL 与查询串，只留错误措辞（不含文件路径/文件名），
-    // 这样既能把失败追溯到具体原因，又不把媒体路径写进日志。
+    // 唯一校正口：`stream.error` 只能说「打不开」，分类只能靠措辞猜；
+    // 但 mpv 内部日志带着真实的 HTTP 状态（我们实测到这里是 404）。
+    // 不校正的话：「服务器上没有这个文件」会被显示成「网络连接失败」，
+    // 用户按提示查网络永远查不出来，而重试按钮也永远不会成功。
+    final f = withTransportStatus(raw, httpStatusFromMpvTail(_mpvTail));
     // 分类结果要留，但只有 `failure:network` 这三个字无法定位问题：
     // 本轮就卡在这里——`pause.log` 只记了分类名，原始错误文本一个字没留，
     // 于是「到底是解码器不支持 x86、还是取流被拒」完全无从判断。
@@ -12866,7 +12866,11 @@ class _PlayerPageState extends State<PlayerPage>
             ? Icons.broken_image_outlined
             : f.kind == PlaybackFailureKind.data
                 ? Icons.hide_image_outlined
-                : Icons.error_outline;
+                : f.kind == PlaybackFailureKind.missing
+                    ? Icons.file_present_outlined
+                    : f.kind == PlaybackFailureKind.denied
+                        ? Icons.lock_outline
+                        : Icons.error_outline;
     return Positioned.fill(
       // G20：遮罩本身不接收指针事件，失败提示不能挡住 PageView 的
       // 上下滑；只有中间卡片（含重试按钮）可交互。
@@ -12906,11 +12910,23 @@ class _PlayerPageState extends State<PlayerPage>
                       foregroundColor: Colors.black,
                       minimumSize: const Size(120, 38)),
                 )
+              // 文件不存在/被拒绝：重试永远同一个结果，直接给「下一条」；
+              // 已经是最后一条时给「返回」，不让用户卡在一个无按钮的弹层里。
               else if (cur < widget.works.length - 1)
                 FilledButton.icon(
                   onPressed: next,
                   icon: const Icon(Icons.keyboard_arrow_up, size: 18),
                   label: const Text('下一条'),
+                  style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      minimumSize: const Size(120, 38)),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: const Text('返回'),
                   style: FilledButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.black,

@@ -152,4 +152,42 @@ void main() {
       expect(line.contains('port=8090'), isTrue);
     });
   });
+  group('httpStatusFromMpvTail', () {
+    test('从 ffmpeg 前缀的日志里取出真实状态码', () {
+      expect(
+          httpStatusFromMpvTail(
+              ['ffmpeg/warn<notfound>: http: HTTP error 404 Not Found']),
+          404);
+      expect(
+          httpStatusFromMpvTail(
+              ['ffmpeg/error<auth>: http: HTTP error 401 Unauthorized']),
+          401);
+      expect(
+          httpStatusFromMpvTail(['ffmpeg/error<auth>: HTTP error 403']), 403);
+    });
+
+    test('只认可行动的四类码，其它归网络', () {
+      expect(httpStatusFromMpvTail(['http: HTTP error 500']), isNull);
+      expect(httpStatusFromMpvTail(['http: HTTP error 503']), isNull);
+      expect(httpStatusFromMpvTail(['ffmpeg/warn<notfound>: 404']), isNull,
+          reason: '没有 http error 前缀的零散数字不算传输层证据');
+    });
+
+    test('尾部无状态码时返回 null，不猜', () {
+      expect(httpStatusFromMpvTail(const []), isNull);
+      expect(httpStatusFromMpvTail(['stream/error<open>: Failed to open']),
+          isNull);
+    });
+
+    test('环尾多条时命中任意一条即可（相邻重复已去重）', () {
+      expect(
+          httpStatusFromMpvTail([
+            'cplayer/warn: something',
+            'ffmpeg/warn<notfound>: http: HTTP error 404 Not Found',
+            'stream/error<open>: Failed to open',
+          ]),
+          404);
+    });
+  });
 }
+

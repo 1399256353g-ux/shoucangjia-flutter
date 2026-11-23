@@ -49,8 +49,54 @@ void main() {
     });
   });
 
-  group('playbackLoadTimedOut', () {
-    test('未到时长的超时判定', () {
+  group('传输层状态码校正（mpv 实测 404）', () {
+    test('404/410 → 文件不存在，且不提示重试', () {
+      expect(failureForHttpStatus(404)!.kind, PlaybackFailureKind.missing);
+      expect(failureForHttpStatus(410)!.kind, PlaybackFailureKind.missing);
+      expect(mediaMissingFailure.retryable, isFalse);
+    });
+
+    test('401/403 → 无权访问，与「文件丢失」分开', () {
+      expect(failureForHttpStatus(401)!.kind, PlaybackFailureKind.denied);
+      expect(failureForHttpStatus(403)!.kind, PlaybackFailureKind.denied);
+      expect(mediaDeniedFailure.retryable, isFalse);
+    });
+
+    test('其它码/空值不造新分支', () {
+      expect(failureForHttpStatus(500), isNull);
+      expect(failureForHttpStatus(503), isNull);
+      expect(failureForHttpStatus(null), isNull);
+    });
+
+    test('纠正「网络」这类模糊归类', () {
+      final corrected = withTransportStatus(networkFailure, 404);
+      expect(corrected.kind, PlaybackFailureKind.missing);
+      expect(withTransportStatus(unknownFailure, 403).kind,
+          PlaybackFailureKind.denied);
+    });
+
+    test('已确定的解码/数据结论不被状态码覆盖', () {
+      expect(withTransportStatus(decodeFailure, 404).kind,
+          PlaybackFailureKind.decode);
+      expect(withTransportStatus(workDataFailure, 404).kind,
+          PlaybackFailureKind.data);
+    });
+
+    test('没有状态码时原样返回同一对象', () {
+      expect(identical(withTransportStatus(networkFailure, null), networkFailure),
+          isTrue);
+    });
+
+    test('文件不存在与无权访问都不可重试', () {
+      expect(mediaMissingFailure.retryable, isFalse);
+      expect(mediaDeniedFailure.retryable, isFalse);
+      // 网络/超时仍可重试（弱网会变）。
+      expect(networkFailure.retryable, isTrue);
+      expect(timeoutFailure.retryable, isTrue);
+    });
+  });
+
+  group('playbackLoadTimedOut', () {    test('未到时长的超时判定', () {
       expect(
           playbackLoadTimedOut(playbackLoadTimeout.inMilliseconds - 1,
               hasDuration: false),
@@ -69,3 +115,4 @@ void main() {
     });
   });
 }
+
