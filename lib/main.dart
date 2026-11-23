@@ -46,6 +46,7 @@ import 'basic_lib_page.dart';
 import 'folder_structure_page.dart';
 import 'background_pause.dart';
 import 'collection_sync.dart';
+import 'connection_status.dart';
 import 'continue_watching.dart';
 import 'cover_badges.dart';
 import 'decode_fallback.dart';
@@ -53,6 +54,7 @@ import 'home_action.dart';
 import 'lib_names.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
+export 'library_badge.dart' show LibBadgeChip, LibEntryKind;
 import 'library_corner_badge.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
@@ -228,6 +230,13 @@ class Cfg {
   String baseFor([String? libId]) {
     final l = libId ?? lib;
     return _bindings[l]?['base'] ?? base;
+  }
+
+  /// P5：断开某条连接后，清掉它名下的库路由与凭据，
+  /// 否则已缓存的 `baseFor/headersFor` 仍会带着旧密码继续请求该服务端。
+  void dropServerBindings(String serverId) {
+    if (serverId.isEmpty) return;
+    _bindings.removeWhere((_, v) => '${v['server'] ?? ''}' == serverId);
   }
 
   Map<String, String> headersFor([String? libId]) {
@@ -1327,11 +1336,13 @@ class _SettingsPageState extends State<SettingsPage> {
     final sp = await SharedPreferences.getInstance();
     await sp.setString('servers_v1', encodeServers(servers));
     await sp.setString('active_server_v1', activeId);
+    // 当前连接必须是在线的：断连的那条不能继续带着旧地址/密码当全局默认。
+    final live = liveServers(servers);
     ServerConn? active;
-    for (final s in servers) {
+    for (final s in live) {
       if (s.id == activeId) active = s;
     }
-    active ??= servers.isEmpty ? null : servers.first;
+    active ??= live.isEmpty ? null : live.first;
     if (active != null) {
       cfg.base = active.base;
       cfg.user = active.user;
@@ -1341,8 +1352,11 @@ class _SettingsPageState extends State<SettingsPage> {
       await sp.setString('pass', active.pass);
     } else {
       cfg.base = '';
+      cfg.pass = '';
       await sp.setString('base', '');
+      await sp.setString('pass', '');
     }
+    connectionRevision.value++;
   }
 
   Future<void> _test(ServerConn s) async {
@@ -1504,13 +1518,82 @@ class _SettingsPageState extends State<SettingsPage> {
     await _persist();
   }
 
-  Future<void> _toggle(ServerConn s, bool v) async {
+  /// P5：关闭连接＝与该服务端断连（清密码、不再请求），右上角变叉号。
+  Future<void> _disconnect(ServerConn s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('断开「${s.title}」？'),
+        content: const Text('断开后不再向该地址发送任何请求，该连接的库从主页移除；'
+            '本机保存的密码会立即清除。重新开启需要重新输入密码。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('断开')),
+        ],
+      ),
+    );
+    if (ok != true) return;
     setState(() {
       servers = [
-        for (final x in servers) x.id == s.id ? x.copyWith(visible: v) : x,
+        for (final x in servers) x.id == s.id ? disconnectServer(x) : x,
       ];
+      testMsg.remove(s.id);
+      testOk.remove(s.id);
+    });
+    cfg.dropServerBindings(s.id);
+    await _persist();
+  }
+
+  /// P5：重新连接必须先输入密码，不复用旧凭据。
+  Future<void> _reconnect(ServerConn s) async {
+    final pass = TextEditingController();
+    final pw = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('连接「${s.title}」'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(s.base,
+              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: pass,
+            obscureText: true,
+            autofocus: true,
+            decoration:
+                InputDecoration(labelText: '密码', hintText: '账号 ${s.user}'),
+            onSubmitted: (v) => Navigator.pop(c, v),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, pass.text),
+              child: const Text('连接')),
+        ],
+      ),
+    );
+    if (pw == null) return;
+    if (pw.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('密码不能为空')));
+      }
+      return;
+    }
+    final next = reconnectServer(s, pw);
+    setState(() {
+      servers = [for (final x in servers) x.id == s.id ? next : x];
+      testMsg.remove(s.id);
+      testOk.remove(s.id);
     });
     await _persist();
+    if (!mounted) return;
+    await _test(next);
   }
 
   Future<void> _activate(ServerConn s) async {
@@ -1541,7 +1624,8 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(padding: const EdgeInsets.all(16), children: [
         const Text(
             '可添加多个 NAS 地址（IP）。主页与媒体库会聚合所有可见连接的库；'
-            '同名/同 id 的库只显示一份。隐藏某条连接只会隐藏它的库，配置仍保留。',
+            '同名/同 id 的库只显示一份。关闭一条连接＝与该服务端断连：'
+            '不再发请求、密码立即清除，重新开启需重新输入密码。',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 12),
         if (servers.isEmpty)
@@ -1565,6 +1649,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _card(ServerConn s) {
     final isActive = s.id == activeId;
+    final live = s.enabled;
     final msg = testMsg[s.id];
     final ok = testOk[s.id];
     return Card(
@@ -1573,30 +1658,43 @@ class _SettingsPageState extends State<SettingsPage> {
         padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Icon(isActive ? Icons.check_circle : Icons.dns_outlined,
-                size: 20, color: isActive ? Colors.green : null),
+            // P5：连接状态角标——已连接对钩 / 已断连叉号。
+            Icon(
+                !live
+                    ? Icons.link_off
+                    : (isActive ? Icons.check_circle : Icons.dns_outlined),
+                size: 20,
+                color: !live ? Colors.grey : (isActive ? Colors.green : null)),
             const SizedBox(width: 8),
             Expanded(
                 child: Text(s.title,
                     style: const TextStyle(fontWeight: FontWeight.w600),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis)),
-            if (isActive)
+            if (!live)
+              const Padding(
+                padding: EdgeInsets.only(right: 6),
+                child: Text('已断连',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
+              )
+            else if (isActive)
               const Padding(
                 padding: EdgeInsets.only(right: 6),
                 child: Text('当前',
                     style: TextStyle(fontSize: 11, color: Colors.green)),
               ),
             Switch(
-                value: s.visible,
-                onChanged: (v) => _toggle(s, v),
+                value: live,
+                onChanged: (v) =>
+                    v ? _reconnect(s) : _disconnect(s),
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
           ]),
           Text(s.base,
               style: const TextStyle(fontSize: 12, color: Colors.grey),
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
-          Text('账号：${s.user} · ${s.visible ? '库参与聚合' : '库已隐藏'}',
+          Text(
+              '账号：${s.user} · ${live ? '已连接，库参与聚合' : '已断连，密码已清除'}',
               style: const TextStyle(fontSize: 11, color: Colors.grey)),
           if (msg != null)
             Padding(
@@ -1608,12 +1706,16 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           const SizedBox(height: 4),
           Wrap(spacing: 4, children: [
-            TextButton(
-                onPressed: () => _activate(s),
-                child: Text(isActive ? '当前连接' : '设为当前')),
-            TextButton(
-                onPressed: testing.contains(s.id) ? null : () => _test(s),
-                child: Text(testing.contains(s.id) ? '测试中…' : '测试')),
+            if (live) ...[
+              TextButton(
+                  onPressed: () => _activate(s),
+                  child: Text(isActive ? '当前连接' : '设为当前')),
+              TextButton(
+                  onPressed: testing.contains(s.id) ? null : () => _test(s),
+                  child: Text(testing.contains(s.id) ? '测试中…' : '测试')),
+            ] else
+              TextButton(
+                  onPressed: () => _reconnect(s), child: const Text('连接')),
             TextButton(onPressed: () => _edit(s), child: const Text('编辑')),
             TextButton(
                 onPressed: () => _delete(s),
@@ -1626,6 +1728,22 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
+/// P1：词条配色页的分组标题。
+class _SectionHeader extends StatelessWidget {
+  final String text;
+  const _SectionHeader(this.text);
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Theme.of(context).colorScheme.primary)),
+      );
+}
+
 class LibraryBadgeColorsPage extends StatefulWidget {
   const LibraryBadgeColorsPage({super.key});
   @override
@@ -1635,6 +1753,10 @@ class LibraryBadgeColorsPage extends StatefulWidget {
 class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   /// 0.9.9：词条配色按**单元库**（作者来源词条）配置，不再按旧注册库。
   List<UnitLibrary> units = const [];
+
+  /// P1：顶级节点（媒体库根）与末梢基础库各一组，配合向下继承。
+  List<UnitLibrary> tops = const [];
+  List<BasicLib> basics = const [];
   LibMeta? meta;
   bool loading = true;
   String? err;
@@ -1655,12 +1777,22 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     try {
       final m = await LibMeta.load(cfg.lib);
       if (!mounted) return;
+      final root = m.unitTree;
       setState(() {
         meta = m;
-        // 顶级 SECRET 固定灰色（无归属时兜底），不参与自定义。
+        // 顶级 SECRET 只承载「无归属基础库」兜底，不参与逐库配色。
         units = [
           for (final u in m.units)
             if (u.id != 'secret') u
+        ];
+        // P1：顶级节点＝媒体库根＝SECRET 的直接子节点（结构事实，不看名字）。
+        tops = [
+          for (final u in (root?.children ?? const <UnitLibrary>[]))
+            if (!u.isEmpty) u
+        ];
+        basics = [
+          for (final u in m.units)
+            if (u.id != 'secret') ...u.basics
         ];
         loading = false;
       });
@@ -1702,10 +1834,16 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Text(
-                        '作者/作品左上角「单元库词条」的颜色与 emoji 后缀。默认按单元库顺序自动配色，'
-                        '也可逐个指定颜色并追加一个 emoji；SECRET 固定灰色、不显示后缀。',
+                        '词条颜色按三层组织：顶级节点（媒体库根）设色后向下继承给其下所有'
+                        '单元库/基础库；单元库可各自覆盖；基础库自己的颜色优先级最高。'
+                        '四种层级形状与尺寸一致，只用边框/底纹区分。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
+                  if (tops.isNotEmpty) ...[
+                    const _SectionHeader('顶级节点（媒体库根）· 向下继承'),
+                    for (final u in tops) _libTile(u, isTop: true),
+                  ],
+                  const _SectionHeader('单元库'),
                   if (units.isEmpty)
                     const Padding(
                       padding: EdgeInsets.all(24),
@@ -1714,17 +1852,29 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                           style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ),
                   for (final u in units) _libTile(u),
+                  if (basics.isNotEmpty) ...[
+                    const _SectionHeader('基础库（末梢，优先级最高）'),
+                    for (final b in basics) _basicTile(b),
+                  ],
+                  const SizedBox(height: 24),
                 ]),
     );
   }
 
-  Widget _libTile(UnitLibrary u) {
+  Widget _libTile(UnitLibrary u, {bool isTop = false}) {
     final id = u.id;
     final name = u.name.isEmpty ? id : u.name;
     // D1：自定义色可能以 rel / node:rel 任一形式落盘，统一用归一化查询，
     // 避免状态显示「自定义」但色块仍是自动色。
-    final color = LibraryBadge.colorForUnit(id, order: _order);
+    final color = isTop
+        ? (LibraryBadge.topColorFor(id) ??
+            LibraryBadge.colorForUnit(id, order: _order))
+        : LibraryBadge.colorForUnit(id, order: _order);
     final emoji = LibraryBadge.emojiFor(id);
+    final overridden =
+        isTop ? LibraryBadge.topColorFor(id) != null : LibraryBadge.customColorFor(id) != null;
+    final inheritedOnly = !isTop && LibraryBadge.customColorFor(id) == null &&
+        LibraryBadge.topColorFor(UnitBadgeRegistry.topOf[id] ?? '') != null;
     return ListTile(
       leading: Container(
         width: 26,
@@ -1735,7 +1885,11 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       title: Row(children: [
         Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
         const SizedBox(width: 8),
-        LibBadgeChip(label: name, color: color, unitId: id),
+        LibBadgeChip(
+            label: name,
+            color: color,
+            unitId: id,
+            kind: isTop ? LibEntryKind.top : LibEntryKind.unit),
       ]),
       subtitle: Text(
           '${u.basicCount} 个基础库 · $id${emoji.isEmpty ? '' : ' · 后缀 $emoji'}',
@@ -1747,25 +1901,73 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
           if (emoji.isNotEmpty)
             Text(emoji, style: const TextStyle(fontSize: 16, height: 1.1)),
           Text(
-            LibraryBadge.customColorFor(id) == null ? '自动' : '自定义',
+            overridden ? '自定义' : (inheritedOnly ? '继承顶级' : '自动'),
             style: TextStyle(
                 fontSize: 12,
-                color: LibraryBadge.customColorFor(id) == null
-                    ? Colors.grey
-                    : Colors.lightBlueAccent),
+                color: overridden
+                    ? Colors.lightBlueAccent
+                    : (inheritedOnly ? Colors.amber : Colors.grey)),
           ),
         ],
       ),
       onTap: () async {
-        final chosen = await _showBadgeDialog(name, id, color);
+        final chosen = await _showBadgeDialog(name, id, color,
+            kind: isTop ? LibEntryKind.top : LibEntryKind.unit);
         if (chosen == null) return;
         if (chosen.reset) {
-          await LibraryBadge.setColor(id, null);
+          if (isTop) {
+            await LibraryBadge.setTopColor(id, null);
+          } else {
+            await LibraryBadge.setColor(id, null);
+          }
           await LibraryBadge.setEmoji(id, null);
         } else {
-          await LibraryBadge.setColor(id, chosen.color);
+          if (isTop) {
+            await LibraryBadge.setTopColor(id, chosen.color);
+          } else {
+            await LibraryBadge.setColor(id, chosen.color);
+          }
           await LibraryBadge.setEmoji(id, chosen.emoji);
         }
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// P1：末梢基础库词条——自己设色优先，否则继承单元库/顶级节点。
+  Widget _basicTile(BasicLib b) {
+    final unitId = meta?.basicToUnit[b.id] ?? '';
+    final color = LibraryBadge.basicColorFor(b.id, unitId, order: _order);
+    final own = LibraryBadge.basicCustom[b.id] != null;
+    final name = LibraryBadge.stripIndex(b.name);
+    return ListTile(
+      dense: true,
+      leading: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+            color: Color(color), borderRadius: BorderRadius.circular(7)),
+      ),
+      title: Row(children: [
+        Flexible(child: Text(name, overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 8),
+        LibBadgeChip(
+            label: name,
+            color: color,
+            unitId: unitId,
+            kind: LibEntryKind.basic),
+      ]),
+      subtitle: Text('${b.authors} 作者 · ${b.works} 作品 · ${b.id}',
+          style: const TextStyle(fontSize: 11)),
+      trailing: Text(own ? '自定义' : '继承',
+          style: TextStyle(
+              fontSize: 12,
+              color: own ? Colors.lightBlueAccent : Colors.grey)),
+      onTap: () async {
+        final chosen = await _showBadgeDialog(name, b.id, color,
+            kind: LibEntryKind.basic, topLevelOnly: true);
+        if (chosen == null) return;
+        await LibraryBadge.setBasicColor(b.id, chosen.reset ? null : chosen.color);
         if (mounted) setState(() {});
       },
     );
@@ -1808,8 +2010,12 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   }
 
   /// 词条样式（颜色 + emoji 后缀）编辑；返回 null 表示取消。
+  ///
+  /// [kind] 只影响预览词条的层级外观；[topLevelOnly] 表示该层级不支持
+  /// emoji 后缀（基础库），只调颜色。
   Future<_BadgeDraft?> _showBadgeDialog(
-      String name, String id, int autoColor) async {
+      String name, String id, int autoColor,
+      {LibEntryKind kind = LibEntryKind.unit, bool topLevelOnly = false}) async {
     var current = LibraryBadge.customColorFor(id) ?? autoColor;
     var hsv = HSVColor.fromColor(Color(current));
     var currentEmoji = LibraryBadge.emojiFor(id);
@@ -1828,7 +2034,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 LibBadgeChip(
                     label: name,
                     color: current,
-                    unitId: currentEmoji.isEmpty ? '' : id),
+                    unitId: currentEmoji.isEmpty ? '' : id,
+                    kind: kind),
                 const SizedBox(height: 14),
                 const Align(
                   alignment: Alignment.centerLeft,
@@ -1912,6 +2119,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                     reset = false;
                   }),
                 ),
+                if (!topLevelOnly) ...[
                 const SizedBox(height: 14),
                 const Align(
                   alignment: Alignment.centerLeft,
@@ -1958,6 +2166,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       ),
                     ),
                 ]),
+                ],
                 const SizedBox(height: 6),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -1970,7 +2179,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       reset = true;
                     }),
                     icon: const Icon(Icons.restart_alt, size: 18),
-                    label: const Text('恢复自动（颜色 + 后缀）'),
+                    label: Text(topLevelOnly
+                        ? '恢复继承/自动'
+                        : '恢复自动（颜色 + 后缀）'),
                   ),
                 ),
               ]),
@@ -1998,45 +2209,6 @@ class _BadgeDraft {
   final bool reset;
   const _BadgeDraft(
       {required this.color, required this.emoji, this.reset = false});
-}
-
-// 库词条：作者卡片左上角的小标签，颜色按库自动分配（设置里可改）
-class LibBadgeChip extends StatelessWidget {
-  final String label;
-  final int color;
-
-  /// 单元库 id（`rel` 或 `node:rel`）；给出时追加该库 emoji 后缀。
-  final String unitId;
-  const LibBadgeChip(
-      {super.key, required this.label, required this.color, this.unitId = ''});
-
-  @override
-  Widget build(BuildContext context) {
-    // 位置词条自动省略目录名前缀序号（`(1) 名称` → `名称`）。
-    final text = label.startsWith('+')
-        ? label
-        : LibraryBadge.labelWithEmoji(LibraryBadge.stripIndex(label), unitId);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-      decoration: BoxDecoration(
-        color: Color(color).withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(6),
-        border:
-            Border.all(color: Colors.black.withValues(alpha: 0.25), width: 0.5),
-      ),
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 9,
-          height: 1.25,
-          fontWeight: FontWeight.w600,
-          color: Color(LibraryBadge.textColorOn(color)),
-        ),
-      ),
-    );
-  }
 }
 
 class LibBadges extends StatelessWidget {
@@ -2073,6 +2245,9 @@ class LibBadges extends StatelessWidget {
           LibBadgeChip(
             label: labels[i],
             unitId: i < shown.length ? shown[i] : '',
+            kind: i < shown.length
+                ? LibraryBadge.entryKindOfUnit(shown[i])
+                : LibEntryKind.other,
             color: (labels[i].startsWith('+') ||
                     (i < shown.length && grayIds.contains(shown[i])))
                 ? LibraryBadge.gray
@@ -4094,6 +4269,13 @@ class _LibraryPageState extends State<LibraryPage> {
   /// J2：大库/基础库两级选择。v1 服务端没有 bigLibraries 时为 null，走原列表。
   LibraryTree? tree;
 
+  /// P5：本次加载用到的「已连接」连接（只用于聚合与请求）。
+  ///
+  /// [shownServers] 是磁盘上全部连接（含已断连），断连数量用于左上角叉号。
+  /// 两者分开存：断连的连接绝不能混进 [servers]，否则又会被拿去请求。
+  List<ServerConn> shownServers = [];
+  int disconnected = 0;
+
   /// L5：单元库树（节点文件夹＝单元库，SECRET 顶级）。
   UnitLibrary? unitTree;
   Set<String> expanded = <String>{};
@@ -4212,7 +4394,8 @@ class _LibraryPageState extends State<LibraryPage> {
         user: sp.getString('user') ?? cfg.user,
         pass: sp.getString('pass') ?? cfg.pass,
       );
-      final visible = all.where((s) => s.visible).toList(growable: false);
+      // P5：断连的连接不参与聚合，也不发任何请求。
+      final visible = liveServers(all);
       final use = visible.isEmpty
           ? [
               ServerConn(
@@ -4292,6 +4475,8 @@ class _LibraryPageState extends State<LibraryPage> {
       if (!mounted) return;
       setState(() {
         servers = use;
+        shownServers = all;
+        disconnected = disconnectedCount(all);
         libs = merged;
         _hasSnapshot = true;
         if (failures.isNotEmpty) {
@@ -4869,7 +5054,8 @@ class _LibraryPageState extends State<LibraryPage> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
           child: Text(
-              '聚合 ${servers.where((s) => s.visible).length} 条连接'
+              '聚合 ${servers.length} 条连接'
+              '${disconnected > 0 ? ' · 已断连 $disconnected 条' : ''}'
               ' · ${libs.length} 个已注册库（同 id 只显示一次）',
               style: const TextStyle(fontSize: 11, color: Colors.grey)),
         ),
@@ -5593,6 +5779,15 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 12,
+        // P5：左上角连接状态图标（断连即叉号，点击进网络连接设置）。
+        leading: ConnectionStatusIcon(
+          onTap: () async {
+            await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsPage()));
+            if (!mounted) return;
+            setState(() => _libEpoch++);
+          },
+        ),
         title: const Text('媒体库'),
         actions: [
           const HomeAction(),

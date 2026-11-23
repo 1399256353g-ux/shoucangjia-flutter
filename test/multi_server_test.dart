@@ -11,7 +11,7 @@ ServerConn _s(String id, String base,
         base: base,
         user: 'u',
         pass: 'p',
-        visible: visible);
+        enabled: visible);
 
 void main() {
   test('地址规范化与连接编解码容错', () {
@@ -29,6 +29,26 @@ void main() {
     final round = decodeServers(encodeServers(list));
     expect(round.length, 2);
     expect(round.last.id, 'c');
+
+  });
+
+  test('P5 断连：清密码、不参与聚合；旧 visible 字段仍可读', () {
+    final s = _s('a', 'http://a:8090', label: '家里');
+    final off = disconnectServer(s);
+    expect(off.enabled, false);
+    expect(off.pass, isEmpty);
+    expect(off.visible, false);
+    expect(liveServers([s, off]).map((e) => e.id), ['a']);
+    expect(disconnectedCount([s, off]), 1);
+    // 重连必须带新密码
+    final back = reconnectServer(off, 'newpass');
+    expect(back.enabled, true);
+    expect(back.pass, 'newpass');
+    // 旧格式（只有 visible）读入后按同语义，且断连时不保留密码
+    final legacy =
+        decodeServers('[{"id":"x","base":"http://x:1","pass":"old","visible":false}]');
+    expect(legacy.single.enabled, false);
+    expect(legacy.single.pass, isEmpty);
   });
 
   test('旧版单地址自动迁移为第一条连接', () {

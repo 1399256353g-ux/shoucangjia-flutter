@@ -15,6 +15,7 @@
 // basicLibraries（基础库，带 rel 相对路径）。
 
 import 'disk_name.dart';
+import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 
@@ -463,11 +464,39 @@ Map<String, String> unitKeyByBasic(UnitLibrary root) {
 ///
 /// 作者卡、基础库卡、播放页信息行都必须从这里取词条，禁止各自解析，
 /// 否则会出现「作者词条是基础库、基础库词条是单元库」的不一致。
+/// P1：单元库 id → 顶级节点 id（顶级节点＝媒体库根，向下继承词条色）。
+///
+/// 判定只看树结构：根的直接子节点就是各连接的媒体库根；SECRET 自身没有
+/// 上级，按空串处理（它只承载「无归属基础库」兜底）。同名/`node:` 前缀的
+/// 两种 id 形式都登记，配色查询无需再做归一。
+Map<String, String> topOfUnitIds(UnitLibrary root) {
+  final out = <String, String>{};
+  void walk(UnitLibrary u, String top) {
+    if (top.isNotEmpty) {
+      out[u.id] = top;
+      if (u.id.startsWith('node:')) out[u.id.substring(5)] = top;
+      out['node:${u.rel}'] = top;
+    }
+    for (final c in u.children) {
+      walk(c, top);
+    }
+  }
+
+  for (final c in root.children) {
+    walk(c, c.id);
+  }
+  return out;
+}
+
 class UnitBadgeRegistry {
   static final Map<String, String> labels = <String, String>{};
   static final Map<String, String> keys = <String, String>{};
   /// 单元库配色顺序（不含顶级 SECRET）：作者词条与基础库卡片共用。
   static final List<String> order = <String>[];
+
+  /// P1：单元库 id → 所属顶级节点 id（顶级节点＝媒体库根）。
+  /// 只由结构关系算出，不看任何目录名文本。
+  static final Map<String, String> topOf = <String, String>{};
 
   static void setFrom(UnitLibrary root) {
     labels
@@ -482,6 +511,13 @@ class UnitBadgeRegistry {
         for (final u in flattenUnits(root))
           if (u.node.id != root.node.id) u.id,
       ]);
+    topOf
+      ..clear()
+      ..addAll(topOfUnitIds(root));
+    // 词条继承表同步给 LibraryBadge，配色只查这一处。
+    LibraryBadge.topOfUnit
+      ..clear()
+      ..addAll(topOf);
   }
 
   static String labelFor(String basicId) => labels[basicId] ?? '';

@@ -2,7 +2,8 @@
 //
 // 规则：
 //  - 可添加多条连接，每条有独立地址与账号；
-//  - 连接可单独隐藏：隐藏后它的库不再出现在聚合列表里，但配置保留；
+//  - P5 连接语义：关闭一条连接＝与该服务端**断连**——不再向它发任何请求、
+//    密码字段立即清空（不保存明文），重新开启必须重新输入密码；
 //  - 多个连接指向同一个库（库 id 相同）时只显示一份，优先取靠前且可见的连接；
 //  - 删除连接只删除本机配置，不动 NAS 数据。
 //
@@ -16,7 +17,10 @@ class ServerConn {
   final String base;
   final String user;
   final String pass;
-  final bool visible;
+
+  /// 是否处于「已连接」状态。false 表示已断连：不参与聚合与请求，
+  /// 且 [pass] 必为空（断连时清掉，重开要重新输入）。
+  final bool enabled;
 
   const ServerConn({
     required this.id,
@@ -24,10 +28,13 @@ class ServerConn {
     required this.base,
     required this.user,
     required this.pass,
-    this.visible = true,
+    this.enabled = true,
   });
 
   String get title => label.trim().isEmpty ? base : label.trim();
+
+  /// 历史字段名（旧代码/旧测试用 `visible` 表达同一件事）。
+  bool get visible => enabled;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -35,7 +42,7 @@ class ServerConn {
         'base': base,
         'user': user,
         'pass': pass,
-        'visible': visible,
+        'enabled': enabled,
       };
 
   ServerConn copyWith({
@@ -43,7 +50,7 @@ class ServerConn {
     String? base,
     String? user,
     String? pass,
-    bool? visible,
+    bool? enabled,
   }) =>
       ServerConn(
         id: id,
@@ -51,7 +58,7 @@ class ServerConn {
         base: base ?? this.base,
         user: user ?? this.user,
         pass: pass ?? this.pass,
-        visible: visible ?? this.visible,
+        enabled: enabled ?? this.enabled,
       );
 
   static ServerConn? fromJson(dynamic raw) {
@@ -60,16 +67,40 @@ class ServerConn {
     if (base.isEmpty) return null;
     var id = '${raw['id'] ?? ''}'.trim();
     if (id.isEmpty) id = 'srv-${base.hashCode.abs()}';
+    // 新格式 `enabled`；旧格式只有 `visible`，按同一语义读入。
+    final enabled = raw.containsKey('enabled')
+        ? raw['enabled'] != false
+        : raw['visible'] != false;
     return ServerConn(
       id: id,
       label: '${raw['label'] ?? ''}'.trim(),
       base: base,
       user: '${raw['user'] ?? 'zzx'}',
-      pass: '${raw['pass'] ?? ''}',
-      visible: raw['visible'] != false,
+      // 断连的连接不保留任何凭据（历史数据里可能还留着，读入即丢弃）。
+      pass: enabled ? '${raw['pass'] ?? ''}' : '',
+      enabled: enabled,
     );
   }
 }
+
+/// 断开一条连接：清密码、置未连接。调用方负责落盘。
+//
+// 断连后的连接不再参与合并、不再发请求，界面上显示叉号；
+// 重新开启只能通过 [reconnectServer] 输入密码。
+ServerConn disconnectServer(ServerConn s) =>
+    s.copyWith(enabled: false, pass: '');
+
+/// 重新连接：写入用户刚输入的密码并恢复启用状态。
+ServerConn reconnectServer(ServerConn s, String pass) =>
+    s.copyWith(enabled: true, pass: pass);
+
+/// 可以发起请求 / 参与聚合的连接。
+List<ServerConn> liveServers(List<ServerConn> all) =>
+    [for (final s in all) if (s.enabled) s];
+
+/// 已断连的连接数量（>0 时主页左上角显示叉号）。
+int disconnectedCount(List<ServerConn> all) =>
+    all.where((s) => !s.enabled).length;
 
 /// 规范化地址：去空格、补协议、去尾部斜杠。
 String normalizeBase(String raw) {

@@ -1177,32 +1177,21 @@ class BasicLibCard extends StatelessWidget {
   Widget _badge() {
     // 位置词条只由「单元库」生成：取所属单元库名称与配色，不再用基础库自身。
     // K17：有单元库就用单元库词条；没有则回退到「库名」灰色词条。
+    //
+    // P1：末梢基础库词条颜色优先级＝本库自定义 → 上级单元库自定义 →
+    // 顶级节点继承 → 自动配色；层级外观固定为 basic（形状/尺寸与上层一致，
+    // 只改边框/底纹）。
     final hasUnit = unitLabel.isNotEmpty;
     final text = LibraryBadge.labelWithEmoji(
         badgeText(hasUnit ? unitLabel : basic.name), hasUnit ? unitKey : '');
-    // 顶级节点库（SECRET）下发的词条固定灰色；其余按单元库配色。
-    final isTop = !hasUnit || unitKey == 'secret';
-    final color = isTop
-        ? const Color(0xFF6B7280)
-        : Color(LibraryBadge.colorForUnit(
-            unitKey.isEmpty ? unitLabel : unitKey,
-            order: UnitBadgeRegistry.order));
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text.length > 10 ? '${text.substring(0, 10)}…' : text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 9.5,
-          color: Color(LibraryBadge.textColorOn(color.toARGB32())),
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+    final unitId = unitKey.isEmpty ? unitLabel : unitKey;
+    final color = Color(LibraryBadge.basicColorFor(basic.id, unitId,
+        order: UnitBadgeRegistry.order));
+    return LibBadgeChip(
+      label: text.length > 10 ? '${text.substring(0, 10)}…' : text,
+      color: color.toARGB32(),
+      unitId: '',
+      kind: LibEntryKind.basic,
     );
   }
 
