@@ -8118,7 +8118,17 @@ class _PlayerPageState extends State<PlayerPage>
   int _navAt = 0;
   int _lastKeyNav = 0;
   int? _pendingPage;
-  bool paused = false;
+  /// 用户暂停意图（唯一真源）。
+  ///
+  /// 相位机负责「实际有没有在播」，这里只记录「用户想不想播」。
+  /// 0.9.189 起写入点全部收敛到这一个私有字段（15 处），外部只读；
+  /// 之前它叫 `paused` 且被 15 个位置各自赋值，谁都能盖住状态，
+  /// 这正是「暂停不灵敏」的结构性来源。`test/pause_intent_single_source_test.dart`
+  /// 钉住：播放页里不得再出现对裸 `paused` 的赋值。
+  bool _pausedIntent = false;
+
+  /// 对外只读的暂停意图（沿用旧名字，调用点不必改语义）。
+  bool get paused => _pausedIntent;
   // G16：是否因切后台而暂停（回前台时只恢复这种暂停）
   bool _pausedByBackground = false;
   // 「随机自动暂停」修复：区分「用户主动暂停」与「播放器/系统造成的停止」。
@@ -8683,7 +8693,7 @@ class _PlayerPageState extends State<PlayerPage>
             !_pausedByBackground &&
             _failure == null) {
           _feed(PlaybackEvent.play);
-          setState(() => paused = false);
+          setState(() => _pausedIntent = false);
         }
         return;
       }
@@ -8696,7 +8706,7 @@ class _PlayerPageState extends State<PlayerPage>
           failed: _failure != null,
           opening: _opening)) {
         _feed(PlaybackEvent.pause);
-        if (!paused) setState(() => paused = true);
+        if (!paused) setState(() => _pausedIntent = true);
         return;
       }
       PauseTrace.mark('stall:playing=false');
@@ -9046,7 +9056,7 @@ class _PlayerPageState extends State<PlayerPage>
         _stallAttempts++;
         PauseTrace.mark('stall:retryPlay#$_stallAttempts');
         _feed(PlaybackEvent.play);
-        if (paused) setState(() => paused = false);
+        if (paused) setState(() => _pausedIntent = false);
         try {
           final at = pos.inMilliseconds > 800 ? pos : player.state.position;
           if (at.inMilliseconds > 800) await player.seek(at);
@@ -9140,7 +9150,7 @@ class _PlayerPageState extends State<PlayerPage>
       player.pause();
     } catch (_) {}
     _feed(PlaybackEvent.pause);
-    if (mounted) setState(() => paused = true);
+    if (mounted) setState(() => _pausedIntent = true);
   }
 
   /// G16：只恢复「因切后台暂停」的播放，并从记忆位置继续。
@@ -9150,7 +9160,7 @@ class _PlayerPageState extends State<PlayerPage>
     PauseTrace.mark('background:resume');
     final isV = _workAt(cur)['t'] == 'v';
     _feed(PlaybackEvent.play);
-    setState(() => paused = false);
+    setState(() => _pausedIntent = false);
     try {
       if (isV) {
         if (pos > Duration.zero) player.seek(pos);
@@ -9253,7 +9263,7 @@ class _PlayerPageState extends State<PlayerPage>
       _failure = f;
       _buffering = false;
       _slowBuffer = false;
-      paused = true;
+      _pausedIntent = true;
     });
   }
 
@@ -9304,7 +9314,7 @@ class _PlayerPageState extends State<PlayerPage>
     _feed(PlaybackEvent.open);
     setState(() {
       _failure = null;
-      paused = false;
+      _pausedIntent = false;
       _buffering = false;
       _slowBuffer = false;
     });
@@ -9713,7 +9723,7 @@ class _PlayerPageState extends State<PlayerPage>
         cur = i;
         _setPicIndex(0);
         captionOpen = false;
-        paused = true;
+        _pausedIntent = true;
         _failure = null;
         _buffering = false;
         _slowBuffer = false;
@@ -9759,7 +9769,7 @@ class _PlayerPageState extends State<PlayerPage>
       _setPicIndex(0);
       captionOpen = false;
       // 缓存命中 → mediaReady → 相位 ready，不再转圈；未命中 → opening 仍在转圈。
-      paused = false;
+      _pausedIntent = false;
       // P2 §11：新页进度归零，绝不用上一条的进度渲染进度条。
       pos = Duration.zero;
       dur = Duration.zero;
@@ -9962,7 +9972,7 @@ class _PlayerPageState extends State<PlayerPage>
       _feed(keepsPaused ? PlaybackEvent.pause : PlaybackEvent.play);
       setState(() {
         // 若打开过程中被切到后台，保持暂停，等回前台再恢复
-        if (w['t'] != 'v' && !_pausedByBackground) paused = false;
+        if (w['t'] != 'v' && !_pausedByBackground) _pausedIntent = false;
       });
     }
     // 后台打开的作品不启动图文轮播，等回前台再按用户状态恢复
@@ -10913,7 +10923,7 @@ class _PlayerPageState extends State<PlayerPage>
       final willPause = !paused;
       _userPaused = willPause;
       _feed(willPause ? PlaybackEvent.pause : PlaybackEvent.play);
-      setState(() => paused = willPause);
+      setState(() => _pausedIntent = willPause);
       if (willPause) {
         pauseAuto();
         PauseTrace.mark('user:toggle');
@@ -10929,14 +10939,14 @@ class _PlayerPageState extends State<PlayerPage>
     if (paused) {
       _userPaused = false;
       _feed(PlaybackEvent.play);
-      setState(() => paused = false);
+      setState(() => _pausedIntent = false);
       _requestPlayState(playing: true);
     } else {
       _userPaused = true;
       PauseTrace.mark('user:toggle');
       Breadcrumb.mark('player:pause', 'L9362');
       _feed(PlaybackEvent.pause);
-      setState(() => paused = true);
+      setState(() => _pausedIntent = true);
       _requestPlayState(playing: false);
     }
   }
@@ -12210,7 +12220,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (paused) {
         // 从头播放视为一次新的观看，直接开始
         _feed(PlaybackEvent.play);
-        setState(() => paused = false);
+        setState(() => _pausedIntent = false);
         try {
           player.setRate(speed);
         } catch (_) {}
@@ -12513,7 +12523,7 @@ class _PlayerPageState extends State<PlayerPage>
     setState(() => pos = Duration(milliseconds: at));
     if (paused) {
       _feed(PlaybackEvent.play);
-      setState(() => paused = false);
+      setState(() => _pausedIntent = false);
       try {
         player.setRate(speed);
       } catch (_) {}

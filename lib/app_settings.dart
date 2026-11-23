@@ -76,7 +76,7 @@ class KeyCombo {
   String toString() => 'KeyCombo($keyId,$mods)';
 }
 
-/// 全局设置：播放参数 + 桌面按键绑定，持久化到 SharedPreferences。
+/// 全局设置：播放设置 + 桌面按键绑定，持久化到 SharedPreferences。
 /// 序列化与业务逻辑保持纯函数，便于单元测试。
 class AppSettings {
   static const String prefsKey = 'app_settings_v1';
@@ -181,7 +181,7 @@ class AppSettings {
         if (j is Map<String, dynamic>) applyJson(j);
       }
       // Windows 上多路视频预载会让整机明显卡顿：老配置一次性降为「不预载」，
-      // 用户仍可在「播放参数」里手动开回来。
+      // 用户仍可在「播放设置」里手动开回来。
       if (Platform.isWindows && sp.getBool('lowload_migrated_v1') != true) {
         preloadPerSide = 0;
         await save();
