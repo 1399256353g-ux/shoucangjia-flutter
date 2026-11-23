@@ -18,53 +18,68 @@ class CrashReportsPage extends StatelessWidget {
   final Uri? cachePruneUri;
   final Map<String, String> cacheHeaders;
 
+  /// 作为「诊断」合并页的一个 tab 嵌入时置 true：
+  /// 不套 Scaffold/AppBar，操作按钮移到内容顶部，避免双层标题栏。
+  final bool embedded;
+
   const CrashReportsPage({
     super.key,
     this.detail = '',
     this.cacheStatsUri,
     this.cachePruneUri,
     this.cacheHeaders = const {},
+    this.embedded = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final actions = <Widget>[
+      AnimatedBuilder(
+        animation: CrashLog.instance,
+        builder: (context, _) {
+          if (CrashLog.instance.count == 0) return const SizedBox.shrink();
+          return IconButton(
+            tooltip: '复制全部',
+            icon: const Icon(Icons.copy_all_outlined),
+            onPressed: () async {
+              await Clipboard.setData(
+                  ClipboardData(text: CrashLog.instance.dump()));
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(const SnackBar(content: Text('已复制错误记录')));
+            },
+          );
+        },
+      ),
+      AnimatedBuilder(
+        animation: CrashLog.instance,
+        builder: (context, _) {
+          if (CrashLog.instance.count == 0) return const SizedBox.shrink();
+          return IconButton(
+            tooltip: '清空',
+            icon: const Icon(Icons.delete_sweep_outlined),
+            onPressed: CrashLog.instance.clear,
+          );
+        },
+      ),
+    ];
+    if (embedded) {
+      return Column(children: [
+        Align(alignment: Alignment.centerRight, child: Row(
+            mainAxisSize: MainAxisSize.min, children: actions)),
+        Expanded(child: _body(context)),
+      ]);
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('诊断信息'),
-        actions: [
-          AnimatedBuilder(
-            animation: CrashLog.instance,
-            builder: (context, _) {
-              final n = CrashLog.instance.count;
-              if (n == 0) return const SizedBox.shrink();
-              return IconButton(
-                tooltip: '复制全部',
-                icon: const Icon(Icons.copy_all_outlined),
-                onPressed: () async {
-                  await Clipboard.setData(
-                      ClipboardData(text: CrashLog.instance.dump()));
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('已复制错误记录')));
-                },
-              );
-            },
-          ),
-          AnimatedBuilder(
-            animation: CrashLog.instance,
-            builder: (context, _) {
-              final n = CrashLog.instance.count;
-              if (n == 0) return const SizedBox.shrink();
-              return IconButton(
-                tooltip: '清空',
-                icon: const Icon(Icons.delete_sweep_outlined),
-                onPressed: CrashLog.instance.clear,
-              );
-            },
-          ),
-        ],
+        actions: actions,
       ),
-      body: AnimatedBuilder(
+      body: _body(context),
+    );
+  }
+
+  Widget _body(BuildContext context) => AnimatedBuilder(
         animation: CrashLog.instance,
         builder: (context, _) {
           final entries = CrashLog.instance.entries;
@@ -140,9 +155,7 @@ class CrashReportsPage extends StatelessWidget {
             ],
           );
         },
-      ),
-    );
-  }
+      );
 
   /// 首屏缩略图预热 + 图片缓存现状（0.9.26）。
   Widget _prefetchTile() {

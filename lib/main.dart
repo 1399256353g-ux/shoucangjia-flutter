@@ -1256,6 +1256,11 @@ class _AppState extends State<App> {
     cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
     await LibraryCornerBadge.load();
+    // P1：词条配色与四层级外观必须在首帧前就位，否则首屏卡片会先闪默认色。
+    await LibraryBadge.load();
+    // P6：等级配置以服务端为准；这里先用本机只读缓存，联网后再覆写一次。
+    await AuthorGrade.load();
+    unawaited(syncAuthorGradeFromServer());
     await RecommendCountSettings.load();
     await AppTheme.load();
     if (mounted) setState(() => ready = true);
@@ -1875,6 +1880,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                         '四种层级形状与尺寸一致，只用边框/底纹区分。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
+                  const _SectionHeader('词条外观（四层级边框 / 底纹）'),
+                  _entryStyleSection(),
+                  const SizedBox(height: 8),
+                  const _SectionHeader('按媒体库设置词条色'),
                   // P2：按顶级节点分类——每个媒体库根一节，展开就是它的
                   // 单元库与基础库；不依赖任何名称文本，只按树结构归组。
                   for (final t in tops) _topSection(t),
@@ -1896,6 +1905,130 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   }
 
   /// P2：一个顶级节点的分组——它自己的词条、下级单元库、基础库。
+  Widget _entryStyleSection() {
+    const labels = <LibEntryKind, String>{
+      LibEntryKind.top: '顶级节点（媒体库根）',
+      LibEntryKind.unit: '单元库',
+      LibEntryKind.basic: '基础库（末梢）',
+      LibEntryKind.other: '其它（作者卡等）',
+    };
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Text(
+              '四种词条的圆角、内边距、字号固定一致，只能调边框粗细、'
+              '边框深浅与底纹浓度（颜色仍在下方按库设置）。'
+              '调完即时生效，也可单层级恢复默认。',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+        for (final kind in LibEntryKind.values)
+          _entryStyleTile(kind, labels[kind] ?? kind.name),
+      ],
+    );
+  }
+
+  Widget _entryStyleTile(LibEntryKind kind, String label) {
+    final st = LibraryBadge.styleFor(kind);
+    final custom = LibraryBadge.isStyleCustom(kind);
+    return ListTile(
+      dense: true,
+      title: Row(children: [
+        Expanded(child: Text(label, overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 8),
+        // 预览用该层级真实外观（底色用中性色，只看边框/底纹）。
+        LibBadgeChip(label: label, color: 0xFF8B5CF6, kind: kind),
+      ]),
+      subtitle: Text(
+          '边宽 ${st.borderWidth.toStringAsFixed(1)} · '
+          '边框透明度 ${(st.borderAlpha * 100).round()}% · '
+          '底纹浓度 ${(st.fillAlpha * 100).round()}%',
+          style: const TextStyle(fontSize: 11)),
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (custom)
+          IconButton(
+            tooltip: '恢复默认',
+            icon: const Icon(Icons.restart_alt, size: 18),
+            onPressed: () async {
+              await LibraryBadge.resetStyle(kind);
+              if (mounted) setState(() {});
+            },
+          ),
+        Text(custom ? '自定义' : '默认',
+            style: TextStyle(
+                fontSize: 12,
+                color: custom ? Colors.lightBlueAccent : Colors.grey)),
+      ]),
+      onTap: () async {
+        final v = await _showEntryStyleDialog(kind, label, st);
+        if (v == null) return;
+        await LibraryBadge.setStyle(kind, v);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// 只给三个参数（边宽 / 边框透明 / 底纹）；没有圆角与尺寸入口。
+  Future<EntryStyle?> _showEntryStyleDialog(
+      LibEntryKind kind, String label, EntryStyle initial) async {
+    var w = initial.borderWidth;
+    var ba = initial.borderAlpha;
+    var fa = initial.fillAlpha;
+    return showDialog<EntryStyle>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: Text('$label · 词条外观'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            _sliderRow('边框粗细', w, 0, 3, 31, (v) => setDlg(() => w = v),
+                '${w.toStringAsFixed(1)}dp'),
+            _sliderRow('边框深浅', ba, 0, 1, 20, (v) => setDlg(() => ba = v),
+                '${(ba * 100).round()}%'),
+            _sliderRow('底纹浓度', fa, 0, 1, 20, (v) => setDlg(() => fa = v),
+                '${(fa * 100).round()}%'),
+            const SizedBox(height: 8),
+            Center(
+              child: LibBadgeChip(
+                  label: label,
+                  color: 0xFF8B5CF6,
+                  kind: kind),
+            ),
+          ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('取消')),
+            TextButton(
+                onPressed: () => Navigator.of(ctx)
+                    .pop(kDefaultEntryStyle[kind]),
+                child: const Text('默认')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(EntryStyle(
+                    borderWidth: w, borderAlpha: ba, fillAlpha: fa)),
+                child: const Text('确定')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sliderRow(String label, double value, double min, double max,
+      int divisions, ValueChanged<double> onChanged, String shown) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
+        Text(shown, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+      ]),
+      Slider(
+          value: value.clamp(min, max).toDouble(),
+          min: min,
+          max: max,
+          divisions: divisions,
+          onChanged: onChanged),
+    ]);
+  }
+
   Widget _topSection(UnitLibrary top) {
     final subUnits = unitsByTop[top.id] ?? const <UnitLibrary>[];
     final subBasics = basicsByTop[top.id] ?? const <BasicLib>[];
@@ -2574,6 +2707,11 @@ class AuthorBadges extends StatelessWidget {
   }
 }
 
+/// P6：作者等级查看页——**只读**。
+///
+/// 等级门槛与权重由服务端 `/api/author-grade.json` 保存并下发，
+/// App 内不再提供任何修改入口；这里只展示当前生效值并把服务端最新值拉一次。
+/// 需要修改请在服务端改（改完所有客户端一致生效）。
 class AuthorGradeSettingsPage extends StatefulWidget {
   const AuthorGradeSettingsPage({super.key});
   @override
@@ -2582,90 +2720,24 @@ class AuthorGradeSettingsPage extends StatefulWidget {
 }
 
 class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
-  final _play = TextEditingController();
-  final _drop = TextEditingController();
-  final _work = TextEditingController();
-  final _thresholds = List<TextEditingController>.generate(
-      AuthorGrade.grades.length - 1, (_) => TextEditingController());
-  String? _error;
   bool _ready = false;
+  String? _note;
 
   @override
   void initState() {
     super.initState();
-    AuthorGrade.load().then((_) {
-      if (!mounted) return;
-      setState(() {
-        _fillFromConfig();
-        _ready = true;
-      });
-    });
+    _refresh();
   }
 
-  void _fillFromConfig() {
-    _play.text = '${AuthorGrade.playWeight}';
-    _drop.text = '${AuthorGrade.dropWeight}';
-    _work.text = '${AuthorGrade.workWeight}';
-    for (var i = 0; i < _thresholds.length; i++) {
-      _thresholds[i].text = '${AuthorGrade.thresholds[i]}';
-    }
-  }
-
-  @override
-  void dispose() {
-    _play.dispose();
-    _drop.dispose();
-    _work.dispose();
-    for (final c in _thresholds) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  int? _read(TextEditingController c) {
-    final v = int.tryParse(c.text.trim());
-    if (v == null || v < 0) return null;
-    return v;
-  }
-
-  Future<void> _save() async {
-    final play = _read(_play);
-    final drop = _read(_drop);
-    final work = _read(_work);
-    final ts = _thresholds.map(_read).toList();
-    if (play == null || drop == null || work == null) {
-      setState(() => _error = '权重必须是不小于 0 的整数');
-      return;
-    }
-    if (ts.any((e) => e == null)) {
-      setState(() => _error = '门槛必须是不小于 0 的整数');
-      return;
-    }
-    final list = ts.cast<int>();
-    for (var i = 1; i < list.length; i++) {
-      if (list[i] <= list[i - 1]) {
-        setState(() => _error = '等级门槛需逐级递增（C < B < A < S）');
-        return;
-      }
-    }
-    setState(() => _error = null);
-    AuthorGrade.playWeight = play;
-    AuthorGrade.dropWeight = drop;
-    AuthorGrade.workWeight = work;
-    AuthorGrade.thresholds = list;
-    await AuthorGrade.save();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('等级配置已保存')));
-  }
-
-  Future<void> _reset() async {
-    AuthorGrade.reset();
-    await AuthorGrade.save();
+  Future<void> _refresh() async {
+    setState(() => _note = null);
+    // 先用本机只读缓存立即出图，再向服务端确认一次。
+    await AuthorGrade.load();
+    final ok = await syncAuthorGradeFromServer();
     if (!mounted) return;
     setState(() {
-      _fillFromConfig();
-      _error = null;
+      _ready = true;
+      _note = ok ? null : '未能从服务端读取等级配置，显示上次同步值';
     });
   }
 
@@ -2673,8 +2745,10 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('作者等级'), actions: [
-        TextButton(
-            onPressed: _ready ? _reset : null, child: const Text('恢复默认')),
+        IconButton(
+            tooltip: '从服务端刷新',
+            onPressed: _ready ? _refresh : null,
+            icon: const Icon(Icons.refresh)),
       ]),
       body: !_ready
           ? const Center(child: CircularProgressIndicator())
@@ -2682,9 +2756,16 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
               const Text('等级词条', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               const Text(
-                  '作者卡片库词条后显示 D–S 等级。分数 = 播放×权重 + 水滴×权重 + 作品×权重；'
-                  '达到门槛即升一级，等级越高门槛递增。',
+                  '作者卡片库词条后显示 D–S 等级。分数 = 播放×权重 + 水滴×权重 + '
+                  '作品×权重；达到门槛即升一级。等级配置由服务端统一管理，'
+                  '此处只读，修改后所有客户端同步生效。',
                   style: TextStyle(fontSize: 12, color: Colors.grey)),
+              if (_note != null) ...[
+                const SizedBox(height: 6),
+                Text(_note!,
+                    style:
+                        const TextStyle(fontSize: 12, color: Colors.orangeAccent)),
+              ],
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 for (var i = 0; i < AuthorGrade.grades.length; i++)
@@ -2699,67 +2780,99 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
                   ]),
               ]),
               const Divider(height: 28),
-              Row(children: [
-                Expanded(child: _numField('播放权重', _play)),
-                const SizedBox(width: 10),
-                Expanded(child: _numField('水滴权重', _drop)),
-                const SizedBox(width: 10),
-                Expanded(child: _numField('作品权重', _work)),
-              ]),
-              const SizedBox(height: 16),
+              _kv('播放权重', '${AuthorGrade.playWeight}'),
+              _kv('水滴权重', '${AuthorGrade.dropWeight}'),
+              _kv('作品权重', '${AuthorGrade.workWeight}'),
+              const SizedBox(height: 12),
               const Text('等级门槛（分数）',
                   style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Row(children: [
-                for (var i = 1; i < AuthorGrade.grades.length; i++) ...[
-                  if (i > 1) const SizedBox(width: 8),
-                  Expanded(
-                    child: _numField(
-                        '${AuthorGrade.grades[i - 1]}→${AuthorGrade.grades[i]}',
-                        _thresholds[i - 1]),
-                  ),
-                ],
-              ]),
+              const SizedBox(height: 6),
+              for (var i = 1; i < AuthorGrade.grades.length; i++)
+                _kv('${AuthorGrade.grades[i - 1]} → ${AuthorGrade.grades[i]}',
+                    '≥${AuthorGrade.thresholds[i - 1]}'),
               const SizedBox(height: 12),
               Text(
                   '示例：播放 100、水滴 5、作品 10 → '
                   '${AuthorGrade.score(plays: 100, drops: 5, works: 10)} 分 → '
                   '${AuthorGrade.gradeFor(plays: 100, drops: 5, works: 10)} 级',
                   style: const TextStyle(fontSize: 12, color: Colors.grey)),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(_error!,
-                    style:
-                        const TextStyle(color: Colors.redAccent, fontSize: 12)),
-              ],
               const SizedBox(height: 20),
-              FilledButton(onPressed: _save, child: const Text('保存')),
+              const Text(
+                  '服务端文件：<媒体库元数据目录>/author-grade.json\n'
+                  '接口：GET / PUT /api/author-grade.json（写入需鉴权）',
+                  style: TextStyle(fontSize: 11, color: Colors.grey)),
             ]),
     );
   }
 
-  Widget _numField(String label, TextEditingController c) => TextField(
-        controller: c,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: InputDecoration(
-          labelText: label,
-          isDense: true,
-          border: const OutlineInputBorder(),
-        ),
+  Widget _kv(String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(children: [
+          Expanded(child: Text(k, style: const TextStyle(fontSize: 13))),
+          Text(v, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+        ]),
       );
 }
+
 
 /// 删除监测页：展示服务端 `_deleted.log` 的只读记录。
 /// 诊断页：显示本次运行的「最后动作」记录，用于定位原生崩溃、
 /// 播放异常停止、封面缺失等没有 Dart 堆栈的问题。
-class DiagnosticsPage extends StatefulWidget {
-  const DiagnosticsPage({super.key});
+/// 诊断（合并页）：把原来的「诊断」（面包屑动作记录）与
+/// 「诊断信息」（错误记录 + 缩图缓存）两个入口合成一个。
+///
+/// 两个 tab 各自保持原有行为与数据源，只是入口不再分裂：
+/// -「动作记录」：`Breadcrumb` 落盘的最近动作，用于定位原生崩溃/停播；
+/// -「错误记录」：[CrashReportsPage]，内存里的错误 + 缩图缓存清理。
+class DiagnosticsPage extends StatelessWidget {
+  const DiagnosticsPage({
+    super.key,
+    this.detail = '',
+    this.cacheStatsUri,
+    this.cachePruneUri,
+    this.cacheHeaders = const {},
+  });
+
+  final String detail;
+  final Uri? cacheStatsUri;
+  final Uri? cachePruneUri;
+  final Map<String, String> cacheHeaders;
+
   @override
-  State<DiagnosticsPage> createState() => _DiagnosticsPageState();
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('诊断'),
+          bottom: const TabBar(tabs: [
+            Tab(text: '动作记录'),
+            Tab(text: '错误记录'),
+          ]),
+        ),
+        body: TabBarView(children: [
+          const _BreadcrumbTab(),
+          CrashReportsPage(
+            detail: detail,
+            cacheStatsUri: cacheStatsUri,
+            cachePruneUri: cachePruneUri,
+            cacheHeaders: cacheHeaders,
+            // 合并后不再自带 Scaffold/AppBar（外层已有）。
+            embedded: true,
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
-class _DiagnosticsPageState extends State<DiagnosticsPage> {
+class _BreadcrumbTab extends StatefulWidget {
+  const _BreadcrumbTab();
+  @override
+  State<_BreadcrumbTab> createState() => _BreadcrumbTabState();
+}
+
+class _BreadcrumbTabState extends State<_BreadcrumbTab> {
   List<String> _lines = const <String>[];
   bool _loading = true;
 
@@ -2780,29 +2893,31 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('诊断'), actions: [
-        IconButton(
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    return Column(children: [
+      Align(
+        alignment: Alignment.centerRight,
+        child: IconButton(
             tooltip: '刷新', onPressed: _load, icon: const Icon(Icons.refresh)),
-      ]),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _lines.isEmpty
-              ? const Center(child: Text('暂无记录'))
-              : ListView.separated(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: _lines.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (_, i) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: SelectableText(
-                      _lines[i],
-                      style: const TextStyle(
-                          fontSize: 12, fontFamily: 'monospace'),
-                    ),
+      ),
+      Expanded(
+        child: _lines.isEmpty
+            ? const Center(child: Text('暂无记录'))
+            : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                itemCount: _lines.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (_, i) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: SelectableText(
+                    _lines[i],
+                    style:
+                        const TextStyle(fontSize: 12, fontFamily: 'monospace'),
                   ),
                 ),
-    );
+              ),
+      ),
+    ]);
   }
 }
 
@@ -3345,12 +3460,24 @@ class SettingsHubPage extends StatelessWidget {
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const MediaCrawlerSettingsPage())),
         ),
+        // 诊断合并：动作记录（Breadcrumb）+ 错误记录（CrashLog + 缩图缓存）
+        // 收到同一个页面，两个 tab；入口只留一个。
         ListTile(
           leading: const Icon(Icons.bug_report_outlined),
           title: const Text('诊断'),
-          subtitle: const Text('本次运行的最后动作记录 · 崩溃/停播/封面异常排查'),
-          onTap: () => Navigator.of(context)
-              .push(MaterialPageRoute(builder: (_) => const DiagnosticsPage())),
+          subtitle: const Text('动作记录 + 错误记录 · 崩溃/停播/封面异常排查'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => DiagnosticsPage(
+                    detail: cfg.base.isEmpty
+                        ? '未连接服务器'
+                        : '${cfg.base} · '
+                            '${cfg.libName.isEmpty ? cfg.lib : cfg.libName}',
+                    cacheStatsUri:
+                        cfg.base.isEmpty ? null : cfg.u('/api/cache/stats'),
+                    cachePruneUri:
+                        cfg.base.isEmpty ? null : cfg.u('/api/cache/prune'),
+                    cacheHeaders: cfg.headers,
+                  ))),
         ),
         ListTile(
           leading: const Icon(Icons.workspace_premium_outlined),
@@ -3379,21 +3506,6 @@ class SettingsHubPage extends StatelessWidget {
         const _StripIndexTile(),
         const _DoubleTapLikeTile(),
         const _RecommendCountTile(),
-        ListTile(
-          leading: const Icon(Icons.bug_report_outlined),
-          title: const Text('诊断信息'),
-          subtitle: const Text('最近错误 · 只在内存保留，重启清空'),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => CrashReportsPage(
-                  detail: cfg.base.isEmpty
-                      ? '未连接服务器'
-                      : '${cfg.base} · ${cfg.libName.isEmpty ? cfg.lib : cfg.libName}',
-                  cacheStatsUri:
-                      cfg.base.isEmpty ? null : cfg.u('/api/cache/stats'),
-                  cachePruneUri:
-                      cfg.base.isEmpty ? null : cfg.u('/api/cache/prune'),
-                  cacheHeaders: cfg.headers))),
-        ),
         const Divider(),
         ListTile(
           leading: const Icon(Icons.info_outline),
@@ -14611,6 +14723,33 @@ class AuthorEditResult {
   final String path;
 
   const AuthorEditResult(this.ok, this.message, {this.path = ''});
+}
+
+/// P6：从服务端拉作者等级配置（`GET /api/author-grade.json`）。
+///
+/// 成功时套用到 [AuthorGrade] 并写一份本机只读缓存供下次首帧使用；
+/// 失败不抛异常，保持上次值（绝不因服务端离线把等级改回默认）。
+Future<bool> syncAuthorGradeFromServer({String? lib}) async {
+  if (cfg.base.isEmpty) return false;
+  http.Response r;
+  try {
+    r = await http.get(cfg.u('/api/author-grade.json', lib: lib),
+        headers: cfg.headersFor(lib));
+  } catch (_) {
+    return false;
+  }
+  if (r.statusCode != 200) return false;
+  Map<String, dynamic> j;
+  try {
+    final d = jsonDecode(r.body);
+    if (d is! Map) return false;
+    j = Map<String, dynamic>.from(d);
+  } catch (_) {
+    return false;
+  }
+  final ok = AuthorGrade.applyRemote(j);
+  if (ok) await AuthorGrade.cacheLocal();
+  return ok;
 }
 
 /// 把裁切好的 PNG 字节 POST 到 `/api/author/avatar`。

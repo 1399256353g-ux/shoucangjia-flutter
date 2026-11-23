@@ -122,6 +122,64 @@ class AuthorGrade {
         't': List<int>.from(thresholds),
       };
 
+  /// P6：服务端下发是否已生效。true 时本机不再读写 SharedPreferences，
+  /// 也不再显示任何修改入口（配置唯一来源＝服务端）。
+  static bool remoteManaged = false;
+
+  /// P6：服务端下发的时间戳（秒），仅用于显示「已同步」。
+  static int remoteAt = 0;
+
+  /// P6：把服务端 `GET /api/author-grade.json` 的响应套用到本地。
+  ///
+  /// 接受两种形状：`{ok,grade:{...}}` 与裸 `{play,drop,work,t}`。
+  /// 服务端数据非法时不改动现有配置，返回 false。
+  static bool applyRemote(Map<String, dynamic>? resp) {
+    if (resp == null) return false;
+    final raw = resp['grade'];
+    final src = (raw is Map) ? Map<String, dynamic>.from(raw) : resp;
+    final play = _intOf(src['play']);
+    final drop = _intOf(src['drop']);
+    final work = _intOf(src['work']);
+    final t = _strictThresholds(src['t']);
+    if (play == null || drop == null || work == null || t == null) {
+      return false;
+    }
+    playWeight = play;
+    dropWeight = drop;
+    workWeight = work;
+    thresholds = t;
+    remoteManaged = true;
+    remoteAt = (src['at'] is num ? (src['at'] as num).toInt() : 0);
+    return true;
+  }
+
+  static int? _intOf(Object? v) {
+    if (v is num) {
+      final n = v.toInt();
+      return n < 0 ? null : n;
+    }
+    if (v is String) {
+      final n = int.tryParse(v.trim());
+      return (n == null || n < 0) ? null : n;
+    }
+    return null;
+  }
+
+  /// 门槛必须恰好 [grades].length-1 个且严格递增，否则整组作废。
+  static List<int>? _strictThresholds(Object? raw) {
+    if (raw is! List || raw.length != grades.length - 1) return null;
+    final out = <int>[];
+    for (final v in raw) {
+      final n = _intOf(v);
+      if (n == null) return null;
+      out.add(n);
+    }
+    for (var i = 1; i < out.length; i++) {
+      if (out[i] <= out[i - 1]) return null;
+    }
+    return out;
+  }
+
   static Map<String, dynamic> parse(String? raw) {
     if (raw == null || raw.isEmpty) return <String, dynamic>{};
     try {
@@ -133,6 +191,10 @@ class AuthorGrade {
 
   static String encode() => jsonEncode(toJson());
 
+  /// P6：配置来源已改为服务端（`/api/author-grade.json`）。
+  ///
+  /// 本机只保留一份**只读缓存**，用于首屏立即拿到上次同步值；
+  /// 真正生效的配置由 [applyRemote] 套用，本地不再写回服务端。
   static Future<void> load() async {
     try {
       final sp = await SharedPreferences.getInstance();
@@ -141,11 +203,28 @@ class AuthorGrade {
       if (j.isEmpty) {
         reset();
       } else {
-        applyJson(j);
+        reset();
+        // 只读缓存：解析成功也只当作「上次已知值」，不改 remoteManaged。
+        final play = _intOf(j['play']);
+        final drop = _intOf(j['drop']);
+        final work = _intOf(j['work']);
+        final t = _strictThresholds(j['t']);
+        if (play != null) playWeight = play;
+        if (drop != null) dropWeight = drop;
+        if (work != null) workWeight = work;
+        if (t != null) thresholds = t;
       }
     } catch (_) {
       reset();
     }
+  }
+
+  /// P6：只写本机只读缓存，供下次启动首帧使用；服务端配置由 PUT 接口写。
+  static Future<void> cacheLocal() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString(prefsKey, encode());
+    } catch (_) {}
   }
 
   static Future<void> save() async {

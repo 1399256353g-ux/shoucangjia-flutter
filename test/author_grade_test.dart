@@ -2,7 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/author_grade.dart';
 
 void main() {
-  setUp(AuthorGrade.reset);
+  setUp(() {
+    AuthorGrade.reset();
+    AuthorGrade.remoteManaged = false;
+    AuthorGrade.remoteAt = 0;
+  });
 
   test('默认权重与门槛', () {
     expect(AuthorGrade.score(), 0);
@@ -66,5 +70,57 @@ void main() {
     expect(AuthorGrade.colorForGrade('S'), AuthorGrade.colors.last);
     expect(AuthorGrade.colorForGrade('D'), AuthorGrade.colors.first);
     expect(AuthorGrade.grades.length, AuthorGrade.colors.length);
+  });
+
+  // P6：服务端下发（App 端只读）
+  test('applyRemote 套用服务端配置并标记 remoteManaged', () {
+    final ok = AuthorGrade.applyRemote({
+      'ok': true,
+      'grade': {'play': 2, 'drop': 20, 'work': 3, 't': [200, 1000, 4000, 16000]},
+      'at': 1795421256,
+    });
+    expect(ok, isTrue);
+    expect(AuthorGrade.playWeight, 2);
+    expect(AuthorGrade.dropWeight, 20);
+    expect(AuthorGrade.workWeight, 3);
+    expect(AuthorGrade.thresholds, [200, 1000, 4000, 16000]);
+    expect(AuthorGrade.remoteManaged, isTrue);
+    expect(AuthorGrade.gradeFor(plays: 200), 'C');
+  });
+
+  test('applyRemote 接受裸对象（无 grade 包裹）', () {
+    final ok = AuthorGrade.applyRemote(
+        <String, dynamic>{'play': 1, 'drop': 10, 'work': 2, 't': [1, 2, 3, 4]});
+    expect(ok, isTrue);
+    expect(AuthorGrade.thresholds, [1, 2, 3, 4]);
+  });
+
+  test('applyRemote 拒绝非法数据且不改动现有配置', () {
+    AuthorGrade.applyRemote(
+        <String, dynamic>{'play': 2, 'drop': 20, 'work': 3, 't': [1, 2, 3, 4]});
+    final before = AuthorGrade.thresholds;
+    // 非递增
+    expect(
+        AuthorGrade.applyRemote(<String, dynamic>{
+          'play': 5,
+          'drop': 5,
+          'work': 5,
+          't': [100, 50, 200, 300]
+        }),
+        isFalse);
+    // 门槛数量不对
+    expect(
+        AuthorGrade.applyRemote(
+            <String, dynamic>{'play': 1, 'drop': 1, 'work': 1, 't': [1, 2, 3]}),
+        isFalse);
+    // 负权重
+    expect(
+        AuthorGrade.applyRemote(
+            <String, dynamic>{'play': -1, 'drop': 1, 'work': 1, 't': [1, 2, 3, 4]}),
+        isFalse);
+    // null
+    expect(AuthorGrade.applyRemote(null), isFalse);
+    expect(AuthorGrade.thresholds, before);
+    expect(AuthorGrade.playWeight, 2);
   });
 }
