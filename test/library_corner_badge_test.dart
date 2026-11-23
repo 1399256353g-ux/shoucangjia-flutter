@@ -85,4 +85,41 @@ void main() {
     expect(sizes.values.map((s) => s.height).toSet().length, 1);
     expect(sizes[LibBadgeKind.top.name], const Size(kCornerBadgeSize, kCornerBadgeSize));
   });
+
+  test('改图案/颜色会递增唯一变更信号（已渲染角标靠它重建）', () async {
+    final before = LibraryCornerBadge.revision.value;
+    await LibraryCornerBadge.setPattern(LibBadgeKind.unit, 5);
+    expect(LibraryCornerBadge.revision.value, greaterThan(before));
+    final afterPattern = LibraryCornerBadge.revision.value;
+    await LibraryCornerBadge.setColor(LibBadgeKind.unit, 0xFF123456);
+    expect(LibraryCornerBadge.revision.value, greaterThan(afterPattern));
+    final afterColor = LibraryCornerBadge.revision.value;
+    await LibraryCornerBadge.resetKind(LibBadgeKind.unit);
+    expect(LibraryCornerBadge.revision.value, greaterThan(afterColor));
+  });
+
+  test('重复写入同一个值不递增信号（避免无意义重建）', () async {
+    await LibraryCornerBadge.setPattern(LibBadgeKind.basic, 3);
+    final v = LibraryCornerBadge.revision.value;
+    await LibraryCornerBadge.setPattern(LibBadgeKind.basic, 3);
+    await LibraryCornerBadge.setColor(
+        LibBadgeKind.basic, LibraryCornerBadge.colorFor(LibBadgeKind.basic));
+    expect(LibraryCornerBadge.revision.value, v);
+  });
+
+  testWidgets('已渲染的角标在设置变更后自行重建（无需页面 setState）', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Center(child: LibCornerBadge(kind: LibBadgeKind.top)),
+    ));
+    int patternOnScreen() {
+      final w = tester.widget<LibCornerBadge>(find.byType(LibCornerBadge));
+      return LibraryCornerBadge.patternFor(w.kind);
+    }
+
+    await LibraryCornerBadge.setPattern(LibBadgeKind.top, 6);
+    await tester.pump();
+    expect(patternOnScreen(), 6);
+    // 设置页自己的 setState 之外，组件必须凭 notifier 重绘。
+    expect(find.byKey(const ValueKey('lib-corner-badge-top')), findsOneWidget);
+  });
 }

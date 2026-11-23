@@ -73,11 +73,83 @@ jobs:
           PY2
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
+      # 固定签名（结构性修复）：`flutter create` 生成的模板把 release 指向
+      # `signingConfigs.getByName("debug")`，而 release APK 落到 runner 的临时
+      # debug keystore —— 每次构建签名都不同，`adb install -r -d` 必然
+      # INSTALL_FAILED_UPDATE_INCOMPATIBLE，只能每轮 uninstall + 备份 + 恢复。
+      # 这里注入长期 keystore，之后同一台设备可以直接覆盖安装。
+      - name: Install release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -e
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 未配置，拒绝构建无固定签名的包"
+            exit 1
+          fi
+          mkdir -p android/keystore
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/keystore/dizi-release.p12
+          test -s android/keystore/dizi-release.p12
+          ls -l android/keystore
+      - name: Patch signing config
+        env:
+          KS_PASS: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os
+          p = 'android/app/build.gradle.kts'
+          s = open(p).read()
+          if 'diziRelease' in s:
+              print('already patched')
+              raise SystemExit(0)
+          store, key = os.environ['KS_PASS'], os.environ['KEY_PASS']
+          alias = os.environ.get('KEY_ALIAS') or 'dizi'
+          # 1) 在 android{} 块前声明 release signingConfig
+          sign_block = '''
+          android {
+              signingConfigs {
+                  create("diziRelease") {
+                      storeFile = file("../keystore/dizi-release.p12")
+                      storePassword = "%s"
+                      keyAlias = "%s"
+                      keyPassword = "%s"
+                      storeType = "PKCS12"
+                  }
+              }
+          ''' % (store, alias, key)
+          s = s.replace('android {', sign_block, 1)
+          # 2) release 用固定签名，不再用 runner 的临时 debug key
+          s = s.replace(
+              'signingConfig = signingConfigs.getByName("debug")',
+              'signingConfig = signingConfigs.getByName("diziRelease")')
+          assert 'diziRelease' in s
+          open(p, 'w').write(s)
+          print(s[:900])
+          PY
       - name: Build APK (retry once)
         env:
           GRADLE_OPTS: -Dorg.gradle.internal.http.connectionTimeout=60000 -Dorg.gradle.internal.http.socketTimeout=60000
         run: |
           flutter build apk --release || flutter build apk --release
+      - name: Verify signing certificate is stable
+        run: |
+          set -e
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          SIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner 2>/dev/null | tail -1)
+          echo "apksigner: $SIGNER"
+          "$SIGNER" verify --print-certs "$APK" | tee /tmp/certs.txt
+          FOUND=$(grep -oE 'SHA-256 digest: [0-9a-f]+' /tmp/certs.txt | head -1 | awk '{print $3}')
+          EXPECTED="feb4574570872cfa7fa35761f1262e6a3da6d4c642fb335227d5b5c829e25db8"
+          echo "signing sha256: $FOUND"
+          if [ "$FOUND" != "$EXPECTED" ]; then
+            echo "::error::APK 签名指纹与固定 keystore 不一致（$FOUND），覆盖安装会失败"
+            exit 1
+          fi
+          echo "签名指纹与固定 keystore 一致，可直接 install -r -d 覆盖安装"
       - name: Rename APK with version
         run: |
           VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)

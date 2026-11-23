@@ -57,6 +57,15 @@ const Map<LibBadgeKind, int> kDefaultCornerColor = <LibBadgeKind, int>{
 class LibraryCornerBadge {
   static const String prefsKey = 'lib_corner_badge_v1';
 
+  /// 唯一变更信号：任何层级改了图案/颜色就自增一次。
+  ///
+  /// 角标是按层级取值的**静态**数据，卡片一旦建好就不会自己重建；
+  /// 只靠设置页 `setState` 只有设置页自己会刷新，已经渲染在主页/单元库页的
+  /// 角标会停在旧图案上 —— 这就是「更换后即时生效」做不到的根因。
+  /// 组件内部订阅这一个 notifier，设置改了所有可见角标一起重建，
+  /// 不需要各页面自己往上递回调。
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
   /// 层级 → 图案 id。
   static final Map<LibBadgeKind, int> pattern = <LibBadgeKind, int>{
     ...kDefaultCornerPattern,
@@ -103,6 +112,7 @@ class LibraryCornerBadge {
 
   static void applyJson(Map<String, dynamic> j) {
     resetDefaults();
+    _bump();
     final p = j['pattern'];
     if (p is Map) {
       for (final k in LibBadgeKind.values) {
@@ -152,21 +162,32 @@ class LibraryCornerBadge {
   }
 
   static Future<void> setPattern(LibBadgeKind kind, int id) async {
-    pattern[kind] = clampPattern(kind, id);
+    final next = clampPattern(kind, id);
+    if (pattern[kind] == next) return;
+    pattern[kind] = next;
+    _bump();
     await save();
   }
 
   static Future<void> setColor(LibBadgeKind kind, int argb) async {
+    if (color[kind] == argb) return;
     color[kind] = argb;
+    _bump();
     await save();
   }
 
   /// 恢复某层级的图案与颜色。
   static Future<void> resetKind(LibBadgeKind kind) async {
-    pattern[kind] = kDefaultCornerPattern[kind] ?? 0;
-    color[kind] = kDefaultCornerColor[kind] ?? 0xFF6B7280;
+    final p = kDefaultCornerPattern[kind] ?? 0;
+    final c = kDefaultCornerColor[kind] ?? 0xFF6B7280;
+    if (pattern[kind] == p && color[kind] == c) return;
+    pattern[kind] = p;
+    color[kind] = c;
+    _bump();
     await save();
   }
+
+  static void _bump() => revision.value++;
 }
 
 /// 左上角角标：所有层级同一形状尺寸，只有图案与颜色不同。
@@ -177,6 +198,14 @@ class LibCornerBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 订阅唯一变更信号：设置页改了图案/颜色，所有已渲染角标立即跟着变。
+    return ValueListenableBuilder<int>(
+      valueListenable: LibraryCornerBadge.revision,
+      builder: (_, __, ___) => _paint(),
+    );
+  }
+
+  Widget _paint() {
     final argb = LibraryCornerBadge.colorFor(kind);
     final fg = _pickForeground(argb);
     return Container(
