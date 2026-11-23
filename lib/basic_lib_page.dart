@@ -13,6 +13,7 @@ import 'author_letter_bar.dart';
 import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
+import 'library_revision.dart';
 import 'library_tree.dart';
 import 'media_priority.dart';
 import 'media_resize.dart';
@@ -120,10 +121,27 @@ class _BasicLibPageState extends State<BasicLibPage>
   bool loadingMore = false;
   String? err;
 
+  /// 「卡片快速刷新」第 4 步：本库索引被重建后，作品/作者都回到第一页重拉。
+  late final ValueNotifier<int> _libRev = ValueNotifier<int>(0);
+
+  void _onLibDataChanged() {
+    final v = LibDataRevision.revisionOf(widget.basic.id);
+    if (v == _libRev.value) return;
+    _libRev.value = v;
+    if (!mounted) return;
+    _worksScroll.jumpTo(0);
+    _loadAuthors();
+    _loadAvatars();
+    _loadAuthorStats();
+    _loadWorks(reset: true);
+  }
+
   @override
   void initState() {
     super.initState();
     _worksScroll.addListener(_onScroll);
+    LibDataRevision.listenable(widget.basic.id).addListener(_onLibDataChanged);
+    _libRev.value = LibDataRevision.revisionOf(widget.basic.id);
     _loadAuthors();
     _loadAvatars();
     _loadAuthorStats();
@@ -132,6 +150,9 @@ class _BasicLibPageState extends State<BasicLibPage>
 
   @override
   void dispose() {
+    LibDataRevision.listenable(widget.basic.id)
+        .removeListener(_onLibDataChanged);
+    _libRev.dispose();
     _worksScroll.removeListener(_onScroll);
     _worksScroll.dispose();
     _authorScroll.dispose();

@@ -115,6 +115,10 @@ Future<LibRefreshOutcome> runLibRefresh({
   required Future<void> Function() reloadLibraries,
   required Future<void> Function() clearLibCovers,
   Future<void> Function()? reloadOpenLists,
+
+  /// 重建成功后广播「该库索引已变」的入口（由调用方接到
+  /// [LibDataRevision.bump]，打开中的列表据此回到第一页重拉）。
+  void Function()? onBumpRevision,
 }) async {
   final id = lib.trim();
   if (id.isEmpty) {
@@ -147,6 +151,9 @@ Future<LibRefreshOutcome> runLibRefresh({
   } catch (_) {}
 
   // 4) 打开中的列表。
+  try {
+    onBumpRevision?.call();
+  } catch (_) {}
   try {
     await reloadOpenLists?.call();
   } catch (_) {}

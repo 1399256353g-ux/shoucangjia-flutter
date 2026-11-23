@@ -61,6 +61,7 @@ export 'library_badge.dart' show LibBadgeChip, LibEntryKind;
 import 'library_corner_badge.dart';
 import 'home_top_bar.dart';
 import 'library_refresh.dart';
+import 'library_revision.dart';
 import 'refresh_all.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
@@ -4755,6 +4756,10 @@ class _LibraryPageState extends State<LibraryPage> {
       lib: id,
       reloadLibraries: load,
       clearLibCovers: () => DiziCache.evictLib(id),
+      onBumpRevision: () {
+        LibDataRevision.bump(id);
+        coverRevision.value++;
+      },
       reloadOpenLists: null,
       reindex: (body) async {
         final uri =
@@ -4771,8 +4776,6 @@ class _LibraryPageState extends State<LibraryPage> {
         return (status: r.statusCode, body: parsed);
       },
     );
-    // 重建过索引的库，作品数/封面都变了：bump 版本让可见卡片重新取图。
-    if (out.ok) coverRevision.value++;
     return out.message;
   }
 

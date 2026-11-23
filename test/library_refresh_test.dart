@@ -90,7 +90,7 @@ void main() {
   });
 
   group('runLibRefresh 编排', () {
-    test('顺序固定：重建 → 重拉快照 → 清本库缓存 → 刷新列表', () async {
+    test('顺序固定：重建 → 重拉快照 → 清本库缓存 → 广播列表刷新', () async {
       final calls = <String>[];
       final out = await runLibRefresh(
         lib: 'lib-001',
@@ -105,12 +105,13 @@ void main() {
         },
         reloadLibraries: () async => calls.add('reloadLibs'),
         clearLibCovers: () async => calls.add('clearCovers'),
+        onBumpRevision: () => calls.add('bump'),
         reloadOpenLists: () async => calls.add('reloadLists'),
       );
       expect(out.ok, isTrue);
       expect(out.works, 12);
       expect(calls,
-          ['reindex:lib-001', 'reloadLibs', 'clearCovers', 'reloadLists']);
+          ['reindex:lib-001', 'reloadLibs', 'clearCovers', 'bump', 'reloadLists']);
     });
 
     test('重建失败即终止：不清缓存、不重拉快照', () async {
@@ -132,6 +133,19 @@ void main() {
       );
       expect(out.ok, isFalse);
       expect(calls, ['reindex']);
+    });
+
+    test('重建失败不广播列表刷新（避免无谓重拉）', () async {
+      var bumped = 0;
+      await runLibRefresh(
+        lib: 'lib-010',
+        reindex: (body) async =>
+            (status: 400, body: <String, dynamic>{'ok': false, 'error': 'x'}),
+        reloadLibraries: () async {},
+        clearLibCovers: () async {},
+        onBumpRevision: () => bumped++,
+      );
+      expect(bumped, 0);
     });
 
     test('后两步异常不影响「已刷新」结论（数据已重建成功）', () async {
