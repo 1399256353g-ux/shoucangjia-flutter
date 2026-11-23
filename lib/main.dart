@@ -24,6 +24,7 @@ import 'cover_history.dart';
 import 'cover_menu.dart';
 import 'cover_upload.dart';
 import 'deleted_monitor.dart';
+import 'deleted_cover.dart';
 import 'sync_ledger.dart';
 import 'concurrency.dart';
 import 'breadcrumb.dart';
@@ -2984,12 +2985,32 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   bool loading = true;
   String? err;
 
+  /// 作者头像索引（`/api/authors.json`）。删除记录的本地媒体通常已被清理，
+  /// 服务端下发的记录里就没有 `th`/`cv`；此时按 `deleted_cover.dart` 的规则
+  /// 退回作者头像，列表才不会整列「图片不可用」。
+  Map<String, dynamic> _authorIdx = const {};
+
   bool checking = false;
 
   @override
   void initState() {
     super.initState();
+    _loadAuthorIdx();
     load();
+  }
+
+  /// 拉一次作者索引供预览图兜底；失败不影响列表（只是回落到占位图标）。
+  Future<void> _loadAuthorIdx() async {
+    if (cfg.base.isEmpty) return;
+    try {
+      final r = await http
+          .get(cfg.u('/api/authors.json'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return;
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      if (j is! Map || !mounted) return;
+      setState(() => _authorIdx = Map<String, dynamic>.from(j));
+    } catch (_) {}
   }
 
   /// 触发爬虫脚本（dy_prune.js）立即扫描平台已删除的作品。
@@ -3085,7 +3106,13 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   }
 
   Widget _cover(DeletedEntry e) {
-    if (!e.hasCover) {
+    // 记录里的 `th`/`cv` 常常已被清理（本地媒体也删了）：按 deleted_cover
+    // 的规则退回作者头像，仍然没有才显示占位图标。
+    final path = deletedCoverPath({
+      'th': e.cover,
+      'a': e.author,
+    }, _authorIdx);
+    if (path.isEmpty) {
       return Container(
         width: 56,
         height: 56,
@@ -3095,13 +3122,13 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     }
     // 删除记录可能来自其他单元库；`/media/<lib>/...` 里的 lib 必须原样保留，
     // 不能按当前库重新前缀，否则会 404 成空白缩略图。
-    final mediaLib = libOfMediaPath(e.cover);
+    final mediaLib = libOfMediaPath(path);
     final lib = mediaLib.isEmpty ? cfg.lib : mediaLib;
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: CachedNetworkImage(
         cacheManager: DiziCache.manager,
-        imageUrl: cfg.mediaUrl(e.cover, lib: lib),
+        imageUrl: cfg.mediaUrl(path, lib: lib),
         httpHeaders: cfg.headersFor(lib),
         width: 56,
         height: 56,
