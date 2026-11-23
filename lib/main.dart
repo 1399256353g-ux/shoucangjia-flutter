@@ -59,6 +59,8 @@ import 'infinite.dart';
 import 'library_badge.dart';
 export 'library_badge.dart' show LibBadgeChip, LibEntryKind;
 import 'library_corner_badge.dart';
+import 'home_top_bar.dart';
+import 'refresh_all.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
 import 'loop_link.dart';
@@ -6165,10 +6167,43 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _libEpoch = 0;
 
+  /// 总刷新进行中：按钮转圈并禁用重复点击（防抖由 [kTotalRefreshCooldown]
+  /// 与这个标志一起保证，不新增定时器）。
+  bool _refreshing = false;
+  DateTime? _lastRefreshAt;
+
   @override
   void initState() {
     super.initState();
     _syncCurrentLib();
+  }
+
+  /// 顶部「总刷新」：连接探活 → 库列表 → 封面缓存 → 作者索引。
+  ///
+  /// 完成后只 bump [_libEpoch] 让主页重新拉一次快照（保持滚动位置的逻辑在
+  /// `_LibraryPageState.load` 里），并用 SnackBar 报结果。
+  Future<void> _totalRefresh() async {
+    if (_refreshing) return;
+    final now = DateTime.now();
+    if (!totalRefreshAllowed(now, _lastRefreshAt)) return;
+    _lastRefreshAt = now;
+    setState(() => _refreshing = true);
+    TotalRefreshOutcome? out;
+    try {
+      out = await performTotalRefresh();
+    } catch (e) {
+      out = TotalRefreshOutcome(
+          servers: 0, online: 0, libraries: 0, firstError: '$e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _refreshing = false;
+      _libEpoch++;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 2),
+      content: Text(out.message),
+    ));
   }
 
   /// 只同步「当前库」指向服务端默认库，用于播放/同步路由；不拉收藏夹列表。
@@ -6231,42 +6266,132 @@ class _HomePageState extends State<HomePage> {
           },
         ),
         title: const Text('媒体库'),
+        // 手机版顶部排布：总刷新常驻、搜索次之，其余收进「⋯」；
+        // 可见按钮数量由可用宽度算出（≤4 个），触达区 44dp。
         actions: [
           const HomeAction(),
-          IconButton(
-              key: const ValueKey('open-folder-structure-home'),
-              icon: const Icon(Icons.account_tree_outlined),
-              tooltip: '文件结构 / 节点文件夹',
-              onPressed: _openFolders),
-          IconButton(
-              icon: const Icon(Icons.auto_awesome),
-              tooltip: '推荐',
-              onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const RecommendPage()))),
-          IconButton(
-              icon: const Icon(Icons.people_alt_outlined),
-              tooltip: '作者',
-              onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const AuthorGridPage()))),
-          IconButton(
-              icon: const Icon(Icons.leaderboard_outlined),
-              tooltip: '排行榜',
-              onPressed: () => Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const RankPage()))),
-          IconButton(
-              icon: const Icon(Icons.search),
-              tooltip: '搜索',
-              onPressed: () => Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const SearchPage()))),
-          IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsHubPage()))),
+          HomeTopBar(
+            refreshing: _refreshing,
+            actions: [
+              TopBarAction(
+                id: 'refresh',
+                tooltip: '总刷新',
+                icon: Icons.refresh,
+                onPressed: _totalRefresh,
+              ),
+              TopBarAction(
+                id: 'search',
+                tooltip: '搜索',
+                icon: Icons.search,
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => const SearchPage())),
+              ),
+              TopBarAction(
+                id: 'folders',
+                tooltip: '文件结构 / 节点文件夹',
+                icon: Icons.account_tree_outlined,
+                onPressed: _openFolders,
+              ),
+              TopBarAction(
+                id: 'recommend',
+                tooltip: '推荐',
+                icon: Icons.auto_awesome,
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const RecommendPage())),
+              ),
+              TopBarAction(
+                id: 'authors',
+                tooltip: '作者',
+                icon: Icons.people_alt_outlined,
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AuthorGridPage())),
+              ),
+              TopBarAction(
+                id: 'rank',
+                tooltip: '排行榜',
+                icon: Icons.leaderboard_outlined,
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => const RankPage())),
+              ),
+              TopBarAction(
+                id: 'settings',
+                tooltip: '设置',
+                icon: Icons.settings,
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsHubPage())),
+              ),
+            ],
+          ),
         ],
       ),
       body: LibraryPage(key: ValueKey('home-libs-$_libEpoch'), embedded: true),
     );
   }
+}
+
+/// 顶部任务栏「总刷新」的实际编排：连接探活 → 库列表 → 封面缓存 → 作者索引。
+///
+/// 只做编排，不做 UI；结果交给调用方决定怎么提示。
+Future<TotalRefreshOutcome> performTotalRefresh() async {
+  List<ServerConn> servers = const <ServerConn>[];
+  try {
+    final sp = await SharedPreferences.getInstance();
+    servers = liveServers(migrateLegacy(
+      servers: decodeServers(sp.getString('servers_v1')),
+      base: sp.getString('base') ?? cfg.base,
+      user: sp.getString('user') ?? cfg.user,
+      pass: sp.getString('pass') ?? cfg.pass,
+    ));
+  } catch (_) {}
+
+  Future<int> probe(ServerConn s) async {
+    try {
+      final r = await http.get(Uri.parse('${s.base}/api/auth'), headers: {
+        'Authorization': 'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+      }).timeout(const Duration(seconds: 6));
+      return r.statusCode;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<int> countLibs(ServerConn s) async {
+    final r = await http.get(
+        Uri.parse(
+            '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+        headers: {
+          'Authorization':
+              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+        }).timeout(const Duration(seconds: 12));
+    if (r.statusCode != 200) throw StateError('HTTP ${r.statusCode}');
+    final j = jsonDecode(r.body);
+    if (j is! Map) return 0;
+    return ((j['libraries'] as List?) ?? const []).length;
+  }
+
+  return runTotalRefresh(
+    servers: servers,
+    probe: probe,
+    libraryCount: countLibs,
+    // 封面：清磁盘缓存 + 内存图片缓存 + bump 版本，让可见卡片重新取图。
+    clearCoverCache: () async {
+      try {
+        await DiziCache.manager.emptyCache();
+      } catch (_) {}
+      try {
+        PaintingBinding.instance.imageCache.clear();
+        PaintingBinding.instance.imageCache.clearLiveImages();
+      } catch (_) {}
+      coverRevision.value++;
+    },
+    // 作者/头像：清「已加载」标记后再拉一次索引，并通知已渲染头像重建。
+    reloadAuthors: () async {
+      _authorAvatarLoaded = false;
+      authorAvatarIndex.clear();
+      await ensureAuthorAvatarsLoaded();
+      authorAvatarRevision.value++;
+    },
+  );
 }
 
 /// 作者行的库归属（基础库/大库/单元库）：作者总览与排行榜共用。
