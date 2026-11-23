@@ -2,14 +2,15 @@
 //
 // 术语（owner 设计）：
 //  - 节点文件夹（含自身与下级全部结构）＝「单元库」
-//  - SECRET 为固定顶级单元库；第一层目录即下级单元库（原「大库」）
+//  - 顶级单元库＝**当前连接的媒体库根**（名称取根目录名，见 top_node.dart）；
+//    第一层目录即下级单元库（原「大库」）
 //  - 单元库之下可以继续嵌套单元库（原「大库分组」），叶子仍是基础库
 //  - 卡片层级：单元库卡片 > 基础库卡片 > 作品卡片（尺寸递减）
 //
 // 收敛规则（L5）：
 //  1. 同一路径多节点取最下级，上级不重复认领（父节点只认领直属基础库）
 //  2. 单元库（含整棵子树）内没有基础库 → 在选择页消失
-//  3. 没有命中任何节点的下级基础库 → 归入默认顶级单元库（SECRET）
+//  3. 没有命中任何节点的下级基础库 → 归入顶级单元库（媒体库根）
 //
 // 数据来源：/api/libraries.json v2 的 bigLibraries / groups（节点）与
 // basicLibraries（基础库，带 rel 相对路径）。
@@ -18,6 +19,7 @@ import 'disk_name.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
+import 'top_node.dart';
 
 /// 一个节点文件夹（单元库候选）。
 class LibNode {
@@ -147,14 +149,17 @@ bool isPrefixOf(List<String> a, List<String> b) {
 ///
 /// [nodes] 节点文件夹（可以是 bigLibraries + groups 的合集）。
 /// [basics] 基础库，`rel` 为相对库根的路径。
-/// [topName] 顶级单元库名称（默认 `SECRET`），顶级 id 为 [topId]。
+/// [topName] 顶级单元库名称（默认取当前媒体库根目录名），顶级 id 为 [topId]。
 /// 返回顶级单元库；没有基础库时返回 null（整棵树在选择页消失）。
 UnitLibrary? buildUnitTree({
   required List<LibNode> nodes,
   required List<BasicLib> basics,
   String topId = 'secret',
-  String topName = 'SECRET',
+  String? topName,
 }) {
+  final top = (topName == null || topName.trim().isEmpty)
+      ? TopNodeName.current
+      : topName;
   if (basics.isEmpty) return null;
 
   // 1. 节点去重：同一 rel 只保留一个（多连接聚合时取最先出现者，保留其来源）。
@@ -242,7 +247,7 @@ UnitLibrary? buildUnitTree({
   // 6. 没有归属的基础库 → 默认顶级单元库（收敛规则 3）。
   if (orphans.isNotEmpty) {
     rootUnits.add(UnitLibrary(
-      node: LibNode(id: topId, rel: '', name: topName),
+      node: LibNode(id: topId, rel: '', name: top),
       basics: orphans,
       children: const [],
     ));
@@ -273,7 +278,7 @@ UnitLibrary? buildUnitTree({
       node: LibNode(
         id: 'media:${e.key}',
         rel: '',
-        name: label.isEmpty ? topName : label,
+        name: label.isEmpty ? top : label,
         serverId: e.key,
         serverBase: subs.first.node.serverBase,
         serverLabel: label,
@@ -286,14 +291,14 @@ UnitLibrary? buildUnitTree({
   if (mediaLibraries.isEmpty) {
     // 退回到旧形态（单连接/无连接信息）：根即为容器，children 是下级单元库。
     return UnitLibrary(
-      node: LibNode(id: topId, rel: '', name: topName),
+      node: LibNode(id: topId, rel: '', name: top),
       basics: const [],
       children: rootUnits,
     );
   }
   mediaLibraries.sort((a, b) => a.name.compareTo(b.name));
   return UnitLibrary(
-    node: LibNode(id: topId, rel: '', name: topName),
+    node: LibNode(id: topId, rel: '', name: top),
     basics: const [],
     children: mediaLibraries,
   );

@@ -84,6 +84,7 @@ import 'playback_error.dart';
 import 'perf_diagnostics.dart';
 import 'text_fit.dart';
 import 'esc_back.dart';
+import 'top_node.dart';
 import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
@@ -548,6 +549,8 @@ class LibMeta {
               // 不上，词条会全部落到 SECRET。这里额外用库根坐标建一份
               // 「单元库归属」用的基础库列表。
               final root = '${ljm['root'] ?? ''}'.trim();
+              // owner 2026-11-22：顶级节点名＝媒体库根目录名（不是内置常量）。
+              TopNodeName.setFromRoot(root);
               final basicList = <BasicLib>[
                 for (final b in basics) basicLibFromRef(b),
               ];
@@ -599,7 +602,10 @@ class LibMeta {
                   ? nodesFromV2(ljm, root: base)
                   : nodesFromMarks(marks,
                       covers: markCovers, serverBase: cfg.base);
-              final tree = buildUnitTree(nodes: nodes, basics: unitBasics);
+              final tree = buildUnitTree(
+                  nodes: nodes,
+                  basics: unitBasics,
+                  topName: TopNodeName.current);
               if (tree != null) {
                 unitTree = tree;
                 units = flattenUnits(tree);
@@ -703,7 +709,7 @@ class LibMeta {
 
   String unitNameOf(String id) {
     if (id.isEmpty) return '';
-    if (id == 'secret') return 'SECRET';
+    if (id == 'secret') return TopNodeName.current;
     for (final u in units) {
       if (u.id == id) return u.name;
     }
@@ -2560,10 +2566,11 @@ class UnitBadges extends StatelessWidget {
     if (unitId.isEmpty && basic.isEmpty && mediaPath.isNotEmpty) {
       unitId = meta?.unitIdFor(mediaPath) ?? '';
     }
-    // 不再回退到「库名」词条（抖音收藏已废弃）；没有单元库归属就显示 SECRET。
+    // 不再回退到「库名」词条（抖音收藏已废弃）；没有单元库归属就显示
+    // 顶级节点词条（名称来自媒体库根目录）。
     final id = unitId.isEmpty ? 'secret' : unitId;
     final label = unitId.isEmpty || unitId == 'secret'
-        ? 'SECRET'
+        ? TopNodeName.current
         : _unitNameOf(basic, unitId);
     final names = <String, String>{...?meta?.unitNames, id: label};
     final gray = unitId.isEmpty || unitId == 'secret';
@@ -4937,6 +4944,11 @@ class _LibraryPageState extends State<LibraryPage> {
           if (r.statusCode != 200) continue;
           final j = jsonDecode(r.body);
           if (j is! Map) continue;
+          // owner 2026-11-22：顶级节点名＝媒体库根目录名。先到先用，
+          // 多个连接时以首条连接（servers.first，与文件结构页一致）为准。
+          if (identical(s, servers.first)) {
+            TopNodeName.setFromRoot('${j['root'] ?? ''}');
+          }
           snaps.add(ServerLibraries(
               server: s,
               libraries: const [],
@@ -4961,7 +4973,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final units = buildUnitTree(
         nodes: nodes,
         basics: t?.allBasics ?? const <BasicLib>[],
-        topName: 'SECRET',
+        topName: TopNodeName.current,
       );
       // K7：单元库被删除/重建后，清掉已不存在节点的星标（标记只存本机
       // SharedPreferences，不写 NAS）。树拿不到时（网络失败）不动标记。

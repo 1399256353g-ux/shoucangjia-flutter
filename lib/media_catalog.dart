@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'top_node.dart';
+
 /// 一条基础库目录（媒体库里的真实分类目录）。
 class CatalogBasic {
   final String id;
@@ -47,7 +49,8 @@ class MediaCatalog {
 
   static String unitNameOf(String unitId) {
     if (unitId.isEmpty) return '';
-    return _unitNames[unitId] ?? (unitId == 'secret' ? 'SECRET' : unitId);
+    return _unitNames[unitId] ??
+        (unitId == 'secret' ? TopNodeName.current : unitId);
   }
 
   /// 单元库列表（去重，SECRET 最后）。
@@ -81,6 +84,8 @@ class MediaCatalog {
       if (rs[0].statusCode != 200) return;
       final j = jsonDecode(utf8.decode(rs[0].bodyBytes));
       if (j is! Map) return;
+      // owner 2026-11-22：顶级节点名＝媒体库根目录名。
+      TopNodeName.setFromRoot('${j['root'] ?? ''}');
       final basicsRaw = j['basicLibraries'];
       if (basicsRaw is! List) return;
 
@@ -114,7 +119,7 @@ class MediaCatalog {
         }
         if (id.isEmpty || name.isEmpty || rel.isEmpty) continue;
         var unitId = 'secret';
-        var unitName = 'SECRET';
+        var unitName = TopNodeName.current;
         var bestLen = -1;
         for (final n in nodeRels) {
           if ((rel == n || rel.startsWith('$n/')) && n.length > bestLen) {

@@ -5,9 +5,10 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'home_action.dart';
+import 'top_node.dart';
 
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
-/// 供 owner 指定「节点文件夹」（单元库）。默认只有 SECRET 顶级单元库。
+/// 供 owner 指定「节点文件夹」（单元库）。顶级单元库＝当前媒体库根（名称取根目录名）。
 ///
 /// 数据：`GET /api/folders` → { root, top:{name,rel}, folders:[{rel,name,depth,authors,isNode,dirs}] }
 /// 保存：`POST /api/nodes` body {nodes:[rel,...]}
@@ -75,7 +76,7 @@ bool basicLocked({
 }
 
 class _FolderStructurePageState extends State<FolderStructurePage> {
-  String topName = 'SECRET';
+  String topName = '';
   String topRel = '';
   List<_FolderRow> rows = [];
   final Set<String> expanded = <String>{};
@@ -217,7 +218,15 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
       final j = jsonDecode(utf8.decode(r.bodyBytes));
       final top = j['top'];
-      topName = '${top is Map ? (top['name'] ?? 'SECRET') : 'SECRET'}';
+      // owner 2026-11-22：名称来自服务端（库根目录名），不写死 SECRET。
+      // 服务端没给 top 时才用刚刚落盘的库根名，仍为空才回落到常量。
+      final served = '${top is Map ? (top['name'] ?? '') : ''}'.trim();
+      if (served.isNotEmpty) {
+        TopNodeName.set(served);
+      } else {
+        TopNodeName.setFromRoot('${j['root'] ?? ''}');
+      }
+      topName = TopNodeName.current;
       topRel = '${top is Map ? (top['rel'] ?? '') : ''}';
       final serverNodes =
           ((j['nodes'] as List?) ?? const []).map((e) => '$e').toList();
@@ -631,7 +640,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
                         child: Text(
-                            '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级单元库是当前媒体库的根节点，默认名称为 SECRET；接入多个媒体库时，每个库各有自己的顶级单元库。'
+                            '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级单元库是当前媒体库的根节点，名称取该媒体库根目录名；接入多个媒体库时，每个库各有自己的顶级单元库。'
                             '「基础库」目录固定排除，不能设为节点。',
                             style: TextStyle(fontSize: 11, color: Colors.grey)),
                       ),
