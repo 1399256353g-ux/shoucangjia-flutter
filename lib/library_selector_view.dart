@@ -45,10 +45,10 @@ class LibrarySelectorView extends StatelessWidget {
           child: Row(children: [
             const Icon(Icons.account_tree_outlined, size: 18),
             const SizedBox(width: 6),
-            const Text('大库 / 基础库',
+            const Text('媒体库 / 基础库',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
             const Spacer(),
-            Text('${t.bigs.length} 大库 · ${t.totalBasics} 基础库',
+            Text('${t.bigs.length} 媒体库 · ${t.totalBasics} 基础库',
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ]),
         ),
@@ -69,7 +69,7 @@ class LibrarySelectorView extends StatelessWidget {
             if (t.visibleBasics(big).isEmpty)
               const Padding(
                 padding: EdgeInsets.fromLTRB(48, 2, 16, 8),
-                child: Text('该大库的基础库已全部星标置顶',
+                child: Text('该媒体库的基础库已全部星标置顶',
                     style: TextStyle(fontSize: 11, color: Colors.grey)),
               )
             else

@@ -5,6 +5,7 @@ import 'cover_cache.dart';
 import 'cover_upload.dart';
 import 'decode_plan.dart';
 import 'library_badge.dart';
+import 'library_corner_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'media_resize.dart';
@@ -706,6 +707,15 @@ class UnitLibraryCard extends StatelessWidget {
                 server: server,
               ),
             ),
+            // P4：左上角种类角标（形状尺寸统一，仅图案不同）。
+            Positioned(
+              left: kCornerBadgeInset,
+              top: kCornerBadgeInset,
+              child: LibCornerBadge(
+                kind: LibraryCornerBadge.kindOf(
+                    isTop: unit.rel.trim().isEmpty, isUnit: true),
+              ),
+            ),
             // 与基础库卡片一致的右上角操作区（爬虫配置 / 星标）。
             Positioned(
               top: 6,
@@ -1238,6 +1248,12 @@ class BasicLibCard extends StatelessWidget {
               server: basic.serverLabel,
               dense: true,
             ),
+          ),
+          // P4：基础库（末梢）角标；形状尺寸与上层一致。
+          const Positioned(
+            left: kCornerBadgeInset,
+            top: kCornerBadgeInset,
+            child: LibCornerBadge(kind: LibBadgeKind.basic),
           ),
           if (onSetCover != null)
             Positioned(

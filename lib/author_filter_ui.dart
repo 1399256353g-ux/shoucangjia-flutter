@@ -143,7 +143,7 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _section('单元库', unitChips),
-                  _section('大库', bigChips),
+                  _section('媒体库', bigChips),
                   _section('基础库', basicChips),
                   _section('作者等级', gradeChips),
                   _section('作品类型', typeChips),

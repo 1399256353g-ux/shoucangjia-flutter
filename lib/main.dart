@@ -53,6 +53,7 @@ import 'home_action.dart';
 import 'lib_names.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
+import 'library_corner_badge.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
 import 'loop_link.dart';
@@ -1245,6 +1246,7 @@ class _AppState extends State<App> {
     cfg.setBindings(decodeBindings(sp.getString('lib_bindings_v1')));
     cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
+    await LibraryCornerBadge.load();
     await RecommendCountSettings.load();
     await AppTheme.load();
     if (mounted) setState(() => ready = true);
@@ -3152,6 +3154,13 @@ class SettingsHubPage extends StatelessWidget {
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const KeyBindingsPage())),
         ),
+        ListTile(
+          leading: const Icon(Icons.workspaces_outline),
+          title: const Text('库角标'),
+          subtitle: const Text('顶级节点 / 单元库 / 基础库的图案与颜色 · 立即生效'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const CornerBadgeSettingsPage())),
+        ),
         const Divider(),
         ListTile(
           leading: const Icon(Icons.info_outline),
@@ -3479,12 +3488,18 @@ class KeyBindingsPage extends StatefulWidget {
 
 class _KeyBindingsPageState extends State<KeyBindingsPage> {
   Future<void> _rebind(PlayerAction action) async {
-    final id = await showDialog<int>(
+    final combo = await showDialog<KeyCombo>(
       context: context,
       builder: (_) => _KeyCaptureDialog(action: action),
     );
-    if (id == null || !mounted) return;
-    setState(() => AppSettings.bind(action, id));
+    if (combo == null || !mounted) return;
+    final ok = AppSettings.bindCombo(action, combo);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('修饰键不能单独绑定，请再按一个主键')));
+      return;
+    }
+    setState(() {});
     await AppSettings.save();
   }
 
@@ -3504,7 +3519,9 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
           child: Text(
-              '点击任意一行，然后按下新的按键即可绑定（Windows 桌面端生效，移动端可忽略）。'
+              '点击任意一行，按下新的按键即可绑定；需要组合键时按住 Ctrl / Shift / Alt / Win '
+              '再按主键（如 Ctrl+Shift+F）。冲突按「修饰键+主键」整体判断，'
+              'Ctrl+J 不会与单键 J 冲突。（Windows 桌面端生效，移动端可忽略）'
               '方向键与 Esc 始终保留。',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
@@ -3537,24 +3554,32 @@ class _KeyCaptureDialog extends StatefulWidget {
 }
 
 class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
-  static final _modifiers = <int>{
-    LogicalKeyboardKey.shift.keyId,
-    LogicalKeyboardKey.control.keyId,
-    LogicalKeyboardKey.alt.keyId,
-    LogicalKeyboardKey.meta.keyId,
-    LogicalKeyboardKey.capsLock.keyId,
-    LogicalKeyboardKey.fn.keyId,
-  };
+  /// 当前按住的修饰键掩码，仅用于弹窗里的即时提示。
+  int _liveMods = 0;
+
+  void _syncMods() {
+    final m = AppSettings.currentMods();
+    if (m != _liveMods && mounted) setState(() => _liveMods = m);
+  }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
-    if (e is! KeyDownEvent) return KeyEventResult.handled;
+    if (e is KeyUpEvent) {
+      _syncMods();
+      return KeyEventResult.handled;
+    }
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
     if (k == LogicalKeyboardKey.escape) {
       Navigator.of(context).pop();
       return KeyEventResult.handled;
     }
-    if (_modifiers.contains(k.keyId)) return KeyEventResult.handled;
-    Navigator.of(context).pop(k.keyId);
+    // 修饰键本身只更新提示，等主键到了才确认绑定
+    if (AppSettings.isModifierKeyId(k.keyId)) {
+      _syncMods();
+      return KeyEventResult.handled;
+    }
+    Navigator.of(context)
+        .pop(KeyCombo(k.keyId, AppSettings.currentMods()));
     return KeyEventResult.handled;
   }
 
@@ -3576,7 +3601,10 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
                 size: 26,
                 color: Theme.of(context).colorScheme.onSurfaceVariant),
             const SizedBox(height: 8),
-            Text('请按下要绑定的按键…',
+            Text(
+                _liveMods == 0
+                    ? '请按下要绑定的按键…'
+                    : '${AppSettings.modsParts(_liveMods).join('+')}+ … 请按主键',
                 style: TextStyle(
                     fontSize: 13,
                     color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -3589,6 +3617,121 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
             child: const Text('取消（Esc）')),
       ],
     );
+  }
+}
+
+class CornerBadgeSettingsPage extends StatefulWidget {
+  const CornerBadgeSettingsPage({super.key});
+  @override
+  State<CornerBadgeSettingsPage> createState() =>
+      _CornerBadgeSettingsPageState();
+}
+
+class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
+  static const _kindLabels = <LibBadgeKind, String>{
+    LibBadgeKind.top: '顶级节点（媒体库根）',
+    LibBadgeKind.unit: '单元库（中间层）',
+    LibBadgeKind.basic: '基础库（末梢）',
+    LibBadgeKind.other: '其它（非库语境）',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('库角标')),
+      body: ListView(children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
+          child: Text(
+              '角标显示在库卡片左上角，表示库的种类。所有层级形状与尺寸一致，'
+              '只有图案与颜色不同；改完立即生效。',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+        const Divider(height: 1),
+        for (final kind in LibBadgeKind.values)
+          _kindTile(context, kind),
+      ]),
+    );
+  }
+
+  Widget _kindTile(BuildContext context, LibBadgeKind kind) {
+    final argb = LibraryCornerBadge.colorFor(kind);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      ListTile(
+        leading: LibCornerBadge(kind: kind),
+        title: Text(_kindLabels[kind] ?? kind.name),
+        subtitle: Text(
+            '图案：${kCornerPatternNames[LibraryCornerBadge.patternFor(kind)]}'),
+        trailing: TextButton(
+          onPressed: () async {
+            await LibraryCornerBadge.resetKind(kind);
+            setState(() {});
+          },
+          child: const Text('恢复默认'),
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+        child: Wrap(spacing: 8, runSpacing: 8, children: [
+          for (var i = 0; i < kCornerPatternNames.length; i++)
+            GestureDetector(
+              onTap: () async {
+                await LibraryCornerBadge.setPattern(kind, i);
+                setState(() {});
+              },
+              child: Container(
+                width: 56,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: LibraryCornerBadge.patternFor(kind) == i
+                        ? Colors.lightBlueAccent
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                child: Column(children: [
+                  LibCornerBadge(kind: kind),
+                  const SizedBox(height: 4),
+                  Text(kCornerPatternNames[i],
+                      style:
+                          const TextStyle(fontSize: 9, color: Colors.grey)),
+                ]),
+              ),
+            ),
+        ]),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Wrap(spacing: 10, runSpacing: 10, children: [
+          for (final c in LibraryBadge.palette)
+            GestureDetector(
+              onTap: () async {
+                await LibraryCornerBadge.setColor(kind, c);
+                setState(() {});
+              },
+              child: Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: Color(c),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: argb == c ? Colors.white : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
+                child: argb == c
+                    ? const Icon(Icons.check, size: 16, color: Colors.white)
+                    : null,
+              ),
+            ),
+        ]),
+      ),
+      const Divider(height: 1),
+    ]);
   }
 }
 
@@ -10294,9 +10437,11 @@ class _PlayerPageState extends State<PlayerPage>
     if (!down && !repeat) return KeyEventResult.ignored;
     // P2：任何按键都先恢复非全屏沉浸（全屏逻辑不动）。
     if (down && !fs) _immersiveTouch();
-    // 自定义键位只在按下时触发一次，长按重复不再连发
+    // 自定义键位只在按下时触发一次，长按重复不再连发。
+    // 组合键按「修饰键 + 主键」精确匹配：Ctrl+J 不会触发绑定在单键 J 上的动作。
     if (down) {
-      final bound = AppSettings.actionFor(k);
+      final bound =
+          AppSettings.actionForCombo(k.keyId, AppSettings.currentMods());
       if (bound != null) {
         doAction(bound);
         return KeyEventResult.handled;

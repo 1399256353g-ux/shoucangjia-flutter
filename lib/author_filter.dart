@@ -158,7 +158,7 @@ class AuthorFilterState {
     }
     if (bigs.isNotEmpty) {
       final names = bigs.map((id) => bigNames[id] ?? id).toList()..sort();
-      parts.add('大库 ${names.join('/')}');
+      parts.add('媒体库 ${names.join('/')}');
     }
     if (grades.isNotEmpty) {
       final order = ['S', 'A', 'B', 'C', 'D'];

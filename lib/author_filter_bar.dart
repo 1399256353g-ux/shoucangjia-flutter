@@ -87,7 +87,7 @@ class AuthorFilterBar extends StatelessWidget {
     required this.onOpen,
     required this.onClear,
     this.loading = false,
-    this.hint = '按大库/基础库、等级、作品类型叠加筛选',
+    this.hint = '按媒体库/基础库、等级、作品类型叠加筛选',
     this.summary,
   });
 
