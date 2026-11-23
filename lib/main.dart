@@ -104,7 +104,6 @@ import 'preload_policy.dart';
 import 'preload_plan.dart';
 import 'preload_pool.dart';
 import 'video_prefetch.dart';
-import 'swipe_control.dart';
 import 'video_layout.dart';
 import 'swipe_physics.dart';
 import 'stage_tap.dart';
@@ -8215,15 +8214,6 @@ class _PlayerPageState extends State<PlayerPage>
   double _volStartDx = 0;
   Timer? _volHintTimer;
   bool get _volHintVisible => _volAdjusting || showVol;
-  // G15：移动端左右两侧上下滑——左侧亮度、右侧音量，中间仍可翻页。
-  // 亮度用应用内压暗遮罩实现，不引入原生插件；桌面端不启用。
-  double brightness = 100;
-  bool _swipeActive = false;
-  bool _swipeShow = false;
-  Timer? _swipeHintTimer;
-  bool get _swipeHint => _swipeActive || _swipeShow;
-  bool get _mobileSwipe =>
-      swipeEnabledFor(isAndroid: Platform.isAndroid, isIOS: Platform.isIOS);
 
   /// O4：当前视频宽高比（来自播放器 videoParams），用于把手机端任务栏
   /// 贴到画面下沿；拿不到时退回屏幕底部。
@@ -11582,7 +11572,6 @@ class _PlayerPageState extends State<PlayerPage>
     _fadeTimer?.cancel();
     _blackGuard?.cancel();
     _fadeGen++;
-    _swipeHintTimer?.cancel();
     _preloadTimer?.cancel();
     _preloadGen++;
     _cancelVideoPrefetch();
@@ -14050,16 +14039,6 @@ class _PlayerPageState extends State<PlayerPage>
               // 缓冲态只在诊断里记录，不再占用画面中心。
               // G12：加载超时/解码失败/网络失败 —— 给出重试入口
               if (_failure != null) _failureOverlay(),
-              // G15：移动端调光遮罩（只压暗画面，不影响控件）
-              if (_mobileSwipe && brightness < 100)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: ColoredBox(
-                      color: Colors.black.withValues(
-                          alpha: dimOpacityForBrightness(brightness)),
-                    ),
-                  ),
-                ),
               Positioned(
                 // P0 §6：非全屏左边距 12dp（全屏保持旧值 8dp）。
                 left: pad.left + (fs ? 8 : 12),
@@ -14160,7 +14139,7 @@ class _PlayerPageState extends State<PlayerPage>
                     ),
                   ),
                 ),
-              if (_volumeUi && _volHintVisible && ui && !_swipeHint)
+              if (_volumeUi && _volHintVisible && ui)
                 Positioned(
                   right: pad.right + 16,
                   bottom: pad.bottom + 96,
