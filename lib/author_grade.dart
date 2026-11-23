@@ -10,14 +10,18 @@ class AuthorGrade {
   /// 从低到高；[grades].length - 1 个门槛。
   static const List<String> grades = <String>['D', 'C', 'B', 'A', 'S'];
 
-  /// 等级底色（D 灰 → S 金）。
-  static const List<int> colors = <int>[
+  /// 默认等级底色（D 灰 → S 金）。服务端未下发配色时用它。
+  static const List<int> defaultColors = <int>[
     0xFF6B7280,
     0xFF16A34A,
     0xFF2563EB,
     0xFF7C3AED,
     0xFFF59E0B,
   ];
+
+  /// 当前生效的等级底色。P6：与服务端 `author-grade.json` 的 `c` 一起下发，
+  /// 因此这里必须是可变表，而不是写死的常量——配色也是被管理的配置项之一。
+  static List<int> colors = List<int>.from(defaultColors);
 
   /// 默认权重与门槛（分数 = 播放×1 + 水滴×10 + 作品×2）。
   static const int defaultPlayWeight = 1;
@@ -35,6 +39,7 @@ class AuthorGrade {
     dropWeight = defaultDropWeight;
     workWeight = defaultWorkWeight;
     thresholds = List<int>.from(defaultThresholds);
+    colors = List<int>.from(defaultColors);
   }
 
   /// 加权分数；负值按 0 处理。
@@ -93,6 +98,10 @@ class AuthorGrade {
     dropWeight = (readInt(j['drop']) ?? defaultDropWeight).clamp(0, 10000);
     workWeight = (readInt(j['work']) ?? defaultWorkWeight).clamp(0, 1000);
 
+    // P6：配色同属配置，本机只读缓存的往返也要带上它。
+    final colorList = _strictColors(j['c']);
+    if (colorList != null) colors = colorList;
+
     final raw = j['t'];
     if (raw is List && raw.length >= grades.length - 1) {
       final list = <int>[];
@@ -120,7 +129,23 @@ class AuthorGrade {
         'drop': dropWeight,
         'work': workWeight,
         't': List<int>.from(thresholds),
+        'c': List<int>.from(colors),
       };
+
+  /// 配色必须是恰好 [grades].length 个 0..0xFFFFFFFF 的整数；否则整组作废。
+  ///
+  /// 不逐项修补：配色是一套视觉语言，混进一个坏值会让等级高低在观感上错位，
+  /// 宁可整组回落默认。
+  static List<int>? _strictColors(Object? raw) {
+    if (raw is! List || raw.length != grades.length) return null;
+    final out = <int>[];
+    for (final v in raw) {
+      final n = _intOf(v);
+      if (n == null || n > 0xFFFFFFFF) return null;
+      out.add(n);
+    }
+    return out;
+  }
 
   /// P6：服务端下发是否已生效。true 时本机不再读写 SharedPreferences，
   /// 也不再显示任何修改入口（配置唯一来源＝服务端）。
@@ -148,6 +173,9 @@ class AuthorGrade {
     dropWeight = drop;
     workWeight = work;
     thresholds = t;
+    // 配色同为服务端配置：缺省或缺省为旧版服务端时保留默认色，不报失败。
+    final c = _strictColors(src['c']);
+    if (c != null) colors = c;
     remoteManaged = true;
     remoteAt = (src['at'] is num ? (src['at'] as num).toInt() : 0);
     return true;
@@ -213,6 +241,8 @@ class AuthorGrade {
         if (drop != null) dropWeight = drop;
         if (work != null) workWeight = work;
         if (t != null) thresholds = t;
+        final c = _strictColors(j['c']);
+        if (c != null) colors = c;
       }
     } catch (_) {
       reset();

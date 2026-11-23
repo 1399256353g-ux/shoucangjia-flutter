@@ -2810,8 +2810,8 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
               const SizedBox(height: 4),
               const Text(
                   '作者卡片库词条后显示 D–S 等级。分数 = 播放×权重 + 水滴×权重 + '
-                  '作品×权重；达到门槛即升一级。等级配置由服务端统一管理，'
-                  '此处只读，修改后所有客户端同步生效。',
+                  '作品×权重；达到门槛即升一级。等级配置（含 D–S 配色）由服务端'
+                  '统一管理，此处只读，修改后所有客户端同步生效。',
                   style: TextStyle(fontSize: 12, color: Colors.grey)),
               if (_note != null) ...[
                 const SizedBox(height: 6),
@@ -2852,7 +2852,8 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
               const SizedBox(height: 20),
               const Text(
                   '服务端文件：<媒体库元数据目录>/author-grade.json\n'
-                  '接口：GET / PUT /api/author-grade.json（写入需鉴权）',
+                  '接口：GET / PUT /api/author-grade.json（写入需鉴权）\n'
+                  '字段：play/drop/work（权重）· t（4 个门槛）· c（5 个 ARGB 配色）',
                   style: TextStyle(fontSize: 11, color: Colors.grey)),
             ]),
     );
