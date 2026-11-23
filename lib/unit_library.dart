@@ -250,11 +250,64 @@ UnitLibrary? buildUnitTree({
   if (rootUnits.isEmpty) return null;
   rootUnits.sort((a, b) => a.name.compareTo(b.name));
 
+  // 首页要显示的是「媒体库」本身（顶级单元库），而不是库下的第一层目录。
+  // 第一次序：按连接（serverId）归组，每个连接一个顶级单元库；
+  // 没有 serverId 的树（单连接/离线）保持原样，把第一层目录视为下级。
+  final byServer = <String, List<UnitLibrary>>{};
+  final noServer = <UnitLibrary>[];
+  for (final u in rootUnits) {
+    final sid = u.node.serverId.trim();
+    if (sid.isEmpty) {
+      noServer.add(u);
+    } else {
+      _collectServerBasics(u, byServer.putIfAbsent(sid, () => <UnitLibrary>[]));
+    }
+  }
+
+  List<UnitLibrary> mediaLibraries = <UnitLibrary>[];
+  for (final e in byServer.entries) {
+    final subs = e.value;
+    if (subs.isEmpty) continue;
+    final label = subs.first.node.serverLabel.trim();
+    mediaLibraries.add(UnitLibrary(
+      node: LibNode(
+        id: 'media:${e.key}',
+        rel: '',
+        name: label.isEmpty ? topName : label,
+        serverId: e.key,
+        serverBase: subs.first.node.serverBase,
+        serverLabel: label,
+      ),
+      basics: const [],
+      children: subs,
+    ));
+  }
+
+  if (mediaLibraries.isEmpty) {
+    // 退回到旧形态（单连接/无连接信息）：根即为容器，children 是下级单元库。
+    return UnitLibrary(
+      node: LibNode(id: topId, rel: '', name: topName),
+      basics: const [],
+      children: rootUnits,
+    );
+  }
+  mediaLibraries.sort((a, b) => a.name.compareTo(b.name));
   return UnitLibrary(
     node: LibNode(id: topId, rel: '', name: topName),
     basics: const [],
-    children: rootUnits,
+    children: mediaLibraries,
   );
+}
+
+/// 把一个连接下的根单元库摊平成「该媒体库的下级单元库」列表。
+///
+/// 根单元库本身如果挂了基础库（节点就是库根），要保留它作为一个下级，
+/// 否则这些基础库在首页第二层会消失。
+void _collectServerBasics(UnitLibrary root, List<UnitLibrary> out) {
+  if (root.basics.isNotEmpty) out.add(root);
+  for (final c in root.children) {
+    out.add(c);
+  }
 }
 
 /// 从 v2 的 bigLibraries / groups 提取节点。
