@@ -45,6 +45,13 @@ class AuthorFilterState {
   final Set<String> bigs;
   /// L5 新维度：单元库（作者总览/推荐/排行统一按此筛选）。
   final Set<String> units;
+
+  /// P3：顶级节点（＝每个连接的媒体库根）维度。
+  ///
+  /// 与 [units] 是包含关系：选中某个顶级节点即收敛到它的整棵子树，
+  /// 两条维度同时存在时按「单元库维度内取并集」的既有语义合并——
+  /// 顶级节点命中同样算库维度命中，不会与单元库筛选互相覆盖。
+  final Set<String> tops;
   final Set<String> grades;
   final Set<String> types;
 
@@ -52,11 +59,13 @@ class AuthorFilterState {
     Set<String>? basics,
     Set<String>? bigs,
     Set<String>? units,
+    Set<String>? tops,
     Set<String>? grades,
     Set<String>? types,
   })  : basics = {...?basics},
         bigs = {...?bigs},
         units = {...?units},
+        tops = {...?tops},
         grades = {...?grades},
         types = {...?types};
 
@@ -64,6 +73,7 @@ class AuthorFilterState {
       basics.isNotEmpty ||
       bigs.isNotEmpty ||
       units.isNotEmpty ||
+      tops.isNotEmpty ||
       grades.isNotEmpty ||
       types.isNotEmpty;
 
@@ -71,6 +81,7 @@ class AuthorFilterState {
       basics.length +
       bigs.length +
       units.length +
+      tops.length +
       grades.length +
       types.length;
 
@@ -78,6 +89,7 @@ class AuthorFilterState {
         basics: basics,
         bigs: bigs,
         units: units,
+        tops: tops,
         grades: grades,
         types: types,
       );
@@ -86,6 +98,7 @@ class AuthorFilterState {
     basics.clear();
     bigs.clear();
     units.clear();
+    tops.clear();
     grades.clear();
     types.clear();
   }
@@ -105,6 +118,11 @@ class AuthorFilterState {
     if (!units.remove(id)) units.add(id);
   }
 
+  void toggleTop(String id) {
+    if (id.isEmpty) return;
+    if (!tops.remove(id)) tops.add(id);
+  }
+
   void toggleGrade(String g) {
     if (g.isEmpty) return;
     if (!grades.remove(g)) grades.add(g);
@@ -121,15 +139,21 @@ class AuthorFilterState {
     required String basicId,
     required String bigId,
     String unitId = '',
+    String topId = '',
     required String grade,
     required Set<String> workTypes,
   }) {
-    if (basics.isNotEmpty || bigs.isNotEmpty || units.isNotEmpty) {
+    if (basics.isNotEmpty ||
+        bigs.isNotEmpty ||
+        units.isNotEmpty ||
+        tops.isNotEmpty) {
       final byBasic = basicId.isNotEmpty && basics.contains(basicId);
       final byBig = bigId.isNotEmpty && bigs.contains(bigId);
       final byUnit = unitId.isNotEmpty && units.contains(unitId);
-      // 库维度内取并集：基础库/大库/单元库任一命中即可。
-      if (!byBasic && !byBig && !byUnit) return false;
+      // P3：顶级节点是单元库的祖先，选中它即收敛整棵子树。
+      final byTop = topId.isNotEmpty && tops.contains(topId);
+      // 库维度内取并集：基础库/大库/单元库/顶级节点任一命中即可。
+      if (!byBasic && !byBig && !byUnit && !byTop) return false;
     }
     if (grades.isNotEmpty) {
       if (grade.isEmpty || !grades.contains(grade)) return false;
@@ -146,8 +170,13 @@ class AuthorFilterState {
     Map<String, String> basicNames = const {},
     Map<String, String> bigNames = const {},
     Map<String, String> unitNames = const {},
+    Map<String, String> topNames = const {},
   }) {
     final parts = <String>[];
+    if (tops.isNotEmpty) {
+      final names = tops.map((id) => topNames[id] ?? id).toList()..sort();
+      parts.add('顶级节点 ${names.join('/')}');
+    }
     if (units.isNotEmpty) {
       final names = units.map((id) => unitNames[id] ?? id).toList()..sort();
       parts.add('单元库 ${names.join('/')}');

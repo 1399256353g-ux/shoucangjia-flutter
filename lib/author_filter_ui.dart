@@ -16,6 +16,7 @@ Future<AuthorFilterState?> showAuthorFilterSheet({
   required List<AuthorLibNode> basics,
   required List<AuthorBigNode> bigs,
   List<AuthorLibNode> units = const [],
+  List<AuthorLibNode> tops = const [],
   required List<String> grades,
   required int Function(AuthorFilterState) count,
 }) {
@@ -28,6 +29,7 @@ Future<AuthorFilterState?> showAuthorFilterSheet({
       basics: basics,
       bigs: bigs,
       units: units,
+      tops: tops,
       grades: grades,
       count: count,
     ),
@@ -39,6 +41,9 @@ class _AuthorFilterSheet extends StatefulWidget {
   final List<AuthorLibNode> basics;
   final List<AuthorBigNode> bigs;
   final List<AuthorLibNode> units;
+
+  /// P3：顶级节点（＝媒体库根）选项；作为一级筛选维度。
+  final List<AuthorLibNode> tops;
   final List<String> grades;
   final int Function(AuthorFilterState) count;
 
@@ -47,6 +52,7 @@ class _AuthorFilterSheet extends StatefulWidget {
     required this.basics,
     required this.bigs,
     required this.units,
+    this.tops = const [],
     required this.grades,
     required this.count,
   });
@@ -94,6 +100,11 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
     final maxH = MediaQuery.of(context).size.height * 0.82;
     final matched = widget.count(f);
 
+    // P3：顶级节点作为一级筛选（在单元库之前），点它即收敛整棵子树。
+    final topChips = [
+      for (final t in widget.tops)
+        _chip(t.name, f.tops.contains(t.id), () => f.toggleTop(t.id)),
+    ];
     final unitChips = [
       for (final u in widget.units)
         _chip(u.name, f.units.contains(u.id), () => f.toggleUnit(u.id)),
@@ -142,14 +153,16 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _section('顶级节点（媒体库）', topChips),
                   _section('单元库', unitChips),
-                  _section('媒体库', bigChips),
+                  _section('媒体库（旧分组）', bigChips),
                   _section('基础库', basicChips),
                   _section('作者等级', gradeChips),
                   _section('作品类型', typeChips),
                   if (widget.basics.isEmpty &&
                       widget.bigs.isEmpty &&
-                      widget.units.isEmpty)
+                      widget.units.isEmpty &&
+                      widget.tops.isEmpty)
                     Text('暂无可筛选的库信息',
                         style: TextStyle(
                             fontSize: 12, color: cs.onSurfaceVariant)),

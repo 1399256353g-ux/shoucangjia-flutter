@@ -468,6 +468,36 @@ class LibMeta {
   List<BasicLibRef> get filterBasics =>
       allBasics.isNotEmpty ? allBasics : basics;
 
+  /// P3：顶级节点列表（＝每个连接的媒体库根，即单元库树的直接子节点）。
+  ///
+  /// 只由结构算出（根的直接子节点），不看任何目录名文本。
+  List<UnitLibrary> get tops => [
+        for (final c in (unitTree?.children ?? const <UnitLibrary>[]))
+          if (!c.isEmpty) c,
+      ];
+
+  /// P3：单元库 → 所属顶级节点 id。顶级节点自身返回自己。
+  String topIdFor(String unitId) {
+    if (unitId.isEmpty) return '';
+    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    final pre = 'node:$rel';
+    final t = LibraryBadge.topOfUnit[unitId] ??
+        LibraryBadge.topOfUnit[rel] ??
+        LibraryBadge.topOfUnit[pre];
+    if (t != null) return t;
+    // 注册表未加载时兑底：只接受「本身就是顶级」的精确命中，不猜。
+    for (final top in tops) {
+      if (top.id == unitId || top.id == rel || top.id == pre) return top.id;
+    }
+    return '';
+  }
+
+  /// P3：基础库 → 所属顶级节点 id（经基础库→单元库→顶级节点）。
+  String topIdForBasic(String basicId) {
+    final unit = basicToUnit[basicId] ?? '';
+    return topIdFor(unit);
+  }
+
   static final Map<String, LibMeta> cache = <String, LibMeta>{};
   static final Map<String, Future<LibMeta>> _loading =
       <String, Future<LibMeta>>{};
@@ -14402,6 +14432,20 @@ class _RecommendPageState extends State<RecommendPage> {
   Map<String, String> get _filterUnitNames =>
       {for (final u in _filterUnits) u.id: u.name};
 
+  /// P3：顶级节点（＝媒体库根）作一级筛选项。
+  List<AuthorLibNode> get _filterTops {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final t in meta?.tops ?? const <UnitLibrary>[]) {
+      if (t.id.isEmpty || !seen.add(t.id)) continue;
+      out.add(AuthorLibNode(id: t.id, name: t.name));
+    }
+    return authorLibNodes(out);
+  }
+
+  Map<String, String> get _filterTopNames =>
+      {for (final t in _filterTops) t.id: t.name};
+
   bool _matches(dynamic raw, AuthorFilterState f) {
     if (raw is! Map) return false;
     final w = Map<String, dynamic>.from(raw);
@@ -14423,6 +14467,7 @@ class _RecommendPageState extends State<RecommendPage> {
       basicId: basic,
       bigId: meta?.bigIdFor(av) ?? '',
       unitId: unit,
+      topId: unit.isEmpty ? '' : (meta?.topIdFor(unit) ?? ''),
       grade: meta?.gradeFor(a, _authorCount[a] ?? 0) ?? '',
       workTypes: types,
     );
@@ -14446,6 +14491,7 @@ class _RecommendPageState extends State<RecommendPage> {
       basics: _filterBasics,
       bigs: _filterBigs,
       units: _filterUnits,
+      tops: _filterTops,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => works.where((w) => _matches(w, f)).length,
     );
@@ -14494,7 +14540,7 @@ class _RecommendPageState extends State<RecommendPage> {
                     onOpen: _openFilter,
                     onClear: authorFilter.clearAll,
                     summary: authorFilter.value.isActive
-                        ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames)} · 命中 ${visible.length}/${works.length}'
+                        ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames, topNames: _filterTopNames)} · 命中 ${visible.length}/${works.length}'
                         : null,
                   ),
                   Expanded(
@@ -14789,6 +14835,22 @@ class _SearchPageState extends State<SearchPage> {
   Map<String, String> get _filterUnitNames =>
       {for (final u in _filterUnits) u.id: u.name};
 
+  /// P3：顶级节点（＝媒体库根）作一级筛选项（多库口径）。
+  List<AuthorLibNode> get _filterTops {
+    final out = <AuthorLibNode>[];
+    final seen = <String>{};
+    for (final m in metas.values) {
+      for (final t in m.tops) {
+        if (t.id.isEmpty || !seen.add(t.id)) continue;
+        out.add(AuthorLibNode(id: t.id, name: t.name));
+      }
+    }
+    return authorLibNodes(out);
+  }
+
+  Map<String, String> get _filterTopNames =>
+      {for (final t in _filterTops) t.id: t.name};
+
   bool _matchesFilter(Map<String, dynamic> e, AuthorFilterState f) {
     final w = e['w'];
     if (w is! Map) return false;
@@ -14801,14 +14863,19 @@ class _SearchPageState extends State<SearchPage> {
         (type == 'other' ? const <String>{} : <String>{type});
     final bid = '${e['_bid'] ?? ''}';
     final known = bid.isNotEmpty ? meta?.basicById(bid) : null;
+    final unitId = bid.isNotEmpty
+        ? (meta?.basicToUnit[bid] ?? '')
+        : (meta?.unitIdFor(av) ?? '');
     return f.matches(
       basicId: known?.id ?? (meta?.idFor(av) ?? ''),
       bigId: known != null && known.bigId.isNotEmpty
           ? known.bigId
           : (meta?.bigIdFor(av) ?? ''),
-      unitId: bid.isNotEmpty
-          ? (meta?.basicToUnit[bid] ?? '')
-          : (meta?.unitIdFor(av) ?? ''),
+      unitId: unitId,
+      // P3：顶级节点按「基础库 → 单元库 → 顶级节点」链，不另算一份归属。
+      topId: bid.isNotEmpty
+          ? (meta?.topIdForBasic(bid) ?? '')
+          : (unitId.isEmpty ? '' : (meta?.topIdFor(unitId) ?? '')),
       grade: meta?.gradeFor(author, authorWorkCount['$lib|$author'] ?? 0) ?? '',
       workTypes: types,
     );
@@ -14840,6 +14907,7 @@ class _SearchPageState extends State<SearchPage> {
       basics: _filterBasics,
       bigs: _filterBigs,
       units: _filterUnits,
+      tops: _filterTops,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => all.where((e) => _matchesFilter(e, f)).length,
     );
@@ -14903,7 +14971,7 @@ class _SearchPageState extends State<SearchPage> {
           onOpen: _openFilter,
           onClear: authorFilter.clearAll,
           summary: authorFilter.value.isActive
-              ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames)} · 命中 ${res.length}/${all.length}'
+              ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames, topNames: _filterTopNames)} · 命中 ${res.length}/${all.length}'
               : null,
         ),
         if (loading)
