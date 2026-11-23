@@ -4101,12 +4101,13 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
       builder: (_) => _KeyCaptureDialog(action: action),
     );
     if (combo == null || !mounted) return;
-    final ok = AppSettings.bindCombo(action, combo);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('修饰键不能单独绑定，请再按一个主键')));
+    final bad = AppSettings.bindComboError(combo);
+    if (bad != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(bad)));
       return;
     }
+    AppSettings.bindCombo(action, combo);
     setState(() {});
     await AppSettings.save();
   }
@@ -4130,7 +4131,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
               '点击任意一行，按下新的按键即可绑定；需要组合键时按住 Ctrl / Shift / Alt / Win '
               '再按主键（如 Ctrl+Shift+F）。冲突按「修饰键+主键」整体判断，'
               'Ctrl+J 不会与单键 J 冲突。（Windows 桌面端生效，移动端可忽略）'
-              '方向键与 Esc 始终保留。',
+              '方向键与 Esc 是固定键位，不允许绑定；已保存的旧配置里这类绑定会被丢弃。',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
         const Divider(height: 1),
@@ -4165,6 +4166,9 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
   /// 当前按住的修饰键掩码，仅用于弹窗里的即时提示。
   int _liveMods = 0;
 
+  /// 上一次被拒绝的原因（按了保留键时显示，下一次按键清空）。
+  String? _hint;
+
   void _syncMods() {
     final m = AppSettings.currentMods();
     if (m != _liveMods && mounted) setState(() => _liveMods = m);
@@ -4181,13 +4185,23 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
       Navigator.of(context).pop();
       return KeyEventResult.handled;
     }
-    // 修饰键本身只更新提示，等主键到了才确认绑定
+    // 已显示过的拒绝原因只服务于上一次按键，这里先清空。
+    if (_hint != null) setState(() => _hint = null);
+    // 修饰键本身只更新提示，等主键到了才确认绑定。
+    // 注意：这不是第二道准入闸门——按修饰键不能算「一次绑定尝试」，
+    // 所以不能落到 bindComboError（那会立刻报错）；准入只看下面的 combo。
     if (AppSettings.isModifierKeyId(k.keyId)) {
       _syncMods();
       return KeyEventResult.handled;
     }
-    Navigator.of(context)
-        .pop(KeyCombo(k.keyId, AppSettings.currentMods()));
+    final combo = KeyCombo(k.keyId, AppSettings.currentMods());
+    // 保留键当场提示，不关闭弹窗（与绑定层同一条准入规则）。
+    final bad = AppSettings.bindComboError(combo);
+    if (bad != null) {
+      setState(() => _hint = bad);
+      return KeyEventResult.handled;
+    }
+    Navigator.of(context).pop(combo);
     return KeyEventResult.handled;
   }
 
@@ -4199,7 +4213,7 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
         autofocus: true,
         onKeyEvent: _onKey,
         child: Container(
-          height: 88,
+          height: 96,
           alignment: Alignment.center,
           decoration: BoxDecoration(
               border: Border.all(color: Theme.of(context).colorScheme.outline),
@@ -4210,9 +4224,10 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
                 color: Theme.of(context).colorScheme.onSurfaceVariant),
             const SizedBox(height: 8),
             Text(
-                _liveMods == 0
-                    ? '请按下要绑定的按键…'
-                    : '${AppSettings.modsParts(_liveMods).join('+')}+ … 请按主键',
+                _hint ??
+                    (_liveMods == 0
+                        ? '请按下要绑定的按键…'
+                        : '${AppSettings.modsParts(_liveMods).join('+')}+ … 请按主键'),
                 style: TextStyle(
                     fontSize: 13,
                     color: Theme.of(context).colorScheme.onSurfaceVariant)),
@@ -12306,7 +12321,12 @@ class _PlayerPageState extends State<PlayerPage>
     ));
   }
 
-  /// 可见的封面入口：把原来的长按菜单项集中到一个底部面板。
+  /// 可见的封面入口：**全 App 唯一的封面菜单**（基础库 / 单元库四项）。
+  ///
+  /// 0.9.191（owner 2026-11-24）：以前长按信息区菜单里另有两条封面项
+  /// （设/清基础库封面），与封面按钮里的面板说法不一、重叠两套；
+  /// 现在长按菜单只留一个「封面…」入口，四项全部收起在
+  /// [ _openCoverSheet ] 里，任何入口弹出的都是同一份菜单。
   void _openCoverSheet() {
     final w = _workAt(cur);
     final lib = _libFor(w);
@@ -12319,30 +12339,40 @@ class _PlayerPageState extends State<PlayerPage>
           ListTile(
             leading: const Icon(Icons.photo_size_select_actual_outlined),
             title: const Text('设为该库封面'),
-            subtitle: const Text('用当前画面框选作为基础库封面'),
+            subtitle: const Text('用当前画面框选作为基础库封面，不影响原文件'),
             onTap: () {
               Navigator.of(ctx).pop();
               _cropAndApplyCover(w, CoverScope.basic);
             },
           ),
           ListTile(
+            leading: const Icon(Icons.hide_image_outlined),
+            title: const Text('清除自定义封面'),
+            subtitle: const Text('恢复自动封面（爬虫封面 → 最高播放作品）'),
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _confirmClearCover(lib);
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.collections_bookmark_outlined),
             title: const Text('设为该单元库封面'),
-            subtitle: const Text('用当前画面框选作为所属单元库封面'),
+            subtitle: const Text('用当前画面框选作为所属单元库封面，不动作品原图'),
             onTap: () {
               Navigator.of(ctx).pop();
               _cropAndApplyCover(w, CoverScope.unit);
             },
           ),
           ListTile(
-            leading: const Icon(Icons.restart_alt),
-            title: const Text('恢复自动封面'),
-            subtitle: const Text('清除基础库封面设置，回到自动选择'),
+            leading: const Icon(Icons.folder_off_outlined),
+            title: const Text('清除单元库封面'),
+            subtitle: const Text('恢复该单元库的自动封面'),
             onTap: () {
               Navigator.of(ctx).pop();
-              _confirmClearCover(lib);
+              _confirmClearCover(lib, scope: CoverScope.unit);
             },
           ),
+          const SizedBox(height: 4),
         ]),
       ),
     );
@@ -12387,43 +12417,14 @@ class _PlayerPageState extends State<PlayerPage>
                 _restartPlayback();
               },
             ),
-            // 0.9.19：自定义封面——把当前作品图片设为该基础库封面（服务端只新增文件）。
+            // 0.9.191：封面统一入口——四项全收进同一个面板，不再两套说法。
             ListTile(
-              leading: const Icon(Icons.wallpaper_outlined),
-              title: const Text('设为该库封面'),
-              subtitle: const Text('用当前画面框选作为基础库封面，不影响原文件'),
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('封面…'),
+              subtitle: const Text('基础库 / 单元库：选画面、恢复自动、清除'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                _cropAndApplyCover(w, CoverScope.basic);
-              },
-            ),
-            // 0.9.29：自定义封面可撤销——只删 `_cover/current` 指针，已生成封面文件保留。
-            ListTile(
-              leading: const Icon(Icons.hide_image_outlined),
-              title: const Text('清除自定义封面'),
-              subtitle: const Text('恢复自动封面（爬虫封面 → 最高播放作品）'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _confirmClearCover(_libFor(w));
-              },
-            ),
-            // 0.9.35：单元库（上级文件夹）封面——指针存服务端 unit-covers.json。
-            ListTile(
-              leading: const Icon(Icons.folder_special_outlined),
-              title: const Text('设为该单元库封面'),
-              subtitle: const Text('上级单元库卡片改用这幅框选画面，不动作品原图'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _cropAndApplyCover(w, CoverScope.unit);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_off_outlined),
-              title: const Text('清除单元库封面'),
-              subtitle: const Text('恢复该单元库的自动封面'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _confirmClearCover(_libFor(w), scope: CoverScope.unit);
+                _openCoverSheet();
               },
             ),
             if (menu.canResume)

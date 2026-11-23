@@ -151,7 +151,9 @@ class AppSettings {
       for (final a in PlayerAction.values) {
         final v = keys[a.name];
         final c = KeyCombo.fromJson(v);
-        if (c != null && c.isBound) keyBindings[a] = c;
+        // 落盘配置同样要过准入：旧版本允许把动作绑到保留键，
+        // 读入时丢弃该条，让固定键位保持可用。
+        if (c != null && bindComboError(c) == null) keyBindings[a] = c;
       }
     }
   }
@@ -208,7 +210,7 @@ class AppSettings {
   /// 若目标组合已被别的动作占用则互换，保证一个组合只对应一个动作。
   /// 只有修饰键（Shift/Ctrl/Alt/Meta）不能单独成为组合，直接忽略。
   static bool bindCombo(PlayerAction action, KeyCombo combo) {
-    if (!combo.isBound || isModifierKeyId(combo.keyId)) return false;
+    if (bindComboError(combo) != null) return false;
     final old = keyBindings[action];
     PlayerAction? conflict;
     for (final e in keyBindings.entries) {
@@ -221,6 +223,27 @@ class AppSettings {
     keyBindings[action] = combo;
     return true;
   }
+
+  /// 组合能否成为绑定；不能时给出用户可读的原因（单一判定口）。
+  ///
+  /// 保留键在**绑定层**拒绝：播放页的 onKey 里自定义绑定先于固定键位判定，
+  /// 只要允许把动作绑到方向键/Esc，读取层就必然抢掉翻页与退出——
+  /// 所以「保留」必须是一条准入规则，而不是读取顺序里的补丁。
+  static String? bindComboError(KeyCombo combo) {
+    if (!combo.isBound) return '请按下一个主键';
+    if (isModifierKeyId(combo.keyId)) return '修饰键不能单独绑定，请再按一个主键';
+    if (isReservedKeyId(combo.keyId)) return '方向键与 Esc 是固定键位，不能绑定';
+    return null;
+  }
+
+  /// 固定保留键：方向键（翻页/切图）与 Esc（退出全屏/返回）。
+  /// 空格可绑，因为它本来就是自定义动作（playPause）的默认键。
+  static bool isReservedKeyId(int id) =>
+      id == LogicalKeyboardKey.arrowUp.keyId ||
+      id == LogicalKeyboardKey.arrowDown.keyId ||
+      id == LogicalKeyboardKey.arrowLeft.keyId ||
+      id == LogicalKeyboardKey.arrowRight.keyId ||
+      id == LogicalKeyboardKey.escape.keyId;
 
   static bool isModifierKeyId(int id) =>
       id == LogicalKeyboardKey.shift.keyId ||
