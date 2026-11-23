@@ -9266,6 +9266,8 @@ class _PlayerPageState extends State<PlayerPage>
     }
     PerfDiagnostics.instance.slotsReleased(old.length);
     if (!mounted) return;
+    // 软解重试＝重开一条媒体：相位回到 opening，由后续 mediaReady/play 推进。
+    _feed(PlaybackEvent.open);
     setState(() {
       _failure = null;
       loading = true;
@@ -9280,6 +9282,8 @@ class _PlayerPageState extends State<PlayerPage>
     if (!mounted) return;
     _loadTimeout?.cancel();
     _slowBufferTimer?.cancel();
+    // 失败后重试同样是一次重开。
+    _feed(PlaybackEvent.open);
     setState(() {
       _failure = null;
       loading = true;
@@ -9669,6 +9673,10 @@ class _PlayerPageState extends State<PlayerPage>
         await player.stop();
       } catch (_) {}
       if (!mounted) return;
+      // 不可播放条目：没有媒体、也没有等待中的起播，相位必须明确落到
+      // 「暂停」，不能留着上一条的 playing/opening。
+      _feed(PlaybackEvent.open);
+      _feed(PlaybackEvent.pause);
       setState(() {
         cur = i;
         _setPicIndex(0);
@@ -9710,7 +9718,11 @@ class _PlayerPageState extends State<PlayerPage>
     _opening = true;
     _openStartedAt = DateTime.now();
     _poolHit = canUsePreload;
-    _feed(PlaybackEvent.open);
+    // 预载命中：媒体早已在解码器里解出首帧，open 只是换槽位，不存在
+    // 「等待起播」阶段。若仍按 open 推进，相位停在 opening，与
+    // `loading = !canUsePreload`（命中时为 false）长期冲突，自检会被这条
+    // 假告警持续污染，之后真正的暂停/起播异常就淹没了。
+    _feed(canUsePreload ? PlaybackEvent.mediaReady : PlaybackEvent.open);
     setState(() {
       cur = i;
       _setPicIndex(0);
@@ -9913,7 +9925,11 @@ class _PlayerPageState extends State<PlayerPage>
     }
     if (mounted && my == _openToken && _failure == null) {
       _feed(PlaybackEvent.mediaReady);
-      _feed(PlaybackEvent.play);
+      // 只有真要起播时才推进到 playing。后台打开的作品按设计要求保持
+      // 暂停等回前台，此时喂 play 会让相位说「正在播放」而界面停在暂停，
+      // 自检随即报假告警。
+      final keepsPaused = paused && (w['t'] == 'v' || _pausedByBackground);
+      _feed(keepsPaused ? PlaybackEvent.pause : PlaybackEvent.play);
       setState(() {
         loading = false;
         // 若打开过程中被切到后台，保持暂停，等回前台再恢复
@@ -10867,6 +10883,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (!isV) {
       final willPause = !paused;
       _userPaused = willPause;
+      _feed(willPause ? PlaybackEvent.pause : PlaybackEvent.play);
       setState(() => paused = willPause);
       if (willPause) {
         pauseAuto();
@@ -10882,12 +10899,14 @@ class _PlayerPageState extends State<PlayerPage>
     // 先更新 UI（点击立刻有反馈），再排队执行原生调用。
     if (paused) {
       _userPaused = false;
+      _feed(PlaybackEvent.play);
       setState(() => paused = false);
       _requestPlayState(playing: true);
     } else {
       _userPaused = true;
       PauseTrace.mark('user:toggle');
       Breadcrumb.mark('player:pause', 'L9362');
+      _feed(PlaybackEvent.pause);
       setState(() => paused = true);
       _requestPlayState(playing: false);
     }
@@ -12161,6 +12180,7 @@ class _PlayerPageState extends State<PlayerPage>
       setState(() => pos = Duration.zero);
       if (paused) {
         // 从头播放视为一次新的观看，直接开始
+        _feed(PlaybackEvent.play);
         setState(() => paused = false);
         try {
           player.setRate(speed);
@@ -12463,6 +12483,7 @@ class _PlayerPageState extends State<PlayerPage>
     } catch (_) {}
     setState(() => pos = Duration(milliseconds: at));
     if (paused) {
+      _feed(PlaybackEvent.play);
       setState(() => paused = false);
       try {
         player.setRate(speed);

@@ -129,4 +129,87 @@ void main() {
       expect(nextPhase(failed, PlaybackEvent.open), PlaybackPhase.opening);
     });
   });
+
+  /// 播放页每条真实路径都要把用户意图喂进相位机。漏喂时相位机只是在
+  /// 「自说自话」，自检告警会被假冲突淹没（0.9.185 前的实际状态）。
+  /// 这里用与 main.dart 相同的序列钉住四条路径的落点。
+  group('各条路径喂事件后的落点（漏喂回归）', () {
+    PlaybackPhase run(List<PlaybackEvent> events) {
+      var p = PlaybackPhase.idle;
+      for (final e in events) {
+        p = nextPhase(p, e);
+      }
+      return p;
+    }
+
+    test('预载命中：直接 mediaReady → play，跳过 opening 的转圈', () {
+      final afterHit = run(<PlaybackEvent>[
+        PlaybackEvent.mediaReady,
+        PlaybackEvent.play,
+      ]);
+      expect(afterHit, PlaybackPhase.playing);
+      // 预载命中时界面 loading=false，相位也不能是 opening。
+      expect(afterHit.showsLoading, isFalse);
+    });
+
+    test('非预载：open → mediaReady → play 才离开转圈', () {
+      final p = run(<PlaybackEvent>[
+        PlaybackEvent.open,
+        PlaybackEvent.mediaReady,
+        PlaybackEvent.play,
+      ]);
+      expect(p, PlaybackPhase.playing);
+    });
+
+    test('用户点暂停必须被相位采信（togglePause 喂 pause）', () {
+      final p = run(<PlaybackEvent>[
+        PlaybackEvent.open,
+        PlaybackEvent.mediaReady,
+        PlaybackEvent.play,
+        PlaybackEvent.pause,
+      ]);
+      expect(p.showsPaused, isTrue);
+      expect(p.isActivelyPlaying, isFalse);
+    });
+
+    test('用户点恢复必须被相位采信（togglePause 喂 play）', () {
+      final p = run(<PlaybackEvent>[
+        PlaybackEvent.open,
+        PlaybackEvent.mediaReady,
+        PlaybackEvent.play,
+        PlaybackEvent.pause,
+        PlaybackEvent.play,
+      ]);
+      expect(p.isActivelyPlaying, isTrue);
+      expect(p.showsPaused, isFalse);
+    });
+
+    test('后台打开的视频保持暂停：喂 pause 而不是 play', () {
+      final p = run(<PlaybackEvent>[
+        PlaybackEvent.open,
+        PlaybackEvent.mediaReady,
+        PlaybackEvent.pause,
+      ]);
+      expect(p.showsPaused, isTrue);
+      expect(p.showsLoading, isFalse);
+    });
+
+    test('不可播放条目：open → pause，明确停在暂停而非空白转圈', () {
+      final p = run(<PlaybackEvent>[
+        PlaybackEvent.open,
+        PlaybackEvent.pause,
+      ]);
+      expect(p.showsPaused, isTrue);
+      expect(p.showsLoading, isFalse);
+    });
+
+    test('软解重试/失败重试都从 open 重新开始', () {
+      final playing = run(<PlaybackEvent>[
+        PlaybackEvent.open,
+        PlaybackEvent.mediaReady,
+        PlaybackEvent.play,
+      ]);
+      expect(nextPhase(playing, PlaybackEvent.open), PlaybackPhase.opening);
+    });
+  });
 }
