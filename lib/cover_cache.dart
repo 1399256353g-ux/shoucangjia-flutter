@@ -14,6 +14,7 @@ import 'dart:io';
 
 import 'package:file/file.dart' as pkgfile;
 import 'package:file/local.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -387,5 +388,60 @@ class DiziCache {
   /// 备份用：退出/退后台时调用（不阻塞）。
   static void sweepOnExit() {
     unawaited(sweep(light: true));
+  }
+
+  // ---------------------------------------------------------------------
+  // 按库淘汰（owner 2026-11-22「卡片快速刷新」第 3 步）。
+  //
+  // flutter_cache_manager 只按 URL 存取、没有「这个库有哪些 URL」的反向索引，
+  // 所以由渲染端在请求封面时登记 `url → lib`，刷新时按库精确删除。
+  // 只登记本进程见过的 URL（内存，不落盘、不联网），上限 [_kUrlIndexCap]。
+  // ---------------------------------------------------------------------
+
+  static const int _kUrlIndexCap = 4000;
+  static final Map<String, Set<String>> _urlsByLib = <String, Set<String>>{};
+  static final Map<String, String> _libByUrl = <String, String>{};
+
+  /// 渲染封面时登记：这个 URL 属于哪个库。空 lib/url 直接忽略。
+  static void noteUrl(String libId, String url) {
+    final l = libId.trim();
+    final u = url.trim();
+    if (l.isEmpty || u.isEmpty) return;
+    final prev = _libByUrl[u];
+    if (prev == l) return;
+    if (prev != null) _urlsByLib[prev]?.remove(u);
+    _libByUrl[u] = l;
+    (_urlsByLib[l] ??= <String>{}).add(u);
+    if (_libByUrl.length > _kUrlIndexCap) {
+      // 超上限就整体清空重建，避免无界增长（只影响淘汰精度，不影响功能）。
+      _libByUrl.clear();
+      _urlsByLib.clear();
+      _libByUrl[u] = l;
+      (_urlsByLib[l] ??= <String>{}).add(u);
+    }
+  }
+
+  /// 当前登记的某库封面 URL 数量（测试/诊断用）。
+  static int urlCountForLib(String libId) =>
+      _urlsByLib[libId.trim()]?.length ?? 0;
+
+  /// 清掉某库已知的全部封面缓存（磁盘 + 内存图片缓存）。返回删除条数。
+  static Future<int> evictLib(String libId) async {
+    final l = libId.trim();
+    if (l.isEmpty) return 0;
+    final urls = _urlsByLib.remove(l)?.toList() ?? const <String>[];
+    var n = 0;
+    for (final u in urls) {
+      _libByUrl.remove(u);
+      try {
+        await manager.removeFile(u);
+        n++;
+      } catch (_) {}
+    }
+    try {
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    } catch (_) {}
+    return n;
   }
 }

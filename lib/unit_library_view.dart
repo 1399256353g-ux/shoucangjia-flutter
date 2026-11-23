@@ -11,6 +11,7 @@ import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'media_resize.dart';
 import 'home_action.dart';
+import 'lib_refresh_button.dart';
 import 'scroll_decode.dart';
 import 'star_store.dart';
 import 'thumb_image.dart';
@@ -25,6 +26,10 @@ typedef UnitCoverOf = String Function(UnitLibrary unit);
 /// owner 2026-11-23：按「基础库 id + 单元库 rel」生成卡片封面菜单动作。
 /// 返回 null 表示该卡片没有封面入口（例如缺少基础库 id）。
 typedef CoverMenuOf = CoverMenuActions? Function(String libId, String unitRel);
+
+/// owner 2026-11-22：卡片「快速刷新」。返回一句话结果用于提示；
+/// 返回 null 表示不提示（例如被防抖拦下）。
+typedef LibRefreshOf = Future<String?> Function(String libId, String unitRel);
 
 // ---------------------------------------------------------------------------
 // 库卡片统一规格（单元库卡片 / 基础库卡片共用）
@@ -263,6 +268,9 @@ class UnitLibraryHomeView extends StatefulWidget {
   /// `cover.u`）；空串表示未设封面 → 卡片用词条色块占位，**不取自动封面**。
   final UnitCoverOf? topCoverOf;
 
+  /// owner 2026-11-22：卡片快速刷新；为空不显示刷新按钮。
+  final LibRefreshOf? refreshOf;
+
   const UnitLibraryHomeView({
     super.key,
     required this.tree,
@@ -277,6 +285,7 @@ class UnitLibraryHomeView extends StatefulWidget {
     this.coverMenuOf,
     this.statusOf,
     this.topCoverOf,
+    this.refreshOf,
   });
 
   @override
@@ -429,6 +438,9 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
                 onToggleStar: () => widget.onToggleUnitStar(u),
                 onTap: () => widget.onOpenUnit(u),
                 coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
+                onQuickRefresh: widget.refreshOf == null || coverLib.isEmpty
+                    ? null
+                    : () => widget.refreshOf!(coverLib, u.rel),
                 onSetCover: widget.coverMenuOf != null
                     ? null
                     : (widget.coverUploader == null || coverLib.isEmpty
@@ -500,6 +512,9 @@ class StarredUnitsPage extends StatefulWidget {
   /// 右上角爬虫配置入口（与主页/详情页单元库卡片一致；非顶级才显示）。
   final void Function(UnitLibrary unit)? onConfigureUnit;
 
+  /// owner 2026-11-22：卡片快速刷新。
+  final LibRefreshOf? refreshOf;
+
   const StarredUnitsPage({
     super.key,
     required this.units,
@@ -510,6 +525,7 @@ class StarredUnitsPage extends StatefulWidget {
     this.coverUploader,
     this.coverMenuOf,
     this.onConfigureUnit,
+    this.refreshOf,
   });
 
   @override
@@ -621,6 +637,9 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                   onToggleStar: () => _toggle(u),
                   onTap: () => widget.onOpenUnit(u),
                   coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
+                  onQuickRefresh: widget.refreshOf == null || coverLib.isEmpty
+                      ? null
+                      : () => widget.refreshOf!(coverLib, u.rel),
                   onSetCover: widget.coverMenuOf != null
                       ? null
                       : (widget.coverUploader == null || coverLib.isEmpty
@@ -689,6 +708,10 @@ class UnitLibraryCard extends StatefulWidget {
   /// 连接状态文案（如「已连接」「已断连」）；空串不显示。
   final String connectionStatus;
 
+  /// 快速刷新（该单元库子树里第一个基础库 id 由调用方关入）；
+  /// 为空时不显示刷新按钮。
+  final Future<String?> Function()? onQuickRefresh;
+
   const UnitLibraryCard({
     super.key,
     required this.unit,
@@ -704,6 +727,7 @@ class UnitLibraryCard extends StatefulWidget {
     this.topCard = false,
     this.fallbackTint,
     this.connectionStatus = '',
+    this.onQuickRefresh,
   });
 
   /// 顶级单元库（SECRET，rel 为空）没有独立爬虫配置；只有下级单元库才有。
@@ -796,6 +820,9 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                   headers: widget.headers,
                   fallbackIcon: Icons.folder_copy_outlined,
                   tint: widget.topCard ? widget.fallbackTint : null,
+                  libId: unit.allBasics.isNotEmpty
+                      ? unit.allBasics.first.id
+                      : '',
                 ),
               ),
             ),
@@ -828,6 +855,13 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
               top: 6,
               right: 6,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (widget.onQuickRefresh != null)
+                  LibQuickRefreshButton(
+                    libId: unit.allBasics.isNotEmpty
+                        ? unit.allBasics.first.id
+                        : unit.id,
+                    onRefresh: widget.onQuickRefresh,
+                  ),
                 if (widget.coverMenu != null)
                   IconButton(
                     key: ValueKey('unit-cover-btn-${unit.id}'),
@@ -891,6 +925,9 @@ class _UnitCoverFill extends StatelessWidget {
   /// P3：无封面时的占位底色（顶级单元库用词条色块，不用自动封面）。
   final int? tint;
 
+  /// 该封面属于哪个库：用于「卡片快速刷新」按库精确淘汰缓存。
+  final String libId;
+
   const _UnitCoverFill({
     super.key,
     required this.url,
@@ -898,6 +935,7 @@ class _UnitCoverFill extends StatelessWidget {
     required this.fallbackIcon,
     this.displayWidth = 220,
     this.tint,
+    this.libId = '',
   });
 
   @override
@@ -915,6 +953,8 @@ class _UnitCoverFill extends StatelessWidget {
               : Color(LibraryBadge.textColorOn(t)).withValues(alpha: 0.75)),
     );
     if (url.isEmpty) return fallback;
+    // 登记「URL → 库」，刷新该库时才能精确删掉它的封面缓存。
+    DiziCache.noteUrl(libId, withImageWidth(url, kCardImageWidth));
     return CachedNetworkImage(
       cacheManager: DiziCache.manager,
       // 0.9.24：卡片封面按 480px 取图（服务端 `w=` 缩放并缓存），
@@ -998,6 +1038,9 @@ class UnitLibraryPage extends StatefulWidget {
   /// owner 2026-11-23：卡片封面合并入口。
   final CoverMenuOf? coverMenuOf;
 
+  /// owner 2026-11-22：卡片快速刷新。
+  final LibRefreshOf? refreshOf;
+
   const UnitLibraryPage({
     super.key,
     required this.unit,
@@ -1011,6 +1054,7 @@ class UnitLibraryPage extends StatefulWidget {
     this.onConfigureUnit,
     this.coverUploader,
     this.coverMenuOf,
+    this.refreshOf,
   });
 
   @override
@@ -1224,6 +1268,9 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                       ? null
                       : () => onConfigureUnit(sub),
                   coverMenu: widget.coverMenuOf?.call(coverLib, sub.rel),
+                  onQuickRefresh: widget.refreshOf == null || coverLib.isEmpty
+                      ? null
+                      : () => widget.refreshOf!(coverLib, sub.rel),
                   onSetCover: widget.coverMenuOf != null
                       ? null
                       : (widget.coverUploader == null || coverLib.isEmpty
@@ -1261,6 +1308,10 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                 coverMenu: widget.coverMenuOf == null
                     ? null
                     : widget.coverMenuOf!.call(
+                        sorted[i].id, ownerKey[sorted[i].id] ?? ''),
+                onQuickRefresh: widget.refreshOf == null
+                    ? null
+                    : () => widget.refreshOf!(
                         sorted[i].id, ownerKey[sorted[i].id] ?? ''),
                 onSetCover: widget.coverMenuOf != null
                     ? null
@@ -1304,6 +1355,10 @@ class BasicLibCard extends StatefulWidget {
   /// owner 2026-11-23：封面合并入口（非空时右上角只留一个「封面设置」）。
   final CoverMenuActions? coverMenu;
 
+  /// owner 2026-11-22：快速刷新（重建索引 → 重拉快照 → 清本库封面缓存）。
+  /// 为空时不显示刷新按钮。
+  final Future<String?> Function()? onQuickRefresh;
+
   const BasicLibCard({
     super.key,
     required this.basic,
@@ -1311,6 +1366,7 @@ class BasicLibCard extends StatefulWidget {
     this.coverUrl = '',
     this.coverUrlOf,
     this.headers = const <String, String>{},
+    this.onQuickRefresh,
     this.unitLabel = '',
     this.unitKey = '',
     this.onSetCover,
@@ -1409,6 +1465,7 @@ class _BasicLibCardState extends State<BasicLibCard> {
               url: _coverUrlNow(),
               headers: widget.headers,
               fallbackIcon: Icons.folder_outlined,
+              libId: basic.id,
             ),
           ),
           Positioned(
@@ -1434,16 +1491,34 @@ class _BasicLibCardState extends State<BasicLibCard> {
             Positioned(
               top: 6,
               right: 6,
-              child: IconButton(
-                key: ValueKey('basic-cover-btn-${basic.id}'),
-                tooltip: widget.coverMenu != null ? '封面设置' : '本地选图作封面',
-                iconSize: 18,
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints.tightFor(width: 30, height: 30),
-                icon: const Icon(Icons.image_outlined),
-                onPressed: _openCoverMenu,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (widget.onQuickRefresh != null)
+                  LibQuickRefreshButton(
+                    libId: basic.id,
+                    onRefresh: widget.onQuickRefresh,
+                  ),
+                if (widget.coverMenu != null || widget.onSetCover != null)
+                  IconButton(
+                    key: ValueKey('basic-cover-btn-${basic.id}'),
+                    tooltip:
+                        widget.coverMenu != null ? '封面设置' : '本地选图作封面',
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 30, height: 30),
+                    icon: const Icon(Icons.image_outlined),
+                    onPressed: _openCoverMenu,
+                  ),
+              ]),
+            )
+          else if (widget.onQuickRefresh != null)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: LibQuickRefreshButton(
+                libId: basic.id,
+                onRefresh: widget.onQuickRefresh,
               ),
             ),
         ]),

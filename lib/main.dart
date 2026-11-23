@@ -60,6 +60,7 @@ import 'library_badge.dart';
 export 'library_badge.dart' show LibBadgeChip, LibEntryKind;
 import 'library_corner_badge.dart';
 import 'home_top_bar.dart';
+import 'library_refresh.dart';
 import 'refresh_all.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
@@ -4734,6 +4735,47 @@ class _LibraryPageState extends State<LibraryPage> {
         '${atBase ?? cfg.baseFor(lib)}$path${sep}lib=${Uri.encodeQueryComponent(lib ?? cfg.lib)}');
   }
 
+  /// 最近一次库级快速刷新的时间（防抖用，不新增定时器）。
+  final Map<String, DateTime> _libRefreshAt = <String, DateTime>{};
+
+  /// owner 2026-11-22：卡片「快速刷新」——重建该库索引 → 重拉库快照
+  /// → 清该库封面缓存 → 刷新打开中的列表。
+  ///
+  /// [unitRel] 仅用于在服务端按单元库口径重建；索引重建始终针对基础库 id
+  /// （单元库没有自己的 libidx）。
+  Future<String?> _quickRefresh(String libId, String unitRel) async {
+    final id = libId.trim();
+    if (id.isEmpty) return '该卡片没有可刷新的库';
+    final now = DateTime.now();
+    if (!libRefreshAllowed(now, _libRefreshAt[id])) return null;
+    _libRefreshAt[id] = now;
+    final base = cfg.baseFor(id);
+    final headers = cfg.headersFor(id);
+    final out = await runLibRefresh(
+      lib: id,
+      reloadLibraries: load,
+      clearLibCovers: () => DiziCache.evictLib(id),
+      reloadOpenLists: null,
+      reindex: (body) async {
+        final uri =
+            Uri.parse('$base/api/reindex?lib=${Uri.encodeQueryComponent(id)}');
+        final r = await http
+            .post(uri,
+                headers: {...headers, 'Content-Type': 'application/json'},
+                body: jsonEncode(body))
+            .timeout(const Duration(seconds: 60));
+        dynamic parsed;
+        try {
+          parsed = jsonDecode(utf8.decode(r.bodyBytes));
+        } catch (_) {}
+        return (status: r.statusCode, body: parsed);
+      },
+    );
+    // 重建过索引的库，作品数/封面都变了：bump 版本让可见卡片重新取图。
+    if (out.ok) coverRevision.value++;
+    return out.message;
+  }
+
   Future<void> load() async {
     setState(() {
       err = null;
@@ -5103,6 +5145,7 @@ class _LibraryPageState extends State<LibraryPage> {
         coverUploader: uploadCoverFromPicker,
         coverMenuOf: _coverMenuFor,
         onConfigureUnit: _openUnitCrawler,
+        refreshOf: _quickRefresh,
       ),
     ));
   }
@@ -5194,6 +5237,7 @@ class _LibraryPageState extends State<LibraryPage> {
             onConfigureUnit: _openUnitCrawler,
             coverUploader: uploadCoverFromPicker,
             coverMenuOf: _coverMenuFor,
+            refreshOf: _quickRefresh,
           ),
         )),
         onToggleUnitStar: _toggleUnitStar,
@@ -5203,6 +5247,7 @@ class _LibraryPageState extends State<LibraryPage> {
         onConfigureUnit: _openUnitCrawler,
         coverUploader: uploadCoverFromPicker,
         coverMenuOf: _coverMenuFor,
+        refreshOf: _quickRefresh,
       ),
     ));
   }
@@ -5514,6 +5559,7 @@ class _LibraryPageState extends State<LibraryPage> {
             statusOf: _topNodeStatus,
             coverUploader: uploadCoverFromPicker,
             coverMenuOf: _coverMenuFor,
+            refreshOf: _quickRefresh,
           )
         else
           const Padding(
