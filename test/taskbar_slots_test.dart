@@ -7,8 +7,6 @@ import 'package:shoucangjia/taskbar_layout.dart';
 /// 核心断言是「不靠缩放掩盖溢出」：放不下时必须真的把低优先级槽位
 /// 收进「更多」，而不是把按钮整体缩小到点不中。
 void main() {
-  const slot44 = 44.0;
-
   double w(TaskbarSlot s) => switch (s) {
         TaskbarSlot.play => 48,
         TaskbarSlot.episodes => 44,

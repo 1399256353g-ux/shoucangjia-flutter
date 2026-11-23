@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/thumb_image.dart';
 
 Future<Object> _keyOf(ImageProvider provider) async =>
-    await provider.obtainKey(ImageConfiguration.empty) as Object;
+    await provider.obtainKey(ImageConfiguration.empty);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
