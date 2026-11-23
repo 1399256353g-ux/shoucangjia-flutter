@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -163,6 +164,9 @@ Future<void> main() async {
     onPause: DiziCache.sweepOnExit,
     onDetach: DiziCache.sweepOnExit,
   );
+  // 关于页显示的版本号来自构建信息，不再硬编码
+  await loadAppVersion();
+  perf.step('app_version');
   runApp(const App());
   WidgetsBinding.instance.addPostFrameCallback((_) {
     perf.markFirstFrame();
@@ -279,6 +283,18 @@ class Cfg {
 }
 
 final cfg = Cfg();
+
+/// 应用版本（运行时读取，避免像以前那样硬编码成 0.9.0）。
+String appVersion = '';
+
+Future<void> loadAppVersion() async {
+  try {
+    final info = await PackageInfo.fromPlatform();
+    if (info.version.isNotEmpty) appVersion = info.version;
+  } catch (_) {
+    // 测试环境或平台通道不可用时保持为空，界面退化为不显示版本号
+  }
+}
 
 /// 媒体路径转义：只处理会让 `Uri.parse` 把一个文件名断成片段/查询的字符。
 ///
@@ -3092,7 +3108,7 @@ class SettingsHubPage extends StatelessWidget {
         ),
         ListTile(
           leading: const Icon(Icons.tune),
-          title: const Text('播放参数'),
+          title: const Text('播放设置'),
           subtitle: const Text('默认倍速 · 图文间隔 · 全屏隐藏时间'),
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const PlaybackSettingsPage())),
@@ -3140,11 +3156,13 @@ class SettingsHubPage extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.info_outline),
           title: const Text('关于 Dizi'),
-          subtitle: const Text('本地媒体库客户端 0.9.0'),
+          subtitle: Text(appVersion.isEmpty
+              ? '本地媒体库客户端'
+              : '本地媒体库客户端 $appVersion'),
           onTap: () => showAboutDialog(
             context: context,
             applicationName: 'Dizi',
-            applicationVersion: '0.9.0',
+            applicationVersion: appVersion,
             children: const [Text('本地媒体库客户端')],
           ),
         ),
@@ -3325,7 +3343,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('播放参数'), actions: [
+      appBar: AppBar(title: const Text('播放设置'), actions: [
         TextButton(
           onPressed: () {
             setState(() => AppSettings.resetDefaults());
