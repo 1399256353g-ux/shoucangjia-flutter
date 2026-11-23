@@ -83,6 +83,7 @@ import 'playback_flow.dart';
 import 'playback_state.dart';
 import 'pic_zoom.dart';
 import 'playback_error.dart';
+import 'mpv_log_digest.dart';
 import 'perf_diagnostics.dart';
 import 'text_fit.dart';
 import 'esc_back.dart';
@@ -8038,6 +8039,11 @@ class _PlaybackSlot {
   final String tag;
   final int sid;
 
+  /// 本槽位当前打开的媒体地址（只用于落盘「地址形状」诊断）。
+  /// 保存它是为了在命中预载池的路径上也能拿到地址——那条路径不经过
+  /// `open()` 的媒体拼接，否则「池命中后播放失败」就没有任何形状指标。
+  String mediaUrl = '';
+
   /// 每次换媒体/取消预加载时递增，迟到的异步任务据此放弃。
   int epoch = 0;
   late final Player player;
@@ -8049,6 +8055,9 @@ class _PlaybackSlot {
       configuration: const PlayerConfiguration(
         title: 'Dizi',
         bufferSize: 32 * 1024 * 1024,
+        // 只要 error/warn：诊断需要「哪一层失败」，不需要每帧时钟。
+        // 默认也是 error，这里显式写出来，避免日后被改成 none 而丢掉诊断。
+        logLevel: MPVLogLevel.warn,
       ),
     );
     // Windows：显式使用安全硬件解码，避免窗口缩放/最大化时纹理重建导致崩溃
@@ -8099,6 +8108,13 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// 最近一次播放器错误的原始文本（仅用于写脱敏诊断摘要，不展示给用户）。
   String? _lastPlayerError;
+
+  /// mpv 内部日志的脱敏尾部（只留 error/warn/fatal 的最近几条）。
+  /// 失败时整段落盘，这样「mpv 为什么打不开」不再只剩一句分类名。
+  List<String> _mpvTail = const <String>[];
+
+  /// 本次 open() 要打开的媒体地址（仅用于落盘「地址形状」，不写地址本身）。
+  String _openMediaUrl = '';
 
   /// 本次 open() 是否命中预载池（仅用于起播耗时的分组统计）。
   bool _poolHit = false;
@@ -8807,6 +8823,17 @@ class _PlayerPageState extends State<PlayerPage>
       }
       _showFailure(failure);
     }));
+    // mpv 内部日志：`stream.error` 只说「打不开」，说不出「为什么打不开」。
+    // 订阅 log 流把 error/warn/fatal 的**措辞**留成脱敏尾部，失败时整段
+    // 落盘（401/404/timeout/protocol/decoder 一眼可分）。只收这三档，
+    // info/v 级会把每帧时钟都吐出来，落盘等于淹掉日志。
+    _playerSubs.add(p.stream.log.listen((log) {
+      if (!identical(p, player)) return;
+      final line = mpvLogDigest(
+          prefix: log.prefix, level: log.level, text: log.text);
+      if (line == null) return;
+      _mpvTail = pushMpvDigest(_mpvTail, line);
+    }));
     // G12：弱网缓冲提示 —— 缓冲超过阈值才显示，避免正常起播闪一下
     _playerSubs.add(p.stream.buffering.listen((b) {
       if (!identical(p, player)) return;
@@ -9300,6 +9327,20 @@ class _PlayerPageState extends State<PlayerPage>
     // 记一条脱敏摘要（剥掉 URL/路径/文件名，只留错误措辞）。
     PauseTrace.mark(
         'failure:${f.kind.name} detail=${sanitizePlaybackErrorForLog(_lastPlayerError)}');
+    // 地址形状：只记长度/非 ASCII 数/空格数/转义数/协议/端口，
+    // **不记地址本身**。用来分辨「打不开」是否与地址形态相关（未转义空格、
+    // 非 ASCII 字节、协议被拒），而这一判断不需要看到媒体路径。
+    if (_openMediaUrl.isNotEmpty) {
+      PauseTrace.mark('media:${describeUrlShape(urlShapeOf(_openMediaUrl))}');
+    }
+    // mpv 自己的报错尾部：`stream.error` 只说「Failed to open」，说不出
+    // 是 401/404/超时/协议/解码。这几行直接把「哪一层失败」写进日志。
+    final tail = _mpvTail.length > kMpvTailReportMax
+        ? _mpvTail.sublist(_mpvTail.length - kMpvTailReportMax)
+        : _mpvTail;
+    for (final line in tail) {
+      PauseTrace.mark('mpv: $line');
+    }
     // 失败的槽位不能继续当作「已就绪」留在池里，否则切条会命中一个
     // 出不了画的槽位；重试走 open() 会重新登记。
     _preloadCache.removeSlot(_active.sid);
@@ -9605,8 +9646,9 @@ class _PlayerPageState extends State<PlayerPage>
         return false;
       }
       await slot.player.setVolume(0);
+      slot.mediaUrl = cfg.mediaUrl(path, lib: lib);
       await slot.player.open(
-        Media(cfg.mediaUrl(path, lib: lib), httpHeaders: cfg.headersFor(lib)),
+        Media(slot.mediaUrl, httpHeaders: cfg.headersFor(lib)),
         play: false,
       );
       if (!mounted ||
@@ -9800,7 +9842,11 @@ class _PlayerPageState extends State<PlayerPage>
     _openStartedAt = DateTime.now();
     // 换条后诊断摘要必须归零，否则新条目的失败会带上一条的错误文本。
     _lastPlayerError = null;
+    // mpv 日志尾部同样归零：上一条的 401/404 不能算到下一条头上。
+    _mpvTail = const <String>[];
+    _openMediaUrl = '';
     _poolHit = canUsePreload;
+    if (canUsePreload) _openMediaUrl = cachedSlot.mediaUrl;
     // 预载命中：媒体早已在解码器里解出首帧，open 只是换槽位，不存在
     // 「等待起播」阶段。若仍按 open 推进，相位停在 opening，与
     // `loading = !canUsePreload`（命中时为 false）长期冲突，自检会被这条
@@ -9878,12 +9924,11 @@ class _PlayerPageState extends State<PlayerPage>
     if (!canUsePreload) {
       try {
         if (w['t'] == 'v') {
-          await player.open(Media(
-              cfg.mediaUrl(workMediaPaths(w).first, lib: wl),
-              httpHeaders: cfg.headersFor(wl)));
+          _openMediaUrl = cfg.mediaUrl(workMediaPaths(w).first, lib: wl);
+          await player.open(Media(_openMediaUrl, httpHeaders: cfg.headersFor(wl)));
         } else if ((w['au'] ?? '').toString().isNotEmpty) {
-          await player.open(Media(cfg.mediaUrl(w['au'].toString(), lib: wl),
-              httpHeaders: cfg.headersFor(wl)));
+          _openMediaUrl = cfg.mediaUrl(w['au'].toString(), lib: wl);
+          await player.open(Media(_openMediaUrl, httpHeaders: cfg.headersFor(wl)));
         }
         if ((w['t'] == 'v' || (w['au'] ?? '').toString().isNotEmpty) &&
             my == _openToken) {
