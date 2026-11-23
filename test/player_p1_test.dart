@@ -1,82 +1,24 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/player_controls.dart';
 
 void main() {
-  group('P1 §1 互动栏数值', () {
-    test('头像/徽标/图标/间距与规格一致', () {
-      expect(kRailAvatarSize, 44);
-      expect(kRailBadgeSize, 22);
-      expect(kRailBadgeOverhang, 8);
-      expect(kRailIconSize, 32);
-      expect(kRailCountFontSize, 11);
-      expect(kRailItemGap, 18);
-      expect(kRailRightMargin, 10);
-      expect(kRailBottomGap, 12);
-      expect(kRailAvatarGap, 20);
-      expect(kRailTouchSize, greaterThanOrEqualTo(48));
-      expect(kRailAccent, const Color(0xFFFE2C55));
-    });
-
-    test('数字格式：0 隐藏、万位紧凑', () {
-      expect(formatRailCount(0), '');
-      expect(formatRailCount(-3), '');
-      expect(formatRailCount(7), '7');
-      expect(formatRailCount(9999), '9999');
-      expect(formatRailCount(10000), '1万');
-      expect(formatRailCount(12345), '1.2万');
-      expect(formatRailCount(1234567), '123万');
-    });
-
-    testWidgets('四项互动 + 头像徽标，点击回调', (tester) async {
-      var like = 0, comment = 0, fav = 0, share = 0;
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: PlayerInteractionRail(
-              avatar: const ColoredBox(color: Colors.blue),
-              liked: true,
-              likeCount: 12,
-              commentCount: 3,
-              favoriteCount: 0,
-              onLike: () => like++,
-              onComment: () => comment++,
-              onFavorite: () => fav++,
-              onShare: () => share++,
-            ),
-          ),
-        ),
-      ));
-      expect(find.byIcon(Icons.favorite), findsOneWidget);
-      expect(find.byIcon(Icons.mode_comment_outlined), findsOneWidget);
-      expect(find.byIcon(Icons.star_border), findsOneWidget);
-      expect(find.byIcon(Icons.share), findsOneWidget);
-      expect(find.byIcon(Icons.add), findsOneWidget);
-      expect(find.text('12'), findsOneWidget);
-      expect(find.text('3'), findsOneWidget);
-
-      await tester.tap(find.byIcon(Icons.favorite));
-      await tester.tap(find.byIcon(Icons.mode_comment_outlined));
-      await tester.tap(find.byIcon(Icons.star_border));
-      await tester.tap(find.byIcon(Icons.share));
-      expect([like, comment, fav, share], [1, 1, 1, 1]);
-    });
-
-    testWidgets('点赞激活色为品牌红', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: PlayerInteractionRail(
-            avatar: const SizedBox(),
-            liked: true,
-            onLike: () {},
-            onComment: () {},
-            onFavorite: () {},
-            onShare: () {},
-          ),
-        ),
-      ));
-      final icon = tester.widget<Icon>(find.byIcon(Icons.favorite));
-      expect(icon.color, kRailAccent);
+  group('P1 §1 互动栏：点赞删除后无残留', () {
+    // owner 2026-11-23 删除双击点赞后，右侧互动栏整块成为无调用死代码；
+    // 本组断言「不是忘了接，而是确实不再有这块 UI」，防止有人把它加回来
+    // 又不接调用点，退化成只在测试里通过的假功能。
+    test('lib/ 下没有任何互动栏调用点', () {
+      final lib = Directory('lib');
+      final hits = <String>[];
+      for (final f in lib.listSync(recursive: true)) {
+        if (f is! File || !f.path.endsWith('.dart')) continue;
+        if (f.path.endsWith('player_controls.dart')) continue;
+        final src = f.readAsStringSync();
+        if (src.contains('PlayerInteractionRail')) hits.add(f.path);
+      }
+      expect(hits, isEmpty);
     });
   });
 
