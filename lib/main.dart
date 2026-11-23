@@ -61,6 +61,7 @@ import 'library_badge.dart';
 export 'library_badge.dart' show LibBadgeChip, LibEntryKind;
 import 'library_corner_badge.dart';
 import 'home_top_bar.dart';
+import 'taskbar_layout.dart';
 import 'library_refresh.dart';
 import 'library_revision.dart';
 import 'refresh_all.dart';
@@ -12457,6 +12458,181 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
+  /// 任务栏槽位 → 控件。只做映射，不参与排布决策（排布在 [taskbarPlan]）。
+  Widget _taskbarSlotWidget({
+    required TaskbarSlot slot,
+    required bool fs,
+    required double tbBtnW,
+    required TaskbarPolicy taskbar,
+    required int chapterCount,
+    required bool paused,
+    required double speed,
+    required bool muted,
+    required double volume,
+    required VoidCallback toggleFs,
+    required VoidCallback toggleOrientation,
+  }) {
+    switch (slot) {
+      case TaskbarSlot.play:
+        // M3/O2：桌面端播放/暂停常驻任务栏主位；手机端由画面中央大圆钮承担。
+        return TaskbarPlayButton(paused: paused, onPressed: togglePause);
+      case TaskbarSlot.episodes:
+        // J5：视频合集章节——`1/12` 单入口，点击弹出集数列表。
+        return TaskbarEpisodeButton(
+          current: _chapter + 1,
+          total: chapterCount,
+          width: fs ? 46 : tbBtnW,
+          onPressed: _showChapters,
+        );
+      case TaskbarSlot.settings:
+        // owner 2026-11-23：倍速/循环/连播/乱序合并为一个「播放设置」入口。
+        return TaskbarSettingsButton(
+          speed: speed,
+          width: fs ? 46 : tbBtnW,
+          onPressed: _showPlaybackSettings,
+        );
+      case TaskbarSlot.sound:
+        // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）。
+        return TaskbarSoundButton(
+          muted: muted,
+          volume: volume,
+          width: fs ? 48 : tbBtnW,
+          onTap: toggleMute,
+          onLongPressStart: _volLongPressStart,
+          onLongPressMoveUpdate: _volLongPressMove,
+          onLongPressEnd: (_) => _volDragEnd(),
+          onHorizontalDragStart: _volDragStart,
+          onHorizontalDragUpdate: _volDragUpdate,
+          onHorizontalDragEnd: _volDragEnd,
+        );
+      case TaskbarSlot.volume:
+        // L6：桌面端音量模块常驻任务栏（声音按钮右侧）。
+        return _taskbarVolumeModule();
+      case TaskbarSlot.drop:
+        return _taskbarDropButton(fs: fs, tbBtnW: tbBtnW);
+      case TaskbarSlot.display:
+        // owner 2026-11-23：移动端点按=全屏、长按=横竖屏；桌面端独立全屏按钮。
+        return taskbar.showRotate
+            ? TaskbarDisplayButton(
+                fullscreen: fs,
+                mobile: true,
+                width: fs ? 46 : tbBtnW,
+                onPressed: toggleFs,
+                onLongPress: toggleOrientation,
+              )
+            : TaskbarDisplayButton(
+                fullscreen: fs,
+                mobile: false,
+                onPressed: toggleFs,
+              );
+    }
+  }
+
+  /// 桌面端常驻音量滑杆（104dp）。
+  Widget _taskbarVolumeModule() => SizedBox(
+        key: const ValueKey('volume-module'),
+        width: 104,
+        height: 48,
+        child: Row(children: [
+          Expanded(
+            child: SliderTheme(
+              data: const SliderThemeData(
+                trackHeight: 2.5,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5),
+                overlayShape: RoundSliderOverlayShape(overlayRadius: 10),
+                activeTrackColor: Colors.white70,
+                inactiveTrackColor: Colors.white24,
+                thumbColor: Colors.white,
+              ),
+              child: Slider(
+                value: (muted ? 0.0 : volume).clamp(0.0, 100.0),
+                max: 100,
+                onChanged: _setVolume,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 30,
+            child: Text('${volume.round()}',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 10, color: Colors.white54)),
+          ),
+        ]),
+      );
+
+  /// J-A1：播放页不再展示水滴数量/余额，只保留赠送动作。
+  Widget _taskbarDropButton({required bool fs, required double tbBtnW}) => Tooltip(
+        message: '送一颗小水滴',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: (dropBusy || dropDayLeft <= 0 || dropWeekLeft <= 0)
+              ? null
+              : _sendDrop,
+          child: SizedBox(
+            width: fs ? 48 : tbBtnW,
+            height: 48,
+            child: ScaleTransition(
+              scale: _dropScale,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (dropBusy)
+                    const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white54))
+                  else
+                    Icon(Icons.water_drop,
+                        size: fs ? 20 : kTaskbarIconSize,
+                        color: _dropIconColor(fs: fs)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+  /// 水滴图标配色：全屏沿用旧的 70%/24% 白，非全屏用纯白/未激活色。
+  Color _dropIconColor({required bool fs}) {
+    if (dropGlow && dropDayLeft >= 0) return Colors.lightBlueAccent;
+    final active = dropDayLeft > 0 && dropWeekLeft > 0;
+    if (fs) return active ? Colors.white70 : Colors.white24;
+    return active ? Colors.white : kTaskbarInactiveColor;
+  }
+
+  /// 「更多」菜单里的文案。
+  String _taskbarSlotLabel(TaskbarSlot s) => switch (s) {
+        TaskbarSlot.play => '播放/暂停',
+        TaskbarSlot.episodes => '选集',
+        TaskbarSlot.settings => '播放设置 ${speedLabel(speed)}',
+        TaskbarSlot.sound => '声音',
+        TaskbarSlot.volume => '音量',
+        TaskbarSlot.drop => '送一颗小水滴',
+        TaskbarSlot.display => '显示 / 全屏',
+      };
+
+  /// 「更多」菜单选中后的动作：与可见按钮走同一批处理函数，不复制逻辑。
+  void _taskbarSlotAction(TaskbarSlot s) {
+    switch (s) {
+      case TaskbarSlot.play:
+        togglePause();
+      case TaskbarSlot.episodes:
+        _showChapters();
+      case TaskbarSlot.settings:
+        _showPlaybackSettings();
+      case TaskbarSlot.sound:
+        toggleMute();
+      case TaskbarSlot.volume:
+        // 音量模块无法塞进菜单（滑杆需要连续拖动），菜单项改为静音切换入口。
+        toggleMute();
+      case TaskbarSlot.drop:
+        if (!dropBusy && dropDayLeft > 0 && dropWeekLeft > 0) _sendDrop();
+      case TaskbarSlot.display:
+        toggleFs();
+    }
+  }
+
   String fmt(Duration d) {
     final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -13148,9 +13324,38 @@ class _PlayerPageState extends State<PlayerPage>
     // P1 §4：非全屏任务栏控件间距（320dp 窄屏压到 20dp）；全屏保持旧值不动。
     final tbSpacing = taskbarSpacingFor(viewSize.width);
     final tbBtnW = kTaskbarIconSize + tbSpacing;
-    Color tbColor(bool active) => fs
-        ? (active ? Colors.white70 : Colors.white24)
-        : (active ? Colors.white : kTaskbarInactiveColor);
+    // owner 2026-11-22：任务栏按「取舍」排布，不再用 FittedBox 整体缩放。
+    // 缩放会把 44dp 触达区悄悄压到 30dp 以下（点不中），改为把低优先级
+    // 槽位收进「更多」菜单，任何按钮都保持原尺寸。
+    final tbSlots = <TaskbarSlot>[
+      if (taskbar.showPlayPause) TaskbarSlot.play,
+      if (workChapterCount(w) > 1) TaskbarSlot.episodes,
+      TaskbarSlot.settings,
+      if (_volumeUi) TaskbarSlot.sound,
+      if (_volumeUi) TaskbarSlot.volume,
+      TaskbarSlot.drop,
+      TaskbarSlot.display,
+    ];
+    final tbWidthOf = <TaskbarSlot, double>{
+      TaskbarSlot.play: 48,
+      TaskbarSlot.episodes: fs ? 46.0 : tbBtnW,
+      TaskbarSlot.settings: fs ? 46.0 : tbBtnW,
+      TaskbarSlot.sound: fs ? 48.0 : tbBtnW,
+      // 桌面端音量模块固定 104dp，明显比其他按钮宽，必须按真实宽度算。
+      TaskbarSlot.volume: 104,
+      TaskbarSlot.drop: fs ? 48.0 : tbBtnW,
+      TaskbarSlot.display: taskbar.showRotate ? (fs ? 46.0 : tbBtnW) : 48,
+    };
+    // 桌面端允许全部可见；移动端最多 5 个（owner 规格）。
+    final tbPlan = taskbarPlan(
+      items: tbSlots,
+      availableWidth: viewSize.width -
+          pad.left -
+          pad.right -
+          (fs ? 24 : kTaskbarSidePadding * 2),
+      widthOf: (s) => tbWidthOf[s] ?? tbBtnW,
+      maxVisible: taskbar.showRotate ? 5 : 99,
+    );
     // A/T：任务栏实底后，视频舞台内缩到栏上方（首帧栏高未知，测量后校正）；
     // 移动端全屏为沉浸式，任务栏隐藏、舞台铺满屏幕。
     // 全屏：保留旧的「单击呼出/隐藏」逻辑——任务栏始终渲染为半透明浮层，
@@ -13806,187 +14011,39 @@ class _PlayerPageState extends State<PlayerPage>
                                     : MainAxisAlignment.center,
                                 children: [
                                   Row(children: [
-                                    // M2：移动端任务栏按钮较多，窄屏时整体等比缩小，
-                                    // 避免 390pt 机型溢出；全屏与竖屏下都保持单行。
+                                    // owner 2026-11-22：任务栏按 [TaskbarPlan] 取舍渲染。
+                                    // 不再用 FittedBox(scaleDown) 整体缩放——那会把 44dp
+                                    // 触达区压到 30dp 以下；放不下的槽位改收进「更多」菜单，
+                                    // 每个按钮都保持原尺寸与触达区。
                                     Expanded(
-                                      child: FittedBox(
-                                        fit: BoxFit.scaleDown,
-                                        alignment: Alignment.centerLeft,
-                                        child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              // M3/O2：桌面端播放/暂停常驻任务栏主位；
-                                              // 手机端由画面中央大圆钮承担（owner 2026-11-18 决定），
-                                              // 任务栏不再重复放置。
-                                              if (taskbar.showPlayPause)
-                                                TaskbarPlayButton(
-                                                    paused: paused,
-                                                    onPressed: togglePause),
-                                              // J5：视频合集章节——`1/12` 单入口，
-                                              // 点击弹出集数列表（不再需要独立的上下集按钮）。
-                                              if (workChapterCount(w) > 1)
-                                                TaskbarEpisodeButton(
-                                                  current: _chapter + 1,
-                                                  total: workChapterCount(w),
-                                                  width: fs ? 46 : tbBtnW,
-                                                  onPressed: _showChapters,
-                                                ),
-                                              // owner 2026-11-23：倍速/循环/连播/乱序合并为
-                                              // 一个「播放设置」入口，按钮显示当前倍速。
-                                              TaskbarSettingsButton(
+                                      child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            for (final slot in tbPlan.visible)
+                                              _taskbarSlotWidget(
+                                                slot: slot,
+                                                fs: fs,
+                                                tbBtnW: tbBtnW,
+                                                taskbar: taskbar,
+                                                chapterCount: chapterCount,
+                                                paused: paused,
                                                 speed: speed,
-                                                width: fs ? 46 : tbBtnW,
-                                                onPressed: _showPlaybackSettings,
+                                                muted: muted,
+                                                volume: volume,
+                                                toggleFs: toggleFs,
+                                                toggleOrientation:
+                                                    toggleOrientation,
                                               ),
-                                              // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
-                                              // I1：移动端隐藏音量按钮，音量由系统音量键控制
-                                              if (_volumeUi)
-                                                TaskbarSoundButton(
-                                                  muted: muted,
-                                                  volume: volume,
-                                                  width: fs ? 48 : tbBtnW,
-                                                  onTap: toggleMute,
-                                                  onLongPressStart:
-                                                      _volLongPressStart,
-                                                  onLongPressMoveUpdate:
-                                                      _volLongPressMove,
-                                                  onLongPressEnd: (_) =>
-                                                      _volDragEnd(),
-                                                  onHorizontalDragStart:
-                                                      _volDragStart,
-                                                  onHorizontalDragUpdate:
-                                                      _volDragUpdate,
-                                                  onHorizontalDragEnd:
-                                                      _volDragEnd,
-                                                ),
-                                              // L6：桌面端音量模块常驻任务栏（声音按钮右侧）：
-                                              // 细滑杆即时改音量，单击左侧声音按钮仍然是静音切换。
-                                              if (_volumeUi)
-                                                SizedBox(
-                                                  key: const ValueKey(
-                                                      'volume-module'),
-                                                  width: 104,
-                                                  height: 48,
-                                                  child: Row(children: [
-                                                    Expanded(
-                                                      child: SliderTheme(
-                                                        data:
-                                                            const SliderThemeData(
-                                                          trackHeight: 2.5,
-                                                          thumbShape:
-                                                              RoundSliderThumbShape(
-                                                                  enabledThumbRadius:
-                                                                      5),
-                                                          overlayShape:
-                                                              RoundSliderOverlayShape(
-                                                                  overlayRadius:
-                                                                      10),
-                                                          activeTrackColor:
-                                                              Colors.white70,
-                                                          inactiveTrackColor:
-                                                              Colors.white24,
-                                                          thumbColor:
-                                                              Colors.white,
-                                                        ),
-                                                        child: Slider(
-                                                          value: (muted
-                                                                  ? 0.0
-                                                                  : volume)
-                                                              .clamp(
-                                                                  0.0, 100.0),
-                                                          max: 100,
-                                                          onChanged: _setVolume,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    SizedBox(
-                                                      width: 30,
-                                                      child: Text(
-                                                          '${volume.round()}',
-                                                          textAlign:
-                                                              TextAlign.right,
-                                                          style: const TextStyle(
-                                                              fontSize: 10,
-                                                              color: Colors
-                                                                  .white54)),
-                                                    ),
-                                                  ]),
-                                                ),
-                                              // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
-                                              Tooltip(
-                                                message: '送一颗小水滴',
-                                                child: GestureDetector(
-                                                  behavior:
-                                                      HitTestBehavior.opaque,
-                                                  onTap: (dropBusy ||
-                                                          dropDayLeft <= 0 ||
-                                                          dropWeekLeft <= 0)
-                                                      ? null
-                                                      : _sendDrop,
-                                                  child: SizedBox(
-                                                    width: fs ? 48 : tbBtnW,
-                                                    height: 48,
-                                                    child: ScaleTransition(
-                                                      scale: _dropScale,
-                                                      child: Column(
-                                                        mainAxisAlignment:
-                                                            MainAxisAlignment
-                                                                .center,
-                                                        children: [
-                                                          if (dropBusy)
-                                                            const SizedBox(
-                                                                width: 18,
-                                                                height: 18,
-                                                                child: CircularProgressIndicator(
-                                                                    strokeWidth:
-                                                                        2,
-                                                                    color: Colors
-                                                                        .white54))
-                                                          else
-                                                            Icon(
-                                                                Icons
-                                                                    .water_drop,
-                                                                size: fs
-                                                                    ? 20
-                                                                    : kTaskbarIconSize,
-                                                                color: dropGlow &&
-                                                                        dropDayLeft >=
-                                                                            0
-                                                                    ? Colors
-                                                                        .lightBlueAccent
-                                                                    : (dropDayLeft >
-                                                                                0 &&
-                                                                            dropWeekLeft >
-                                                                                0
-                                                                        ? tbColor(
-                                                                            true)
-                                                                        : tbColor(
-                                                                            false))),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
+                                            if (tbPlan.hasOverflow)
+                                              TaskbarMoreButton(
+                                                key: const ValueKey(
+                                                    'taskbar-more'),
+                                                items: tbPlan.overflow,
+                                                labelOf: _taskbarSlotLabel,
+                                                onSelected: (s) =>
+                                                    _taskbarSlotAction(s),
                                               ),
-                                              // owner 2026-11-23：显示（移动端点按=全屏、
-                                              // 长按=横竖屏切换；桌面端保留独立全屏按钮）。
-                                              if (taskbar.showRotate)
-                                                TaskbarDisplayButton(
-                                                  fullscreen: fs,
-                                                  mobile: true,
-                                                  width: fs ? 46 : tbBtnW,
-                                                  onPressed: toggleFs,
-                                                  onLongPress:
-                                                      toggleOrientation,
-                                                )
-                                              else
-                                                TaskbarDisplayButton(
-                                                  fullscreen: fs,
-                                                  mobile: false,
-                                                  onPressed: toggleFs,
-                                                ),
-                                            ]),
-                                      ),
+                                          ]),
                                     ),
                                   ]),
                                 ]),
