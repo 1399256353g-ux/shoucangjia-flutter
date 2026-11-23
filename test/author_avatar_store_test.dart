@@ -74,12 +74,53 @@ void main() {
     expect(AuthorAvatarStore.instance.count, 0);
   });
 
-  test('服务端自定义头像路径识别（/@manual-avatar/ 前缀）', () {
+  test('服务端自定义头像路径识别（/@manual-avatar/ 与 .avatars）', () {
     expect(isManualAvatarPath('/media/lib-001/@manual-avatar/x/_avatar/a.jpg'),
+        isTrue);
+    expect(isManualAvatarPath('/media/lib-001/.avatars/a.jpg'), isTrue);
+    expect(isManualAvatarPath('/media/lib-001/%40manual-avatar/x/_avatar/a.jpg'),
         isTrue);
     expect(isManualAvatarPath('/media/lib-001/x/_avatar/a.jpg'), isFalse);
     expect(isManualAvatarPath(null), isFalse);
     expect(isManualAvatarPath(''), isFalse);
+  });
+
+  test('服务端头像文件名：只收无路径的 JPG/PNG/WebP', () {
+    expect(isServerAvatarFileName('a.jpg'), isTrue);
+    expect(isServerAvatarFileName('a.JPEG'), isTrue);
+    expect(isServerAvatarFileName('a.webp'), isTrue);
+    expect(isServerAvatarFileName(''), isFalse);
+    expect(isServerAvatarFileName('../a.jpg'), isFalse);
+    expect(isServerAvatarFileName('x/a.jpg'), isFalse);
+    expect(isServerAvatarFileName(r'x\a.jpg'), isFalse);
+    expect(isServerAvatarFileName('a.txt'), isFalse);
+  });
+
+  test('从媒体地址解析 .avatars 文件（库 id + 文件名）', () {
+    final r = serverAvatarFileFromPath('/media/lib-001/.avatars/a.jpg');
+    expect(r?.lib, 'lib-001');
+    expect(r?.file, 'a.jpg');
+    expect(serverAvatarFileFromPath('/media/lib-001/.avatars/a.jpg?x=1'),
+        isNull);
+    expect(serverAvatarFileFromPath('/media/lib-001/@manual-avatar/x/_avatar/a.jpg'),
+        isNull);
+    expect(serverAvatarFileFromPath('/media/lib-001/.avatars/a.txt'), isNull);
+    expect(serverAvatarFileFromPath('/media/lib-001/other/a.jpg'), isNull);
+    expect(serverAvatarFileFromPath(''), isNull);
+  });
+
+  test('/api/avatar/set 请求体：set 带 file，clear 带 clear:true', () {
+    expect(
+      authorAvatarSetBody(lib: ' lib-001 ', author: ' 作者 ', file: ' a.jpg '),
+      {'lib': 'lib-001', 'author': '作者', 'file': 'a.jpg'},
+    );
+    expect(
+      authorAvatarClearBody(lib: 'lib-001', author: '作者'),
+      {'lib': 'lib-001', 'author': '作者', 'clear': true},
+    );
+    expect(authorAvatarApiErrorText(400), contains('文件名'));
+    expect(authorAvatarApiErrorText(404), contains('不存在'));
+    expect(authorAvatarApiErrorText(418), 'HTTP 418');
   });
 
   test('写入本机偏好，重新读取后仍在', () async {

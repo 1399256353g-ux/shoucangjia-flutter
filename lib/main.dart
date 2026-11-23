@@ -20,8 +20,11 @@ import 'package:window_manager/window_manager.dart';
 import 'cover_admin.dart';
 import 'cover_cache.dart';
 import 'cover_crop_page.dart';
+import 'cover_history.dart';
+import 'cover_menu.dart';
 import 'cover_upload.dart';
 import 'deleted_monitor.dart';
+import 'sync_ledger.dart';
 import 'concurrency.dart';
 import 'breadcrumb.dart';
 import 'crash_guard.dart';
@@ -3068,6 +3071,122 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
   /// 按「同步批次」分组展示：每条记录都归到发现它的那一轮同步，
   /// 组头直接写明「本次同步 · 11-20 22:57」，不再只有一串时间。
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// 单击整行：用 `libId`+`workId` 打开作品；作品不在本地索引时给明确提示，
+  /// 不再像以前那样把「打开作品」错做成「进作者页」。
+  Future<void> _openDeletedWork(DeletedEntry e) async {
+    final uri = deletedWorkUri(cfg.base, e);
+    if (uri == null) {
+      _toast(kDeletedNotLocalMessage);
+      return;
+    }
+    final lib = e.libId.trim().isEmpty ? cfg.lib : e.libId.trim();
+    try {
+      final r = await http
+          .get(uri, headers: cfg.headersFor(lib))
+          .timeout(const Duration(seconds: 10));
+      if (!mounted) return;
+      if (r.statusCode == 404) {
+        _toast(kDeletedNotLocalMessage);
+        return;
+      }
+      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      dynamic raw;
+      try {
+        raw = await parseJsonMapAsync(r.bodyBytes);
+      } catch (_) {
+        raw = jsonDecode(utf8.decode(r.bodyBytes));
+      }
+      final m = raw is Map ? raw : const <dynamic, dynamic>{};
+      final work = m['work'];
+      if (work is! Map) {
+        _toast(kDeletedNotLocalMessage);
+        return;
+      }
+      final list = <Map<String, dynamic>>[];
+      final ws = m['works'];
+      if (ws is List) {
+        for (final w in ws) {
+          if (w is Map) {
+            list.add({...Map<String, dynamic>.from(w), '_lib': lib});
+          }
+        }
+      }
+      if (list.isEmpty) {
+        list.add({...Map<String, dynamic>.from(work), '_lib': lib});
+      }
+      var start = m['index'] is num ? (m['index'] as num).toInt() : 0;
+      start = start.clamp(0, list.length - 1);
+      // 服务端索引可能与作者文件顺序略有差异：以被点的作品为准。
+      final want = e.workId.trim();
+      if (want.isNotEmpty) {
+        final i = list.indexWhere((w) => '${w['id'] ?? ''}' == want);
+        if (i >= 0) start = i;
+      }
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => PlayerPage(works: list, start: start, lib: lib),
+      ));
+    } catch (err) {
+      if (mounted) _toast('打开作品失败：$err');
+    }
+  }
+
+  /// 抓取失败的记录可重试：服务端按 id 再跑一次对应单元库的爬虫。
+  Future<void> _retryDeleted(DeletedEntry e) async {
+    final id = e.workId.trim();
+    if (id.isEmpty) {
+      _toast('该记录没有作品 id，无法重试');
+      return;
+    }
+    final body = syncRetryBody(ids: [id]);
+    if (e.libId.trim().isNotEmpty) body['lib'] = e.libId.trim();
+    try {
+      final r = await http
+          .post(syncRetryUri(cfg.base),
+              headers: {
+                ...cfg.headers,
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(body))
+          .timeout(const Duration(seconds: 12));
+      dynamic parsed;
+      try {
+        parsed = jsonDecode(utf8.decode(r.bodyBytes));
+      } catch (_) {}
+      _toast(syncRetryResultLabel(r.statusCode, parsed));
+    } catch (err) {
+      _toast('重试失败：$err');
+    }
+  }
+
+  /// 三态小标签：已删除（曾落地）/ 抓取失败（可重试）/ 已落地。
+  Widget _stateChip(DeletedState s) {
+    final cs = Theme.of(context).colorScheme;
+    final (color, icon) = switch (s) {
+      DeletedState.failed => (Colors.orange.shade800, Icons.error_outline),
+      DeletedState.landed => (Colors.green.shade700, Icons.download_done),
+      DeletedState.deleted => (cs.error, Icons.delete_outline),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 10, color: color),
+        const SizedBox(width: 2),
+        Text(deletedStateLabel(s),
+            style: TextStyle(
+                fontSize: 9, fontWeight: FontWeight.w600, color: color)),
+      ]),
+    );
+  }
+
   Widget _groupedList() {
     final groups = groupDeletedBySync(report.items);
     final cs = Theme.of(context).colorScheme;
@@ -3111,31 +3230,62 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 11)),
                     const SizedBox(height: 2),
-                    Text(e.foundLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 10,
-                            color: cs.onSurfaceVariant.withValues(alpha: 0.8))),
+                    Row(children: [
+                      _stateChip(e.state),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(e.foundLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: cs.onSurfaceVariant
+                                    .withValues(alpha: 0.8))),
+                      ),
+                    ]),
                   ]),
               isThreeLine: true,
-              trailing: IconButton(
-                tooltip: '复制作品链接',
-                icon: const Icon(Icons.link, size: 18),
-                onPressed: e.link.isEmpty
-                    ? null
-                    : () async {
-                        await Clipboard.setData(ClipboardData(text: e.link));
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('链接已复制')));
-                      },
-              ),
-              onTap: e.author.isEmpty
-                  ? null
-                  : () => Navigator.of(context).push(MaterialPageRoute<void>(
-                      builder: (_) =>
-                          AuthorPage(name: e.author, libs: [cfg.lib]))),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (e.state == DeletedState.failed)
+                  IconButton(
+                    key: ValueKey('deleted-retry-${e.workId}'),
+                    tooltip: '重试抓取',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.replay, size: 18),
+                    onPressed: () => _retryDeleted(e),
+                  ),
+                IconButton(
+                  tooltip: '复制作品链接',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.link, size: 18),
+                  onPressed: e.link.isEmpty
+                      ? null
+                      : () async {
+                          await Clipboard.setData(ClipboardData(text: e.link));
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('链接已复制')));
+                        },
+                ),
+                IconButton(
+                  key: ValueKey('deleted-author-${e.workId}'),
+                  tooltip: '进入作者页',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.person_outline, size: 18),
+                  onPressed: e.author.isEmpty
+                      ? null
+                      : () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) => AuthorPage(
+                                  name: e.author,
+                                  libs: [
+                                    e.libId.trim().isEmpty
+                                        ? cfg.lib
+                                        : e.libId.trim()
+                                  ]))),
+                ),
+              ]),
+              onTap: () => _openDeletedWork(e),
             ),
             const Divider(height: 1),
           ],
@@ -3147,6 +3297,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final stats = DeletedStats.of(report.items);
     return Scaffold(
       appBar: AppBar(title: const Text('删除监测'), actions: [
         IconButton(
@@ -3188,6 +3339,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                         child: Text(
                             '共 ${report.total} 条'
                             '${report.items.length == report.total ? '' : '（展示 ${report.items.length}）'}'
+                            ' · ${stats.label}'
                             '${report.updatedLabel.isEmpty ? '' : ' · 日志更新 ${report.updatedLabel}'}'
                             '${report.lastDiscoveryLabel.isEmpty ? '' : ' · 最近同步发现 ${report.lastDiscoveryLabel}'}'
                             ' · 只读记录，不删除媒体',
@@ -4787,6 +4939,56 @@ class _LibraryPageState extends State<LibraryPage> {
   /// L5-C：基础库封面（自定义 `_cover/` 优先，其次本机播放量最高的作品缩略图）。
   String _coverUrlFor(BasicLib b) => _basicCoverUrl(b);
 
+  /// owner 2026-11-23：卡片封面合并入口所接的服务端动作。
+  /// [libId] 是封面文件所在的库（单元库取子树第一个基础库）；
+  /// [unitRel] 非空表示单元库封面（指针在 unit-covers.json）。
+  CoverMenuActions? _coverMenuFor(String libId, String unitRel) {
+    if (libId.trim().isEmpty) return null;
+    final headers = cfg.headersFor(libId);
+    Uri versionsUri() {
+      final base = cfg.u('/api/cover/versions', lib: libId);
+      if (unitRel.isEmpty) return base;
+      final sep = base.toString().contains('?') ? '&' : '?';
+      return Uri.parse(
+          '$base${sep}unitRel=${Uri.encodeQueryComponent(unitRel)}');
+    }
+
+    final restoreUri = cfg.u('/api/cover/restore', lib: libId);
+    final clearUri = cfg.u('/api/cover/clear', lib: libId);
+    return CoverMenuActions(
+      libId: libId,
+      unitRel: unitRel,
+      headers: headers,
+      urlOf: (p) => cfg.mediaUrl(p, lib: libId),
+      pickLocal: () => uploadCoverFromPicker(libId: libId, unitRel: unitRel),
+      listVersions: () =>
+          fetchCoverVersions(url: versionsUri(), headers: headers),
+      restore: (v) => restoreCoverVersion(
+        url: restoreUri,
+        headers: headers,
+        libId: libId,
+        unitRel: unitRel,
+        version: v.version,
+        ext: v.ext,
+      ),
+      restoreAuto: () => clearCustomCover(
+        url: clearUri,
+        headers: headers,
+        libId: libId,
+        unitRel: unitRel,
+        hard: false,
+      ),
+      clearAll: () => clearCustomCover(
+        url: clearUri,
+        headers: headers,
+        libId: libId,
+        unitRel: unitRel,
+        hard: true,
+      ),
+      onChanged: () => coverRevision.value++,
+    );
+  }
+
   /// G：单元库子树里第一个非空的 `fc`（第一张作品封面）。
   ({String lib, String path})? _firstFcOfUnit(UnitLibrary u) {
     for (final b in u.allBasics) {
@@ -4897,6 +5099,7 @@ class _LibraryPageState extends State<LibraryPage> {
         unitCoverOf: _unitCoverUrl,
         headersOf: cfg.headersFor,
         coverUploader: uploadCoverFromPicker,
+        coverMenuOf: _coverMenuFor,
         onConfigureUnit: _openUnitCrawler,
       ),
     ));
@@ -4988,6 +5191,7 @@ class _LibraryPageState extends State<LibraryPage> {
             unitCoverOf: _unitCoverUrl,
             onConfigureUnit: _openUnitCrawler,
             coverUploader: uploadCoverFromPicker,
+            coverMenuOf: _coverMenuFor,
           ),
         )),
         onToggleUnitStar: _toggleUnitStar,
@@ -4996,6 +5200,7 @@ class _LibraryPageState extends State<LibraryPage> {
         unitCoverOf: _unitCoverUrl,
         onConfigureUnit: _openUnitCrawler,
         coverUploader: uploadCoverFromPicker,
+        coverMenuOf: _coverMenuFor,
       ),
     ));
   }
@@ -5306,6 +5511,7 @@ class _LibraryPageState extends State<LibraryPage> {
             topCoverOf: (u) => _topNodeCoverUrl(u),
             statusOf: _topNodeStatus,
             coverUploader: uploadCoverFromPicker,
+            coverMenuOf: _coverMenuFor,
           )
         else
           const Padding(
@@ -10543,8 +10749,96 @@ class _PlayerPageState extends State<PlayerPage>
     const steps = [0.75, 1.0, 1.25, 1.5, 2.0];
     var i = steps.indexWhere((s) => (s - speed).abs() < 0.001);
     final nextSpeed = steps[(i + 1) % steps.length];
-    setState(() => speed = nextSpeed);
-    player.setRate(speed);
+    setSpeed(nextSpeed);
+  }
+
+  /// 设定倍速（播放设置菜单与键盘循环共用唯一入口）。
+  void setSpeed(double value) {
+    final next = value.clamp(0.5, 3.0).toDouble();
+    setState(() => speed = next);
+    player.setRate(next);
+  }
+
+  /// owner 2026-11-23：播放设置——倍速/自动连播/单条循环/乱序合并到一个菜单，
+  /// 任务栏只留一个入口（按钮显示当前倍速），原有操作一个不少。
+  void _showPlaybackSettings() {
+    hapticTap();
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          void apply(VoidCallback fn) {
+            fn();
+            setSheet(() {});
+          }
+
+          final cs = Theme.of(ctx).colorScheme;
+          return SafeArea(
+            top: false,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Row(children: [
+                  const Icon(Icons.tune, size: 18),
+                  const SizedBox(width: 8),
+                  const Text('播放设置',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  Text('1.0x 表示原速',
+                      style: TextStyle(
+                          fontSize: 11, color: cs.onSurfaceVariant)),
+                ]),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(children: [
+                  const Text('倍速', style: TextStyle(fontSize: 13)),
+                  const Spacer(),
+                  for (final v in const [0.75, 1.0, 1.25, 1.5, 2.0])
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: ChoiceChip(
+                        key: ValueKey('speed-$v'),
+                        label: Text(speedLabel(v),
+                            style: const TextStyle(fontSize: 11)),
+                        selected: (speed - v).abs() < 0.001,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (_) => apply(() => setSpeed(v)),
+                      ),
+                    ),
+                ]),
+              ),
+              SwitchListTile(
+                key: const ValueKey('setting-autoplay'),
+                dense: true,
+                title: const Text('自动连播'),
+                subtitle: loopOne ? const Text('单条循环开启时自动连播不可用') : null,
+                value: autoplay,
+                onChanged: loopOne ? null : (_) => apply(toggleAutoplay),
+              ),
+              SwitchListTile(
+                key: const ValueKey('setting-loop'),
+                dense: true,
+                title: const Text('单条循环'),
+                value: loopOne,
+                onChanged: (_) => apply(toggleLoop),
+              ),
+              SwitchListTile(
+                key: const ValueKey('setting-shuffle'),
+                dense: true,
+                title: const Text('乱序播放'),
+                subtitle: const Text('当前库内随机'),
+                value: shuffle,
+                onChanged: (_) => apply(toggleShuffle),
+              ),
+              const SizedBox(height: 8),
+            ]),
+          );
+        });
+      },
+    );
   }
 
   Future<void> toggleFs() async {
@@ -13341,12 +13635,36 @@ class _PlayerPageState extends State<PlayerPage>
                                         child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
+                                              // M3/O2：桌面端播放/暂停常驻任务栏主位；
+                                              // 手机端由画面中央大圆钮承担（owner 2026-11-18 决定），
+                                              // 任务栏不再重复放置。
+                                              if (taskbar.showPlayPause)
+                                                TaskbarPlayButton(
+                                                    paused: paused,
+                                                    onPressed: togglePause),
+                                              // J5：视频合集章节——`1/12` 单入口，
+                                              // 点击弹出集数列表（不再需要独立的上下集按钮）。
+                                              if (workChapterCount(w) > 1)
+                                                TaskbarEpisodeButton(
+                                                  current: _chapter + 1,
+                                                  total: workChapterCount(w),
+                                                  width: fs ? 46 : tbBtnW,
+                                                  onPressed: _showChapters,
+                                                ),
+                                              // owner 2026-11-23：倍速/循环/连播/乱序合并为
+                                              // 一个「播放设置」入口，按钮显示当前倍速。
+                                              TaskbarSettingsButton(
+                                                speed: speed,
+                                                width: fs ? 46 : tbBtnW,
+                                                onPressed: _showPlaybackSettings,
+                                              ),
                                               // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）
                                               // I1：移动端隐藏音量按钮，音量由系统音量键控制
                                               if (_volumeUi)
-                                                GestureDetector(
-                                                  behavior:
-                                                      HitTestBehavior.opaque,
+                                                TaskbarSoundButton(
+                                                  muted: muted,
+                                                  volume: volume,
+                                                  width: fs ? 48 : tbBtnW,
                                                   onTap: toggleMute,
                                                   onLongPressStart:
                                                       _volLongPressStart,
@@ -13360,25 +13678,6 @@ class _PlayerPageState extends State<PlayerPage>
                                                       _volDragUpdate,
                                                   onHorizontalDragEnd:
                                                       _volDragEnd,
-                                                  child: Tooltip(
-                                                    message: '点击静音 / 长按拖动调音量',
-                                                    child: SizedBox(
-                                                      width: fs ? 48 : tbBtnW,
-                                                      height: 48,
-                                                      child: Icon(
-                                                          muted || volume == 0
-                                                              ? Icons.volume_off
-                                                              : (volume < 50
-                                                                  ? Icons
-                                                                      .volume_down
-                                                                  : Icons
-                                                                      .volume_up),
-                                                          size: fs
-                                                              ? null
-                                                              : kTaskbarIconSize,
-                                                          color: tbColor(true)),
-                                                    ),
-                                                  ),
                                                 ),
                                               // L6：桌面端音量模块常驻任务栏（声音按钮右侧）：
                                               // 细滑杆即时改音量，单击左侧声音按钮仍然是静音切换。
@@ -13433,119 +13732,6 @@ class _PlayerPageState extends State<PlayerPage>
                                                     ),
                                                   ]),
                                                 ),
-                                              // J5：视频合集章节选择（按「选集」图标 + 当前集数）
-                                              if (workChapterCount(w) > 1)
-                                                GestureDetector(
-                                                  behavior:
-                                                      HitTestBehavior.opaque,
-                                                  onTap: _showChapters,
-                                                  child: Tooltip(
-                                                    message: '选集',
-                                                    child: SizedBox(
-                                                      width: fs ? 46 : tbBtnW,
-                                                      height: 48,
-                                                      child: Column(
-                                                        mainAxisAlignment:
-                                                            MainAxisAlignment
-                                                                .center,
-                                                        children: [
-                                                          Icon(
-                                                              Icons
-                                                                  .video_library_outlined,
-                                                              size: fs
-                                                                  ? 19
-                                                                  : kTaskbarIconSize,
-                                                              color: tbColor(
-                                                                  true)),
-                                                          const SizedBox(
-                                                              height: 1),
-                                                          Text(
-                                                              '${_chapter + 1}/${workChapterCount(w)}',
-                                                              style: const TextStyle(
-                                                                  fontSize: 9,
-                                                                  height: 1.0,
-                                                                  color: Colors
-                                                                      .white54)),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              // M2/M3：桌面端播放/暂停常驻任务栏；
-                                              // O2：手机端改由画面中央大圆钮承担。
-                                              if (taskbar.showPlayPause)
-                                                TaskbarPlayButton(
-                                                    paused: paused,
-                                                    onPressed: togglePause),
-                                              IconButton(
-                                                  constraints: fs
-                                                      ? null
-                                                      : BoxConstraints(
-                                                          minWidth: tbBtnW,
-                                                          minHeight: 48,
-                                                          maxHeight: 48),
-                                                  onPressed: cycleSpeed,
-                                                  icon: Text('${speed}x',
-                                                      style: TextStyle(
-                                                          fontSize: 11,
-                                                          color:
-                                                              tbColor(true)))),
-                                              IconButton(
-                                                  constraints: fs
-                                                      ? null
-                                                      : BoxConstraints(
-                                                          minWidth: tbBtnW,
-                                                          minHeight: 48,
-                                                          maxHeight: 48),
-                                                  onPressed: toggleShuffle,
-                                                  tooltip: shuffle
-                                                      ? '乱序播放（当前库内随机）'
-                                                      : '顺序播放',
-                                                  icon: Icon(Icons.shuffle,
-                                                      size: fs
-                                                          ? null
-                                                          : kTaskbarIconSize,
-                                                      color: shuffle
-                                                          ? Colors
-                                                              .lightBlueAccent
-                                                          : tbColor(false))),
-                                              IconButton(
-                                                  constraints: fs
-                                                      ? null
-                                                      : BoxConstraints(
-                                                          minWidth: tbBtnW,
-                                                          minHeight: 48,
-                                                          maxHeight: 48),
-                                                  // 单条循环期间禁用连播开关，避免「开着循环又开连播」的困惑
-                                                  onPressed: loopOne
-                                                      ? null
-                                                      : toggleAutoplay,
-                                                  tooltip: loopOne
-                                                      ? '单条循环开启时自动连播不可用'
-                                                      : '自动连播',
-                                                  icon: Icon(Icons.skip_next,
-                                                      size: fs
-                                                          ? null
-                                                          : kTaskbarIconSize,
-                                                      color: autoplay
-                                                          ? tbColor(true)
-                                                          : tbColor(false))),
-                                              IconButton(
-                                                  constraints: fs
-                                                      ? null
-                                                      : BoxConstraints(
-                                                          minWidth: tbBtnW,
-                                                          minHeight: 48,
-                                                          maxHeight: 48),
-                                                  onPressed: toggleLoop,
-                                                  tooltip: '单条循环',
-                                                  icon: Icon(Icons.repeat_one,
-                                                      size: fs
-                                                          ? null
-                                                          : kTaskbarIconSize,
-                                                      color: loopOne
-                                                          ? tbColor(true)
-                                                          : tbColor(false))),
                                               // J-A1：播放页不再展示水滴数量/余额，只保留赠送动作
                                               Tooltip(
                                                 message: '送一颗小水滴',
@@ -13558,7 +13744,7 @@ class _PlayerPageState extends State<PlayerPage>
                                                       ? null
                                                       : _sendDrop,
                                                   child: SizedBox(
-                                                    width: fs ? 46 : tbBtnW,
+                                                    width: fs ? 48 : tbBtnW,
                                                     height: 48,
                                                     child: ScaleTransition(
                                                       scale: _dropScale,
@@ -13602,30 +13788,26 @@ class _PlayerPageState extends State<PlayerPage>
                                                   ),
                                                 ),
                                               ),
+                                              // owner 2026-11-23：显示（移动端点按=全屏、
+                                              // 长按=横竖屏切换；桌面端保留独立全屏按钮）。
                                               if (taskbar.showRotate)
-                                                TaskbarRotateButton(
-                                                  mode: screenModeOf(
-                                                      MediaQuery.sizeOf(
-                                                          context)),
-                                                  onPressed: toggleOrientation,
+                                                TaskbarDisplayButton(
+                                                  fullscreen: fs,
+                                                  mobile: true,
+                                                  width: fs ? 46 : tbBtnW,
+                                                  onPressed: toggleFs,
+                                                  onLongPress:
+                                                      toggleOrientation,
+                                                )
+                                              else
+                                                TaskbarDisplayButton(
+                                                  fullscreen: fs,
+                                                  mobile: false,
+                                                  onPressed: toggleFs,
                                                 ),
                                             ]),
                                       ),
                                     ),
-                                    IconButton(
-                                        constraints: fs
-                                            ? null
-                                            : const BoxConstraints(
-                                                minWidth: 44,
-                                                minHeight: 48,
-                                                maxHeight: 48),
-                                        onPressed: toggleFs,
-                                        icon: Icon(
-                                            fs
-                                                ? Icons.fullscreen_exit
-                                                : Icons.fullscreen,
-                                            size: fs ? null : kTaskbarIconSize,
-                                            color: tbColor(true))),
                                   ]),
                                 ]),
                           ),
@@ -14709,10 +14891,51 @@ Future<AuthorEditResult> uploadAuthorBio({
   return AuthorEditResult(true, '简介已更新', path: saved);
 }
 
-/// 2026-11-22：清除服务端自定义头像（恢复「爬虫 → 自动」）。
+/// 批 A（2026-11-23）：把库内 `<lib>/.avatars/<file>` 注册为该作者头像。
 ///
-/// 服务端会删注册项与 `@manual-avatar/<作者>` 目录，并让作者索引重新生成；
+/// 服务端写入 `LIBDIR/manual_avatars.json` 并清缓存，作者页/作者索引
+/// 立即改用该文件（跨设备生效）。成功时回传媒体地址 `u`。
+Future<AuthorEditResult> setAuthorAvatarFile({
+  required String libId,
+  required String author,
+  required String file,
+}) async {
+  if (libId.trim().isEmpty || author.trim().isEmpty) {
+    return const AuthorEditResult(false, '缺少库或作者');
+  }
+  if (!isServerAvatarFileName(file)) {
+    return const AuthorEditResult(false, '头像文件名不合法（只支持 JPG/PNG/WebP）');
+  }
+  http.Response r;
+  try {
+    r = await http.post(
+      cfg.u(kAuthorAvatarSetPath, lib: libId),
+      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
+      body: jsonEncode(authorAvatarSetBody(
+          lib: libId, author: author, file: file)),
+    );
+  } catch (e) {
+    return AuthorEditResult(false, '设置头像失败：$e');
+  }
+  Map<String, dynamic> j = const {};
+  try {
+    final d = jsonDecode(r.body);
+    if (d is Map<String, dynamic>) j = d;
+  } catch (_) {}
+  if (r.statusCode != 200 || j['ok'] != true) {
+    final msg = j['error'] is String
+        ? j['error'] as String
+        : authorAvatarApiErrorText(r.statusCode);
+    return AuthorEditResult(false, '设置头像失败：$msg');
+  }
+  return AuthorEditResult(true, '已设为该作者头像', path: '${j['u'] ?? ''}');
+}
+
+/// 2026-11-22 / 批 A（2026-11-23）：清除服务端自定义头像（恢复「爬虫 → 自动」）。
+///
+/// 走 `POST /api/avatar/set {clear:true}`：删注册项并清缓存，作者索引重新生成；
 /// 没有覆盖时同样返回 ok（幂等），客户端可无条件调用。
+/// 文件本身保留（可回滚），不再像旧接口那样删除 `@manual-avatar/<作者>` 目录。
 Future<AuthorEditResult> clearAuthorAvatar({
   required String libId,
   required String author,
@@ -14720,9 +14943,9 @@ Future<AuthorEditResult> clearAuthorAvatar({
   http.Response r;
   try {
     r = await http.post(
-      cfg.u('/api/author/avatar/clear', lib: libId),
+      cfg.u(kAuthorAvatarSetPath, lib: libId),
       headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
-      body: jsonEncode({'lib': libId, 'author': author}),
+      body: jsonEncode(authorAvatarClearBody(lib: libId, author: author)),
     );
   } catch (e) {
     return AuthorEditResult(false, '清除头像失败：$e');
@@ -14733,8 +14956,9 @@ Future<AuthorEditResult> clearAuthorAvatar({
     if (d is Map<String, dynamic>) j = d;
   } catch (_) {}
   if (r.statusCode != 200 || j['ok'] != true) {
-    final msg =
-        j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
+    final msg = j['error'] is String
+        ? j['error'] as String
+        : authorAvatarApiErrorText(r.statusCode);
     return AuthorEditResult(false, '清除头像失败：$msg');
   }
   return const AuthorEditResult(true, '已恢复自动头像');
@@ -15076,8 +15300,8 @@ class _AuthorPageState extends State<AuthorPage> {
           ListTile(
             leading: const Icon(Icons.photo_library_outlined),
             title: const Text('从作品里挑一张作头像'),
-            subtitle:
-                const Text('只存本机，不改媒体文件与服务端数据', style: TextStyle(fontSize: 11)),
+            subtitle: const Text('库内 .avatars 头像可跨设备；普通作品图只存本机',
+                style: TextStyle(fontSize: 11)),
             onTap: () => Navigator.of(ctx).pop('pick'),
           ),
           if (has)
@@ -15131,6 +15355,29 @@ class _AuthorPageState extends State<AuthorPage> {
                   : libOfMediaPath(p);
               return InkWell(
                 onTap: () async {
+                  // 批 A：`.avatars` 里的头像文件直接注册到服务端（跨设备）；
+                  // 普通作品图仍只存本机，不传媒体文件。
+                  final srv = serverAvatarFileFromPath(p);
+                  if (srv != null) {
+                    final r = await setAuthorAvatarFile(
+                        libId: srv.lib, author: widget.name, file: srv.file);
+                    if (!ctx.mounted) return;
+                    Navigator.of(ctx).pop();
+                    if (!mounted) return;
+                    if (!r.ok) {
+                      _toast(r.message);
+                      return;
+                    }
+                    // 服务端已生效：清掉同作者的本机覆盖，避免旧图压住新图。
+                    await AuthorAvatarStore.instance.clear(widget.name);
+                    if (!mounted) return;
+                    setState(() {
+                      if (r.path.isNotEmpty) av = r.path;
+                    });
+                    authorAvatarRevision.value++;
+                    _toast(r.message);
+                    return;
+                  }
                   final ok =
                       await AuthorAvatarStore.instance.setPath(widget.name, p);
                   if (!ctx.mounted) return;
@@ -15233,7 +15480,12 @@ class _AuthorPageState extends State<AuthorPage> {
   /// 清完立刻涨一次 [authorAvatarRevision]，作者页、播放页信息区与作品卡片
   /// 三处同时换回自动头像；本机与服务端都没有覆盖时按钮不显示。
   Future<void> _restoreAutoAvatar() async {
-    final lib = primaryLib.isEmpty ? cfg.lib : primaryLib;
+    // 手动头像可能来自别的基础库（`.avatars` 跨设备注册），清除时必须
+    // 用头像路径里的库 id，否则会清错库、旧图依旧盖住自动结果。
+    final avLib = isManualAvatarPath(av) ? libOfMediaPath(av) : '';
+    final lib = avLib.isNotEmpty
+        ? avLib
+        : (primaryLib.isEmpty ? cfg.lib : primaryLib);
     if (lib.isNotEmpty) {
       final r = await clearAuthorAvatar(libId: lib, author: widget.name);
       if (!r.ok) {

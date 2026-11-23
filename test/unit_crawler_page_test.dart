@@ -43,6 +43,10 @@ void main() {
       if (req.url.path == '/api/settings') {
         return http.Response(jsonEncode({'collections': <dynamic>[]}), 200);
       }
+      if (req.url.path == '/api/sync/logs') {
+        return http.Response(
+            jsonEncode({'ok': true, 'keptDays': 7, 'runs': <dynamic>[]}), 200);
+      }
       expect(req.url.path, '/api/unit/crawler');
       expect(req.url.queryParameters['unit'], 'big-01');
       expect(req.url.queryParameters['rel'], '(1) A');
@@ -69,6 +73,10 @@ void main() {
     final client = MockClient((req) async {
       if (req.url.path == '/api/settings') {
         return http.Response(jsonEncode({'collections': <dynamic>[]}), 200);
+      }
+      if (req.url.path == '/api/sync/logs') {
+        return http.Response(
+            jsonEncode({'ok': true, 'keptDays': 7, 'runs': <dynamic>[]}), 200);
       }
       expect(req.url.path, '/api/unit/crawler');
       if (req.method == 'POST') {

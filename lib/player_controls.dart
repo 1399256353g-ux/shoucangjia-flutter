@@ -30,6 +30,8 @@ List<DeviceOrientation> orientationsFor(ScreenMode mode) =>
           ];
 
 /// 任务栏播放/暂停按钮：图标与提示随 [paused] 实时变化（M2/M3）。
+///
+/// owner 2026-11-23：作为任务栏主按钮，触达区不小于 44dp、图标用白色。
 class TaskbarPlayButton extends StatelessWidget {
   const TaskbarPlayButton({
     super.key,
@@ -46,8 +48,10 @@ class TaskbarPlayButton extends StatelessWidget {
       key: const Key('taskbar-play'),
       onPressed: onPressed,
       tooltip: paused ? '播放' : '暂停',
-      icon:
-          Icon(paused ? Icons.play_arrow : Icons.pause, color: Colors.white70),
+      iconSize: 28,
+      constraints: const BoxConstraints(
+          minWidth: kTaskbarTouchTarget, minHeight: kTaskbarTouchTarget),
+      icon: Icon(paused ? Icons.play_arrow : Icons.pause, color: Colors.white),
     );
   }
 }
@@ -81,6 +85,215 @@ class TaskbarRotateButton extends StatelessWidget {
 /// 组件渲染条件：仅 Android/iOS 显示横竖屏按钮；桌面端（含 Windows）不显示。
 bool showRotateButton({required bool isAndroid, required bool isIOS}) =>
     isAndroid || isIOS;
+
+/// owner 2026-11-23：任务栏所有按钮的最小触达区（dp）。
+const double kTaskbarTouchTarget = 44;
+
+/// 倍速文案：`1.0x` / `1.25x` / `2.0x`（保留一位或两位小数，不显示末尾 0）。
+String speedLabel(double speed) {
+  var s = speed.toStringAsFixed(2);
+  if (s.endsWith('0')) s = s.substring(0, s.length - 1);
+  return '${s}x';
+}
+
+/// 任务栏剧集入口：`1/12`，点击弹出集数列表。
+///
+/// owner 2026-11-23：合并为单入口，替代独立的上一集/下一集按钮。
+class TaskbarEpisodeButton extends StatelessWidget {
+  const TaskbarEpisodeButton({
+    super.key,
+    required this.current,
+    required this.total,
+    required this.onPressed,
+    this.width = kTaskbarTouchTarget,
+  });
+
+  final int current;
+  final int total;
+  final VoidCallback onPressed;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = width < kTaskbarTouchTarget ? kTaskbarTouchTarget : width;
+    final cur = current < 1 ? 1 : (current > total ? total : current);
+    return Tooltip(
+      message: '选集',
+      child: Semantics(
+        button: true,
+        label: '选集 $cur/$total',
+        child: GestureDetector(
+          key: const Key('taskbar-episodes'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: SizedBox(
+            width: w,
+            height: 48,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.video_library_outlined,
+                    size: kTaskbarIconSize - 4, color: Colors.white70),
+                const SizedBox(height: 1),
+                Text('$cur/$total',
+                    style: const TextStyle(
+                        fontSize: 9, height: 1.0, color: Colors.white54)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 任务栏「播放设置」入口：显示当前倍速，点击弹出倍速/循环/连播/乱序菜单。
+class TaskbarSettingsButton extends StatelessWidget {
+  const TaskbarSettingsButton({
+    super.key,
+    required this.speed,
+    required this.onPressed,
+    this.width = kTaskbarTouchTarget,
+  });
+
+  final double speed;
+  final VoidCallback onPressed;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = width < kTaskbarTouchTarget ? kTaskbarTouchTarget : width;
+    return Tooltip(
+      message: '播放设置',
+      child: Semantics(
+        button: true,
+        label: '播放设置 ${speedLabel(speed)}',
+        child: GestureDetector(
+          key: const Key('taskbar-settings'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: SizedBox(
+            width: w,
+            height: 48,
+            child: Center(
+              child: Text(speedLabel(speed),
+                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 任务栏声音按钮：点击静音；长按/左右拖动调音量（桌面端）。
+/// 移动端不渲染（音量交给系统音量键）。
+class TaskbarSoundButton extends StatelessWidget {
+  const TaskbarSoundButton({
+    super.key,
+    required this.muted,
+    required this.volume,
+    required this.onTap,
+    this.onLongPressStart,
+    this.onLongPressMoveUpdate,
+    this.onLongPressEnd,
+    this.onHorizontalDragStart,
+    this.onHorizontalDragUpdate,
+    this.onHorizontalDragEnd,
+    this.width = kTaskbarTouchTarget,
+  });
+
+  final bool muted;
+  final double volume;
+  final VoidCallback onTap;
+  final GestureLongPressStartCallback? onLongPressStart;
+  final GestureLongPressMoveUpdateCallback? onLongPressMoveUpdate;
+  final GestureLongPressEndCallback? onLongPressEnd;
+  final GestureDragStartCallback? onHorizontalDragStart;
+  final GestureDragUpdateCallback? onHorizontalDragUpdate;
+  final GestureDragEndCallback? onHorizontalDragEnd;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = width < kTaskbarTouchTarget ? kTaskbarTouchTarget : width;
+    final icon = muted || volume <= 0
+        ? Icons.volume_off
+        : (volume < 50 ? Icons.volume_down : Icons.volume_up);
+    // Tooltip 必须在 GestureDetector 外层：放在内层时它的长按识别器会
+    // 抢在音量长按之前赢得手势仲裁（实测长按调音量失效）。
+    return Tooltip(
+      message: '点击静音 / 长按拖动调音量',
+      child: GestureDetector(
+        key: const Key('taskbar-sound'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        onLongPressStart: onLongPressStart,
+        onLongPressMoveUpdate: onLongPressMoveUpdate,
+        onLongPressEnd: onLongPressEnd,
+        onHorizontalDragStart: onHorizontalDragStart,
+        onHorizontalDragUpdate: onHorizontalDragUpdate,
+        onHorizontalDragEnd: onHorizontalDragEnd,
+        child: SizedBox(
+          width: w,
+          height: 48,
+          child: Icon(icon, size: kTaskbarIconSize, color: Colors.white70),
+        ),
+      ),
+    );
+  }
+}
+
+/// 任务栏「显示」按钮。
+///
+/// - 移动端：点按=全屏开关，长按=横竖屏切换（合并原来两个按钮）；
+/// - 桌面端：保留独立的全屏按钮（M3 交互不变）。
+class TaskbarDisplayButton extends StatelessWidget {
+  const TaskbarDisplayButton({
+    super.key,
+    required this.fullscreen,
+    required this.mobile,
+    required this.onPressed,
+    this.onLongPress,
+    this.width = kTaskbarTouchTarget,
+  });
+
+  final bool fullscreen;
+  final bool mobile;
+  final VoidCallback onPressed;
+  final VoidCallback? onLongPress;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = fullscreen ? Icons.fullscreen_exit : Icons.fullscreen;
+    if (!mobile) {
+      return IconButton(
+        key: const Key('taskbar-fullscreen'),
+        tooltip: fullscreen ? '退出全屏' : '全屏',
+        onPressed: onPressed,
+        constraints: const BoxConstraints(
+            minWidth: kTaskbarTouchTarget, minHeight: kTaskbarTouchTarget),
+        icon: Icon(icon, size: kTaskbarIconSize, color: Colors.white70),
+      );
+    }
+    final w = width < kTaskbarTouchTarget ? kTaskbarTouchTarget : width;
+    return Tooltip(
+      message: '全屏（长按切换横竖屏）',
+      child: GestureDetector(
+        key: const Key('taskbar-display'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        onLongPress: onLongPress,
+        child: SizedBox(
+          width: w,
+          height: 48,
+          child: Icon(icon, size: kTaskbarIconSize, color: Colors.white70),
+        ),
+      ),
+    );
+  }
+}
 
 /// M3：任务栏平台策略。
 ///

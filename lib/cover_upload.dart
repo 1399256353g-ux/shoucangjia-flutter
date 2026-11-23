@@ -11,12 +11,18 @@ class CoverUploadResult {
   final bool cancelled;
   final String message;
 
-  const CoverUploadResult(this.ok, this.message, {this.cancelled = false});
+  /// owner 2026-11-23：服务端返回的新封面相对媒体路径
+  /// （`/media/<lib>/_cover/<version>.<ext>`）；卡片据此立即换图。
+  final String url;
+
+  const CoverUploadResult(this.ok, this.message,
+      {this.cancelled = false, this.url = ''});
 
   const CoverUploadResult.cancelled()
       : ok = false,
         cancelled = true,
-        message = '已取消';
+        message = '已取消',
+        url = '';
 }
 
 /// 由宿主页面注入的上传入口：负责拼 URL/鉴权，并在成功后触发封面刷新。
@@ -147,6 +153,12 @@ Future<CoverUploadResult> uploadCoverBytes({
     } catch (_) {}
     return CoverUploadResult(false, '上传失败：$msg');
   }
+  var coverPath = '';
+  try {
+    final j = jsonDecode(r.body);
+    if (j is Map) coverPath = '${j['u'] ?? ''}'.trim();
+  } catch (_) {}
   return CoverUploadResult(
-      true, unitRel.isEmpty ? '封面已更新' : '单元库封面已更新');
+      true, unitRel.isEmpty ? '封面已更新' : '单元库封面已更新',
+      url: coverPath.startsWith('/media/') ? coverPath : '');
 }

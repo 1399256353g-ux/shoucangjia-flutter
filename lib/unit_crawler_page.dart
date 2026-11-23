@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'home_action.dart';
 import 'collection_sync_panel.dart';
+import 'sync_log_panel.dart';
 import 'unit_crawler.dart';
 import 'unit_library.dart';
 
@@ -204,6 +205,14 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     const SizedBox(height: 8),
                     // 同步频率：快检只扫新增/删除，全量才完整抓取。
                     _ScheduleSummary(schedule: schedule),
+                    // S3：同步日志（时间/库/成功/失败/耗时；失败项可展开单条重试）
+                    const SizedBox(height: 6),
+                    SyncLogPanel(
+                      base: widget.base,
+                      headers: widget.headers,
+                      libId: widget.libId,
+                      client: widget.client,
+                    ),
                     const Divider(height: 28),
                     // owner 2026-11-21：同步源选择并入每个单元库的爬虫设置，
                     // 不再保留设置页里的全局「同步源选择」入口。

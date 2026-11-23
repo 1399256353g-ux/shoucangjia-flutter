@@ -8,6 +8,10 @@
 /// 头像，也可一键清除回到爬虫/自动结果。覆盖只写本机 SharedPreferences，
 /// 不上传、不改媒体文件、不改服务端数据；换设备/重装后回到原头像。
 ///
+/// 2026-11-23 批 A：库内 `<库>/.avatars/<file>` 头像改为走服务端
+/// `POST /api/avatar/set` 注册（跨设备生效）；本机覆盖仍用于普通作品图。
+/// 两种来源的优先级不变：手动 > 爬虫 > 自动。
+///
 /// 键按**作者名**（服务端 `/api/authors.json` 本身就是按名字合并的，
 /// 同名即同一作者），所以作者总览、排行榜、作者主页三处入口看到的是同一张。
 library;
@@ -65,12 +69,84 @@ String encodeAuthorAvatarOverrides(Map<String, String> m) {
   return jsonEncode(out);
 }
 
-/// 服务端自定义头像的媒体地址特征：`/media/<lib>/@manual-avatar/<作者>/_avatar/...`。
+/// 服务端自定义头像的媒体地址特征：
+///  - 旧落点：`/media/<lib>/@manual-avatar/<作者>/_avatar/...`；
+///  - 批 A（2026-11-23）：`/media/<lib>/.avatars/<file>`。
 ///
-/// 2026-11-22：上传的头像由服务端注册后，作者页与索引都会返回这个前缀，
+/// 上传/注册的头像由服务端下发后，作者页与索引都会返回这些前缀，
 /// 客户端据此判断「恢复自动」是否有服务端覆盖需要清理。
-bool isManualAvatarPath(String? path) =>
-    (path ?? '').contains('/@manual-avatar/');
+bool isManualAvatarPath(String? path) {
+  final p = path ?? '';
+  return p.contains('/@manual-avatar/') ||
+      p.contains('/%40manual-avatar/') ||
+      p.contains('/.avatars/');
+}
+
+/// 服务端头像「按文件注册」接口（批 A，2026-11-23）：`POST /api/avatar/set`。
+/// set `{lib, author, file}`；clear `{lib, author, clear:true}`。
+const String kAuthorAvatarSetPath = '/api/avatar/set';
+
+/// 服务端头像文件名：只允许不含路径分隔符的 JPG/PNG/WebP。
+///
+/// 服务端从 `<库>/.avatars/<file>` 解析，客户端不传路径，避免目录穿越。
+bool isServerAvatarFileName(String file) {
+  final f = file.trim();
+  if (f.isEmpty || f.length > 160) return false;
+  if (f.contains('/') || f.contains('\\') || f.contains('..')) return false;
+  return RegExp(r'\.(?:jpe?g|png|webp)$', caseSensitive: false).hasMatch(f);
+}
+
+/// 从媒体地址解析 `<库>/.avatars/<file>`，返回库 id 与文件名；否则 null。
+///
+/// 只认精确的三段式 `/media/<lib>/.avatars/<file>`；旧目录
+/// `@manual-avatar/...` 不是「按文件注册」的来源，交给旧上传链路处理。
+({String lib, String file})? serverAvatarFileFromPath(String? mediaPath) {
+  final s = mediaPath?.trim() ?? '';
+  if (!s.startsWith('/media/')) return null;
+  final parts = s.substring(7).split('/');
+  if (parts.length != 3 || parts[1] != '.avatars') return null;
+  final lib = Uri.decodeComponent(parts[0]);
+  final file = Uri.decodeComponent(parts[2]);
+  if (lib.isEmpty || !isServerAvatarFileName(file)) return null;
+  return (lib: lib, file: file);
+}
+
+/// `/api/avatar/set` 设置请求体。
+Map<String, dynamic> authorAvatarSetBody({
+  required String lib,
+  required String author,
+  required String file,
+}) =>
+    <String, dynamic>{
+      'lib': lib.trim(),
+      'author': author.trim(),
+      'file': file.trim(),
+    };
+
+/// `/api/avatar/set` 清除请求体（「恢复自动」）。
+Map<String, dynamic> authorAvatarClearBody({
+  required String lib,
+  required String author,
+}) =>
+    <String, dynamic>{
+      'lib': lib.trim(),
+      'author': author.trim(),
+      'clear': true,
+    };
+
+/// 头像接口 HTTP 状态码 → 可读原因；未知状态码只报数字。
+String authorAvatarApiErrorText(int status) {
+  switch (status) {
+    case 400:
+      return '请求格式不对或文件名非法';
+    case 404:
+      return '基础库或头像文件不存在';
+    case 500:
+      return '服务端写入注册表失败';
+    default:
+      return 'HTTP $status';
+  }
+}
 
 /// 作者头像来源优先级：手动覆盖 > 作品自带 `av`/爬虫作者头像 > 自动兜底图。
 ///

@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import 'cover_cache.dart';
+import 'cover_menu.dart';
 import 'cover_upload.dart';
 import 'decode_plan.dart';
 import 'library_badge.dart';
@@ -20,6 +21,10 @@ import 'work_plays.dart';
 /// L5-C：卡片封面（空串表示用默认图）。由调用方解析 `_cover/` 与播放量。
 typedef CoverOf = String Function(BasicLib basic);
 typedef UnitCoverOf = String Function(UnitLibrary unit);
+
+/// owner 2026-11-23：按「基础库 id + 单元库 rel」生成卡片封面菜单动作。
+/// 返回 null 表示该卡片没有封面入口（例如缺少基础库 id）。
+typedef CoverMenuOf = CoverMenuActions? Function(String libId, String unitRel);
 
 // ---------------------------------------------------------------------------
 // 库卡片统一规格（单元库卡片 / 基础库卡片共用）
@@ -157,12 +162,13 @@ String unitCoverUrl(
   String customUrl = '',
   String Function(BasicLib basic, String thumb)? thumbUrlOf,
   String firstThumb = '',
+  bool ignoreManual = false,
 }) {
   final preset = customUrl.trim();
   // 调用方已解析好的地址（自定义封面，鉴权/路由由调用方掌握）优先。
-  if (preset.isNotEmpty) return preset;
+  if (!ignoreManual && preset.isNotEmpty) return preset;
   // 0.9.35：owner 手动设的单元库封面（服务端 `cover.u`）。
-  final manual = unit.node.coverUrl.trim();
+  final manual = ignoreManual ? '' : unit.node.coverUrl.trim();
   if (manual.isNotEmpty) {
     final base = unit.node.serverBase.trim();
     if (base.isNotEmpty) {
@@ -172,7 +178,7 @@ String unitCoverUrl(
   final top = topPlayedInUnit(unit);
   final pick = pickUnitCover(
     rel: unit.rel,
-    version: unit.node.coverVersion,
+    version: ignoreManual ? '' : unit.node.coverVersion,
     ext: unit.node.coverExt,
     bestThumb: top?.thumb ?? '',
     // 首张作品封面始终作为「最后一级」传入：有播放记录但那张记录的缩略图
@@ -206,8 +212,9 @@ Map<String, String> unitHeadersOf(
 ///  3. 本库「App 播放量最高」作品的封面（有图文作品时优先图文图片）；
 ///  4. 服务端下发的首张作品封面 `fc`（[BasicLib.firstCover]）；
 ///  5. 空串 → 卡片回退默认图标。
-String basicCoverUrl(BasicLib basic, {String preset = '', String firstThumb = ''}) {
-  final p = preset.trim();
+String basicCoverUrl(BasicLib basic,
+    {String preset = '', String firstThumb = '', bool ignoreCustom = false}) {
+  final p = ignoreCustom ? '' : preset.trim();
   if (p.isNotEmpty) return p;
   final top = topPlayed(WorkPlaysStore.countsFor(basic.id));
   // `fc` 只在调用方没指定时兜底用，保证「库 → 封面」只有一套取値口径。
@@ -216,7 +223,7 @@ String basicCoverUrl(BasicLib basic, {String preset = '', String firstThumb = ''
   // 再拼 rel 会变成 `<rel>/_cover/...` → 404（实测 2026-11-21）。
   final pick = pickBasicCover(
     rel: '',
-    version: basic.coverVersion,
+    version: ignoreCustom ? '' : basic.coverVersion,
     ext: basic.coverExt,
     crawlerThumb: basic.crawlerCover,
     bestThumb: top?.thumb ?? '',
@@ -245,6 +252,10 @@ class UnitLibraryHomeView extends StatefulWidget {
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
   final CoverUploader? coverUploader;
 
+  /// owner 2026-11-23：封面入口（本地选图 / 过往封面 / 恢复自动 / 清除）。
+  /// 为空时回退到只有「本地选图」的旧入口。
+  final CoverMenuOf? coverMenuOf;
+
   /// P3：顶级单元库卡片的连接状态文案（如「已连接」「已断连」）；空串不显示。
   final String Function(UnitLibrary unit)? statusOf;
 
@@ -263,6 +274,7 @@ class UnitLibraryHomeView extends StatefulWidget {
     this.unitCoverOf,
     this.headersOf,
     this.coverUploader,
+    this.coverMenuOf,
     this.statusOf,
     this.topCoverOf,
   });
@@ -416,10 +428,12 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
                 starred: liveStars.contains(u.id),
                 onToggleStar: () => widget.onToggleUnitStar(u),
                 onTap: () => widget.onOpenUnit(u),
-                onSetCover:
-                    widget.coverUploader == null || coverLib.isEmpty
+                coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
+                onSetCover: widget.coverMenuOf != null
+                    ? null
+                    : (widget.coverUploader == null || coverLib.isEmpty
                         ? null
-                        : () => _pickCover(coverLib, u.rel),
+                        : () => _pickCover(coverLib, u.rel)),
               );
             },
           ),
@@ -480,6 +494,9 @@ class StarredUnitsPage extends StatefulWidget {
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
   final CoverUploader? coverUploader;
 
+  /// owner 2026-11-23：卡片封面合并入口。
+  final CoverMenuOf? coverMenuOf;
+
   /// 右上角爬虫配置入口（与主页/详情页单元库卡片一致；非顶级才显示）。
   final void Function(UnitLibrary unit)? onConfigureUnit;
 
@@ -491,6 +508,7 @@ class StarredUnitsPage extends StatefulWidget {
     this.unitCoverOf,
     this.headersOf,
     this.coverUploader,
+    this.coverMenuOf,
     this.onConfigureUnit,
   });
 
@@ -602,10 +620,12 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                   starred: true,
                   onToggleStar: () => _toggle(u),
                   onTap: () => widget.onOpenUnit(u),
-                  onSetCover:
-                      widget.coverUploader == null || coverLib.isEmpty
+                  coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
+                  onSetCover: widget.coverMenuOf != null
+                      ? null
+                      : (widget.coverUploader == null || coverLib.isEmpty
                           ? null
-                          : () => _pickCover(coverLib, u.rel),
+                          : () => _pickCover(coverLib, u.rel)),
                   onConfigure: (widget.onConfigureUnit == null ||
                           !UnitLibraryCard.canConfigure(u))
                       ? null
@@ -620,7 +640,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
 
 /// 单元库卡片（大）：与基础库卡片同一形状/排版（圆角 [kLibCardRadius]、
 /// 满幅封面 + 底部渐变信息层），只比基础库卡片面积更大。
-class UnitLibraryCard extends StatelessWidget {
+class UnitLibraryCard extends StatefulWidget {
   /// 卡片高度（略大于基础库卡片）。
   static const double height = 150;
 
@@ -655,6 +675,10 @@ class UnitLibraryCard extends StatelessWidget {
   /// C2：本地选图上传封面（为空不显示按钮）。
   final VoidCallback? onSetCover;
 
+  /// owner 2026-11-23：封面合并入口。非空时右上角只留一个「封面设置」，
+  /// 点击弹出四项菜单；为空时回退到 [onSetCover] 直连选图。
+  final CoverMenuActions? coverMenu;
+
   /// P3：首页顶级单元库卡片。为 true 时**不使用自动封面**，
   /// 未设置封面就用词条色块占位（[fallbackTint]），避免首页拿作品图充当库封面。
   final bool topCard;
@@ -676,6 +700,7 @@ class UnitLibraryCard extends StatelessWidget {
     this.onToggleStar,
     this.onConfigure,
     this.onSetCover,
+    this.coverMenu,
     this.topCard = false,
     this.fallbackTint,
     this.connectionStatus = '',
@@ -685,6 +710,54 @@ class UnitLibraryCard extends StatelessWidget {
   static bool canConfigure(UnitLibrary unit) => unit.rel.trim().isNotEmpty;
 
   @override
+  State<UnitLibraryCard> createState() => _UnitLibraryCardState();
+}
+
+class _UnitLibraryCardState extends State<UnitLibraryCard> {
+  /// 菜单操作成功后的临时覆盖：非空直接使用；[_coverAuto] 为 true 时
+  /// 按自动封面链重新求值（不读服务端自定义指针）。
+  String? _coverOverride;
+  bool _coverAuto = false;
+
+  @override
+  void didUpdateWidget(covariant UnitLibraryCard old) {
+    super.didUpdateWidget(old);
+    if (old.coverUrl != widget.coverUrl ||
+        !identical(old.coverUrlOf, widget.coverUrlOf)) {
+      _coverOverride = null;
+      _coverAuto = false;
+    }
+  }
+
+  String _coverUrlNow() {
+    if (_coverOverride != null) return _coverOverride!;
+    if (_coverAuto) {
+      if (widget.topCard) return '';
+      return unitCoverUrl(widget.unit, ignoreManual: true);
+    }
+    return widget.topCard
+        ? (widget.coverUrlOf?.call(widget.unit) ?? widget.coverUrl)
+        : unitCoverUrl(
+            widget.unit,
+            customUrl: widget.coverUrlOf?.call(widget.unit) ?? widget.coverUrl,
+          );
+  }
+
+  Future<void> _openCoverMenu() async {
+    final menu = widget.coverMenu;
+    if (menu == null) {
+      widget.onSetCover?.call();
+      return;
+    }
+    final out = await showCoverMenu(context, menu);
+    if (!mounted || out == null) return;
+    setState(() {
+      _coverAuto = out.auto;
+      _coverOverride = out.auto || out.url.isEmpty ? null : out.url;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) =>
       // 0.9.55：每张卡片单独一层重绘边界——网格滚动、悬停涟漪、
       // 播放次数变化（WorkPlaysStore）只重绘当前卡片，不带动整块网格。
@@ -692,17 +765,20 @@ class UnitLibraryCard extends StatelessWidget {
 
   Widget _buildCard(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final unit = widget.unit;
     final server = unit.node.serverLabel;
-    final showCrawler = onConfigure != null && canConfigure(unit);
+    final showCrawler =
+        widget.onConfigure != null && UnitLibraryCard.canConfigure(unit);
     return Material(
       color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      borderRadius: BorderRadius.circular(radius),
+      borderRadius: BorderRadius.circular(UnitLibraryCard.radius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        key: ValueKey(
-            onTap == null ? 'unit-head-${unit.id}' : 'unit-${unit.id}'),
-        borderRadius: BorderRadius.circular(radius),
-        onTap: onTap,
+        key: ValueKey(widget.onTap == null
+            ? 'unit-head-${unit.id}'
+            : 'unit-${unit.id}'),
+        borderRadius: BorderRadius.circular(UnitLibraryCard.radius),
+        onTap: widget.onTap,
         // 封面铺满整张卡片；不贴来源词条；名称与统计压在底部渐变上。
         child: SizedBox.expand(
           key: ValueKey('unit-card-${unit.id}'),
@@ -716,15 +792,10 @@ class UnitLibraryCard extends StatelessWidget {
                 builder: (_, __, ___) => _UnitCoverFill(
                   key: ValueKey('unit-cover-${unit.id}'),
                   displayWidth: kUnitCardDisplayWidth,
-                  url: topCard
-                      ? (coverUrlOf?.call(unit) ?? coverUrl)
-                      : unitCoverUrl(
-                          unit,
-                          customUrl: coverUrlOf?.call(unit) ?? coverUrl,
-                        ),
-                  headers: headers,
+                  url: _coverUrlNow(),
+                  headers: widget.headers,
                   fallbackIcon: Icons.folder_copy_outlined,
-                  tint: topCard ? fallbackTint : null,
+                  tint: widget.topCard ? widget.fallbackTint : null,
                 ),
               ),
             ),
@@ -738,7 +809,7 @@ class UnitLibraryCard extends StatelessWidget {
                 unitId: unit.id,
                 stats: '${formatCount(unit.authors)} 作者 · '
                     '${formatCount(unit.works)} 作品',
-                server: [connectionStatus, server]
+                server: [widget.connectionStatus, server]
                     .where((e) => e.isNotEmpty)
                     .join(' · '),
               ),
@@ -752,12 +823,24 @@ class UnitLibraryCard extends StatelessWidget {
                     isTop: unit.rel.trim().isEmpty, isUnit: true),
               ),
             ),
-            // 与基础库卡片一致的右上角操作区（爬虫配置 / 星标）。
+            // 与基础库卡片一致的右上角操作区（封面 / 爬虫配置 / 星标）。
             Positioned(
               top: 6,
               right: 6,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                if (onSetCover != null)
+                if (widget.coverMenu != null)
+                  IconButton(
+                    key: ValueKey('unit-cover-btn-${unit.id}'),
+                    tooltip: '封面设置',
+                    iconSize: 18,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 30, height: 30),
+                    icon: const Icon(Icons.image_outlined),
+                    onPressed: _openCoverMenu,
+                  )
+                else if (widget.onSetCover != null)
                   IconButton(
                     key: ValueKey('unit-cover-btn-${unit.id}'),
                     tooltip: '本地选图作封面',
@@ -767,7 +850,7 @@ class UnitLibraryCard extends StatelessWidget {
                     constraints:
                         const BoxConstraints.tightFor(width: 30, height: 30),
                     icon: const Icon(Icons.image_outlined),
-                    onPressed: onSetCover,
+                    onPressed: widget.onSetCover,
                   ),
                 if (showCrawler)
                   IconButton(
@@ -779,13 +862,13 @@ class UnitLibraryCard extends StatelessWidget {
                     constraints:
                         const BoxConstraints.tightFor(width: 30, height: 30),
                     icon: const Icon(Icons.settings_ethernet),
-                    onPressed: onConfigure,
+                    onPressed: widget.onConfigure,
                   ),
-                if (onToggleStar != null)
+                if (widget.onToggleStar != null)
                   _StarButton(
                     key: ValueKey('unit-star-${unit.id}'),
-                    starred: starred,
-                    onTap: onToggleStar!,
+                    starred: widget.starred,
+                    onTap: widget.onToggleStar!,
                   ),
               ]),
             ),
@@ -912,6 +995,9 @@ class UnitLibraryPage extends StatefulWidget {
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
   final CoverUploader? coverUploader;
 
+  /// owner 2026-11-23：卡片封面合并入口。
+  final CoverMenuOf? coverMenuOf;
+
   const UnitLibraryPage({
     super.key,
     required this.unit,
@@ -924,6 +1010,7 @@ class UnitLibraryPage extends StatefulWidget {
     this.headersOf,
     this.onConfigureUnit,
     this.coverUploader,
+    this.coverMenuOf,
   });
 
   @override
@@ -1136,9 +1223,12 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                   onConfigure: onConfigureUnit == null
                       ? null
                       : () => onConfigureUnit(sub),
-                  onSetCover: widget.coverUploader == null || coverLib.isEmpty
+                  coverMenu: widget.coverMenuOf?.call(coverLib, sub.rel),
+                  onSetCover: widget.coverMenuOf != null
                       ? null
-                      : () => _pickCover(coverLib, sub.rel),
+                      : (widget.coverUploader == null || coverLib.isEmpty
+                          ? null
+                          : () => _pickCover(coverLib, sub.rel)),
                 );
               },
             ),
@@ -1168,10 +1258,16 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                 unitLabel: unit.name,
                 unitKey: unit.id,
                 onTap: () => onTapBasic(sorted[i]),
-                onSetCover: widget.coverUploader == null
+                coverMenu: widget.coverMenuOf == null
                     ? null
-                    : () => _pickCover(
+                    : widget.coverMenuOf!.call(
                         sorted[i].id, ownerKey[sorted[i].id] ?? ''),
+                onSetCover: widget.coverMenuOf != null
+                    ? null
+                    : (widget.coverUploader == null
+                        ? null
+                        : () => _pickCover(
+                            sorted[i].id, ownerKey[sorted[i].id] ?? '')),
               ),
             ),
           ],
@@ -1183,7 +1279,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
 }
 
 /// 基础库卡片（中）：来源词条、名称、作者/作品数。
-class BasicLibCard extends StatelessWidget {
+class BasicLibCard extends StatefulWidget {
   final BasicLib basic;
   final VoidCallback onTap;
   final String coverUrl;
@@ -1205,6 +1301,9 @@ class BasicLibCard extends StatelessWidget {
   /// C2：本地选图上传封面（为空不显示按钮）。
   final VoidCallback? onSetCover;
 
+  /// owner 2026-11-23：封面合并入口（非空时右上角只留一个「封面设置」）。
+  final CoverMenuActions? coverMenu;
+
   const BasicLibCard({
     super.key,
     required this.basic,
@@ -1215,10 +1314,53 @@ class BasicLibCard extends StatelessWidget {
     this.unitLabel = '',
     this.unitKey = '',
     this.onSetCover,
+    this.coverMenu,
   });
 
   /// 词条文本：与作者词条共用同一套「去序号」规则。
   static String badgeText(String name) => LibraryBadge.stripIndex(name);
+
+  @override
+  State<BasicLibCard> createState() => _BasicLibCardState();
+}
+
+class _BasicLibCardState extends State<BasicLibCard> {
+  String? _coverOverride;
+  bool _coverAuto = false;
+
+  @override
+  void didUpdateWidget(covariant BasicLibCard old) {
+    super.didUpdateWidget(old);
+    if (old.coverUrl != widget.coverUrl ||
+        !identical(old.coverUrlOf, widget.coverUrlOf)) {
+      _coverOverride = null;
+      _coverAuto = false;
+    }
+  }
+
+  String _coverUrlNow() {
+    if (_coverOverride != null) return _coverOverride!;
+    return basicCoverUrl(
+      widget.basic,
+      preset: _coverAuto ? '' : (widget.coverUrlOf?.call(widget.basic) ?? widget.coverUrl),
+      firstThumb: widget.basic.firstCover,
+      ignoreCustom: _coverAuto,
+    );
+  }
+
+  Future<void> _openCoverMenu() async {
+    final menu = widget.coverMenu;
+    if (menu == null) {
+      widget.onSetCover?.call();
+      return;
+    }
+    final out = await showCoverMenu(context, menu);
+    if (!mounted || out == null) return;
+    setState(() {
+      _coverAuto = out.auto;
+      _coverOverride = out.auto || out.url.isEmpty ? null : out.url;
+    });
+  }
 
   Widget _badge() {
     // 位置词条只由「单元库」生成：取所属单元库名称与配色，不再用基础库自身。
@@ -1227,11 +1369,12 @@ class BasicLibCard extends StatelessWidget {
     // P1：末梢基础库词条颜色优先级＝本库自定义 → 上级单元库自定义 →
     // 顶级单元库继承 → 自动配色；层级外观固定为 basic（形状/尺寸与上层一致，
     // 只改边框/底纹）。
-    final hasUnit = unitLabel.isNotEmpty;
+    final hasUnit = widget.unitLabel.isNotEmpty;
     final text = LibraryBadge.labelWithEmoji(
-        badgeText(hasUnit ? unitLabel : basic.name), hasUnit ? unitKey : '');
-    final unitId = unitKey.isEmpty ? unitLabel : unitKey;
-    final color = Color(LibraryBadge.basicColorFor(basic.id, unitId,
+        BasicLibCard.badgeText(hasUnit ? widget.unitLabel : widget.basic.name),
+        hasUnit ? widget.unitKey : '');
+    final unitId = widget.unitKey.isEmpty ? widget.unitLabel : widget.unitKey;
+    final color = Color(LibraryBadge.basicColorFor(widget.basic.id, unitId,
         order: UnitBadgeRegistry.order));
     return LibBadgeChip(
       label: text.length > 10 ? '${text.substring(0, 10)}…' : text,
@@ -1247,6 +1390,7 @@ class BasicLibCard extends StatelessWidget {
       RepaintBoundary(child: _buildCard(context));
 
   Widget _buildCard(BuildContext context) {
+    final basic = widget.basic;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(kLibCardRadius),
@@ -1254,7 +1398,7 @@ class BasicLibCard extends StatelessWidget {
       child: InkWell(
         key: ValueKey('basic-card-${basic.id}'),
         borderRadius: BorderRadius.circular(kLibCardRadius),
-        onTap: onTap,
+        onTap: widget.onTap,
         // 与单元库卡片一致：封面铺满整张卡片，信息压在底部渐变上。
         child: Stack(fit: StackFit.expand, children: [
           ValueListenableBuilder<int>(
@@ -1262,12 +1406,8 @@ class BasicLibCard extends StatelessWidget {
             valueListenable: WorkPlaysStore.libListenable(basic.id),
             builder: (_, __, ___) => _UnitCoverFill(
               key: ValueKey('basic-cover-${basic.id}'),
-              url: basicCoverUrl(
-                basic,
-                preset: coverUrlOf?.call(basic) ?? coverUrl,
-                firstThumb: basic.firstCover,
-              ),
-              headers: headers,
+              url: _coverUrlNow(),
+              headers: widget.headers,
               fallbackIcon: Icons.folder_outlined,
             ),
           ),
@@ -1278,7 +1418,7 @@ class BasicLibCard extends StatelessWidget {
             child: LibCardInfo(
               badge: _badge(),
               title: basic.name,
-              unitId: unitKey,
+              unitId: widget.unitKey,
               stats: '${basic.authors} 作者 · ${basic.works} 作品',
               server: basic.serverLabel,
               dense: true,
@@ -1290,20 +1430,20 @@ class BasicLibCard extends StatelessWidget {
             top: kCornerBadgeInset,
             child: LibCornerBadge(kind: LibBadgeKind.basic),
           ),
-          if (onSetCover != null)
+          if (widget.coverMenu != null || widget.onSetCover != null)
             Positioned(
               top: 6,
               right: 6,
               child: IconButton(
                 key: ValueKey('basic-cover-btn-${basic.id}'),
-                tooltip: '本地选图作封面',
+                tooltip: widget.coverMenu != null ? '封面设置' : '本地选图作封面',
                 iconSize: 18,
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints:
                     const BoxConstraints.tightFor(width: 30, height: 30),
                 icon: const Icon(Icons.image_outlined),
-                onPressed: onSetCover,
+                onPressed: _openCoverMenu,
               ),
             ),
         ]),
