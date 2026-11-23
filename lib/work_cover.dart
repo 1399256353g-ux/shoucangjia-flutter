@@ -25,10 +25,18 @@ class WorkCoverUrls {
   /// 相对路径 → 绝对地址（媒体已带鉴权/服务器前缀）。
   final String Function(String path) mediaUrl;
 
+  /// 服务端接口路径 → 绝对地址（只补服务器前缀，不加 `/media/<lib>/`）。
+  /// 用于 `th` 已被扫描器写成 `/api/thumb/...` 的作品。
+  final String Function(String path) rawUrl;
+
   /// (lib, workId) → 抽帧接口地址。
   final String Function(String lib, String workId) thumbUrl;
 
-  const WorkCoverUrls({required this.mediaUrl, required this.thumbUrl});
+  const WorkCoverUrls({
+    required this.mediaUrl,
+    required this.rawUrl,
+    required this.thumbUrl,
+  });
 
   /// 默认实现：`/api/thumb/<lib>/<id>?v=<版本>`。
   factory WorkCoverUrls.standard({
@@ -37,6 +45,7 @@ class WorkCoverUrls {
   }) =>
       WorkCoverUrls(
         mediaUrl: mediaUrl,
+        rawUrl: rawUrl,
         thumbUrl: (lib, id) => rawUrl('/api/thumb/$lib/$id?v=$kWorkThumbVersion'),
       );
 }
@@ -52,6 +61,22 @@ bool isVideoPath(String p) {
     if (l.endsWith(ext)) return true;
   }
   return false;
+}
+
+/// 这个封面路径是**服务端接口**（`/api/thumb/...`）而不是媒体文件？
+///
+/// 2026-11-23 实测（只统计结构、不看任何名称）：libidx 里有 2288 条图文作品的
+/// `th` 已经被写成 `/api/thumb/<lib>/<id>` 这种**接口地址**（lib-005 454 条、
+/// lib-019 229 条、lib-021 1602 条等，正是「comics / AI 单图无封面」的那几个库）。
+/// 旧解析把它当相对媒体路径交给 `mediaUrl`，拼出
+/// `http://host/media/<lib>/api/thumb/...` —— 服务端把 `api` 当库内子目录，
+/// 必然 404，卡片就永远只有底色。
+///
+/// 接口地址必须原样走 `rawUrl`（只补服务器前缀），不能再加 `/media/<lib>/`。
+bool isApiThumbPath(String p) {
+  final t = p.trim();
+  if (t.isEmpty) return false;
+  return t.startsWith('/api/');
 }
 
 /// 不经过抽帧接口就能直接用上的封面路径；没有则返回空串。
@@ -106,7 +131,12 @@ String workCoverUrl(
   required WorkCoverUrls urls,
 }) {
   final path = workCoverPath(work);
-  if (path.isNotEmpty) return urls.mediaUrl(path);
+  if (path.isNotEmpty) {
+    // 服务端已把 `th` 落成 `/api/thumb/...`：它是接口不是媒体文件，
+    // 直接补服务器前缀（再套 `/media/<lib>/` 会 404）。
+    if (isApiThumbPath(path)) return urls.rawUrl(path);
+    return urls.mediaUrl(path);
+  }
   if (!workNeedsFrameThumb(work)) return '';
   final id = '${(work as Map)['id'] ?? ''}'.trim();
   return urls.thumbUrl(lib, id);

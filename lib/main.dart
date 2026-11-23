@@ -39,6 +39,7 @@ import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_filter.dart';
 import 'author_drag.dart';
+import 'author_merge.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
 import 'author_filter_bar.dart';
@@ -272,6 +273,11 @@ class Cfg {
     final path = p.trim();
     if (path.isEmpty) return path;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    // 服务端接口地址（`/api/thumb/<lib>/<id>` 等）不是媒体文件：
+    // 扫描器会把这类地址直接写进作品的 `th`，若再套 `/media/<lib>/` 就变成
+    // `/media/<lib>/api/thumb/...` —— 服务端把 `api` 当库内子目录 → 必然 404。
+    // 实测 2026-11-23：2288 条图文作品是这种 `th`，对应「comics / AI 单图无封面」。
+    if (path.startsWith('/api/')) return path;
     if (l.isEmpty) return path;
     // 相对路径（如手动封面 `_cover/v1.jpg`）必须补成 /media/<lib>/...，
     // 否则会被直接拼到域名后面变成 `http://ip:8090_cover/...`，永远加载不出来。
@@ -15413,6 +15419,8 @@ class _AuthorPageState extends State<AuthorPage> {
   List works = [];
   // J6：按作品类型筛选（可多选，空集合=全部）
   final Set<String> typeFilter = <String>{};
+  /// 跨库同名作者合并：按来源基础库筛选（空 = 全部）。
+  String libFilter = '';
   List filteredWorks = [];
   Map<String, int> typeCounts = {};
   String primaryLib = '';
@@ -15777,6 +15785,8 @@ class _AuthorPageState extends State<AuthorPage> {
     av = '';
     fallbackAv = '';
     primaryLib = '';
+    // 重新拉取时来源筛选归零：库可能增减，旧选择不一定还成立。
+    libFilter = '';
     for (final lib in _libs) {
       try {
         final r = await http.get(cfg.u('/api/authors.json', lib: lib),
@@ -16095,7 +16105,13 @@ class _AuthorPageState extends State<AuthorPage> {
 
   // 仅在数据加载/筛选变化时重算，避免观看进度刷新时反复重建列表
   void _refreshFilter() {
-    filteredWorks = filterWorksByType(works, typeFilter);
+    // 先按来源库（跨库同名作者合并后的筛选），再按作品类型。
+    final scoped = filterWorksByLib(
+      works,
+      lib: libFilter,
+      fallbackLib: primaryLib,
+    );
+    filteredWorks = filterWorksByType(scoped, typeFilter);
     typeCounts = workTypeCounts(works);
   }
 
@@ -16112,6 +16128,30 @@ class _AuthorPageState extends State<AuthorPage> {
       typeFilter.clear();
       _refreshFilter();
     });
+  }
+
+  /// 来源库筛选（跨库同名作者合并）：空串 = 全部。
+  void _setLibFilter(String lib) {
+    if (libFilter == lib) return;
+    setState(() {
+      libFilter = lib;
+      _refreshFilter();
+    });
+  }
+
+  /// 基础库展示名：优先当前库元数据里的名称，其次 id 本身。
+  ///
+  /// 只在多库合并时用（单库不显示筛选条），所以查不到名称时直接给 id 也能读。
+  String libLabel(String id) {
+    for (final b in (meta?.allBasics ?? const <BasicLibRef>[])) {
+      if (b.id == id) {
+        return displayLibraryName(b.id, b.name);
+      }
+    }
+    for (final b in (meta?.basics ?? const <BasicLibRef>[])) {
+      if (b.id == id) return displayLibraryName(b.id, b.name);
+    }
+    return displayLibraryName(id, id);
   }
 
   // 点击头像放大查看（可双指缩放，点任意处关闭）；长按设置/清除手动头像。
@@ -16232,6 +16272,17 @@ class _AuthorPageState extends State<AuthorPage> {
                     fallbackName: '',
                     works: works.length,
                   ),
+                  // 跨库同名作者合并：多库时才提示「来自 N 个库」。
+                  if (authorSourceSummary(_libs).isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '${authorSourceSummary(_libs)}'
+                        ' · 同名作者已合并 · 可按库里作品分开看',
+                        key: const ValueKey('author-merge-hint'),
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ),
                   const SizedBox(height: 6),
                   Row(children: [
                     const Text('作者简介',
@@ -16331,6 +16382,38 @@ class _AuthorPageState extends State<AuthorPage> {
                 ),
               ),
               const Divider(height: 1),
+              // 跨库同名作者合并：只在作者确实来自多个基础库时出现来源筛选，
+              // 单库作者（常态）不额外占一行。
+              if (libFilterOptions(works, fallbackLib: primaryLib).length > 1)
+                HorizontalChipBar(
+                  key: const ValueKey('author-lib-filter'),
+                  height: 42,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
+                    Center(
+                      child: FilterChip(
+                          label: Text('全部库 ${works.length}',
+                              style: const TextStyle(fontSize: 12)),
+                          selected: libFilter.isEmpty,
+                          showCheckmark: false,
+                          onSelected: (_) => _setLibFilter('')),
+                    ),
+                    for (final o
+                        in libFilterOptions(works, fallbackLib: primaryLib))
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Center(
+                          child: FilterChip(
+                              key: ValueKey('author-lib-${o.key}'),
+                              label: Text('${libLabel(o.key)} ${o.value}',
+                                  style: const TextStyle(fontSize: 12)),
+                              selected: libFilter == o.key,
+                              showCheckmark: false,
+                              onSelected: (_) => _setLibFilter(o.key)),
+                        ),
+                      ),
+                  ],
+                ),
               if (works.isNotEmpty)
                 HorizontalChipBar(
                   height: 46,

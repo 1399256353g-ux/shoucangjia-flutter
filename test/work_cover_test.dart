@@ -69,6 +69,58 @@ void main() {
       expect(isVideoPath('a/b.mov'), isTrue);
       expect(isVideoPath('a/b.jpg'), isFalse);
     });
+
+    group('服务端接口形态的 th（2026-11-23 comics/AI 单图无封面根因）', () {
+      test('th 是 /api/thumb/<lib>/<id> 时走 rawUrl，不再二次套 /media', () {
+        // 实测：libidx 里 2288 条图文作品的 th 已是这种接口地址
+        // （lib-005 / lib-019 / lib-021 等）；旧解析拼成
+        // /media/<lib>/api/thumb/... → 服务端把 api 当子目录 → 永远 404。
+        final w = {
+          'id': 'w10',
+          't': 'p',
+          'th': '/api/thumb/lib-021/w10',
+          'm': ['A/PIC/1.jpg'],
+        };
+        expect(isApiThumbPath('/api/thumb/lib-021/w10'), isTrue);
+        expect(
+          workCoverUrl(w, lib: 'lib-021', urls: urls),
+          'RAW:/api/thumb/lib-021/w10',
+        );
+      });
+
+      test('接口形态的 th 优先于图文首图（不因路径形态而被跳过）', () {
+        final w = {
+          'id': 'w11',
+          't': 'p',
+          'th': '/api/thumb/lib-005/w11',
+          'm': ['A/PIC/later.jpg'],
+        };
+        expect(workCoverUrl(w, lib: 'lib-005', urls: urls),
+            'RAW:/api/thumb/lib-005/w11');
+        // 有接口封面就不需要服务端再抽帧
+        expect(workNeedsFrameThumb(w), isFalse);
+      });
+
+      test('媒体文件形态的 th 仍然走 mediaUrl（不误判成接口）', () {
+        final w = {
+          'id': 'w12',
+          't': 'p',
+          'th': '/media/lib-001/A/thumb.webp',
+          'm': const <String>[],
+        };
+        expect(isApiThumbPath('/media/lib-001/A/thumb.webp'), isFalse);
+        expect(workCoverUrl(w, lib: 'lib-001', urls: urls),
+            'MEDIA:/media/lib-001/A/thumb.webp');
+      });
+
+      test('isApiThumbPath 只认 /api/ 前缀', () {
+        expect(isApiThumbPath(''), isFalse);
+        expect(isApiThumbPath('  '), isFalse);
+        expect(isApiThumbPath('/apix/thumb'), isFalse);
+        expect(isApiThumbPath('api/thumb'), isFalse);
+        expect(isApiThumbPath('/api/thumb/x/y'), isTrue);
+      });
+    });
   });
 
   group('posterLayerVisible（播放页海报是否建层）', () {
