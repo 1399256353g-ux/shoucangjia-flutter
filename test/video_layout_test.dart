@@ -104,9 +104,11 @@ void main() {
         progressBottom: 0,
         hitStripHeight: 28,
       );
-      // 38 = 28 条带 + 10 间距；必须严格大于条带本身，否则头像会落进热区。
-      expect(bottom, 38);
+      // 36 = 28 条带 + 8 紧凑间距（owner 2026-11-22 要求往下挪）；
+      // 必须严格大于条带本身，否则头像会落进热区。
+      expect(bottom, 36);
       expect(bottom, greaterThan(28));
+      expect(bottom, lessThanOrEqualTo(40));
     });
 
     test('安全区/内边距叠加，非法值退化为 0', () {
@@ -118,7 +120,7 @@ void main() {
             progressBottom: 34,
             hitStripHeight: 28,
           ),
-          72);
+          70);
       expect(
           stageInfoBottom(
             fullscreen: false,
@@ -127,7 +129,7 @@ void main() {
             progressBottom: -5,
             hitStripHeight: -1,
           ),
-          10);
+          8);
     });
 
     test('全屏按进度层实际高度让位（含集数标签）', () {
@@ -151,10 +153,29 @@ void main() {
           58);
     });
 
-    test('单图图文没有进度层：只留 10dp 间距', () {
+    test('非全屏位置不随进度层变化（固定预留，owner 2026-11-22）', () {
+      final withLayer = stageInfoBottom(
+        fullscreen: false,
+        hasProgressLayer: true,
+        hasChapter: false,
+        progressBottom: 0,
+        hitStripHeight: 28,
+      );
+      final withoutLayer = stageInfoBottom(
+        fullscreen: false,
+        hasProgressLayer: false,
+        hasChapter: false,
+        progressBottom: 0,
+        hitStripHeight: 28,
+      );
+      expect(withLayer, withoutLayer);
+      expect(withLayer, 36);
+    });
+
+    test('全屏单图（无进度层）仍只留默认间距', () {
       expect(
           stageInfoBottom(
-            fullscreen: false,
+            fullscreen: true,
             hasProgressLayer: false,
             hasChapter: false,
             progressBottom: 0,

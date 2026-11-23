@@ -231,6 +231,11 @@ double stageProgressOverlayHeight({bool hasChapter = false}) =>
 /// 信息区必须让开这条条带，而不是只让开 2.5dp 的视觉细线——否则头像/
 /// 作者名的下半截会落在条带里，点击被进度条热区整块吞掉（无任何指针
 /// 事件、也无日志），表现就是「点头像没反应」。
+///
+/// owner 2026-11-22 两条：
+///  1. 非全屏的位置**与有没有进度条无关**——固定按条带高度预留，
+///     起播后进度层出现不再把信息区往上顶。
+///  2. 非全屏整体再往下挪一点（贴近进度条）：间距用 [compactGap]。
 double stageInfoBottom({
   required bool fullscreen,
   required bool hasProgressLayer,
@@ -238,13 +243,16 @@ double stageInfoBottom({
   required double progressBottom,
   required double hitStripHeight,
   double gap = 10,
+  double compactGap = 8,
 }) {
   final base = progressBottom > 0 ? progressBottom : 0.0;
   final g = gap > 0 ? gap : 0.0;
-  if (!hasProgressLayer) return base + g;
   if (!fullscreen) {
+    // 固定预留：与 hasProgressLayer 无关，单图/多图/视频位置一致。
     final hit = hitStripHeight > 0 ? hitStripHeight : 0.0;
-    return base + hit + g;
+    final cg = compactGap > 0 ? compactGap : 0.0;
+    return base + hit + cg;
   }
+  if (!hasProgressLayer) return base + g;
   return base + stageProgressOverlayHeight(hasChapter: hasChapter) + g;
 }

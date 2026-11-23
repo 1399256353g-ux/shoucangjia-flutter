@@ -9,6 +9,7 @@ import 'cover_cache.dart';
 import 'decode_plan.dart';
 import 'author_avatar.dart';
 import 'author_index.dart';
+import 'author_letter_bar.dart';
 import 'home_action.dart';
 import 'author_grid.dart';
 import 'category_tree_page.dart';
@@ -419,7 +420,9 @@ class _BasicLibPageState extends State<BasicLibPage>
           return Stack(children: [
         GridView.builder(
           controller: _authorScroll,
-          padding: const EdgeInsets.all(12),
+          // 右侧让出索引条宽度（≥28dp）：字母条只占右边缘条带，
+          // 但卡片不能被它压住，否则最后一列点击会被抢。
+          padding: EdgeInsets.fromLTRB(12, 12, letters.length > 1 ? 34 : 12, 12),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 180,
             mainAxisSpacing: 10,
@@ -533,7 +536,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                 right: 0,
                 top: 0,
                 bottom: 0,
-                width: 22,
+                width: 28,
                 child: _authorIndexBar(letters, starts, cons.maxWidth),
               ),
           ]);
@@ -585,37 +588,14 @@ class _BasicLibPageState extends State<BasicLibPage>
     );
   }
 
-  /// 右侧竖排首字母索引条；点字母滚到该字母首位作者。
+  /// 右侧竖排首字母索引条；点字母或按住上下滑动滚到该字母首位作者。
   Widget _authorIndexBar(
       List<String> letters, Map<String, int> starts, double viewportWidth) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final l in letters)
-              GestureDetector(
-                key: ValueKey('basic-author-index-$l'),
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _jumpToAuthorLetter(l, starts, viewportWidth),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                  child: Text(l,
-                      style: TextStyle(
-                          fontSize: letters.length > 18 ? 8.5 : 9.5,
-                          height: 1.15,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurfaceVariant
-                              .withValues(alpha: 0.75))),
-                ),
-              ),
-          ],
-        ),
-      ),
+    return AuthorLetterBar(
+      keyPrefix: 'basic-author-index-',
+      letters: letters,
+      width: 28,
+      onLetter: (l) => _jumpToAuthorLetter(l, starts, viewportWidth),
     );
   }
 

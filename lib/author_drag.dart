@@ -65,6 +65,41 @@ class AuthorDrag {
   }
 }
 
+/// 左滑进作者页的「能不能起手」判定（owner 2026-11-22）。
+///
+/// 全部规则集中在这里，播放页只负责传当次实测值：
+///  - 从作者页进来的作品：永远不能（否则原地绕回同一作者）；
+///  - 非全屏：只有右侧 [edgeWidth] 内起手才算（避免画面中间误触）；
+///  - 全屏：任意位置可起手，但**任务栏区域除外**（任务栏可见时，
+///    底部 [taskbarHeight] 内起手交给任务栏/进度条）；
+///  - 宽度/高度非法时不放行，避免除以 0 后的误判。
+bool authorDragAllowed({
+  required bool fromAuthor,
+  required bool fullscreen,
+  required double startDx,
+  required double startDy,
+  required double width,
+  required double screenHeight,
+  required double taskbarHeight,
+  required bool taskbarVisible,
+  double edgeWidth = 48,
+}) {
+  if (fromAuthor) return false;
+  if (width <= 0) return false;
+  if (!fullscreen) {
+    // 右边缘起手：startDx 距右边不足 edgeWidth。
+    return width - startDx <= edgeWidth;
+  }
+  // 全屏：排除任务栏热区（只在任务栏可见时排除；隐藏后该区域是普通画面）。
+  if (taskbarVisible &&
+      taskbarHeight > 0 &&
+      screenHeight > 0 &&
+      startDy >= screenHeight - taskbarHeight) {
+    return false;
+  }
+  return true;
+}
+
 /// 自带 Ticker 的 vsync。
 ///
 /// 关键：不能让这个控制器用「播放页」的 TickerProvider——作者页路由推上来后，

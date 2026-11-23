@@ -7546,13 +7546,17 @@ class PlayerPage extends StatefulWidget {
   final String? lib;
   // A2：列表到底时向来源页请求续播（返回是否追加成功）。
   final Future<bool> Function()? onNeedMore;
+  // owner 2026-11-22：按「进入来源」区分行为。true 表示从作者页点进来：
+  // 禁用左滑进作者页，并把点头像/作者名改成返回上一页。
+  final bool fromAuthor;
   // T3：不再携带旧「收藏夹」idx/名称，来源只由单元库体系表达
   const PlayerPage(
       {super.key,
       required this.works,
       required this.start,
       this.lib,
-      this.onNeedMore});
+      this.onNeedMore,
+      this.fromAuthor = false});
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
@@ -8041,6 +8045,7 @@ class _PlayerPageState extends State<PlayerPage>
       if (s == AnimationStatus.completed && mounted) setState(() {});
     });
     PerfDiagnostics.instance.beginSpan('page:player');
+    _fromAuthor = widget.fromAuthor;
     cur = widget.start;
     speed = AppSettings.defaultSpeed;
     _loadLikes();
@@ -10298,12 +10303,29 @@ class _PlayerPageState extends State<PlayerPage>
   /// owner 2026-11-20：只在右侧边缘起手，避免在画面中间滑动误开作者页。
   static const double kAuthorDragEdge = 48;
 
-  void _authorDragStart(double startDx, double width) {
+  /// owner 2026-11-22：从作者页点进来的作品，左滑进作者页与点头像都要关掉
+  /// （否则原地绕回同一个作者）。来源在 initState 里定格。
+  late bool _fromAuthor;
+
+  void _authorDragStart(double startDx, double width, {double startDy = -1}) {
+    // 起手判定集中在 authorDragAllowed（来源 + 边缘 + 任务栏排除），
+    // 不在这里另写一套条件。判定通过才取消单击判定，避免吞掉正常点击。
+    final pad = MediaQuery.paddingOf(context);
+    final allowed = authorDragAllowed(
+      fromAuthor: _fromAuthor,
+      fullscreen: fs,
+      startDx: startDx,
+      startDy: startDy,
+      width: width,
+      screenHeight: MediaQuery.sizeOf(context).height,
+      taskbarHeight: _liveTaskbarHeight(pad),
+      taskbarVisible: ui,
+      edgeWidth: kAuthorDragEdge,
+    );
+    if (!allowed) return;
     // P0：左滑拉作者页时取消单击判定，避免“滑一下却切了暂停”。
     _cancelPendingSingleTap();
     if (_authorDrag != null) return;
-    // 只有从右侧边缘起手才算「进入作者页」手势
-    if (width <= 0 || width - startDx > kAuthorDragEdge) return;
     final name = '${_workAt(cur)['a'] ?? ''}';
     if (name.isEmpty) return;
     _authorDragDx = 0;
@@ -10411,6 +10433,14 @@ class _PlayerPageState extends State<PlayerPage>
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
     _authorTapDiag('openAuthor');
+    // owner 2026-11-22：从作者页进来的作品，点头像/作者名 = 返回作者页。
+    if (_fromAuthor) {
+      _authorTapDiag('pop-to-author');
+      try {
+        Navigator.of(context).maybePop();
+      } catch (_) {}
+      return;
+    }
     final name = authorNameOf(_workAt(cur));
     CrashLog.instance.record(
       'author-tap raw=${_workAt(cur)['a'] ?? ''} resolved=${name.isEmpty ? 'EMPTY' : 'ok'}',
@@ -11151,6 +11181,7 @@ class _PlayerPageState extends State<PlayerPage>
     required Size viewSize,
     required double chromeOpacity,
     required int chromeMs,
+    required double infoOpacity,
     required bool immersiveFade,
     required double railOpacity,
     required int railMs,
@@ -11188,7 +11219,7 @@ class _PlayerPageState extends State<PlayerPage>
                 _authorTapDiag('pointer-up');
               },
               child: AnimatedOpacity(
-                opacity: chromeOpacity,
+                opacity: infoOpacity,
                 duration: Duration(milliseconds: chromeMs),
                 curve: Curves.easeOut,
                 child: GestureDetector(
@@ -12296,13 +12327,12 @@ class _PlayerPageState extends State<PlayerPage>
     // 随功能区一起显示、一起在自动隐藏时间到后消失；非全屏保持原样。
     final persistent = ui && (desktop || fs);
     final active = _scrubActive || (_scrubHover && (!fs || ui));
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: lift,
-      // 高度包含气泡空间，气泡画在进度条正上方居中。
-      height: kScrubHotZoneHeight + kScrubBubbleSpace,
-      child: LayoutBuilder(builder: (_, c) {
+    // owner 2026-11-22：进度条属于「信息层」，非全屏滑动时与信息区一起淡化；
+    // 全屏走原有的显示/隐藏，不叠加第二套透明度。
+    final fade = ChromeFade.infoOpacity(
+        uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
+    final fadeMs = ChromeFade.durationMs(swiping: _pageSwiping);
+    final layer = LayoutBuilder(builder: (_, c) {
         final width = c.maxWidth;
         return Stack(children: [
           // 绘制层：轨道与气泡。气泡预留的 34dp 是**视觉空间**，必须不可
@@ -12356,7 +12386,27 @@ class _PlayerPageState extends State<PlayerPage>
             ),
           ),
         ]);
-      }),
+      });
+    if (fade >= 1) {
+      return Positioned(
+        left: 0,
+        right: 0,
+        bottom: lift,
+        height: kScrubHotZoneHeight + kScrubBubbleSpace,
+        child: layer,
+      );
+    }
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: lift,
+      height: kScrubHotZoneHeight + kScrubBubbleSpace,
+      child: AnimatedOpacity(
+        opacity: fade,
+        duration: Duration(milliseconds: fadeMs),
+        curve: Curves.easeOut,
+        child: layer,
+      ),
     );
   }
 
@@ -12571,6 +12621,10 @@ class _PlayerPageState extends State<PlayerPage>
   }) {
     int picAt(Offset p, double width) =>
         picIndexAtFraction(width <= 0 ? 0 : p.dx / width, pics.length);
+    // owner 2026-11-22：图文分段条与视频进度条同一口径——非全屏滑动时淡化，
+    // 全屏仍按功能区显示/隐藏（拖动中不淡化，否则拖一半看不清目标段）。
+    final fade = ChromeFade.infoOpacity(
+        uiVisible: true, fullscreen: fs, swiping: _pageSwiping);
     return Positioned(
       left: 0,
       right: 0,
@@ -12614,7 +12668,9 @@ class _PlayerPageState extends State<PlayerPage>
               return IgnorePointer(
                 ignoring: fs && !ui && !draggingNow,
                 child: AnimatedOpacity(
-                  opacity: (!fs || ui || draggingNow) ? 1 : 0,
+                  opacity: (!fs || ui || draggingNow)
+                      ? (draggingNow ? 1.0 : fade)
+                      : 0,
                   duration: const Duration(milliseconds: kScrubFadeMs),
                   curve: Curves.easeOut,
                   child: Align(
@@ -12738,6 +12794,10 @@ class _PlayerPageState extends State<PlayerPage>
     final chromeOpacity = ChromeFade.opacity(
         uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
     final chromeMs = ChromeFade.durationMs(swiping: _pageSwiping);
+    // owner 2026-11-22：信息区（头像/作者名/简介）与进度条单独淡化——
+    // 顶部返回/封面按钮、底部任务栏保持不淡化，所以这里是第二套透明度。
+    final infoOpacity = ChromeFade.infoOpacity(
+        uiVisible: ui, fullscreen: fs, swiping: _pageSwiping);
     // P2 §12：非全屏沉浸只淡出右侧互动栏与左侧信息区（200ms easeOut），
     // 页内进度条不参与；全屏不受影响。
     final immersiveFade = !fs && _imm.immersive;
@@ -12977,6 +13037,7 @@ class _PlayerPageState extends State<PlayerPage>
                             viewSize: viewSize,
                             chromeOpacity: chromeOpacity,
                             chromeMs: chromeMs,
+                            infoOpacity: infoOpacity,
                             immersiveFade: immersiveFade,
                             railOpacity: railOpacity,
                             railMs: railMs,
@@ -13005,7 +13066,8 @@ class _PlayerPageState extends State<PlayerPage>
                           // 松手 ≥30% 屏宽或左向速度足够则进入，否则回弹。
                           onHorizontalDragStart: (d) => _authorDragStart(
                               d.globalPosition.dx,
-                              MediaQuery.sizeOf(context).width),
+                              MediaQuery.sizeOf(context).width,
+                              startDy: d.globalPosition.dy),
                           onHorizontalDragUpdate: (d) => _authorDragUpdate(
                               d.delta.dx, MediaQuery.sizeOf(context).width),
                           onHorizontalDragEnd: (d) =>
@@ -13092,6 +13154,7 @@ class _PlayerPageState extends State<PlayerPage>
                               viewSize: viewSize,
                               chromeOpacity: chromeOpacity,
                               chromeMs: chromeMs,
+                              infoOpacity: infoOpacity,
                               immersiveFade: immersiveFade,
                               railOpacity: railOpacity,
                               railMs: railMs,
@@ -13194,6 +13257,7 @@ class _PlayerPageState extends State<PlayerPage>
                             viewSize: viewSize,
                             chromeOpacity: chromeOpacity,
                             chromeMs: chromeMs,
+                            infoOpacity: infoOpacity,
                             immersiveFade: immersiveFade,
                             railOpacity: railOpacity,
                             railMs: railMs,
@@ -16490,10 +16554,12 @@ class _WorkGridState extends State<WorkGrid> {
             }
             // 播放器需要可变列表：续播时直接追加到它自己手里这份。
             final playerWorks = List.of(works, growable: true);
+            // owner 2026-11-22：标明来源，播放页据此禁用左滑并把头像改成返回。
             Navigator.of(context).push(instantRoute((_) => PlayerPage(
                 works: playerWorks,
                 start: i,
                 lib: _libFor(w),
+                fromAuthor: true,
                 onNeedMore: widget.onNeedMoreWorks == null
                     ? null
                     : () => widget.onNeedMoreWorks!(playerWorks))));

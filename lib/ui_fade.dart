@@ -30,4 +30,18 @@ class ChromeFade {
 
   static int durationMs({required bool swiping}) =>
       swiping ? fadeOutMs : fadeInMs;
+
+  /// 信息区（头像/作者名/简介）与进度条的透明度。
+  ///
+  /// owner 2026-11-22：非全屏滑动时恢复「信息淡化」，但只要功能区可见就
+  /// 保留轮廓（[dimmedOpacity]）；全屏不淡化（全屏走显示/隐藏）。
+  static double infoOpacity({
+    required bool uiVisible,
+    required bool fullscreen,
+    required bool swiping,
+  }) {
+    if (!uiVisible) return 0;
+    if (fullscreen) return 1;
+    return swiping ? dimmedOpacity : 1;
+  }
 }

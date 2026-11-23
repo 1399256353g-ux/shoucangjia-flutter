@@ -53,4 +53,42 @@ void main() {
       expect(ChromeFade.fadeOutMs, lessThan(ChromeFade.fadeInMs));
     });
   });
+
+  group('ChromeFade.infoOpacity（信息区 + 进度条，owner 2026-11-22）', () {
+    test('非全屏滑动时淡到 dimmedOpacity', () {
+      expect(
+          ChromeFade.infoOpacity(
+              uiVisible: true, fullscreen: false, swiping: true),
+          ChromeFade.dimmedOpacity);
+    });
+
+    test('非全屏静止时全不透明', () {
+      expect(
+          ChromeFade.infoOpacity(
+              uiVisible: true, fullscreen: false, swiping: false),
+          1.0);
+    });
+
+    test('全屏滑动不淡化', () {
+      expect(
+          ChromeFade.infoOpacity(
+              uiVisible: true, fullscreen: true, swiping: true),
+          1.0);
+    });
+
+    test('功能区隐藏时为 0（与顶部/任务栏一致）', () {
+      expect(
+          ChromeFade.infoOpacity(
+              uiVisible: false, fullscreen: false, swiping: true),
+          0.0);
+    });
+
+    test('比顶部/任务栏（恒为 1）更暗，两套不共用同一个值', () {
+      final chrome = ChromeFade.opacity(
+          uiVisible: true, fullscreen: false, swiping: true);
+      final info = ChromeFade.infoOpacity(
+          uiVisible: true, fullscreen: false, swiping: true);
+      expect(info, lessThan(chrome));
+    });
+  });
 }
