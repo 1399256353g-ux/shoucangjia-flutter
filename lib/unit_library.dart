@@ -82,6 +82,13 @@ class UnitLibrary {
 
   bool get isEmpty => basicCount == 0;
 
+  /// P1：末梢单元库——没有下级单元库。
+  ///
+  /// 只有末梢单元库的词条可以「向下分发」给它的基础库/作品/作者：
+  /// 作品归属由基础库反查得到，非末梢单元库下的作品都落在更深的单元库里，
+  /// 所以非末梢单元的样式只作用于自己这一层，分发出去也会被覆盖。
+  bool get isLeaf => children.isEmpty;
+
   /// 深度优先展开全部基础库（保持层级顺序）。
   List<BasicLib> get allBasics => [
         ...basics,
@@ -488,9 +495,34 @@ Map<String, String> topOfUnitIds(UnitLibrary root) {
   return out;
 }
 
+/// P1：单元库 id → 是否末梢（没有下级单元库）。
+///
+/// 只由树结构算出，不看任何目录名文本；`rel` 与 `node:rel` 两种 id 形式
+/// 都登记，查询端不必自己归一。
+Map<String, bool> leafUnitIds(UnitLibrary root) {
+  final out = <String, bool>{};
+  void walk(UnitLibrary u) {
+    final leaf = u.isLeaf;
+    out[u.id] = leaf;
+    out['node:${u.rel}'] = leaf;
+    if (u.id.startsWith('node:')) out[u.id.substring(5)] = leaf;
+    for (final c in u.children) {
+      walk(c);
+    }
+  }
+
+  for (final c in root.children) {
+    walk(c);
+  }
+  return out;
+}
+
 class UnitBadgeRegistry {
   static final Map<String, String> labels = <String, String>{};
   static final Map<String, String> keys = <String, String>{};
+
+  /// P1：单元库 id → 是否末梢单元库（只有末梢可向下分发词条）。
+  static final Map<String, bool> leaf = <String, bool>{};
   /// 单元库配色顺序（不含顶级 SECRET）：作者词条与基础库卡片共用。
   static final List<String> order = <String>[];
 
@@ -514,10 +546,16 @@ class UnitBadgeRegistry {
     topOf
       ..clear()
       ..addAll(topOfUnitIds(root));
-    // 词条继承表同步给 LibraryBadge，配色只查这一处。
+    leaf
+      ..clear()
+      ..addAll(leafUnitIds(root));
+    // 词条继承表同步给 LibraryBadge，配色/分发判定只查这一处。
     LibraryBadge.topOfUnit
       ..clear()
       ..addAll(topOf);
+    LibraryBadge.leafUnits
+      ..clear()
+      ..addAll(leaf);
   }
 
   static String labelFor(String basicId) => labels[basicId] ?? '';

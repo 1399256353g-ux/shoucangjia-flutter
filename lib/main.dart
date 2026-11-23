@@ -1757,6 +1757,13 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   /// P1：顶级节点（媒体库根）与末梢基础库各一组，配合向下继承。
   List<UnitLibrary> tops = const [];
   List<BasicLib> basics = const [];
+
+  /// P2：按顶级节点分组——每个顶级节点下的单元库与基础库，
+  /// 只按树结构归组，不看任何目录名文本。
+  final Map<String, List<UnitLibrary>> unitsByTop = <String, List<UnitLibrary>>{};
+  final Map<String, List<BasicLib>> basicsByTop = <String, List<BasicLib>>{};
+  List<UnitLibrary> otherUnits = const [];
+  List<BasicLib> otherBasics = const [];
   LibMeta? meta;
   bool loading = true;
   String? err;
@@ -1793,6 +1800,33 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         basics = [
           for (final u in m.units)
             if (u.id != 'secret') ...u.basics
+        ];
+        // P2：按顶级节点分组（结构归组）。子单元库顺序按树深度优先；
+        // 不属于任何顶级节点的单元库归入「其它」。
+        unitsByTop.clear();
+        basicsByTop.clear();
+        final grouped = <String>{};
+        void walk(UnitLibrary u, String topId) {
+          final list = unitsByTop.putIfAbsent(topId, () => <UnitLibrary>[]);
+          if (u.id != topId && u.basics.isNotEmpty) list.add(u);
+          if (u.basics.isNotEmpty) {
+            basicsByTop.putIfAbsent(topId, () => <BasicLib>[]).addAll(u.basics);
+          }
+          grouped.add(u.id);
+          for (final c in u.children) {
+            walk(c, topId);
+          }
+        }
+
+        for (final t in tops) {
+          walk(t, t.id);
+        }
+        otherUnits = [
+          for (final u in units)
+            if (!grouped.contains(u.id)) u
+        ];
+        otherBasics = [
+          for (final u in otherUnits) ...u.basics
         ];
         loading = false;
       });
@@ -1834,34 +1868,68 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Text(
-                        '词条颜色按三层组织：顶级节点（媒体库根）设色后向下继承给其下所有'
+                        '词条按三层组织：顶级节点（媒体库根）设色后向下继承给其下所有'
                         '单元库/基础库；单元库可各自覆盖；基础库自己的颜色优先级最高。'
+                        '分发规则：只有末梢单元库（没有下级单元库）的设色会向下分发，'
+                        '非末梢单元库的设色只作用于本层，作品/作者仍取末梢或继承色。'
                         '四种层级形状与尺寸一致，只用边框/底纹区分。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
-                  if (tops.isNotEmpty) ...[
-                    const _SectionHeader('顶级节点（媒体库根）· 向下继承'),
-                    for (final u in tops) _libTile(u, isTop: true),
-                  ],
-                  const _SectionHeader('单元库'),
-                  if (units.isEmpty)
+                  // P2：按顶级节点分类——每个媒体库根一节，展开就是它的
+                  // 单元库与基础库；不依赖任何名称文本，只按树结构归组。
+                  for (final t in tops) _topSection(t),
+                  if (tops.isEmpty && units.isEmpty)
                     const Padding(
                       padding: EdgeInsets.all(24),
                       child: Text('未发现单元库：请先在「文件结构」里勾选节点文件夹。',
                           textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ),
-                  for (final u in units) _libTile(u),
-                  if (basics.isNotEmpty) ...[
-                    const _SectionHeader('基础库（末梢，优先级最高）'),
-                    for (final b in basics) _basicTile(b),
+                  if (otherUnits.isNotEmpty || otherBasics.isNotEmpty) ...[
+                    const _SectionHeader('其它（不属于任何顶级节点）'),
+                    for (final u in otherUnits) _libTile(u),
+                    for (final b in otherBasics) _basicTile(b),
                   ],
                   const SizedBox(height: 24),
                 ]),
     );
   }
 
-  Widget _libTile(UnitLibrary u, {bool isTop = false}) {
+  /// P2：一个顶级节点的分组——它自己的词条、下级单元库、基础库。
+  Widget _topSection(UnitLibrary top) {
+    final subUnits = unitsByTop[top.id] ?? const <UnitLibrary>[];
+    final subBasics = basicsByTop[top.id] ?? const <BasicLib>[];
+    final name = top.name.isEmpty ? top.id : top.name;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SectionHeader('顶级节点 · $name'),
+        _libTile(top, isTop: true),
+        if (subUnits.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
+            child: Text('单元库',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey)),
+          ),
+        for (final u in subUnits) _libTile(u, indent: true),
+        if (subBasics.isNotEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
+            child: Text('基础库（末梢，优先级最高）',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey)),
+          ),
+        for (final b in subBasics) _basicTile(b, indent: true),
+      ],
+    );
+  }
+
+  Widget _libTile(UnitLibrary u, {bool isTop = false, bool indent = false}) {
     final id = u.id;
     final name = u.name.isEmpty ? id : u.name;
     // D1：自定义色可能以 rel / node:rel 任一形式落盘，统一用归一化查询，
@@ -1875,7 +1943,13 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         isTop ? LibraryBadge.topColorFor(id) != null : LibraryBadge.customColorFor(id) != null;
     final inheritedOnly = !isTop && LibraryBadge.customColorFor(id) == null &&
         LibraryBadge.topColorFor(UnitBadgeRegistry.topOf[id] ?? '') != null;
+    // P1：只有末梢单元库能向下分发；非末梢的自定义色只作用于本层。
+    final leaf = UnitBadgeRegistry.leaf[id] ?? true;
+    final distributeNote = isTop
+        ? '向下继承'
+        : (leaf ? '可分发给下级' : '非末梢 · 仅本层');
     return ListTile(
+      contentPadding: indent ? const EdgeInsets.fromLTRB(40, 0, 16, 0) : null,
       leading: Container(
         width: 26,
         height: 26,
@@ -1892,7 +1966,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             kind: isTop ? LibEntryKind.top : LibEntryKind.unit),
       ]),
       subtitle: Text(
-          '${u.basicCount} 个基础库 · $id${emoji.isEmpty ? '' : ' · 后缀 $emoji'}',
+          '${u.basicCount} 个基础库 · $distributeNote · $id'
+          '${emoji.isEmpty ? '' : ' · 后缀 $emoji'}',
           style: const TextStyle(fontSize: 11)),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -1912,7 +1987,13 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       ),
       onTap: () async {
         final chosen = await _showBadgeDialog(name, id, color,
-            kind: isTop ? LibEntryKind.top : LibEntryKind.unit);
+            kind: isTop ? LibEntryKind.top : LibEntryKind.unit,
+            note: isTop
+                ? '该色会向下继承给整个媒体库（单元库/基础库/作者）。'
+                : (leaf
+                    ? '末梢单元库：该色会分发给它的基础库/作品/作者。'
+                    : '非末梢单元库：该色只作用于本层单元库，'
+                        '不会分发给下级（下级作品归更深的单元库）。'));
         if (chosen == null) return;
         if (chosen.reset) {
           if (isTop) {
@@ -1935,13 +2016,14 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   }
 
   /// P1：末梢基础库词条——自己设色优先，否则继承单元库/顶级节点。
-  Widget _basicTile(BasicLib b) {
+  Widget _basicTile(BasicLib b, {bool indent = false}) {
     final unitId = meta?.basicToUnit[b.id] ?? '';
     final color = LibraryBadge.basicColorFor(b.id, unitId, order: _order);
     final own = LibraryBadge.basicCustom[b.id] != null;
     final name = LibraryBadge.stripIndex(b.name);
     return ListTile(
       dense: true,
+      contentPadding: indent ? const EdgeInsets.fromLTRB(48, 0, 16, 0) : null,
       leading: Container(
         width: 22,
         height: 22,
@@ -2015,7 +2097,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   /// emoji 后缀（基础库），只调颜色。
   Future<_BadgeDraft?> _showBadgeDialog(
       String name, String id, int autoColor,
-      {LibEntryKind kind = LibEntryKind.unit, bool topLevelOnly = false}) async {
+      {LibEntryKind kind = LibEntryKind.unit,
+      bool topLevelOnly = false,
+      String note = ''}) async {
     var current = LibraryBadge.customColorFor(id) ?? autoColor;
     var hsv = HSVColor.fromColor(Color(current));
     var currentEmoji = LibraryBadge.emojiFor(id);
@@ -2036,6 +2120,12 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                     color: current,
                     unitId: currentEmoji.isEmpty ? '' : id,
                     kind: kind),
+                if (note.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(note,
+                      style:
+                          const TextStyle(fontSize: 11, color: Colors.grey)),
+                ],
                 const SizedBox(height: 14),
                 const Align(
                   alignment: Alignment.centerLeft,
@@ -3263,39 +3353,21 @@ class SettingsHubPage extends StatelessWidget {
               .push(MaterialPageRoute(builder: (_) => const DiagnosticsPage())),
         ),
         ListTile(
-          leading: const Icon(Icons.sell_outlined),
-          title: const Text('库词条配色'),
-          subtitle: const Text('作者卡片上的库标签 · 每库自动配色，可自定义'),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => const LibraryBadgeColorsPage())),
-        ),
-        ListTile(
           leading: const Icon(Icons.workspace_premium_outlined),
           title: const Text('作者等级'),
           subtitle: const Text('D–S 等级词条 · 播放/水滴加权、门槛可调'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const AuthorGradeSettingsPage())),
         ),
-        ListTile(
-          leading: const Icon(Icons.palette_outlined),
-          title: const Text('主题外观'),
-          subtitle: const Text('多套配色 · 点击即时预览，不用重启'),
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ThemeSettingsPage())),
-        ),
+
+        // P2：所有「外观 / 词条 / 角标 / 按键 / 播放 / 缓存」收拢到一个入口，
+        // 设置首层只留连接、库、诊断、自定义、关于，避免长列表找不到东西。
         ListTile(
           leading: const Icon(Icons.tune),
-          title: const Text('播放设置'),
-          subtitle: const Text('默认倍速 · 图文间隔 · 全屏隐藏时间'),
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const PlaybackSettingsPage())),
-        ),
-        ListTile(
-          leading: const Icon(Icons.cleaning_services_outlined),
-          title: const Text('缓存'),
-          subtitle: const Text('封面缓存目录 · 上限与自动清理 · 立即清空'),
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const CacheSettingsPage())),
+          title: const Text('自定义'),
+          subtitle: const Text('主题外观 · 词条配色 · 库角标 · 按键绑定 · 播放设置 · 缓存'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const CustomizationHubPage())),
         ),
         ListTile(
           leading: const Icon(Icons.delete_outline),
@@ -3322,20 +3394,6 @@ class SettingsHubPage extends StatelessWidget {
                       cfg.base.isEmpty ? null : cfg.u('/api/cache/prune'),
                   cacheHeaders: cfg.headers))),
         ),
-        ListTile(
-          leading: const Icon(Icons.keyboard),
-          title: const Text('按键绑定'),
-          subtitle: const Text('Windows / 桌面端快捷键 · 播放、翻页、全屏'),
-          onTap: () => Navigator.of(context)
-              .push(MaterialPageRoute(builder: (_) => const KeyBindingsPage())),
-        ),
-        ListTile(
-          leading: const Icon(Icons.workspaces_outline),
-          title: const Text('库角标'),
-          subtitle: const Text('顶级节点 / 单元库 / 基础库的图案与颜色 · 立即生效'),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => const CornerBadgeSettingsPage())),
-        ),
         const Divider(),
         ListTile(
           leading: const Icon(Icons.info_outline),
@@ -3349,6 +3407,65 @@ class SettingsHubPage extends StatelessWidget {
             applicationVersion: appVersion,
             children: const [Text('本地媒体库客户端')],
           ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// P2：「设置 → 自定义」总入口。
+///
+/// 把外观类设置（主题/词条配色/库角标/按键/播放/缓存）收进一层，
+/// 设置首层只留「连接 · 库 · 诊断 · 自定义 · 关于」，长列表不再难找。
+class CustomizationHubPage extends StatelessWidget {
+  const CustomizationHubPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('自定义')),
+      body: ListView(children: [
+        ListTile(
+          leading: const Icon(Icons.palette_outlined),
+          title: const Text('主题外观'),
+          subtitle: const Text('多套配色 · 点击即时预览，不用重启'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ThemeSettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.sell_outlined),
+          title: const Text('库词条配色'),
+          subtitle: const Text('按顶级节点分类 · 向下继承 · 末梢才分发'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const LibraryBadgeColorsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.workspaces_outline),
+          title: const Text('库角标'),
+          subtitle: const Text('顶级节点 / 单元库 / 基础库的图案与颜色 · 立即生效'),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const CornerBadgeSettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.keyboard),
+          title: const Text('按键绑定'),
+          subtitle: const Text('Windows / 桌面端快捷键 · 支持组合键'),
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => const KeyBindingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.tune),
+          title: const Text('播放设置'),
+          subtitle: const Text('默认倍速 · 图文间隔 · 全屏隐藏时间'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const PlaybackSettingsPage())),
+        ),
+        ListTile(
+          leading: const Icon(Icons.cleaning_services_outlined),
+          title: const Text('缓存'),
+          subtitle: const Text('封面缓存目录 · 上限与自动清理 · 立即清空'),
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CacheSettingsPage())),
         ),
       ]),
     );
@@ -4591,6 +4708,35 @@ class _LibraryPageState extends State<LibraryPage> {
     return null;
   }
 
+  /// P3：顶级节点卡片的连接状态。只按节点自带的连接标识查当前连接表，
+  /// 不看任何目录名文本；查不到就不显示（不猜）。
+  String _topNodeStatus(UnitLibrary u) {
+    final id = u.node.serverId.trim();
+    if (id.isEmpty) return '';
+    for (final s in shownServers) {
+      if (s.id != id) continue;
+      return s.enabled ? '已连接' : '已断连';
+    }
+    return '';
+  }
+
+  /// P3：首页顶级节点卡片专用封面——**只认 owner 设过的封面**。
+  ///
+  /// 顺序：服务端 `cover.u`（owner 手动指定）> 自定义 `_cover/<version>`。
+  /// 两者都没有就返回空串，卡片用词条色块占位；不取爬虫封面/作品图，
+  /// 避免首页把某个作者的封面当成媒体库封面。
+  String _topNodeCoverUrl(UnitLibrary u) {
+    final pick = u.node.coverUrl.trim();
+    if (pick.isNotEmpty) {
+      final ownLib = libOfMediaPath(pick);
+      final url = cfg.mediaUrl(pick, lib: ownLib.isEmpty ? null : ownLib);
+      if (url.isNotEmpty) return url;
+    }
+    final custom = coverImageRel(u.rel, u.node.coverVersion, ext: u.node.coverExt);
+    if (custom.isEmpty) return '';
+    return cfg.mediaUrl(custom, lib: u.allBasics.isEmpty ? null : u.allBasics.first.id);
+  }
+
   /// L5-C：单元库封面。
   /// 0.9.35：owner 手动设置的单元库封面（服务端 `unit-covers.json` → `cover.u`）
   /// 优先 > 手动 `_cover/` > 子树最高播放基础库的封面 > 第一个有封面的基础库。
@@ -5069,6 +5215,8 @@ class _LibraryPageState extends State<LibraryPage> {
             onTapBasic: _showBasic,
             onOpenStars: _openStars,
             unitCoverOf: (u) => _unitCoverUrl(u),
+            topCoverOf: (u) => _topNodeCoverUrl(u),
+            statusOf: _topNodeStatus,
             coverUploader: uploadCoverFromPicker,
           )
         else

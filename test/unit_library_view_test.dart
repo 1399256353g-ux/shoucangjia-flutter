@@ -43,10 +43,11 @@ void main() {
       onOpenStars: () => opened = 'stars',
     )));
 
-    expect(find.text('单元库'), findsOneWidget);
+    // P3：首页标题已按 owner 术语改为「媒体库」（顶级节点＝媒体库根）。
+    expect(find.text('媒体库'), findsOneWidget);
     expect(find.byKey(const ValueKey('starred-entry')), findsOneWidget);
     expect(find.text('1 个'), findsOneWidget);
-    expect(find.text('2 个单元库'), findsOneWidget);
+    expect(find.text('2 个媒体库'), findsOneWidget);
     // 旧「大库描述」（N 个基础库）不再出现在单元库卡片/标题上。
     expect(find.textContaining('个基础库'), findsNothing);
     // 主页把顶级下的单元库卡片铺成网格（与基础库卡片同形状）

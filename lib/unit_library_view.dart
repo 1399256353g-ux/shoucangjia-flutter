@@ -245,6 +245,13 @@ class UnitLibraryHomeView extends StatefulWidget {
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
   final CoverUploader? coverUploader;
 
+  /// P3：顶级节点卡片的连接状态文案（如「已连接」「已断连」）；空串不显示。
+  final String Function(UnitLibrary unit)? statusOf;
+
+  /// P3：顶级节点卡片只用 owner 设过的封面（自定义 `_cover/` 或服务端
+  /// `cover.u`）；空串表示未设封面 → 卡片用词条色块占位，**不取自动封面**。
+  final UnitCoverOf? topCoverOf;
+
   const UnitLibraryHomeView({
     super.key,
     required this.tree,
@@ -256,6 +263,8 @@ class UnitLibraryHomeView extends StatefulWidget {
     this.unitCoverOf,
     this.headersOf,
     this.coverUploader,
+    this.statusOf,
+    this.topCoverOf,
   });
 
   @override
@@ -359,10 +368,11 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
           child: Row(children: [
             const Icon(Icons.layers_outlined, size: 18),
             const SizedBox(width: 6),
-            const Text('单元库',
+            // P3：首页只列顶级节点（＝各连接的媒体库根）。
+            const Text('媒体库',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
             const Spacer(),
-            Text('${units.length} 个单元库',
+            Text('${units.length} 个媒体库',
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ]),
         ),
@@ -370,7 +380,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
         if (units.isEmpty)
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 24, 16, 24),
-            child: Text('当前连接下没有可显示的单元库',
+            child: Text('当前连接下没有可显示的媒体库',
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
           ),
         // 与其他卡片一样铺成网格，单元库卡片尺寸更大。
@@ -390,10 +400,18 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
               final u = units[i];
               final coverLib =
                   u.allBasics.isNotEmpty ? u.allBasics.first.id : '';
+              // P3：首页卡片＝顶级节点卡片。只用 owner 设过的封面，
+              // 未设则用该顶级节点的词条色块占位，不再拿作品图冒充库封面。
+              final tint = LibraryBadge.topColorFor(u.id) ??
+                  LibraryBadge.colorForUnit(u.id,
+                      order: UnitBadgeRegistry.order);
               return UnitLibraryCard(
                 unit: u,
-                coverUrl: widget.unitCoverOf?.call(u) ?? '',
-                coverUrlOf: widget.unitCoverOf,
+                topCard: true,
+                fallbackTint: tint,
+                connectionStatus: widget.statusOf?.call(u) ?? '',
+                coverUrl: (widget.topCoverOf ?? widget.unitCoverOf)?.call(u) ?? '',
+                coverUrlOf: widget.topCoverOf ?? widget.unitCoverOf,
                 headers: unitHeadersOf(u, widget.headersOf),
                 starred: liveStars.contains(u.id),
                 onToggleStar: () => widget.onToggleUnitStar(u),
@@ -637,6 +655,16 @@ class UnitLibraryCard extends StatelessWidget {
   /// C2：本地选图上传封面（为空不显示按钮）。
   final VoidCallback? onSetCover;
 
+  /// P3：首页顶级节点卡片。为 true 时**不使用自动封面**，
+  /// 未设置封面就用词条色块占位（[fallbackTint]），避免首页拿作品图充当库封面。
+  final bool topCard;
+
+  /// 无封面时的占位底色（顶级节点＝词条色）；为空则回退通用灰。
+  final int? fallbackTint;
+
+  /// 连接状态文案（如「已连接」「已断连」）；空串不显示。
+  final String connectionStatus;
+
   const UnitLibraryCard({
     super.key,
     required this.unit,
@@ -648,6 +676,9 @@ class UnitLibraryCard extends StatelessWidget {
     this.onToggleStar,
     this.onConfigure,
     this.onSetCover,
+    this.topCard = false,
+    this.fallbackTint,
+    this.connectionStatus = '',
   });
 
   /// 顶级单元库（SECRET，rel 为空）没有独立爬虫配置；只有下级单元库才有。
@@ -685,12 +716,15 @@ class UnitLibraryCard extends StatelessWidget {
                 builder: (_, __, ___) => _UnitCoverFill(
                   key: ValueKey('unit-cover-${unit.id}'),
                   displayWidth: kUnitCardDisplayWidth,
-                  url: unitCoverUrl(
-                    unit,
-                    customUrl: coverUrlOf?.call(unit) ?? coverUrl,
-                  ),
+                  url: topCard
+                      ? (coverUrlOf?.call(unit) ?? coverUrl)
+                      : unitCoverUrl(
+                          unit,
+                          customUrl: coverUrlOf?.call(unit) ?? coverUrl,
+                        ),
                   headers: headers,
                   fallbackIcon: Icons.folder_copy_outlined,
+                  tint: topCard ? fallbackTint : null,
                 ),
               ),
             ),
@@ -704,7 +738,9 @@ class UnitLibraryCard extends StatelessWidget {
                 unitId: unit.id,
                 stats: '${formatCount(unit.authors)} 作者 · '
                     '${formatCount(unit.works)} 作品',
-                server: server,
+                server: [connectionStatus, server]
+                    .where((e) => e.isNotEmpty)
+                    .join(' · '),
               ),
             ),
             // P4：左上角种类角标（形状尺寸统一，仅图案不同）。
@@ -769,21 +805,31 @@ class _UnitCoverFill extends StatelessWidget {
   /// 卡片的逻辑显示宽度（单元库 260 / 基础库 220），决定解码宽度。
   final double displayWidth;
 
+  /// P3：无封面时的占位底色（顶级节点用词条色块，不用自动封面）。
+  final int? tint;
+
   const _UnitCoverFill({
     super.key,
     required this.url,
     required this.headers,
     required this.fallbackIcon,
     this.displayWidth = 220,
+    this.tint,
   });
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final t = tint;
     final fallback = Container(
-      color: scheme.surfaceContainerHighest,
+      key: t == null ? null : const ValueKey('unit-cover-tint'),
+      color: t == null ? scheme.surfaceContainerHighest : Color(t).withValues(alpha: 0.55),
       alignment: Alignment.center,
-      child: Icon(fallbackIcon, size: 34, color: scheme.primary),
+      child: Icon(fallbackIcon,
+          size: 34,
+          color: t == null
+              ? scheme.primary
+              : Color(LibraryBadge.textColorOn(t)).withValues(alpha: 0.75)),
     );
     if (url.isEmpty) return fallback;
     return CachedNetworkImage(

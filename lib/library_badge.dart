@@ -83,6 +83,20 @@ class LibraryBadge {
   /// 只做数据查询，不在这里解析目录名。
   static final Map<String, String> topOfUnit = <String, String>{};
 
+  /// P1：单元库 id → 是否末梢（没有下级单元库）。同样由注册表从树结构填入。
+  /// 分发规则：**只有末梢单元库的词条向下分发**给它的基础库/作品/作者；
+  /// 非末梢单元库自定义色只作用于自己这一层，不参与分发。
+  static final Map<String, bool> leafUnits = <String, bool>{};
+
+  /// 该单元库能否向下分发词条。注册表为空（结构未加载）时不阻断，
+  /// 否则冷启动阶段所有词条都会退化成自动色。
+  static bool canDistribute(String unitId) {
+    if (unitId.isEmpty) return false;
+    if (leafUnits.isEmpty) return true;
+    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    return leafUnits[unitId] ?? leafUnits[rel] ?? leafUnits['node:$rel'] ?? true;
+  }
+
   /// 用户在设置里为某个库选择的 emoji 后缀；id -> emoji（最多 8 个字符）。
   static final Map<String, String> emoji = <String, String>{};
 
@@ -129,14 +143,19 @@ class LibraryBadge {
 
   /// 单元库配色：同一单元库在主页（`node:rel`）与 LibMeta（`rel`）里 id
   /// 形式不同，这里统一归一，保证作者词条与基础库卡颜色一致。
-  static int colorForUnit(String unitId, {List<String> order = const []}) {
+  /// [allowCustom] 为 false 时忽略本层自定义色（供「非末梢不下发」的基础库
+  /// 落色使用），继承链其余部分不变。
+  static int colorForUnit(String unitId,
+      {List<String> order = const [], bool allowCustom = true}) {
     if (unitId.isEmpty) return gray;
     if (unitId == 'secret') return topColorFor('secret') ?? gray;
     final rel =
         unitId.startsWith('node:') ? unitId.substring(5) : unitId;
     final prefixed = 'node:$rel';
-    final c = custom[unitId] ?? custom[rel] ?? custom[prefixed];
-    if (c != null) return c;
+    if (allowCustom) {
+      final c = custom[unitId] ?? custom[rel] ?? custom[prefixed];
+      if (c != null) return c;
+    }
     // P1：自己没设色 → 继承所属顶级节点的词条色（顶级设了才有）。
     final topId = topOfUnit[unitId] ?? topOfUnit[rel] ?? topOfUnit[prefixed];
     final inherited = topId == null ? null : topColorFor(topId);
@@ -204,6 +223,17 @@ class LibraryBadge {
     if (basicId.isNotEmpty) {
       final c = basicCustom[basicId];
       if (c != null) return c;
+    }
+    // P1 分发规则：上级单元库自定义色只有它是末梢时才分发到这里；
+    // 非末梢单元库只影响自己那层，基础库继续继承顶级节点色。
+    if (unitId.isNotEmpty && !canDistribute(unitId)) {
+      final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+      final topId = topOfUnit[unitId] ??
+          topOfUnit[rel] ??
+          topOfUnit['node:$rel'];
+      final inherited = topId == null ? null : topColorFor(topId);
+      if (inherited != null) return inherited;
+      return colorForUnit(unitId, order: order, allowCustom: false);
     }
     return colorForUnit(unitId, order: order);
   }
