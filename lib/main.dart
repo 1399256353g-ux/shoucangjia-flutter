@@ -8097,6 +8097,9 @@ class _PlayerPageState extends State<PlayerPage>
   /// 本次 open() 下发时刻：首帧到达时用它算起播耗时（写入 pause.log）。
   DateTime? _openStartedAt;
 
+  /// 最近一次播放器错误的原始文本（仅用于写脱敏诊断摘要，不展示给用户）。
+  String? _lastPlayerError;
+
   /// 本次 open() 是否命中预载池（仅用于起播耗时的分组统计）。
   bool _poolHit = false;
   Timer? _blackGuard;
@@ -8791,6 +8794,11 @@ class _PlayerPageState extends State<PlayerPage>
     _playerSubs.add(p.stream.error.listen((msg) {
       if (!identical(p, player)) return;
       if (!mounted || _failure != null) return;
+      // 留原始错误文本给 [_errorDigest]：分类只存名字没法定位，
+      // 而原始文本又要剥掉 URL 才能进日志（隐私红线）。
+      // `stream.error` 这里发的是纯字符串（后端已把 cause 折进文本），
+      // 直接留原文即可；脱敏在 `_errorDigest` 里统一做。
+      _lastPlayerError = '$msg';
       final failure = classifyPlaybackError(msg);
       // F34：模拟器/个别解码器上硬件解码失败时，先用软件解码重试一次
       if (_shouldSoftRetry(failure.kind)) {
@@ -9281,7 +9289,17 @@ class _PlayerPageState extends State<PlayerPage>
     _loadTimeout?.cancel();
     _loadTimeout = null;
     _cancelVideoPrefetch();
-    PauseTrace.mark('failure:${f.kind.name}');
+    // 分类结果要留，但只有 `failure:network` 这三个字无法定位问题：
+    // 本轮就卡在这里——`pause.log` 只记了分类名，原始错误文本一个字没留，
+    // 于是「到底是解码器不支持 x86、还是取流被拒」完全无从判断。
+    // 记一条脱敏摘要：去掉 URL 与查询串，只留错误措辞（不含文件路径/文件名），
+    // 这样既能把失败追溯到具体原因，又不把媒体路径写进日志。
+    // 分类结果要留，但只有 `failure:network` 这三个字无法定位问题：
+    // 本轮就卡在这里——`pause.log` 只记了分类名，原始错误文本一个字没留，
+    // 于是「到底是解码器不支持 x86、还是取流被拒」完全无从判断。
+    // 记一条脱敏摘要（剥掉 URL/路径/文件名，只留错误措辞）。
+    PauseTrace.mark(
+        'failure:${f.kind.name} detail=${sanitizePlaybackErrorForLog(_lastPlayerError)}');
     // 失败的槽位不能继续当作「已就绪」留在池里，否则切条会命中一个
     // 出不了画的槽位；重试走 open() 会重新登记。
     _preloadCache.removeSlot(_active.sid);
@@ -9295,6 +9313,7 @@ class _PlayerPageState extends State<PlayerPage>
       _pausedIntent = true;
     });
   }
+
 
   /// F34：是否值得自动切软件解码重试（每条媒体最多一次）。
   bool _shouldSoftRetry(PlaybackFailureKind? kind) =>
@@ -9779,6 +9798,8 @@ class _PlayerPageState extends State<PlayerPage>
     _firstFrameSeen = false;
     _opening = true;
     _openStartedAt = DateTime.now();
+    // 换条后诊断摘要必须归零，否则新条目的失败会带上一条的错误文本。
+    _lastPlayerError = null;
     _poolHit = canUsePreload;
     // 预载命中：媒体早已在解码器里解出首帧，open 只是换槽位，不存在
     // 「等待起播」阶段。若仍按 open 推进，相位停在 opening，与

@@ -136,3 +136,22 @@ PlaybackFailure classifyPlaybackError(Object? error) {
 /// 加载超时判定：进入页面 elapsedMs 后仍没有时长，就认为失败。
 bool playbackLoadTimedOut(int elapsedMs, {required bool hasDuration}) =>
     !hasDuration && elapsedMs >= playbackLoadTimeout.inMilliseconds;
+
+/// 把原始播放器错误整理成**可写日志**的脱敏摘要。
+///
+/// 媒体地址与文件名属于隐私（AGENTS.md 红线），不能进日志；但
+/// `decoder` / `unsupported` / `timeout` 这类非内容措辞必须留下，
+/// 否则失败只能记成 `failure:network` 三个字，无法定位。
+///
+/// 规则：剥 `http(s)://…` → 剥 `/media/…`、`/api/…`（含查询串）→
+/// 空白折叠 → 截断 160 字符。空输入返回 `no-detail`。
+String sanitizePlaybackErrorForLog(Object? raw) {
+  final s0 = '${raw ?? ''}'.trim();
+  if (s0.isEmpty) return 'no-detail';
+  var s = s0.replaceAll(RegExp(r'https?://\S+'), '<url>');
+  s = s.replaceAll(RegExp(r'/(?:media|api)/\S*'), '<path>');
+  s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (s.isEmpty) return 'no-detail';
+  if (s.length > 160) s = s.substring(0, 160);
+  return s;
+}
