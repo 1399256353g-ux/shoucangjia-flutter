@@ -16,6 +16,8 @@ import 'package:flutter/material.dart'
         Text,
         TextOverflow,
         TextStyle,
+        ValueListenableBuilder,
+        ValueNotifier,
         Widget;
 
 import 'app_settings.dart';
@@ -115,6 +117,15 @@ const Map<LibEntryKind, EntryStyle> kDefaultEntryStyle =
 class LibraryBadge {
   static const String prefsKey = 'lib_colors_v1';
 
+  /// 唯一变更信号：任何颜色/外观/emoji 改了都自增一次。
+  ///
+  /// 词条取值来自静态 Map，卡片建好就不会自己重建；只靠设置页 setState
+  /// 只能刷新设置页里的预览，**已显示在作者卡/基础库卡/播放页上的词条
+  /// 会停在旧颜色**。组件内部订阅这一个 notifier，改完即刻生效。
+  static final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
+  static void _bump() => revision.value++;
+
   /// P1：顶级单元库（媒体库根）词条色。与单元库/基础库的自定义色分开存：
   /// 顶级色是**向下继承**的默认值，单元库/基础库自己设了色才覆盖它。
   static const String topPrefsKey = 'lib_top_colors_v1';
@@ -174,11 +185,10 @@ class LibraryBadge {
 
   /// 设置某层级外观；传 null 恢复该层默认。
   static Future<void> setStyle(LibEntryKind kind, EntryStyle? style) async {
-    if (style == null) {
-      entryStyle[kind] = kDefaultEntryStyle[kind]!;
-    } else {
-      entryStyle[kind] = style;
-    }
+    final next = style ?? kDefaultEntryStyle[kind]!;
+    if (entryStyle[kind] == next) return;
+    entryStyle[kind] = next;
+    _bump();
     await saveStyle();
   }
 
@@ -204,6 +214,7 @@ class LibraryBadge {
     entryStyle
       ..clear()
       ..addAll(kDefaultEntryStyle);
+    _bump();
     if (v is! Map) return;
     for (final k in LibEntryKind.values) {
       entryStyle[k] = EntryStyle.fromJson(v[k.name], kDefaultEntryStyle[k]!);
@@ -368,8 +379,10 @@ class LibraryBadge {
   /// 设置/清除基础库词条色。
   static Future<void> setBasicColor(String basicId, int? argb) async {
     if (basicId.isEmpty) return;
+    if (basicCustom[basicId] == argb) return;
     basicCustom.remove(basicId);
     if (argb != null) basicCustom[basicId] = argb;
+    _bump();
     await saveBasic();
   }
 
@@ -391,11 +404,13 @@ class LibraryBadge {
   static Future<void> setTopColor(String topId, int? argb) async {
     if (topId.isEmpty) return;
     final rel = topId.startsWith('node:') ? topId.substring(5) : topId;
+    if (topColorFor(topId) == argb) return;
     topCustom
       ..remove(topId)
       ..remove(rel)
       ..remove('node:$rel');
     if (argb != null) topCustom[topId] = argb;
+    _bump();
     await saveTop();
   }
 
@@ -582,12 +597,14 @@ class LibraryBadge {
   /// 清除时把同一单元库的 `rel` / `node:rel` 两种键一起删掉。
   static Future<void> setColor(String libId, int? argb) async {
     if (libId.isEmpty) return;
+    if (customColorFor(libId) == argb) return;
     final rel = libId.startsWith('node:') ? libId.substring(5) : libId;
     custom
       ..remove(libId)
       ..remove(rel)
       ..remove('node:$rel');
     if (argb != null) custom[libId] = argb;
+    _bump();
     await save();
   }
 
@@ -603,12 +620,14 @@ class LibraryBadge {
   static Future<void> setEmoji(String unitId, String? value) async {
     if (unitId.isEmpty) return;
     final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    final v = sanitizeEmoji(value ?? '');
+    if (emojiFor(unitId) == v) return;
     emoji
       ..remove(unitId)
       ..remove(rel)
       ..remove('node:$rel');
-    final v = sanitizeEmoji(value ?? '');
     if (v.isNotEmpty) emoji[unitId] = v;
+    _bump();
     await saveEmoji();
   }
 }
@@ -633,6 +652,14 @@ class LibBadgeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 订阅唯一变更信号：设置页改了颜色/外观/emoji，所有已显示词条立即跟着变。
+    return ValueListenableBuilder<int>(
+      valueListenable: LibraryBadge.revision,
+      builder: (_, __, ___) => _paint(),
+    );
+  }
+
+  Widget _paint() {
     // 位置词条自动省略目录名前缀序号（`(1) 名称` → `名称`）。
     final text = label.startsWith('+')
         ? label

@@ -67,4 +67,41 @@ void main() {
     expect(LibraryBadge.colorForUnit('(1) A'), 0xFF123456);
     expect(LibraryBadge.colorForUnit('node:(1) A'), 0xFF123456);
   });
+
+  group('词条变更信号（已渲染词条靠它即时生效）', () {
+    test('改色 / 改外观 / 改 emoji 都递增', () async {
+      final v0 = LibraryBadge.revision.value;
+      await LibraryBadge.setColor('unit-a', 0xFF010203);
+      final v1 = LibraryBadge.revision.value;
+      expect(v1, greaterThan(v0));
+      await LibraryBadge.setStyle(LibEntryKind.basic,
+          const EntryStyle(borderWidth: 2, borderAlpha: 1, fillAlpha: 0.5));
+      final v2 = LibraryBadge.revision.value;
+      expect(v2, greaterThan(v1));
+      await LibraryBadge.setEmoji('unit-a', '🔥');
+      expect(LibraryBadge.revision.value, greaterThan(v2));
+    });
+
+    test('顶级继承色 / 基础库色 / 清除也递增', () async {
+      var v = LibraryBadge.revision.value;
+      await LibraryBadge.setTopColor('top-a', 0xFF112233);
+      expect(LibraryBadge.revision.value, greaterThan(v));
+      v = LibraryBadge.revision.value;
+      await LibraryBadge.setBasicColor('basic-a', 0xFF445566);
+      expect(LibraryBadge.revision.value, greaterThan(v));
+      v = LibraryBadge.revision.value;
+      await LibraryBadge.setTopColor('top-a', null);
+      expect(LibraryBadge.revision.value, greaterThan(v));
+    });
+
+    test('重复写入同一个值不递增（避免无意义重建）', () async {
+      await LibraryBadge.setColor('unit-b', 0xFF0A0B0C);
+      final v = LibraryBadge.revision.value;
+      await LibraryBadge.setColor('unit-b', 0xFF0A0B0C);
+      await LibraryBadge.setEmoji('unit-b', '');
+      await LibraryBadge.setStyle(
+          LibEntryKind.top, LibraryBadge.styleFor(LibEntryKind.top));
+      expect(LibraryBadge.revision.value, v);
+    });
+  });
 }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_badge.dart';
-import 'package:shoucangjia/main.dart';
 import 'package:shoucangjia/unit_library_view.dart';
 
 void main() {
@@ -46,17 +45,27 @@ void main() {
         {'c': '🎯'});
   });
 
-  test('LibBadgeChip 渲染后缀，'+ '"+N" 折叠项不受影响', () {
+  testWidgets('LibBadgeChip 渲染后缀，"+N" 折叠项不受影响', (tester) async {
     expect(LibraryBadge.emojiChoices, contains('🔥'));
     LibraryBadge.emoji['unit-1'] = '💎';
-    final chip = LibBadgeChip(
-        label: '单元库', color: LibraryBadge.palette.first, unitId: 'unit-1');
-    final text = (chip.build(_FakeContext()) as Container).child as Text;
-    expect(text.data, '单元库💎');
-    final plus = LibBadgeChip(
-        label: '+2', color: LibraryBadge.gray, unitId: 'unit-1');
-    final plusText = (plus.build(_FakeContext()) as Container).child as Text;
-    expect(plusText.data, '+2');
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          LibBadgeChip(
+              label: '单元库',
+              color: LibraryBadge.palette.first,
+              unitId: 'unit-1'),
+          LibBadgeChip(
+              label: '+2', color: LibraryBadge.gray, unitId: 'unit-1'),
+        ]),
+      ),
+    ));
+    final texts = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((t) => t.data)
+        .toList();
+    expect(texts, contains('单元库💎'));
+    expect(texts, contains('+2'));
   });
 
   testWidgets('库卡片标题追加单元库 emoji 后缀（与词条同一规则）', (tester) async {
@@ -83,5 +92,3 @@ void main() {
   });
 }
 
-/// 只用于取 Text 内容的最小 BuildContext（LibBadgeChip 不读取主题）。
-class _FakeContext extends Fake implements BuildContext {}
