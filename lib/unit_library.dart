@@ -19,6 +19,7 @@ import 'disk_name.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
+import 'rel_path.dart';
 import 'top_node.dart';
 
 /// 一个节点文件夹（单元库候选）。
@@ -108,16 +109,8 @@ class UnitLibrary {
   }
 }
 
-/// 路径分段（统一分隔符，去掉空段与 `.`）。
-List<String> splitRel(String rel) {
-  final out = <String>[];
-  for (final raw in rel.split(RegExp(r'[\\/]+'))) {
-    final s = raw.trim();
-    if (s.isEmpty || s == '.') continue;
-    out.add(s);
-  }
-  return out;
-}
+/// 路径分段交给唯一实现（见 `rel_path.dart`），不在本文件再写一份。
+List<String> splitRel(String rel) => relSegments(rel);
 
 /// 去掉库根前缀，得到相对路径。root 为空时按原样返回。
 String relFromPath(String path, String root) {
@@ -625,6 +618,4 @@ class UnitBadgeRegistry {
   }
 
   static String labelFor(String basicId) => labels[basicId] ?? '';
-
-  static String keyFor(String basicId) => keys[basicId] ?? '';
 }

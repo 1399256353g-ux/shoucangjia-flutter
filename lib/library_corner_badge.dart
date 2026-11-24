@@ -4,6 +4,9 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'contrast.dart';
+import 'prefs_json.dart';
+
 /// 库种类 / 等级 —— 决定左上角角标的默认图案。
 ///
 /// 与词条（颜色 + emoji）是两套东西：词条表达「属于哪个单元库」，
@@ -154,12 +157,7 @@ class LibraryCornerBadge {
     } catch (_) {}
   }
 
-  static Future<void> save() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(prefsKey, jsonEncode(toJson()));
-    } catch (_) {}
-  }
+  static Future<void> save() => savePrefString(prefsKey, jsonEncode(toJson()));
 
   static Future<void> setPattern(LibBadgeKind kind, int id) async {
     final next = clampPattern(kind, id);
@@ -207,7 +205,7 @@ class LibCornerBadge extends StatelessWidget {
 
   Widget _paint() {
     final argb = LibraryCornerBadge.colorFor(kind);
-    final fg = _pickForeground(argb);
+    final fg = foregroundArgbOn(argb);
     return Container(
       key: ValueKey('lib-corner-badge-${kind.name}'),
       width: kCornerBadgeSize,
@@ -229,14 +227,6 @@ class LibCornerBadge extends StatelessWidget {
     );
   }
 
-  /// 底色深 → 白图案；底色浅 → 深色图案。
-  static int _pickForeground(int argb) {
-    final r = (argb >> 16) & 0xFF;
-    final g = (argb >> 8) & 0xFF;
-    final b = argb & 0xFF;
-    final lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
-    return lum > 0.62 ? 0xFF111827 : 0xFFFFFFFF;
-  }
 }
 
 /// 内置图案：只用标准几何形状绘制，跨平台一致、无字体依赖。

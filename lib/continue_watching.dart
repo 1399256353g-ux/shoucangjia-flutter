@@ -12,6 +12,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_json.dart';
 
 /// SharedPreferences 键：整个「继续观看」列表存在一个 JSON 字符串里。
 const String kContinuePrefsKey = 'continue_watching_v1';
@@ -257,33 +258,14 @@ class ContinueWatchingStore {
     if (next.length != _items.length) _set(next);
   }
 
-  /// 单条位置刷新（用于「已看完」后立即消失、以及进度条更新）。
-  static void updatePosition(String lib, String id, int positionMs,
-      {int durationMs = 0}) {
-    final key = (ContinueItem(lib: lib, id: id)).key;
-    final idx = _items.indexWhere((e) => e.key == key);
-    if (idx < 0) return;
-    final prev = _items[idx];
-    final next = prev.copyWith(
-      positionMs: positionMs,
-      durationMs: durationMs > 0 ? durationMs : prev.durationMs,
-      updatedAt: DateTime.now().millisecondsSinceEpoch,
-    );
-    _set(upsertContinueItems(_items, next));
-  }
-
   static void _set(List<ContinueItem> next) {
     _items = next;
     revision.value++;
     unawaited(_persist());
   }
 
-  static Future<void> _persist() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(kContinuePrefsKey, encodeContinueItems(_items));
-    } catch (_) {}
-  }
+  static Future<void> _persist() =>
+      savePrefString(kContinuePrefsKey, encodeContinueItems(_items));
 
   @visibleForTesting
   static void resetForTest() {

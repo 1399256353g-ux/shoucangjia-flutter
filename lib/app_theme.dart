@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'emoji_text.dart';
+import 'prefs_json.dart';
 
 /// 一套主题的外观定义。
 ///
@@ -24,7 +25,6 @@ class AppThemeSpec {
     required this.background,
   });
 
-  bool get isLight => brightness == Brightness.light;
 }
 
 /// 可选主题列表（第一个为默认「深空蓝」）。
@@ -198,12 +198,9 @@ class AppTheme {
     }
   }
 
-  static Future<void> select(String id) async {
+  static Future<void> select(String id) {
     final v = normalizeThemeId(id);
     if (current.value != v) current.value = v;
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(kThemePrefsKey, v);
-    } catch (_) {}
+    return savePrefString(kThemePrefsKey, v);
   }
 }

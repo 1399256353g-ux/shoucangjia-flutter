@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'prefs_json.dart';
 import 'preload_policy.dart';
 import 'video_layout.dart';
 
@@ -194,12 +195,7 @@ class AppSettings {
     }
   }
 
-  static Future<void> save() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(prefsKey, jsonEncode(toJson()));
-    } catch (_) {}
-  }
+  static Future<void> save() => savePrefString(prefsKey, jsonEncode(toJson()));
 
   /// 单键绑定（等价于无修饰键的组合），保留给旧调用点与测试。
   static void bind(PlayerAction action, int keyId) =>

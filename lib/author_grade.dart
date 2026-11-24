@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_json.dart';
 
 /// 作者等级（D–S）：按播放量、小水滴、作品数加权算分，再按逐级门槛定级。
 /// 纯逻辑版本，便于单元测试；配置持久化到 SharedPreferences。
@@ -225,8 +225,7 @@ class AuthorGrade {
   /// 真正生效的配置由 [applyRemote] 套用，本地不再写回服务端。
   static Future<void> load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
-      final raw = sp.getString(prefsKey);
+      final raw = await readPrefString(prefsKey);
       final j = parse(raw);
       if (j.isEmpty) {
         reset();
@@ -250,17 +249,8 @@ class AuthorGrade {
   }
 
   /// P6：只写本机只读缓存，供下次启动首帧使用；服务端配置由 PUT 接口写。
-  static Future<void> cacheLocal() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(prefsKey, encode());
-    } catch (_) {}
-  }
-
-  static Future<void> save() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(prefsKey, encode());
-    } catch (_) {}
-  }
+  ///
+  /// 此前这里还有一个逐字相同的 `save()`，lib/test 双零引用——同一件事
+  /// 两个名字，调用方永远只可能用其中一个。
+  static Future<void> cacheLocal() => savePrefString(prefsKey, encode());
 }

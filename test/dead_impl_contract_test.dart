@@ -205,4 +205,86 @@ void main() {
       expect(libSourceAll().contains('dynamic decodeSyncJson('), isTrue);
     });
   });
+
+  group('第九批（0.9.207）：同规则多份实现 + 无人调用的成员', () {
+    test('亮度→前景色只有 contrast.dart 一处（词条与角标不得各写一份）', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('contrast.dart'))
+          .where((f) => f.readAsStringSync().contains('0.299'))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty,
+          reason: '这些文件又抄了一份亮度公式：$offenders');
+      expect(libSourceAll().contains('int foregroundArgbOn(int argb)'), isTrue);
+    });
+
+    test('相对路径拆分/拼接只有 rel_path.dart 一处', () {
+      // 此前 splitCatRel / splitRel / diskNameOf 内联链 是三份同规则实现。
+      final quoted = RegExp(r"split\(RegExp\(r.\[\\\\\\\\/\]\+\.\)\)");
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('rel_path.dart'))
+          .where((f) => quoted.hasMatch(f.readAsStringSync()))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '路径拆分又出现了内联拷贝：$offenders');
+      final src = libSourceAll();
+      expect(src.contains('List<String> relSegments(String rel)'), isTrue);
+      // 旧名字保留为转调（调用点多，改名无收益），但不得再自带实现。
+      expect(RegExp(r'^List<String> splitRel\(String rel\) => relSegments\(rel\);',
+              multiLine: true)
+          .hasMatch(src), isTrue);
+      expect(RegExp(r'^List<String> splitCatRel\(String rel\) => relSegments\(rel\);',
+              multiLine: true)
+          .hasMatch(src), isTrue);
+    });
+
+    test('配置落盘只有 prefs_json.dart 一处（类里不得再写 try-catch 存盘）', () {
+      final offenders = <String>[];
+      for (final f in libDartFiles()) {
+        if (f.path.endsWith('prefs_json.dart')) continue;
+        final text = f.readAsStringSync();
+        if (text.contains('await sp.setString(')) offenders.add(f.path);
+      }
+      expect(offenders, isEmpty, reason: '这些文件又手写了一份存盘：$offenders');
+      expect(libSourceAll().contains('Future<void> savePrefString('), isTrue);
+    });
+
+    test('AuthorGrade 不再有两个名字做同一件事', () {
+      final src = File('lib/author_grade.dart').readAsStringSync();
+      expect(src.contains('static Future<void> save()'), isFalse,
+          reason: 'save 与 cacheLocal 逐字相同，只保留 cacheLocal');
+      expect(src.contains('static Future<void> cacheLocal()'), isTrue);
+      expect(src.contains('savePrefString(prefsKey'), isTrue);
+    });
+
+    test('九批删掉的零引用成员不得复活', () {
+      const gone = <String>[
+        'bool get isLight',
+        'static int unitColor(',
+        'static String keyFor(String basicId)',
+        'static double get closeFraction',
+        'Map<String, String> get overrides',
+        'static void invalidate(String lib)',
+        'Set<String> typesFor(',
+        'void cycleSpeed()',
+        'bool legacyOpen',
+        'static void updatePosition(',
+      ];
+      final src = libSourceAll();
+      for (final g in gone) {
+        expect(src.contains(g), isFalse, reason: '死成员复活：$g');
+      }
+    });
+
+    test('崩溃判定的另一端已接线（clean_exit 必须有写入点）', () {
+      // 这是本轮修的真 bug：写入函数一直存在，但没人调用，
+      // 于是每次冷启动都把上一轮读成「疑似原生崩溃」。
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main.contains('Breadcrumb.cleanExit()'), isTrue,
+          reason: 'cleanExit 必须被生命周期钩子调用');
+      expect(main.contains('AppLifecycleState.paused'), isTrue);
+      expect(File('lib/breadcrumb.dart').readAsStringSync().contains(
+          'static Future<void> cleanExit()'), isTrue);
+    });
+  });
 }

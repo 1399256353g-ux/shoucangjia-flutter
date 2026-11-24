@@ -149,7 +149,12 @@ class TaskbarEpisodeButton extends StatelessWidget {
   }
 }
 
-/// 任务栏「播放设置」入口：显示当前倍速，点击弹出倍速/循环/连播/乱序菜单。
+/// 任务栏「播放设置」入口：齿轮图标，点击弹出倍速/循环/连播/乱序菜单。
+///
+/// owner 2026-11-24：这里原来显示「1.25x」文字，但点进去是整套播放设置——
+/// 图标暗示的和实际做的事不符，而且自动连播/循环/乱序已经直接摆在任务栏上，
+/// 再拿倍速文字当入口就是重复。改为设置样式的齿轮图标，倍速只在菜单里调。
+/// 当前倍速仍保留在 tooltip / 无障碍标签里，不丢信息。
 class TaskbarSettingsButton extends StatelessWidget {
   const TaskbarSettingsButton({
     super.key,
@@ -166,7 +171,7 @@ class TaskbarSettingsButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final w = width < kTaskbarTouchTarget ? kTaskbarTouchTarget : width;
     return Tooltip(
-      message: '播放设置',
+      message: '播放设置（当前 ${speedLabel(speed)}）',
       child: Semantics(
         button: true,
         label: '播放设置 ${speedLabel(speed)}',
@@ -177,9 +182,9 @@ class TaskbarSettingsButton extends StatelessWidget {
           child: SizedBox(
             width: w,
             height: 48,
-            child: Center(
-              child: Text(speedLabel(speed),
-                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            child: const Center(
+              child: Icon(Icons.tune_rounded,
+                  size: 20, color: Colors.white70),
             ),
           ),
         ),

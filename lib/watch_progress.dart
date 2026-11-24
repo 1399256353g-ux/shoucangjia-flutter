@@ -13,6 +13,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_json.dart';
 
 /// SharedPreferences 键：整个观看记录表存在一个 JSON 字符串里。
 const String kWatchProgressPrefsKey = 'watch_progress_v1';
@@ -271,12 +272,10 @@ class WatchProgressStore {
   }
 
   /// 立即落盘。
-  static Future<void> flush() async {
-    try {
-      _items = pruneWatchProgress(_items);
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(kWatchProgressPrefsKey, encodeWatchProgress(_items));
-    } catch (_) {}
+  static Future<void> flush() {
+    _items = pruneWatchProgress(_items);
+    return savePrefString(
+        kWatchProgressPrefsKey, encodeWatchProgress(_items));
   }
 
   @visibleForTesting

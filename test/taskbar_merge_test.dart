@@ -45,17 +45,31 @@ void main() {
   });
 
   group('播放设置入口', () {
-    testWidgets('显示当前倍速并可点击', (tester) async {
+    testWidgets('显示设置图标（不再用倍速文字冒充），可点击', (tester) async {
       var taps = 0;
       await tester.pumpWidget(host(TaskbarSettingsButton(
         speed: 1.25,
         onPressed: () => taps++,
       )));
-      expect(find.text('1.25x'), findsOneWidget);
+      // owner 2026-11-24：入口是「播放设置」不是「倍速」，图标必须是设置样式；
+      // 任务栏已经直接摆了连播/循环/乱序，再显示倍速文字就是重复入口。
+      expect(find.byIcon(Icons.tune_rounded), findsOneWidget);
+      expect(find.text('1.25x'), findsNothing);
       final size = tester.getSize(find.byKey(const Key('taskbar-settings')));
       expect(size.width, greaterThanOrEqualTo(44));
       await tester.tap(find.byKey(const Key('taskbar-settings')));
       expect(taps, 1);
+    });
+
+    testWidgets('当前倍速保留在无障碍标签里，不丢信息', (tester) async {
+      await tester.pumpWidget(host(TaskbarSettingsButton(
+        speed: 1.5,
+        onPressed: () {},
+      )));
+      expect(
+        find.bySemanticsLabel('播放设置 1.5x'),
+        findsOneWidget,
+      );
     });
   });
 

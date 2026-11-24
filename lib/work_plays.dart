@@ -12,6 +12,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_json.dart';
 
 const String kWorkPlaysPrefsKey = 'work_plays_v2';
 
@@ -238,16 +239,13 @@ class WorkPlaysStore {
   }
 
   /// 立即落盘（测试与退出路径可用）。
-  static Future<void> flush() async {
+  static Future<void> flush() {
     _flush?.cancel();
     _flush = null;
     final raw = encodeWorkPlays(_items);
-    if (raw == _pending) return;
+    if (raw == _pending) return Future<void>.value();
     _pending = raw;
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(kWorkPlaysPrefsKey, raw);
-    } catch (_) {}
+    return savePrefString(kWorkPlaysPrefsKey, raw);
   }
 
   /// 仅测试用：重置内存态。

@@ -15,8 +15,6 @@ class AuthorDrag {
   /// 松手完成进入所需的最小进度（占屏宽比例）。
   static const double completeFraction = 0.3;
 
-  /// 反向拖拽关闭所需的进度上界（对称：1 - completeFraction）。
-  static double get closeFraction => 1 - completeFraction;
 
   /// 视为「甩动完成」的速度阈值（逻辑像素/秒，取绝对值）。
   static const double flingVelocity = 700;

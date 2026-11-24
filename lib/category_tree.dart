@@ -10,6 +10,8 @@
 //   { root, name, dirs:[{name, rel, authors:[...], dirs:[...]}] }
 // 本文件只做解析、校验、改名后的本地映射与筛选，不做 IO。
 
+import 'rel_path.dart';
+
 /// 一个分类节点（对应磁盘上的一个真实目录）。
 class CategoryNode {
   /// 磁盘真实目录名（显示名，不做任何美化）。
@@ -70,18 +72,10 @@ class CategoryNode {
   }
 }
 
-/// 路径拆分（统一分隔符，去掉空段与 `.`）；`..` 保留以便校验时被拒。
-List<String> splitCatRel(String rel) {
-  final out = <String>[];
-  for (final raw in rel.split(RegExp(r'[\\/]+'))) {
-    final s = raw.trim();
-    if (s.isEmpty || s == '.') continue;
-    out.add(s);
-  }
-  return out;
-}
+/// 路径拆分交给唯一实现（见 `rel_path.dart`），不在本文件再写一份。
+List<String> splitCatRel(String rel) => relSegments(rel);
 
-String joinCatRel(Iterable<String> segs) => segs.join('/');
+String joinCatRel(Iterable<String> segs) => relJoin(segs);
 
 /// 从服务端 JSON 解析分类树；结构不合法返回 null。
 CategoryNode? parseCategoryTree(Map<String, dynamic> json) {

@@ -20,6 +20,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'prefs_json.dart';
 
 /// 本机覆盖表：`作者名 -> 媒体路径`（JSON object）。
 const String kAuthorAvatarPrefsKey = 'author_avatar_overrides_v1';
@@ -181,8 +182,6 @@ class AuthorAvatarStore extends ChangeNotifier {
   /// 已设置手动头像的作者数。
   int get count => _paths.length;
 
-  /// 全部覆盖（只读副本，诊断/测试用）。
-  Map<String, String> get overrides => Map<String, String>.unmodifiable(_paths);
 
   /// 该作者的手动头像路径；没有返回 null。
   String? pathFor(String name) => _paths[authorAvatarKey(name)];
@@ -224,12 +223,8 @@ class AuthorAvatarStore extends ChangeNotifier {
     await _persist();
   }
 
-  Future<void> _persist() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(kAuthorAvatarPrefsKey, encodeAuthorAvatarOverrides(_paths));
-    } catch (_) {}
-  }
+  Future<void> _persist() =>
+      savePrefString(kAuthorAvatarPrefsKey, encodeAuthorAvatarOverrides(_paths));
 
   /// 仅供测试：注入初始状态。
   @visibleForTesting

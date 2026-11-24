@@ -21,6 +21,8 @@ import 'package:flutter/material.dart'
         Widget;
 
 import 'app_settings.dart';
+import 'prefs_json.dart';
+import 'contrast.dart';
 
 /// P1：词条层级。四种词条**形状与尺寸完全一致**，差异只在边框/底纹，
 /// 保证「层级一眼可辨、位置与排版不动」。
@@ -202,12 +204,7 @@ class LibraryBadge {
         for (final e in entryStyle.entries) e.key.name: e.value.toJson(),
       });
 
-  static Future<void> saveStyle() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(stylePrefsKey, encodeStyle());
-    } catch (_) {}
-  }
+  static Future<void> saveStyle() => savePrefString(stylePrefsKey, encodeStyle());
 
   /// 容错读入：任何层级缺失/非法都回落默认，不阻断启动。
   static void applyStyleJson(Object? v) {
@@ -276,11 +273,6 @@ class LibraryBadge {
       h = (h * 31 + u) & 0x7fffffff;
     }
     return autoColorAt(h);
-  }
-
-  /// 单元库词条颜色：顶级 SECRET / 空 id 固定灰色，其余按库配色。
-  static int unitColor(String unitId, {List<String> order = const []}) {
-    return colorForUnit(unitId, order: order);
   }
 
   /// 单元库配色：同一单元库在主页（`node:rel`）与 LibMeta（`rel`）里 id
@@ -393,12 +385,7 @@ class LibraryBadge {
     });
   }
 
-  static Future<void> saveBasic() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(basicPrefsKey, encodeBasic());
-    } catch (_) {}
-  }
+  static Future<void> saveBasic() => savePrefString(basicPrefsKey, encodeBasic());
 
   /// 设置/清除顶级单元库颜色。清空即撤销该顶级单元库的向下继承。
   static Future<void> setTopColor(String topId, int? argb) async {
@@ -421,21 +408,11 @@ class LibraryBadge {
     });
   }
 
-  static Future<void> saveTop() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(topPrefsKey, encodeTop());
-    } catch (_) {}
-  }
+  static Future<void> saveTop() => savePrefString(topPrefsKey, encodeTop());
 
   /// 根据底色亮度选择黑/白文字，保证对比度。
-  static int textColorOn(int argb) {
-    final r = (argb >> 16) & 0xFF;
-    final g = (argb >> 8) & 0xFF;
-    final b = argb & 0xFF;
-    final lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
-    return lum > 0.62 ? 0xFF111827 : 0xFFFFFFFF;
-  }
+  /// 实现只在 [foregroundArgbOn] 一处（角标与本处必须同色）。
+  static int textColorOn(int argb) => foregroundArgbOn(argb);
 
   /// 位置词条统一去掉文件夹名前面的序号：
   /// `(1) 名称` / `（1）名称` / `[1] 名称` / `01. 名称` / `01、名称` → `名称`。
@@ -578,12 +555,7 @@ class LibraryBadge {
     } catch (_) {}
   }
 
-  static Future<void> save() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(prefsKey, encode());
-    } catch (_) {}
-  }
+  static Future<void> save() => savePrefString(prefsKey, encode());
 
   /// 单元库自定义颜色的当前值（`rel` / `node:rel` 两种形式都认）。
   /// 设置页用它判断「自动 / 自定义」，避免只删一种 id 后仍显示自定义色。
@@ -608,12 +580,7 @@ class LibraryBadge {
     await save();
   }
 
-  static Future<void> saveEmoji() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(emojiPrefsKey, encodeEmoji());
-    } catch (_) {}
-  }
+  static Future<void> saveEmoji() => savePrefString(emojiPrefsKey, encodeEmoji());
 
   /// 设置或清除单元库 emoji 后缀；同一单元库的 `rel` / `node:rel` 形式
   /// 一起清掉，避免两种 id 各留一份导致显示不一致。

@@ -101,6 +101,7 @@ import 'playback_menu.dart';
 import 'player_controls.dart';
 import 'player_layers.dart';
 import 'pause_trace.dart';
+import 'prefs_json.dart';
 import 'preload_policy.dart';
 import 'preload_plan.dart';
 import 'preload_pool.dart';
@@ -682,11 +683,6 @@ class LibMeta {
     });
   }
 
-  static void invalidate(String lib) {
-    cache.remove(lib);
-    _cachedAt.remove(lib);
-  }
-
   /// 基础库词条显示名：路径命中基础库时用其名称，否则回落到传入的库名。
   String labelFor(String mediaPath, String fallback) {
     final b = basicLibForMedia(basics, mediaPath) ??
@@ -771,10 +767,6 @@ class LibMeta {
     // 旧数据缺少 big_id 时按路径前缀回退到名称中含该前缀的大库。
     return '';
   }
-
-  /// 作者作品类型集合（由外部类型索引提供作者名后取用）。
-  Set<String> typesFor(Map<String, Set<String>> types, String author) =>
-      types[author] ?? const <String>{};
 
   List<String> get order => filterBasics.map((e) => e.id).toList();
 
@@ -1265,13 +1257,43 @@ class App extends StatefulWidget {
   State<App> createState() => _AppState();
 }
 
-class _AppState extends State<App> {
+class _AppState extends State<App> with WidgetsBindingObserver {
   bool ready = false;
 
   @override
   void initState() {
     super.initState();
+    // 崩溃判定的另一端：必须有人在进程销毁前写入 clean_exit，
+    // 否则每次冷启动都会把上一轮读成「疑似原生崩溃」。
+    WidgetsBinding.instance.addObserver(this);
     _boot();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 崩溃判定的另一端就在这里。
+    //
+    // 判定是「最后一行不是 clean_exit ⇒ 疑似原生崩溃」。Android 从最近任务
+    // 划掉进程、系统 OOM 回收，都不会给 detached——旧实现只在 detached 写标记，
+    // 于是**每一次正常关闭都会被读成崩溃**（这是本轮修的真 bug）。
+    // 所以标记必须在「进程还能跑、但已不再掌握前台」的那一刻写下来：
+    // 进入 paused 即视为正常退出；之后若在前台原生崩溃，最后一行就不是
+    // clean_exit，仍然能报出来。
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      unawaited(Breadcrumb.cleanExit());
+      return;
+    }
+    // 回到前台后必须盖掉那条 clean_exit：否则「切后台 → 回前台 → 原生崩溃」
+    // 这一整段会被当成正常退出，崩溃又静默了。写一行普通标记即可。
+    if (state == AppLifecycleState.resumed) {
+      Breadcrumb.mark('app:resumed');
+    }
   }
 
   Future<void> _boot() async {
@@ -1286,7 +1308,7 @@ class _AppState extends State<App> {
       pass: cfg.pass,
     );
     if (servers.isNotEmpty) {
-      await sp.setString('servers_v1', encodeServers(servers));
+      await savePrefString('servers_v1', encodeServers(servers));
     }
     final activeId = sp.getString('active_server_v1') ?? '';
     ServerConn? active;
@@ -1388,9 +1410,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _persist() async {
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString('servers_v1', encodeServers(servers));
-    await sp.setString('active_server_v1', activeId);
+    await savePrefString('servers_v1', encodeServers(servers));
+    await savePrefString('active_server_v1', activeId);
     // 当前连接必须是在线的：断连的那条不能继续带着旧地址/密码当全局默认。
     final live = liveServers(servers);
     ServerConn? active;
@@ -1402,14 +1423,14 @@ class _SettingsPageState extends State<SettingsPage> {
       cfg.base = active.base;
       cfg.user = active.user;
       cfg.pass = active.pass;
-      await sp.setString('base', active.base);
-      await sp.setString('user', active.user);
-      await sp.setString('pass', active.pass);
+      await savePrefString('base', active.base);
+      await savePrefString('user', active.user);
+      await savePrefString('pass', active.pass);
     } else {
       cfg.base = '';
       cfg.pass = '';
-      await sp.setString('base', '');
-      await sp.setString('pass', '');
+      await savePrefString('base', '');
+      await savePrefString('pass', '');
     }
     connectionRevision.value++;
   }
@@ -4728,9 +4749,6 @@ class _LibraryPageState extends State<LibraryPage> {
   Set<String> expanded = <String>{};
   List<String> stars = <String>[];
 
-  /// J3：旧注册表默认收起，只在需要管理时展开。
-  bool legacyOpen = false;
-
   /// G：服务端 `/api/libraries.json` 下发的基础库第一张作品封面（`fc`）
   /// 现在由 `BasicLib.firstCover` 携带（单一来源），不再另存一份映射。
 
@@ -4960,7 +4978,7 @@ class _LibraryPageState extends State<LibraryPage> {
         }
       }
       cfg.setBindings(bindings);
-      await sp.setString('lib_bindings_v1', encodeBindings(bindings));
+      await savePrefString('lib_bindings_v1', encodeBindings(bindings));
       final failures =
           snaps.where((s) => s.error != null).map((s) => s.server.title);
       if (!mounted) return;
@@ -5423,9 +5441,8 @@ class _LibraryPageState extends State<LibraryPage> {
           server: '${l['_serverId'] ?? ''}',
           label: '${l['_serverLabel'] ?? ''}');
     }
-    final sp = await SharedPreferences.getInstance();
-    await sp.setString('lib', cfg.lib);
-    await sp.setString('lib_bindings_v1', encodeBindings(cfg._bindings));
+    await savePrefString('lib', cfg.lib);
+    await savePrefString('lib_bindings_v1', encodeBindings(cfg._bindings));
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
@@ -6375,8 +6392,7 @@ class _HomePageState extends State<HomePage> {
       cfg.libName =
           displayLibraryName('${pick['id']}', '${pick['name'] ?? ''}');
       if (changed) {
-        final sp = await SharedPreferences.getInstance();
-        await sp.setString('lib', cfg.lib);
+        await savePrefString('lib', cfg.lib);
       }
     } catch (_) {}
   }
@@ -7309,12 +7325,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     } catch (_) {}
   }
 
-  Future<void> _saveSort(String value) async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setString(_sortPrefsKey, value);
-    } catch (_) {}
-  }
+  Future<void> _saveSort(String value) => savePrefString(_sortPrefsKey, value);
 
   bool loading = true;
   String? err;
@@ -11150,13 +11161,6 @@ class _PlayerPageState extends State<PlayerPage>
     } else {
       _cancelPreload();
     }
-  }
-
-  void cycleSpeed() {
-    const steps = [0.75, 1.0, 1.25, 1.5, 2.0];
-    var i = steps.indexWhere((s) => (s - speed).abs() < 0.001);
-    final nextSpeed = steps[(i + 1) % steps.length];
-    setSpeed(nextSpeed);
   }
 
   /// 设定倍速（播放设置菜单与键盘循环共用唯一入口）。
