@@ -10,7 +10,8 @@ void main() {
     expect(def.fullMin, 60);
     expect(def.cooldownMin, 15);
     expect(def.script, 'sync.sh');
-    expect(def.syncReady, isFalse);
+    // 脚本列表为空 → 未就绪。
+    expect(def.scriptReadyIn(const <UnitCrawlerScript>[]), isFalse);
 
     final c = UnitCrawlerConfig.fromJson({
       'enabled': true,
@@ -23,7 +24,16 @@ void main() {
     expect(c.fullMin, 60);
     expect(c.note, 'hello');
     expect(c.script, 'run.sh');
-    expect(c.syncReady, isTrue);
+    // 关键：配置里写着 run.sh 但磁盘上没有这个脚本 → 不算就绪。
+    // 旧实现只判 `script.isNotEmpty`，这里会给出相反（更宽松）的答案。
+    expect(c.scriptReadyIn(const <UnitCrawlerScript>[]), isFalse);
+    const real = [UnitCrawlerScript(name: 'run.sh')];
+    expect(c.scriptReadyIn(real), isTrue);
+    // 就绪只看脚本是否存在，不看开关：否则关掉同步后开关再也打不开。
+    expect(c.copyWith(enabled: false).scriptReadyIn(real), isTrue);
+    // 不可运行的扩展名不算就绪。
+    const bad = [UnitCrawlerScript(name: 'run.sh.bak')];
+    expect(c.scriptReadyIn(bad), isFalse);
   });
 
   test('备注归一化', () {

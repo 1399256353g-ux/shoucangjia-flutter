@@ -47,12 +47,3 @@ String stripIndexPrefix(String raw) {
   }
   return s;
 }
-
-/// 上述规则的反向判断：这个名字是否带了序号前缀。
-bool hasIndexPrefix(String raw) {
-  final s = raw.trim();
-  if (s.isEmpty) return false;
-  return _bracketPrefix.hasMatch(s) ||
-      _dotPrefix.hasMatch(s) ||
-      _dunPrefix.hasMatch(s);
-}

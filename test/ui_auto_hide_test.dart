@@ -93,13 +93,12 @@ void main() {
 
     test('未排定时剩余为零、不可排定', () {
       final d = HideDeadline();
-      expect(d.isScheduled, isFalse);
+      expect(d.at, isNull);
       expect(d.remaining(t0), Duration.zero);
     });
 
     test('extend 从给定时刻顺延指定秒数', () {
       final d = HideDeadline()..extend(t0, 3);
-      expect(d.isScheduled, isTrue);
       expect(d.at, t0.add(const Duration(seconds: 3)));
       expect(d.remaining(t0), const Duration(seconds: 3));
       expect(d.remaining(t0.add(const Duration(seconds: 1))),
@@ -122,7 +121,7 @@ void main() {
     test('clear 后不再排定', () {
       final d = HideDeadline()..extend(t0, 3);
       d.clear();
-      expect(d.isScheduled, isFalse);
+      expect(d.at, isNull);
       expect(d.remaining(t0), Duration.zero);
     });
   });

@@ -84,7 +84,8 @@ void main() {
       expect(p.timeline.any((l) => l.contains('startup step=cache ms=850')),
           isTrue);
       expect(p.timeline.any((l) => l.contains('first_frame ms=1000')), isTrue);
-      p.stopHeartbeat();
+      // 心跳只在 writeFile=true 时启动，这里 writeFile=false 从未排定；
+      // 原先的 stopHeartbeat() 是给单测收尾用的空调用，已并入生命周期的自取消。
     });
 
     test('槽位创建/释放计数与峰值；不会出现负数存活', () {

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shoucangjia/deleted_cover.dart';
 import 'package:shoucangjia/deleted_monitor.dart';
 
 void main() {
@@ -24,8 +25,11 @@ void main() {
     expect(r.total, 2);
     expect(r.items.length, 2);
     expect(r.items.first.author, '作者A');
-    expect(r.items.first.hasCover, isTrue);
-    expect(r.items.last.hasCover, isFalse);
+    // 预览图判定走真实路径的 deletedCoverPath（含作者头像回退），
+    // 不再是条目上一个只判 `cover` 的 test-only getter。
+    expect(
+        deletedCoverPath({'th': r.items.first.cover}, const {}), isNotEmpty);
+    expect(deletedCoverPath({'th': r.items.last.cover}, const {}), isEmpty);
     expect(r.items.first.atLabel, isNot(contains('T')));
   });
 

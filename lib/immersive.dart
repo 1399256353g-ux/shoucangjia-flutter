@@ -62,7 +62,6 @@ class ImmersiveCycle {
   int? _deadlineMs;
 
   bool get immersive => _immersive;
-  bool get scheduled => _deadlineMs != null;
 
   /// 任何点击/滑动/按键：退出沉浸，等待调用方重新排定。
   void touch() {

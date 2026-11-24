@@ -4957,7 +4957,8 @@ class _LibraryPageState extends State<LibraryPage> {
             'user': s.user,
             'pass': s.pass,
             'server': s.id,
-            'label': s.title,
+            // owner 2026-11-24：卡片名不能用 s.title（没填会回退成网址）。
+            'label': s.cardLabel,
           };
         }
       }
@@ -5050,7 +5051,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
                 serverId: firstServer?.id ?? '',
                 serverBase: firstServer?.base ?? '',
-                serverLabel: firstServer?.title ?? '',
+                serverLabel: firstServer?.cardLabel ?? '',
               ))
           .toList(growable: false);
       final units = buildUnitTree(

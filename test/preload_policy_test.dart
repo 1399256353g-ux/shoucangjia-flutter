@@ -69,9 +69,9 @@ void main() {
       }
       expect(
           c.evictionSlot(current: 5, direction: 1), 1);
-      c.removeKey('k1');
+      c.removeSlot(1);
       expect(c.evictionSlot(current: 5, direction: 1), 2);
-      c.removeKey('k2');
+      c.removeSlot(2);
       expect(c.evictionSlot(current: 5, direction: 1), 9);
     });
 
@@ -100,12 +100,14 @@ void main() {
       final c = PreloadCache();
       c.put(const PreloadEntry(slot: 3, index: 2, key: 'x', bytes: 10));
       expect(c.keyOfSlot(3), 'x');
-      expect(c.entryOfKey('x')!.index, 2);
+      expect(c.entryOfSlot(3)!.index, 2);
       expect(c.totalBytes, 10);
       expect(c.canFit(5, byteLimit: 15), isTrue);
       expect(c.canFit(6, byteLimit: 15), isFalse);
+      expect(c.containsKey('x'), isTrue);
       c.removeSlot(3);
       expect(c.length, 0);
+      expect(c.containsKey('x'), isFalse);
     });
   });
 

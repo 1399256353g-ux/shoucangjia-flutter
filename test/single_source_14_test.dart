@@ -66,8 +66,10 @@ void main() {
       expect(stripIndexPrefix('18+'), '18+');
       expect(stripIndexPrefix('(1)'), '(1)', reason: '只有序号时保留原串，词条不能变空');
       expect(stripIndexPrefix('  '), '');
-      expect(hasIndexPrefix('(1) 名称'), isTrue);
-      expect(hasIndexPrefix('名称'), isFalse);
+      // 反向判断曾被单独导出、却只有测试在调用；要判断「带了序号」时
+      // 直接比较 stripIndexPrefix 的返回值即可（单一规则、单一入口）。
+      const raw = '(1) 名称';
+      expect(stripIndexPrefix(raw), isNot(raw));
     });
 
     test('括号前缀可叠加，点号前缀只剥一层', () {

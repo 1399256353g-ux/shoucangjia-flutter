@@ -33,6 +33,13 @@ class ServerConn {
 
   String get title => label.trim().isEmpty ? base : label.trim();
 
+  /// 供 UI 卡片使用的名称：**没填就是空串**，不回退成网址（owner 2026-11-24）。
+  ///
+  /// 历史问题：媒体库卡片取 `title`，而 `title` 在 label 为空时回退成 `base`，
+  /// 于是首页卡片上只显示一串 `http://192.168.x.x:8090`，库名完全消失。
+  /// 这里只返回用户真正填过的名称，空串交由调用方回退到「媒体库根目录名」。
+  String get cardLabel => label.trim();
+
   /// 历史字段名（旧代码/旧测试用 `visible` 表达同一件事）。
   bool get visible => enabled;
 
@@ -172,7 +179,7 @@ Map<String, dynamic> _tag(Map raw, ServerConn s) => {
       ...Map<String, dynamic>.from(raw),
       '_serverId': s.id,
       '_serverBase': s.base,
-      '_serverLabel': s.title,
+      '_serverLabel': s.cardLabel,
       '_serverUser': s.user,
       '_serverPass': s.pass,
     };
@@ -249,7 +256,8 @@ Map<String, Map<String, String>> buildBindings({
       'pass': s.pass,
       'server': s.id,
       // owner 2026-11-24：首页媒体库卡片要显示连接名，绑定必须带上它。
-      'label': s.title,
+      // 用 cardLabel（没填就是空串），否则卡片上只会出现一串网址。
+      'label': s.cardLabel,
     };
   }
   return out;

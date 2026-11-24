@@ -78,8 +78,20 @@ class UnitCrawlerConfig {
         script: script ?? this.script,
       );
 
-  /// 同步相关设置是否可用（J17：必须选中一个真实存在的脚本）。
-  bool get syncReady => enabled && script.isNotEmpty;
+  /// 选中的脚本是否**真实存在且可运行**（J17）。
+  ///
+  /// 这条规则原先有两个实现：这里的 `syncReady` 只判 `script.isNotEmpty`，
+  /// 页面的真实路径判「名字在脚本列表里且可运行」。于是「配置里写着 sync.sh、
+  /// 但目录里没有这个文件」在配置对象上算就绪、在界面上算不可用——同一个问题
+  /// 两个答案，而只有后者是产品行为。现在只留这一处。
+  ///
+  /// **不含 `enabled`**：开关本身要靠它决定能不能打开，把 enabled 掺进来会让
+  /// 关掉同步之后再也打不开。
+  bool scriptReadyIn(Iterable<UnitCrawlerScript> scripts) {
+    final name = script.trim();
+    if (name.isEmpty) return false;
+    return scripts.any((s) => s.name == name && s.looksRunnable);
+  }
 
   /// 同步频率汇总文案（页面底部「当前：…」那一行）。
   ///

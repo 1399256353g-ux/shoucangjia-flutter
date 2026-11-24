@@ -264,10 +264,4 @@ class PerfDiagnostics {
       }
     });
   }
-
-  /// 停止心跳（页面退出/单测用）。
-  void stopHeartbeat() {
-    _heartbeat?.cancel();
-    _heartbeat = null;
-  }
 }

@@ -141,8 +141,6 @@ class PreloadCache {
     return null;
   }
 
-  PreloadEntry? entryOfKey(String key) => _byKey[key];
-
   bool containsKey(String key) => _byKey.containsKey(key);
 
   bool containsSlot(int slot) => entryOfSlot(slot) != null;
@@ -151,8 +149,6 @@ class PreloadCache {
     _byKey.remove(e.key);
     _byKey[e.key] = e;
   }
-
-  void removeKey(String key) => _byKey.remove(key);
 
   void removeSlot(int slot) => _byKey.removeWhere((_, e) => e.slot == slot);
 

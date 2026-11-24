@@ -36,8 +36,6 @@ class HideDeadline {
   /// 当前截止时刻（未排定则为 null）。
   DateTime? get at => _at;
 
-  bool get isScheduled => _at != null;
-
   /// 从 [now] 起顺延 [seconds] 秒作为新的截止时刻。
   void extend(DateTime now, int seconds) {
     _at = now.add(Duration(seconds: seconds));

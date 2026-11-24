@@ -418,10 +418,6 @@ class DiziCache {
     }
   }
 
-  /// 当前登记的某库封面 URL 数量（测试/诊断用）。
-  static int urlCountForLib(String libId) =>
-      _urlsByLib[libId.trim()]?.length ?? 0;
-
   /// 清掉某库已知的全部封面缓存（磁盘 + 内存图片缓存）。返回删除条数。
   static Future<int> evictLib(String libId) async {
     final l = libId.trim();

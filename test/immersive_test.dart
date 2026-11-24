@@ -78,7 +78,6 @@ void main() {
       expect(c.immersive, isTrue);
       c.touch();
       expect(c.immersive, isFalse);
-      expect(c.scheduled, isFalse);
       expect(c.tick(9999, eligible: true), isFalse);
     });
 
@@ -96,7 +95,6 @@ void main() {
       final c = ImmersiveCycle();
       c.schedule(0);
       c.cancel();
-      expect(c.scheduled, isFalse);
       expect(c.tick(4000, eligible: true), isFalse);
       expect(c.immersive, isFalse);
     });

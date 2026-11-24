@@ -60,8 +60,8 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
   String get _runUrl => unitCrawlerUrl(widget.base, '/api/unit/run-crawler',
       unitId: widget.unit.id, rel: widget.unit.rel);
 
-  bool get hasScript =>
-      scripts.any((s) => s.name == config.script && s.looksRunnable);
+  /// 脚本是否真的存在且可运行（单一判定口在 `UnitCrawlerConfig.scriptReadyIn`）。
+  bool get hasScript => config.scriptReadyIn(scripts);
 
   List<UnitCrawlerScript> get runnableScripts =>
       scripts.where((s) => s.looksRunnable).toList(growable: false);

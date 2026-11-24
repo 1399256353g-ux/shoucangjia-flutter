@@ -46,8 +46,6 @@ class DeletedEntry {
     this.stateRaw = '',
   });
 
-  bool get hasCover => cover.trim().isNotEmpty;
-
   /// 三态归一：旧服务端没有 `st` 字段时按「已删除」处理，保持原行为。
   DeletedState get state => deletedStateOf(stateRaw);
 

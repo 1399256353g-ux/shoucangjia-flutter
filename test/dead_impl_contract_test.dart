@@ -710,4 +710,80 @@ void main() {
       expect(bar.contains('pinned'), isTrue);
     });
   });
+
+  // 第十六批（0.9.217）：组合键落地后留下的三处「单键兼容壳」。
+  // `keyIds` / `bind()` / `actionFor()` 只被 test 引用，真实路径全部走
+  // `keyBindings` / `bindCombo` / `actionForCombo`；壳还在，就等于给「只改壳
+  // 不改真路径」留了一条静默分叉的路。
+  group('第十六批：组合键只有一套 API', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('单键兼容壳不得复活', () {
+      final s = codeOf('lib/app_settings.dart');
+      expect(RegExp(r'^\s*(static )?Map<PlayerAction, int> get keyIds',
+                      multiLine: true)
+              .hasMatch(s),
+          isFalse,
+          reason: 'keyIds 只读视图又回来了：组合键会出现两条真相');
+      expect(RegExp(r'^\s*static void bind\(', multiLine: true).hasMatch(s),
+          isFalse,
+          reason: 'bind() 单键壳又回来了');
+      expect(RegExp(r'^\s*static PlayerAction\? actionFor\(', multiLine: true)
+              .hasMatch(s),
+          isFalse,
+          reason: 'actionFor() 单键壳又回来了');
+      // 真入口必须都在。
+      for (final k in ['keyBindings', 'bindCombo(', 'actionForCombo(']) {
+        expect(s.contains(k), isTrue, reason: '$k 不见了');
+      }
+    });
+
+    test('响应体 → Map 只有 jsonMapOf 一个入口', () {
+      // `jsonOf(r) as Map<String, dynamic>` 散在 11 处时，任何一处改成
+      // `as Map`（丢掉类型）都不会有人发现；集中到 jsonMapOf 后只有一份。
+      for (final f in ['lib/main.dart', 'lib/unit_crawler_page.dart',
+                       'lib/collection_sync_panel.dart']) {
+        final s = codeOf(f);
+        expect(RegExp(r'jsonOf\(\w+\) as Map').hasMatch(s), isFalse,
+            reason: '$f 又手写了一遍资源体转型');
+      }
+      final http = codeOf('lib/http_json.dart');
+      expect(http.contains('Map<String, dynamic> jsonMapOf'), isTrue);
+    });
+  });
+
+  // 第十七批（0.9.217）：单元库「同步就绪」只有一条判定。
+  group('第十七批：同步就绪只有一条规则', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('页面不得自己再判一遍脚本就绪', () {
+      final page = codeOf('lib/unit_crawler_page.dart');
+      expect(RegExp(r'scripts\.any\(').hasMatch(page), isFalse,
+          reason: '单元库页又自己扫了一遍脚本列表，与配置对象的判定分叉');
+      expect(page.contains('config.scriptReadyIn(scripts)'), isTrue,
+          reason: '页面没走单一判定口');
+    });
+
+    test('就绪判定必须区分「脚本存在」与「已启用」', () {
+      final c = codeOf('lib/unit_crawler.dart');
+      // scriptReadyIn 不得掺 enabled；syncReadyIn 才是 enabled && scriptReadyIn。
+      final scriptReady = RegExp(
+              r'bool scriptReadyIn\(Iterable<UnitCrawlerScript> scripts\) \{([\s\S]*?)\n  \}',
+              multiLine: true)
+          .firstMatch(c);
+      expect(scriptReady, isNotNull, reason: 'scriptReadyIn 不见了');
+      expect(scriptReady!.group(1)!.contains('enabled'), isFalse,
+          reason: 'scriptReadyIn 掺进了 enabled：关掉同步后开关再也打不开');
+      expect(c.contains('syncReadyIn'), isFalse,
+          reason: '又出现了一个「enabled && 就绪」的第二判定口');
+    });
+  });
 }
