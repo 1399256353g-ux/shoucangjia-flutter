@@ -358,6 +358,7 @@ void main() {
       expect(libSourceAll().contains('List<String> toggleStar('), isTrue);
     });
 
+
     test('十批删掉的零引用成员不得复活', () {
       const gone = <String>[
         'AvatarCropBox', // 真实头像裁剪走 main.dart 的 avatarCropDisplaySize 一族
@@ -367,6 +368,68 @@ void main() {
       for (final g in gone) {
         expect(src.contains(g), isFalse, reason: '死成员复活：$g');
       }
+    });
+  });
+
+  group('第十一批：同规则多份实现再收口（2026-11-24）', () {
+    test('Basic 鉴权头只有 basic_auth.dart 一处格式', () {
+      // 清理前 main.dart 里逐字手写了 7 份 base64(user:pass)。
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('basic_auth.dart'))
+          .where((f) => f.readAsStringSync().contains("'Basic "))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '鉴权头格式又被手写了：$offenders');
+      expect(
+          File('lib/basic_auth.dart').readAsStringSync(),
+          contains('String basicAuthHeader(String user, String pass)'));
+      // 真实调用点必须还在（Cfg 的鉴权头仍从这一条出口出去）。
+      expect(
+          File('lib/main.dart')
+              .readAsStringSync()
+              .contains('basicAuthHeader(u, p)'),
+          isTrue);
+    });
+
+    test('名次奖牌色只有 rank_medal.dart 一处', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('rank_medal.dart'))
+          .where((f) => f.readAsStringSync().contains('0xFFFFC107'))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '奖牌色又复制了一份：$offenders');
+      final src = libSourceAll();
+      expect(src.contains('Color _rankColor('), isFalse,
+          reason: '两个榜单各自的名次配色方法必须收成一个 rankColorFor');
+      expect(src.contains('Color rankColorFor('), isTrue);
+    });
+
+    test('作者热区点击只有一个处理函数（三处热区共用）', () {
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main.contains('void _authorTapOpen()'), isTrue);
+      expect('onTap: _authorTapOpen'.allMatches(main).length, 3,
+          reason: '头像 / 占位头像 / 作者名三处热区必须共用同一处理');
+      // 真实打开动作只剩处理函数内部那一次调用。
+      expect('openAuthor();'.allMatches(main).length, 1);
+    });
+
+    test('绑定表查字段只有 _bindingOf 一处算实际库 id', () {
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main.contains('String _bindingOf('), isTrue);
+      expect('libId ?? lib'.allMatches(main).length, 1,
+          reason: '又有地方自己算 libId ?? lib 再查绑定表');
+      for (final acc in const [
+        'String serverIdFor([String? libId])',
+        'String serverLabelFor([String? libId])',
+        'Map<String, String> headersFor([String? libId])',
+      ]) {
+        expect(main.contains(acc), isTrue, reason: '访问器被误删：$acc');
+      }
+    });
+
+    test('播放页不再重复 @override', () {
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main.contains('@override\n  @override'), isFalse);
     });
   });
 }

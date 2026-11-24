@@ -17,6 +17,8 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'basic_auth.dart';
+import 'rank_medal.dart';
 import 'cover_admin.dart';
 import 'haptics.dart';
 import 'cover_cache.dart';
@@ -229,25 +231,27 @@ class Cfg {
     };
   }
 
-  String baseFor([String? libId]) {
+  /// 绑定表取字段的唯一入口：`libId` 省略时用当前库，未绑定时用 [fallback]。
+  ///
+  /// 第十一批之前 `baseFor` / `serverIdFor` / `serverLabelFor` / `headersFor`
+  /// 各自抄了一遍「先算实际库 id、再查 `_bindings`」的两行同体代码——
+  /// 其中一段写错就会变成「某个库的地基来自另一个库」这种极难定位的串库现象。
+  String _bindingOf(String? libId, String key, {String fallback = ''}) {
     final l = libId ?? lib;
-    return _bindings[l]?['base'] ?? base;
+    return _bindings[l]?[key] ?? fallback;
   }
+
+  String baseFor([String? libId]) =>
+      _bindingOf(libId, 'base', fallback: base);
 
   /// 该库所属连接的 id；未绑定时回落到当前连接。
   ///
   /// owner 2026-11-24：首页卡片必须按「连接」归组，否则层级会错位——
   /// 节点没有连接标识时，`buildUnitTree` 会把第一层目录当媒体库卡片。
-  String serverIdFor([String? libId]) {
-    final l = libId ?? lib;
-    return _bindings[l]?['server'] ?? '';
-  }
+  String serverIdFor([String? libId]) => _bindingOf(libId, 'server');
 
   /// 该库所属连接的显示名；未绑定时返回空串（由调用方决定兜底文案）。
-  String serverLabelFor([String? libId]) {
-    final l = libId ?? lib;
-    return _bindings[l]?['label'] ?? '';
-  }
+  String serverLabelFor([String? libId]) => _bindingOf(libId, 'label');
 
   /// P5：断开某条连接后，清掉它名下的库路由与凭据，
   /// 否则已缓存的 `baseFor/headersFor` 仍会带着旧密码继续请求该服务端。
@@ -257,12 +261,9 @@ class Cfg {
   }
 
   Map<String, String> headersFor([String? libId]) {
-    final b = _bindings[libId ?? lib];
-    final u = b?['user'] ?? user;
-    final p = b?['pass'] ?? pass;
-    return {
-      'Authorization': 'Basic ${base64Encode(utf8.encode('$u:$p'))}',
-    };
+    final u = _bindingOf(libId, 'user', fallback: user);
+    final p = _bindingOf(libId, 'pass', fallback: pass);
+    return {'Authorization': basicAuthHeader(u, p)};
   }
 
   /// 当前库所在连接的认证；没有绑定则回落到当前连接。
@@ -1441,8 +1442,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final sw = Stopwatch()..start();
     try {
       final headers = {
-        'Authorization':
-            'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+        'Authorization': basicAuthHeader(s.user, s.pass),
       };
       final rs = await Future.wait([
         http
@@ -4918,8 +4918,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final snaps = <ServerLibraries>[];
       for (final s in use) {
         final h = {
-          'Authorization':
-              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+          'Authorization': basicAuthHeader(s.user, s.pass),
         };
         try {
           final rs = await Future.wait([
@@ -5023,8 +5022,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final snaps = <ServerLibraries>[];
       for (final s in servers) {
         final h = {
-          'Authorization':
-              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+          'Authorization': basicAuthHeader(s.user, s.pass),
         };
         try {
           final r = await http
@@ -5273,9 +5271,8 @@ class _LibraryPageState extends State<LibraryPage> {
     ));
   }
 
-  /// 鉴权头（拆分拼接，避免与既有写法混用）。
-  String _authFor(ServerConn s) =>
-      'Basic ' + base64Encode(utf8.encode(s.user + ':' + s.pass));
+  /// 鉴权头。格式只有 `basicAuthHeader` 一个出处。
+  String _authFor(ServerConn s) => basicAuthHeader(s.user, s.pass);
 
   /// 读取 owner 指定的节点文件夹（服务端 nodes.json）；失败时按「只有 SECRET」处理。
   Future<List<String>> _fetchMarkedNodes() async {
@@ -5386,8 +5383,7 @@ class _LibraryPageState extends State<LibraryPage> {
     for (final s in servers) {
       if (s.base == base) {
         headers = {
-          'Authorization':
-              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+          'Authorization': basicAuthHeader(s.user, s.pass),
         };
         break;
       }
@@ -6515,7 +6511,7 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
   Future<int> probe(ServerConn s) async {
     try {
       final r = await http.get(Uri.parse('${s.base}/api/auth'), headers: {
-        'Authorization': 'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+        'Authorization': basicAuthHeader(s.user, s.pass),
       }).timeout(const Duration(seconds: 6));
       return r.statusCode;
     } catch (_) {
@@ -6528,8 +6524,7 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
         Uri.parse(
             '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
         headers: {
-          'Authorization':
-              'Basic ${base64Encode(utf8.encode('${s.user}:${s.pass}'))}',
+          'Authorization': basicAuthHeader(s.user, s.pass),
         }).timeout(const Duration(seconds: 12));
     if (r.statusCode != 200) throw StateError('HTTP ${r.statusCode}');
     final j = jsonDecode(r.body);
@@ -6739,12 +6734,6 @@ class _RankPageState extends State<RankPage> {
     if (mounted) load();
   }
 
-  Color _rankColor(BuildContext context, int i) {
-    if (i == 0) return const Color(0xFFFFC107);
-    if (i == 1) return const Color(0xFFB0BEC5);
-    if (i == 2) return const Color(0xFFBF8970);
-    return Theme.of(context).colorScheme.onSurfaceVariant;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -6865,7 +6854,7 @@ class _RankPageState extends State<RankPage> {
 
                             return AuthorRankTile(
                               rank: i + 1,
-                              rankColor: _rankColor(context, i),
+                              rankColor: rankColorFor(context, i),
                               name: name,
                               avatar: av,
                               lib: rowLib,
@@ -6965,12 +6954,6 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
     }
   }
 
-  Color _rankColor(BuildContext context, int i) {
-    if (i == 0) return const Color(0xFFFFC107);
-    if (i == 1) return const Color(0xFFB0BEC5);
-    if (i == 2) return const Color(0xFFBF8970);
-    return Theme.of(context).colorScheme.onSurfaceVariant;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -7054,7 +7037,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                                     style: TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold,
-                                        color: _rankColor(context, i))),
+                                        color: rankColorFor(context, i))),
                               ),
                               title: Row(children: [
                                 Flexible(
@@ -9142,7 +9125,6 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   @override
-  @override
   void didChangeMetrics() {
     super.didChangeMetrics();
     if (!Platform.isWindows) return;
@@ -10927,6 +10909,21 @@ class _PlayerPageState extends State<PlayerPage>
     } catch (_) {}
   }
 
+  /// 头像 / 作者名 / 占位图三处热区的**同一个**点击处理。
+  ///
+  /// 原来这三处各自内联了一份 `_authorTapDiag('tap') → try openAuthor() →
+  /// catch(_authorTapDiag('tap-error'))`：改一处忘两处就会出现「头像是好的、
+  /// 名字点了没日志」这种查不出来的现象。热区行为（opaque）仍由各自的
+  /// GestureDetector 保留，这里只管点击之后做什么。
+  void _authorTapOpen() {
+    _authorTapDiag('tap');
+    try {
+      openAuthor();
+    } catch (e) {
+      _authorTapDiag('tap-error', error: e);
+    }
+  }
+
   // 打开当前作品作者主页：先暂停，返回后按原状态恢复
   Future<void> openAuthor() async {
     _authorTapDiag('openAuthor');
@@ -11810,14 +11807,7 @@ class _PlayerPageState extends State<PlayerPage>
                               // 加载（占位为空）或加载失败时中心像素没有可命中对象，
                               // 点击会穿透到舞台被当成暂停——表现就是「点头像没反应」。
                               behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                _authorTapDiag('tap');
-                                try {
-                                  openAuthor();
-                                } catch (e) {
-                                  _authorTapDiag('tap-error', error: e);
-                                }
-                              },
+                              onTap: _authorTapOpen,
                               child: ClipOval(
                                   child: CachedNetworkImage(
                                       cacheManager: DiziCache.manager,
@@ -11844,14 +11834,7 @@ class _PlayerPageState extends State<PlayerPage>
                                               child: Icon(Icons.person)))))
                           : GestureDetector(
                               behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                _authorTapDiag('tap');
-                                try {
-                                  openAuthor();
-                                } catch (e) {
-                                  _authorTapDiag('tap-error', error: e);
-                                }
-                              },
+                              onTap: _authorTapOpen,
                               child: const CircleAvatar(
                                   radius: 19, child: Icon(Icons.person))),
                     ),
@@ -11866,14 +11849,7 @@ class _PlayerPageState extends State<PlayerPage>
                               child: GestureDetector(
                                 // 同上：文字区域也按整块热区命中，不依赖字形像素。
                                 behavior: HitTestBehavior.opaque,
-                                onTap: () {
-                                  _authorTapDiag('tap');
-                                  try {
-                                    openAuthor();
-                                  } catch (e) {
-                                    _authorTapDiag('tap-error', error: e);
-                                  }
-                                },
+                                onTap: _authorTapOpen,
                                 child: Text(
                                     authorLabel.isEmpty
                                         ? '@未知作者'
