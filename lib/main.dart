@@ -3007,12 +3007,70 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
   bool checking = false;
 
+  /// C2（owner 2026-11-24）：顶级单元库＝媒体库根，作为删除记录的一级筛选。
+  /// 记录只带基础库 id（`libId`），经 LibMeta 映射到所属顶级单元库。
+  LibMeta? _meta;
+  String topFilter = '';
+
   @override
   void initState() {
     super.initState();
     _loadAuthorIdx();
+    _loadMeta();
     load();
   }
+
+  /// 拉一次库树，供「顶级单元库」筛选把基础库映射到媒体库根。
+  Future<void> _loadMeta() async {
+    if (cfg.base.isEmpty) return;
+    try {
+      final m = await LibMeta.load(cfg.lib);
+      if (!mounted) return;
+      setState(() => _meta = m);
+    } catch (_) {}
+  }
+
+  /// 记录 → 所属顶级单元库 id；拿不到返回空串（不猜、不归入「其它」）。
+  String _topOf(DeletedEntry e) {
+    final m = _meta;
+    if (m == null) return '';
+    final lib = e.libId.trim();
+    if (lib.isEmpty) return '';
+    return m.topIdForBasic(lib);
+  }
+
+  /// 记录里实际出现的顶级单元库（按首次出现顺序，带条数）。
+  List<MapEntry<String, int>> get _topOptions {
+    final counts = <String, int>{};
+    final order = <String>[];
+    for (final e in report.items) {
+      final t = _topOf(e);
+      if (t.isEmpty) continue;
+      if (!counts.containsKey(t)) order.add(t);
+      counts[t] = (counts[t] ?? 0) + 1;
+    }
+    return [for (final k in order) MapEntry(k, counts[k] ?? 0)];
+  }
+
+  String _topLabel(String id) {
+    for (final t in _meta?.tops ?? const <UnitLibrary>[]) {
+      if (t.id == id) return t.name.isEmpty ? id : t.name;
+    }
+    return id;
+  }
+
+  void _setTopFilter(String t) {
+    if (topFilter == t) return;
+    setState(() => topFilter = t);
+  }
+
+  /// 当前筛选下要显示的记录。
+  List<DeletedEntry> get _visibleItems => topFilter.isEmpty
+      ? report.items
+      : [
+          for (final e in report.items)
+            if (_topOf(e) == topFilter) e
+        ];
 
   /// 拉一次作者索引供预览图兜底；失败不影响列表（只是回落到占位图标）。
   Future<void> _loadAuthorIdx() async {
@@ -3279,8 +3337,9 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     );
   }
 
+  /// owner 2026-11-24：只按当前筛选（顶级单元库）分组展示。
   Widget _groupedList() {
-    final groups = groupDeletedBySync(report.items);
+    final groups = groupDeletedBySync(_visibleItems);
     final cs = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
@@ -3433,6 +3492,38 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                       ),
                     ]),
                   ),
+                  // C2（owner 2026-11-24）：顶级单元库（＝媒体库根）一级筛选。
+                  // 只在记录真的冲越多于一个媒体库时才出现；单库常态不多占一行。
+                  if (_topOptions.length > 1)
+                    HorizontalChipBar(
+                      key: const ValueKey('deleted-top-filter'),
+                      height: 42,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      children: [
+                        Center(
+                          child: FilterChip(
+                              label: Text('全部媒体库 ${report.items.length}',
+                                  style: const TextStyle(fontSize: 12)),
+                              selected: topFilter.isEmpty,
+                              showCheckmark: false,
+                              onSelected: (_) => _setTopFilter('')),
+                        ),
+                        for (final o in _topOptions)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: Center(
+                              child: FilterChip(
+                                  key: ValueKey('deleted-top-${o.key}'),
+                                  label: Text(
+                                      '${LibraryBadge.stripIndex(_topLabel(o.key))} ${o.value}',
+                                      style: const TextStyle(fontSize: 12)),
+                                  selected: topFilter == o.key,
+                                  showCheckmark: false,
+                                  onSelected: (_) => _setTopFilter(o.key)),
+                            ),
+                          ),
+                      ],
+                    ),
                   if (report.items.isEmpty)
                     Expanded(
                       child: Center(
