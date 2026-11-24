@@ -91,27 +91,3 @@ class ImmersiveCycle {
     return true;
   }
 }
-
-/// 翻页轻震动去重：每次成功切到新作品只发一次。
-///
-/// 同一条作品的重开（解码重试、失败重试）不会换目标，仍由调用方判断；
-/// 这里再兜一层：连续两次 open 到同一 index 只允许一次。
-class SwitchHapticGate {
-  int? _last;
-
-  /// 目标与上次不同才放行。
-  bool allow(int index) {
-    if (_last == index) return false;
-    _last = index;
-    return true;
-  }
-
-  /// 失败切条时回滚记录，避免下次真正翻到该 index 被误判为重复。
-  void reset() {
-    _last = null;
-  }
-}
-
-/// 移动端（Android/iOS）才发轻震动；桌面端静默。
-bool hapticAllowedFor({required bool isAndroid, required bool isIOS}) =>
-    isAndroid || isIOS;

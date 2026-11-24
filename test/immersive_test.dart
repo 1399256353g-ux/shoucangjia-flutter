@@ -106,28 +106,4 @@ void main() {
       expect(c.tick(999999, eligible: true), isFalse);
     });
   });
-
-  group('§13 翻页震动去重', () {
-    test('同一目标只放行一次，换目标再放行', () {
-      final g = SwitchHapticGate();
-      expect(g.allow(3), isTrue);
-      expect(g.allow(3), isFalse);
-      expect(g.allow(4), isTrue);
-      expect(g.allow(3), isTrue);
-    });
-
-    test('reset 后可重新放行', () {
-      final g = SwitchHapticGate();
-      expect(g.allow(1), isTrue);
-      expect(g.allow(1), isFalse);
-      g.reset();
-      expect(g.allow(1), isTrue);
-    });
-
-    test('只有移动端发震动', () {
-      expect(hapticAllowedFor(isAndroid: true, isIOS: false), isTrue);
-      expect(hapticAllowedFor(isAndroid: false, isIOS: true), isTrue);
-      expect(hapticAllowedFor(isAndroid: false, isIOS: false), isFalse);
-    });
-  });
 }

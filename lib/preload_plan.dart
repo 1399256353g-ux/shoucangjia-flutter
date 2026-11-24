@@ -27,26 +27,3 @@ String preloadKeyFor(dynamic w, String lib) {
   final path = preloadMediaPath(w) ?? '';
   return '$lib|$id|$path';
 }
-
-/// 是否应该预缓冲下一条：仅连播开启、未开单条循环、确有下一条且下一条
-/// 存在可缓冲媒体时进行。
-bool shouldPreloadNext({
-  required bool autoplay,
-  required bool loopOne,
-  required int index,
-  required int count,
-  required bool hasMedia,
-}) {
-  if (!autoplay || loopOne) return false;
-  if (index < 0 || index >= count) return false;
-  return hasMedia;
-}
-
-/// 已预缓冲的条目能否直接用于当前目标。
-bool preloadMatches({
-  required int? preloadedIndex,
-  required String? preloadedKey,
-  required int index,
-  required String key,
-}) =>
-    preloadedIndex == index && preloadedKey == key && key.isNotEmpty;
