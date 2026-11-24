@@ -82,9 +82,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
           .get(Uri.parse(_configUrl), headers: widget.headers)
           .timeout(const Duration(seconds: 10));
       final j = jsonMapOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       setState(() {
         path = '${j['path'] ?? ''}';
@@ -114,9 +112,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
               body: jsonEncode(config.toJson()))
           .timeout(const Duration(seconds: 10));
       final j = jsonMapOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       setState(() {
         config = UnitCrawlerConfig.fromJson(j['crawler'] as Map?);
@@ -141,9 +137,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
           .post(Uri.parse(_runUrl), headers: widget.headers)
           .timeout(const Duration(seconds: 10));
       final j = jsonMapOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content:

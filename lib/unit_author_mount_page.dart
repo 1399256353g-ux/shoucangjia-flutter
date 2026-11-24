@@ -148,13 +148,8 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
           )
           .timeout(const Duration(seconds: 15));
       final j = jsonOf(r);
-      final ok = r.statusCode == 200 && j is Map && j['ok'] != false;
-      if (!ok) {
-        final msg = j is Map
-            ? '${j['error'] ?? 'HTTP ${r.statusCode}'}'
-            : 'HTTP ${r.statusCode}';
-        throw Exception(msg);
-      }
+      // requireOk:false = 老契约（200 且无显式 ok:false 即成功）。
+      throwIfApiFailed(r.statusCode, j);
       await load();
       if (!mounted) return;
       _toast('已保存');
@@ -666,13 +661,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
           )
           .timeout(const Duration(seconds: 15));
       final j = jsonOf(r);
-      if (r.statusCode != 200 || (j is Map && j['ok'] == false)) {
-        final msg = j is Map
-            ? '${j['error'] ?? 'HTTP ${r.statusCode}'}'
-            : 'HTTP ${r.statusCode}';
-        // 409 是「已存在」，属于用户可理解的结果，不是错误路径。
-        throw Exception(r.statusCode == 409 ? '该作者目录已存在' : msg);
-      }
+      // 409 是「已存在」，属于用户可理解的结果，不是错误路径。
+      if (r.statusCode == 409) throw Exception('该作者目录已存在');
+      throwIfApiFailed(r.statusCode, j);
       await load();
       if (!mounted) return;
       _toast('已创建作者目录');

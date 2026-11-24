@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'cover_admin.dart';
 import 'http_json.dart';
 
 /// C2：库卡片「本地选图上传封面」的结果。
@@ -147,11 +148,11 @@ Future<CoverUploadResult> uploadCoverBytes({
     return const CoverUploadResult(false, '上传失败：网络异常，请检查连接后重试');
   }
   if (r.statusCode != 200) {
-    var msg = 'HTTP ${r.statusCode}';
-    try {
-      final j = jsonOf(r);
-      if (j is Map && j['error'] is String) msg = j['error'] as String;
-    } catch (_) {}
+    // 状态码文案的归类只有一个出口（与作者头像/封面历史同源）：
+    // 此前这里手拼 `HTTP n`，同一个 413 在封面上传显示「HTTP 413」、
+    // 在头像上传显示「图片过大」。
+    final msg = apiFailureText(r.statusCode, jsonObjectOrEmpty(r),
+        requireOk: false, statusText: coverErrorText);
     return CoverUploadResult(false, '上传失败：$msg');
   }
   var coverPath = '';

@@ -128,4 +128,50 @@ void main() {
       expect(apiFailureText(302, {'ok': true}), 'HTTP 302');
     });
   });
+
+  group('requireOk:false —— 读接口的老契约（只认「没显式说失败」）', () {
+    test('200 且缺 ok 字段算成功（写接口语义下会误报）', () {
+      // 这两条是同一个函数在同一种响应上的两种结论：老读接口根本不发 ok，
+      // 用写接口的口径会把每一次成功的 GET 都变成「未知失败」。
+      expect(apiFailureText(200, {'path': '/x'}, requireOk: false), isNull);
+      expect(apiFailureText(200, {'path': '/x'}), isNotNull);
+      expect(apiFailureText(200, null, requireOk: false), isNull);
+    });
+
+    test('显式 ok:false / 非 200 仍然失败', () {
+      expect(apiFailureText(200, {'ok': false}, requireOk: false), isNotNull);
+      expect(apiFailureText(404, {'path': '/'}, requireOk: false), 'HTTP 404');
+      expect(
+          apiFailureText(500, {'ok': false, 'error': '写盘失败'},
+              requireOk: false),
+          '写盘失败');
+    });
+
+    test('body 不是 Map 时不炸（旧写法 j[error] 会抛 NoSuchMethodError）', () {
+      expect(apiFailureText(200, <int>[1, 2], requireOk: false), isNull);
+      expect(apiFailureText(502, 'plain text', requireOk: false), 'HTTP 502');
+    });
+  });
+
+  group('throwIfApiFailed：读接口的 throw 出口', () {
+    test('成功不抛，失败抛 Exception 且 message 可直接展示', () {
+      expect(() => throwIfApiFailed(200, {'path': '/'}), returnsNormally);
+      expect(
+        () => throwIfApiFailed(404, {'path': '/'}),
+        throwsA(isA<Exception>()
+            .having((e) => e.toString(), 'message', contains('HTTP 404'))),
+      );
+    });
+
+    test('error 非字符串时给出状态码文案，而不是把对象贴到界面', () {
+      Object? caught;
+      try {
+        throwIfApiFailed(400, {'ok': false, 'error': {'code': 400}});
+      } catch (e) {
+        caught = e;
+      }
+      expect('$caught', contains('请求格式不对'));
+      expect('$caught', isNot(contains('code:')));
+    });
+  });
 }

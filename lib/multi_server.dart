@@ -237,6 +237,21 @@ Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
   };
 }
 
+/// 单条绑定记录的唯一拼装口。
+///
+/// 字段集合必须与 [decodeBindings] 读的字段**完全对称**：
+/// 此前 [buildBindings] 与 `main.dart` 的一段内联代码各拼一次 `{base,user,pass,server}`
+/// 形状，而 `label` 只有前者写，`decodeBindings` 两边都不读——
+/// 一处加字段另两处不跟，就成了「写进去、读不回来」。
+Map<String, String> bindingEntry(ServerConn s) => {
+      'base': s.base,
+      'user': s.user,
+      'pass': s.pass,
+      'server': s.id,
+      // owner 2026-11-24：首页媒体库卡片要显示连接名，绑定必须带上它。
+      'label': s.cardLabel,
+    };
+
 /// 库 → 连接映射，持久化后启动时就能按库路由。
 Map<String, Map<String, String>> buildBindings({
   required List<ServerConn> servers,
@@ -250,19 +265,45 @@ Map<String, Map<String, String>> buildBindings({
     if (id.isEmpty || sid.isEmpty) continue;
     final s = byId[sid];
     if (s == null) continue;
-    out[id] = {
-      'base': s.base,
-      'user': s.user,
-      'pass': s.pass,
-      'server': s.id,
-      // owner 2026-11-24：首页媒体库卡片要显示连接名，绑定必须带上它。
-      'label': s.cardLabel,
-    };
+    out[id] = bindingEntry(s);
   }
   return out;
 }
 
+/// 按当前**在线**连接修剪绑定表。
+///
+/// P5 的硬要求是「断连后密码立即清除、不再向该服务端发任何请求」。只在断开时
+/// 调一次 [Cfg.dropServerBindings] 不够：绑定表同时落盘在 `lib_bindings_v1`，
+/// 内存里删了、盘上还在，下次启动 `decodeBindings` 又把旧密码读回来，
+/// 库路由依然指向已断连的服务端。
+///
+/// 所以把「绑定表必须与在线连接一致」做成启动时的一次性修剪：
+///  - `server` 不在在线列表 → 整条丢弃（路由与凭据一起消失）；
+///  - 旧格式没有 `server` 字段 → 按 base 匹配，匹配不上同样丢弃；
+///  - 命中在线连接 → 用连接的当前值重建（用户改过密码时不会留下旧密码）。
+Map<String, Map<String, String>> pruneBindings(
+  Map<String, Map<String, String>> bindings,
+  List<ServerConn> live,
+) {
+  final byId = {for (final s in live) s.id: s};
+  final byBase = {for (final s in live) s.base: s};
+  final out = <String, Map<String, String>>{};
+  bindings.forEach((libId, b) {
+    final sid = '${b['server'] ?? ''}'.trim();
+    final s = sid.isNotEmpty
+        ? byId[sid]
+        : byBase[normalizeBase('${b['base'] ?? ''}')];
+    if (s == null) return;
+    out[libId] = bindingEntry(s);
+  });
+  return out;
+}
+
 /// 解析持久化的库映射；坏项跳过。
+///
+/// 必须把 [buildBindings] 写进去的 `label` 读回来：此前这里只读
+/// base/user/pass/server，每次重启后 `serverLabelFor()` 一律返回空串，
+/// 首页媒体库卡片上的连接名在首次启动后消失（写进去、读不回来）。
 Map<String, Map<String, String>> decodeBindings(String? raw) {
   if (raw == null || raw.trim().isEmpty) return const {};
   try {
@@ -278,6 +319,7 @@ Map<String, Map<String, String>> decodeBindings(String? raw) {
         'user': '${v['user'] ?? 'zzx'}',
         'pass': '${v['pass'] ?? ''}',
         'server': '${v['server'] ?? ''}',
+        'label': '${v['label'] ?? ''}',
       };
     });
     return out;

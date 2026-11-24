@@ -69,12 +69,24 @@ Map<String, dynamic> jsonObjectOrEmpty(http.Response r) {
 /// 这里返回 **null 表示成功**，否则返回可直接展示的失败原因。
 /// [statusText] 允许业务传入自己的状态码文案（如封面/头像的 404 特指），
 /// 不传则回落到 [httpErrorText] 的通用归类。
+///
+/// [requireOk] 区分服务端的两种契约，不要靠猜：
+///  - `true`（默认）：必须 `ok == true` 才算成功（写接口，缺字段即失败）；
+///  - `false`：`200` 且没有显式 `ok:false` 就算成功（老接口只带 `error` 字段，
+///    缺 `ok` 时旧调用方是按成功走的）。
+/// 第二种此前在 13 处写成 `statusCode != 200 || j['ok'] == false` + 手拼
+/// `'${j['error'] ?? 'HTTP ${r.statusCode}'}'`，有两个实打实的缺陷：
+/// `j` 不是 Map 时 `j['error']` 直接抛 `NoSuchMethodError`；`error` 是非字符串
+/// （Map/num）时把 `{code: 500}` 这样的对象贴到界面上。
 String? apiFailureText(
   int status,
   dynamic json, {
   String Function(int status)? statusText,
+  bool requireOk = true,
 }) {
-  final ok = status == 200 && json is Map && json['ok'] == true;
+  final ok = requireOk
+      ? status == 200 && json is Map && json['ok'] == true
+      : status == 200 && !(json is Map && json['ok'] == false);
   if (ok) return null;
   if (json is Map) {
     final e = json['error'];
@@ -82,4 +94,20 @@ String? apiFailureText(
   }
   final text = statusText ?? httpErrorText;
   return text(status);
+}
+
+/// 读接口的收尾：非成功就抛异常，消息可直接展示给用户。
+///
+/// 调用点原来是「先算 `'${j['error'] ?? 'HTTP ${r.statusCode}'}'`，再 `throw`」
+/// 两行同体代码，散在 13 处；错误字段不是字符串时会把 `{code: 500}`
+/// 贴到界面上，`j` 不是 Map 时直接 `NoSuchMethodError`。
+void throwIfApiFailed(
+  int status,
+  dynamic json, {
+  bool requireOk = false,
+  String Function(int status)? statusText,
+}) {
+  final bad = apiFailureText(status, json,
+      requireOk: requireOk, statusText: statusText);
+  if (bad != null) throw Exception(bad);
 }

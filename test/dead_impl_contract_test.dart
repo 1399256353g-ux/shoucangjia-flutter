@@ -511,6 +511,59 @@ void main() {
           isTrue);
     });
   });
+  group('第二十三批：失败原因的拼装单一出口', () {
+    // 注释里出现旧写法是说明，不是实现；判断前剥掉行注释。
+    String codeOf(File f) => f
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('读接口的失败文案不得再手拼 j[error] ?? HTTP n', () {
+      // 这个写法在 13 处各抄一遍，有两个实打实的缺陷：
+      // ① `j` 不是 Map 时 `j['error']` 抛 NoSuchMethodError（不是文案问题，是崩）；
+      // ② `error` 是非字符串（Map/num）时把 `{code: 500}` 贴到界面上。
+      // 唯一出口是 http_json.dart 的 apiFailureText / throwIfApiFailed。
+      final re = RegExp(r"\$\{j\['error'\]");
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('http_json.dart'))
+          .where((f) => re.hasMatch(codeOf(f)))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '又有人手拼服务端 error 文案：$offenders');
+    });
+
+    test('状态码判定不得再手写 statusCode != 200 || ok == false', () {
+      // 这行的三处细节（先判状态码还是先解析、error 是否字符串、
+      // 状态码文案走哪个函数）此前每个调用点都写得略有不同。
+      final re = RegExp(r"statusCode\s*!=\s*200\s*\|\|\s*j\[\s*'ok'\s*\]");
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('http_json.dart'))
+          .where((f) => re.hasMatch(codeOf(f)))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '状态码判定又分叉了：$offenders');
+    });
+
+    test('读接口 throw 出口必须真实被调用（不是只有测试在用）', () {
+      final src = libDartFiles().map(codeOf).join('\n');
+      final n = RegExp(r'throwIfApiFailed\(').allMatches(src).length;
+      // 定义 1 处 + 至少 10 个真实调用点；少于这个数说明有人把它绕过去了。
+      expect(n, greaterThanOrEqualTo(10),
+          reason: 'throwIfApiFailed 的调用点只有 $n 处，读接口又回到了手写');
+    });
+
+    test('封面与头像的 413 必须给同一个说法', () {
+      // 此前封面上传手拼 `HTTP 413`，作者头像走 httpErrorText 显示「图片过大」，
+      // 同一个状态码两个页面两种说法。
+      final up = codeOf(File('lib/cover_upload.dart'));
+      expect(up.contains('coverErrorText'), isTrue,
+          reason: '封面上传又自己拼状态码文案了');
+      expect(RegExp(r"var msg = 'HTTP \$\{r\.statusCode\}'").hasMatch(up),
+          isFalse);
+    });
+  });
+
   group('第十三批：响应解码字符集单一出口', () {
     // 注释里提到旧写法是说明，不是实现；判断前先剥掉行注释。
     String codeOf(File f) => f

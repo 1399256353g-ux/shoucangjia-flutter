@@ -1327,7 +1327,17 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       cfg.user = active.user;
       cfg.pass = active.pass;
     }
-    cfg.setBindings(decodeBindings(sp.getString('lib_bindings_v1')));
+    final loaded = decodeBindings(sp.getString('lib_bindings_v1'));
+    cfg.setBindings(loaded);
+    // P5：断连清密码必须在**重启后**仍然成立。`_disconnect` 只改了内存与
+    // 连接表，绑定表（含旧密码）还落在 `lib_bindings_v1` 里；这里按在线
+    // 连接修剪一次并回写，不让旧密码借重启复活。用编码后逐字比对，
+    // 不只比条数——密码改过、label 变过也要回写。
+    final pruned = pruneBindings(loaded, liveServers(servers));
+    if (encodeBindings(pruned) != encodeBindings(loaded)) {
+      cfg.setBindings(pruned);
+      await savePrefString('lib_bindings_v1', encodeBindings(pruned));
+    }
     cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
     await LibraryCornerBadge.load();
@@ -3192,11 +3202,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
           .post(cfg.u('/api/deleted/check'), headers: cfg.headers)
           .timeout(const Duration(seconds: 15));
       final j = jsonOf(r);
-      if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
-        throw (j is Map && j['error'] != null)
-            ? '${j['error']}'
-            : 'HTTP ${r.statusCode}';
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已开始检测平台删除的作品，完成后自动刷新')));
@@ -5140,13 +5146,8 @@ class _LibraryPageState extends State<LibraryPage> {
           final id = '${raw['id'] ?? ''}'.trim();
           final s = byBase['${raw['_serverBase'] ?? ''}'];
           if (id.isEmpty || s == null) continue;
-          bindings[id] = {
-            'base': s.base,
-            'user': s.user,
-            'pass': s.pass,
-            'server': s.id,
-            'label': s.cardLabel,
-          };
+          // 绑定记录的字段集合只有 multi_server.dart 的 bindingEntry 一处定义。
+          bindings[id] = bindingEntry(s);
         }
       }
       cfg.setBindings(bindings);
@@ -5715,9 +5716,7 @@ class _LibraryPageState extends State<LibraryPage> {
           headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
           body: jsonEncode({'id': l['id']}));
       final j = jsonOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('已移除库注册（数据保留）')));
@@ -5802,9 +5801,7 @@ class _LibraryPageState extends State<LibraryPage> {
             'dir': dir.text.trim(),
           }));
       final j = jsonOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('媒体库已添加')));
@@ -6245,9 +6242,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
           .get(_u('/api/crawler'), headers: cfg.headersFor(libId))
           .timeout(const Duration(seconds: 10));
       final j = jsonMapOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       final c = (j['crawler'] as Map?) ?? const {};
       if (!mounted) return;
       setState(() {
@@ -6278,9 +6273,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
             'note': note,
           }));
       final j = jsonOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('爬虫配置已保存')));
@@ -6407,9 +6400,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
               headers: cfg.headersFor(libId))
           .timeout(Duration(seconds: deep ? 90 : 15));
       final j = jsonMapOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (mounted) setState(() => data = j);
     } catch (e) {
       if (mounted) setState(() => err = errorText(e));
@@ -6427,9 +6418,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
           },
           body: jsonEncode({'action': 'run-crawler', 'lib': libId}));
       final j = jsonOf(r);
-      if (r.statusCode != 200 || j['ok'] == false) {
-        throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
-      }
+      throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('爬虫已启动 pid=${j['pid']}，日志：${j['log']}')));
@@ -16432,6 +16421,14 @@ class _AuthorPageState extends State<AuthorPage> {
     return out;
   }
 
+  /// 批量删除的单条失败原因。`postWorkDelete` 的返回体里状态码在 `status`
+  /// 字段（不是 HTTP 层），所以要显式传进去；两处调用共用一个出口，
+  /// 避免同一个内部错误码在两段循环里出现两种说法。
+  String _deleteFailureText(Map<String, dynamic> j) {
+    final st = (j['status'] as num?)?.toInt() ?? 0;
+    return apiFailureText(st, j, requireOk: false) ?? '服务端未确认（HTTP $st）';
+  }
+
   Future<void> _batchDelete() async {
     if (_batchBusy || !canBatchDelete(selectedWorks)) return;
     setState(() => _batchBusy = true);
@@ -16447,7 +16444,7 @@ class _AuthorPageState extends State<AuthorPage> {
             continue;
           }
           if (j['ok'] != true) {
-            errors.add('${j['error'] ?? 'HTTP ${j['status']}'}');
+            errors.add(_deleteFailureText(j));
             continue;
           }
           files += (j['count'] is num) ? (j['count'] as num).toInt() : 0;
@@ -16481,7 +16478,7 @@ class _AuthorPageState extends State<AuthorPage> {
           if (j != null && j['ok'] == true) {
             done++;
           } else if (j != null) {
-            errors.add('${j['error'] ?? 'HTTP ${j['status']}'}');
+            errors.add(_deleteFailureText(j));
           } else {
             errors.add('网络错误');
           }

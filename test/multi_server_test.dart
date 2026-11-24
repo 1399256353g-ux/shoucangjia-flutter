@@ -124,7 +124,7 @@ void main() {
   });
 
   test('绑定表按库记录来源连接并可往返', () {
-    final a = _s('a', 'http://a:8090');
+    final a = _s('a', 'http://a:8090', label: '家里');
     final bindings = buildBindings(servers: [a], libraries: [
       {'id': 'douyin', '_serverId': 'a'}
     ]);
@@ -133,13 +133,84 @@ void main() {
     final back = decodeBindings(encodeBindings(bindings));
     expect(back['douyin']!['base'], 'http://a:8090');
     expect(back['douyin']!['user'], 'u');
+    // 写进去的字段必须能读回来：此前 decodeBindings 漏读 `label`，
+    // 每次重启后首页媒体库卡片上的连接名都会消失。
+    expect(back['douyin']!['label'], '家里');
     expect(decodeBindings('[]'), isEmpty);
     expect(decodeBindings('{"bad": 1}'), isEmpty);
+  });
+
+  test('绑定记录只有一个拼装口（写与读的字段集合对称）', () {
+    final a = _s('a', 'http://a:8090', label: '公司');
+    final e = bindingEntry(a);
+    expect(e.keys.toSet(),
+        {'base', 'user', 'pass', 'server', 'label'});
+    // 每个字段都必须经过一次往返后仍是原值（多一个没读的字段、
+    // 少一个没写的字段，这条都会红）。
+    final back = decodeBindings(encodeBindings({'k': e}))['k']!;
+    expect(back, e);
   });
 
   test('新增连接 id 不重复', () {
     final list = [_s('srv-2', 'http://a:8090')];
     expect(nextServerId(list), 'srv-3');
     expect(nextServerId(const []), 'srv-1');
+  });
+
+  group('pruneBindings —— P5 断连清密码必须挺过重启', () {
+    test('已断连连接的绑定（含密码）被丢掉', () {
+      final on = _s('a', 'http://a:8090', label: '家里');
+      final off = ServerConn(
+          id: 'b', label: '公司', base: 'http://b:8090', user: 'u',
+          pass: '', enabled: false);
+      final kept = bindingEntry(on);
+      // 断连前落盘的旧绑定：磁盘上还带着密码，指向 b。
+      final stale = <String, String>{
+        'base': 'http://b:8090',
+        'user': 'u',
+        'pass': '旧密码',
+        'server': 'b',
+        'label': '公司',
+      };
+      final out = pruneBindings(
+          {'lib-ok': kept, 'lib-stale': stale}, liveServers([on, off]));
+      expect(out.keys, ['lib-ok']);
+      // 断连那条不能以任何形式留在表里（路由与凭据都没了）。
+      expect(encodeBindings(out).contains('旧密码'), isFalse);
+      expect(encodeBindings(out).contains('http://b:8090'), isFalse);
+    });
+
+    test('在线连接的绑定用当前值重建（改过的旧密码不会留下）', () {
+      final a = _s('a', 'http://a:8090', label: '家里');
+      final out = pruneBindings({
+        'lib-1': <String, String>{
+          'base': 'http://a:8090',
+          'user': 'u',
+          'pass': '旧密码',
+          'server': 'a',
+          'label': '',
+        }
+      }, [a]);
+      expect(out['lib-1'], bindingEntry(a));
+      expect(out['lib-1']!['pass'], 'p');
+      expect(out['lib-1']!['label'], '家里');
+    });
+
+    test('旧格式没有 server 字段时按 base 匹配，匹配不上就丢弃', () {
+      final a = _s('a', 'http://a:8090');
+      final out = pruneBindings({
+        'hit': <String, String>{'base': 'http://a:8090/', 'pass': 'x'},
+        'miss': <String, String>{'base': 'http://gone:8090', 'pass': 'y'},
+      }, [a]);
+      expect(out.keys, ['hit']);
+      expect(out['hit']!['server'], 'a');
+    });
+
+    test('全部在线时不动（纯函数不产生噪音写入）', () {
+      final a = _s('a', 'http://a:8090', label: '家里');
+      final src = {'lib-1': bindingEntry(a)};
+      expect(encodeBindings(pruneBindings(src, [a])),
+          encodeBindings(src));
+    });
   });
 }
