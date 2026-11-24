@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'home_action.dart';
+import 'interval_label.dart';
 import 'collection_sync_panel.dart';
 import 'sync_log_panel.dart';
 import 'unit_crawler.dart';
@@ -17,6 +18,7 @@ class UnitCrawlerPage extends StatefulWidget {
   final UnitLibrary unit;
   final String base;
   final Map<String, String> headers;
+
   /// 当前注册库 id；同步源读写走 `/api/settings?lib=`。
   final String libId;
   final http.Client? client;
@@ -140,7 +142,8 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('已启动 ${j['script'] ?? config.script} pid=${j['pid']}')));
+          content:
+              Text('已启动 ${j['script'] ?? config.script} pid=${j['pid']}')));
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await load();
     } catch (e) {
@@ -247,11 +250,11 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     Wrap(spacing: 8, runSpacing: 6, children: [
                       for (final m in kQuickMinOptions)
                         ChoiceChip(
-                          label: Text(m >= 60 ? '每 ${m ~/ 60} 小时' : '每 $m 分钟'),
+                          label: Text(everyMinutesLabel(m)),
                           selected: config.quickMin == m,
                           onSelected: hasScript
-                              ? (_) => setState(() =>
-                                  config = config.copyWith(quickMin: m))
+                              ? (_) => setState(
+                                  () => config = config.copyWith(quickMin: m))
                               : null,
                         ),
                     ]),
@@ -266,13 +269,11 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     Wrap(spacing: 8, runSpacing: 6, children: [
                       for (final m in kFullMinOptions)
                         ChoiceChip(
-                          label: Text(m >= 60
-                              ? '每 ${m ~/ 60} 小时'
-                              : '每 $m 分钟'),
+                          label: Text(everyMinutesLabel(m)),
                           selected: config.fullMin == m,
                           onSelected: hasScript
-                              ? (_) => setState(() =>
-                                  config = config.copyWith(fullMin: m))
+                              ? (_) => setState(
+                                  () => config = config.copyWith(fullMin: m))
                               : null,
                         ),
                     ]),
@@ -296,12 +297,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                         ),
                     ]),
                     const SizedBox(height: 8),
-                    Text(
-                        '当前：${config.quickCheck ? '快检每 ${config.quickMin} 分钟' : '快检关闭'}'
-                        ' · 全量每 ${config.fullMin >= 60 ? '${config.fullMin ~/ 60} 小时' : '${config.fullMin} 分钟'}'
-                        ' · 冷却 ${config.cooldownMin} 分钟',
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.grey)),
+                    Text('当前：${config.intervalLabel}',
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.grey)),
                     TextFormField(
                       initialValue: config.note,
                       enabled: hasScript,
@@ -370,9 +368,8 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
 
   Widget _scriptPicker() {
     final list = runnableScripts;
-    final current = list.any((s) => s.name == config.script)
-        ? config.script
-        : null;
+    final current =
+        list.any((s) => s.name == config.script) ? config.script : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

@@ -154,8 +154,7 @@ void main() {
           .where((f) => f.readAsStringSync().contains('HapticFeedback.'))
           .map((f) => f.path)
           .toList();
-      expect(offenders, isEmpty,
-          reason: '这些文件各自写了一份震动实现：$offenders');
+      expect(offenders, isEmpty, reason: '这些文件各自写了一份震动实现：$offenders');
       final src = libSourceAll();
       expect(defines(src, r'^void hapticTap\(\)'), isTrue);
       expect(defines(src, r'^void hapticSelect\(\)'), isTrue);
@@ -174,7 +173,8 @@ void main() {
     });
 
     test('crashLogPaths 不得复活（真实界面只读 CrashLog.logPath）', () {
-      expect(defines(libSourceAll(), r'^List<String> crashLogPaths\('), isFalse);
+      expect(
+          defines(libSourceAll(), r'^List<String> crashLogPaths\('), isFalse);
     });
 
     test('翻页吸附只留 pageSwipeTarget 一套规则', () {
@@ -213,8 +213,7 @@ void main() {
           .where((f) => f.readAsStringSync().contains('0.299'))
           .map((f) => f.path)
           .toList();
-      expect(offenders, isEmpty,
-          reason: '这些文件又抄了一份亮度公式：$offenders');
+      expect(offenders, isEmpty, reason: '这些文件又抄了一份亮度公式：$offenders');
       expect(libSourceAll().contains('int foregroundArgbOn(int argb)'), isTrue);
     });
 
@@ -230,12 +229,16 @@ void main() {
       final src = libSourceAll();
       expect(src.contains('List<String> relSegments(String rel)'), isTrue);
       // 旧名字保留为转调（调用点多，改名无收益），但不得再自带实现。
-      expect(RegExp(r'^List<String> splitRel\(String rel\) => relSegments\(rel\);',
-              multiLine: true)
-          .hasMatch(src), isTrue);
-      expect(RegExp(r'^List<String> splitCatRel\(String rel\) => relSegments\(rel\);',
-              multiLine: true)
-          .hasMatch(src), isTrue);
+      expect(
+          RegExp(r'^List<String> splitRel\(String rel\) => relSegments\(rel\);',
+                  multiLine: true)
+              .hasMatch(src),
+          isTrue);
+      expect(
+          RegExp(r'^List<String> splitCatRel\(String rel\) => relSegments\(rel\);',
+                  multiLine: true)
+              .hasMatch(src),
+          isTrue);
     });
 
     test('配置落盘只有 prefs_json.dart 一处（类里不得再写 try-catch 存盘）', () {
@@ -283,8 +286,87 @@ void main() {
       expect(main.contains('Breadcrumb.cleanExit()'), isTrue,
           reason: 'cleanExit 必须被生命周期钩子调用');
       expect(main.contains('AppLifecycleState.paused'), isTrue);
-      expect(File('lib/breadcrumb.dart').readAsStringSync().contains(
-          'static Future<void> cleanExit()'), isTrue);
+      expect(
+          File('lib/breadcrumb.dart')
+              .readAsStringSync()
+              .contains('static Future<void> cleanExit()'),
+          isTrue);
+    });
+  });
+
+  group('第十批（0.9.209）：同规则再收口 + 星标单一真相', () {
+    test('「每 N 分钟/小时」只有 interval_label.dart 一处', () {
+      // 此前 5 处各写一份 `>= 60 ? '每 N 小时' : '每 N 分钟'`：
+      // main.dart 两处、unit_crawler_page.dart 两处、unit_crawler.dart 一处。
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('interval_label.dart'))
+          .where((f) => f.readAsStringSync().contains("~/ 60} 小时"))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '间隔文案又出现了内联拷贝：$offenders');
+      final src = libSourceAll();
+      expect(src.contains('String everyMinutesLabel(int minutes)'), isTrue);
+      // 真实调用点必须转调，不能只是留着一个没人用的函数。
+      expect(
+          File('lib/main.dart')
+              .readAsStringSync()
+              .contains('everyMinutesLabel('),
+          isTrue);
+      expect(
+          File('lib/unit_crawler_page.dart')
+              .readAsStringSync()
+              .contains('everyMinutesLabel('),
+          isTrue);
+      expect(
+          File('lib/unit_crawler.dart')
+              .readAsStringSync()
+              .contains('everyMinutesLabel('),
+          isTrue);
+    });
+
+    test('状态码→文案只有 http_error_text.dart 一处', () {
+      // 三个业务函数此前各自写了 400/500/default 三个相同分支。
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('http_error_text.dart'))
+          .where((f) => f.readAsStringSync().contains("return '服务端写入失败';"))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '状态码文案又各写了一份：$offenders');
+      expect(
+          libSourceAll().contains('String httpErrorText(int status'), isTrue);
+      // 三个业务包装必须仍在（业务 404 文案不同，不能一起删）。
+      final src = libSourceAll();
+      for (final fn in const [
+        'String coverErrorText(int status)',
+        'String coverActionErrorText(int status)',
+        'String authorAvatarApiErrorText(int status)',
+      ]) {
+        expect(src.contains(fn), isTrue, reason: '业务入口被误删：$fn');
+      }
+    });
+
+    test('星标只有 StarStore 一份状态（LibraryTree 不得再算 starred）', () {
+      final tree = File('lib/library_tree.dart').readAsStringSync();
+      expect(tree.contains('final List<BasicLib> starred;'), isFalse,
+          reason: 'LibraryTree 又持有了第二份星标状态');
+      expect(tree.contains('LibraryTree withStars('), isFalse);
+      expect(tree.contains('List<BasicLib> visibleBasics('), isFalse);
+      expect(tree.contains('orderStarred('), isFalse);
+      // 真实星标入口仍在。
+      expect(File('lib/star_store.dart').readAsStringSync(),
+          contains('List<String> get ordered'));
+      expect(libSourceAll().contains('List<String> toggleStar('), isTrue);
+    });
+
+    test('十批删掉的零引用成员不得复活', () {
+      const gone = <String>[
+        'AvatarCropBox', // 真实头像裁剪走 main.dart 的 avatarCropDisplaySize 一族
+        'int get totalBasics',
+      ];
+      final src = libSourceAll();
+      for (final g in gone) {
+        expect(src.contains(g), isFalse, reason: '死成员复活：$g');
+      }
     });
   });
 }

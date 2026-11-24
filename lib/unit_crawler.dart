@@ -6,6 +6,8 @@
 //
 // J17：没有脚本的单元库只读展示「无爬虫脚本」，不启用同步设置。
 
+import 'interval_label.dart';
+
 /// 单元库爬虫配置。
 class UnitCrawlerConfig {
   final bool enabled;
@@ -33,8 +35,8 @@ class UnitCrawlerConfig {
     return UnitCrawlerConfig(
       enabled: m['enabled'] == true,
       quickCheck: m['quickCheck'] != false,
-      quickMin: normalizeQuickMin(m['quickMin'] ??
-          (m['intervalMin'] != null ? 5 : 5)),
+      quickMin: normalizeQuickMin(
+          m['quickMin'] ?? (m['intervalMin'] != null ? 5 : 5)),
       fullMin: normalizeFullMin(
           m['fullMin'] ?? (m['intervalMin'] != null ? 60 : 60)),
       cooldownMin: normalizeCooldown(m['cooldownMin']),
@@ -77,8 +79,14 @@ class UnitCrawlerConfig {
   /// 同步相关设置是否可用（J17：必须选中一个真实存在的脚本）。
   bool get syncReady => enabled && script.isNotEmpty;
 
+  /// 同步频率汇总文案（页面底部「当前：…」那一行）。
+  ///
+  /// 页面此前自己拼了一遍同样的三元表达式；「每 N 小时 / 每 N 分钟」
+  /// 现在统一由 [everyMinutesLabel] 给出，这里是唯一汇总点。
   String get intervalLabel =>
-      '快检${quickCheck ? '每 $quickMin 分钟' : '关闭'} · 全量每 $fullMin 分钟';
+      '快检${quickCheck ? everyMinutesLabel(quickMin) : '关闭'}'
+      ' · 全量${everyMinutesLabel(fullMin)}'
+      ' · 冷却 $cooldownMin 分钟';
 }
 
 /// 单元库 `crawler/` 下的脚本文件。

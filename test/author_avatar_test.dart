@@ -115,40 +115,6 @@ void main() {
     });
   });
 
-  group('AvatarCropBox', () {
-    test('默认中心取景在横图与竖图里都居中', () {
-      final box = AvatarCropBox.centerFace();
-      final (x, y, side) = box.toPixels(1200, 800);
-      expect(side, 800);
-      expect(x, 200);
-      expect(y, 0);
-    });
-
-    test('竖图取景略微上移，框不越界', () {
-      final box = AvatarCropBox.centerFace();
-      final (x, y, side) = box.toPixels(800, 1200);
-      expect(side, 800);
-      expect(x, 0);
-      expect(y, closeTo(152, 0.001));
-      expect(y + side <= 1200, isTrue);
-    });
-
-    test('缩小取景框并夹在边界内', () {
-      const box = AvatarCropBox(left: 1, top: 1, size: 0.5);
-      final (x, y, side) = box.toPixels(1000, 600);
-      expect(side, 300);
-      expect(x, 700);
-      expect(y, 300);
-    });
-
-    test('size 会被夹到合法区间', () {
-      const tiny = AvatarCropBox(size: 0.01);
-      expect(tiny.toPixels(500, 500).$3, 100);
-      const huge = AvatarCropBox(size: 9);
-      expect(huge.toPixels(500, 500).$3, 500);
-    });
-  });
-
   group('播放页作者兜底图', () {
     test('th 优先；没有 th 取第一张非视频媒体；全无返回空串', () {
       expect(

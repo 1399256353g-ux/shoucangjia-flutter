@@ -9,6 +9,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'http_error_text.dart';
+
 /// `_cover/` 里的一个历史版本。
 class CoverVersion {
   /// 版本名（不含扩展名），如 `c20261123120000`。
@@ -101,20 +103,13 @@ class CoverActionResult {
 }
 
 /// 服务端状态码 → 可读文案（不把原始响应体暴露给用户）。
-String coverActionErrorText(int status) {
-  switch (status) {
-    case 400:
-      return '请求格式不对';
-    case 404:
-      return '该封面版本已不存在（或服务端未升级）';
-    case 413:
-      return '图片过大';
-    case 500:
-      return '服务端写入失败';
-    default:
-      return 'HTTP $status';
-  }
-}
+///
+/// 400/413/500 三条与其它封面/头像接口完全一致，走 [httpErrorText]；
+/// 只有 404 是本业务特指的（旧版本已被清理或服务端未升级）。
+String coverActionErrorText(int status) =>
+    httpErrorText(status, overrides: const {
+      404: '该封面版本已不存在（或服务端未升级）',
+    });
 
 /// 列出版本列表：`GET /api/cover/versions?lib=&unitRel=`。
 Future<CoverListResult> fetchCoverVersions({
@@ -122,8 +117,9 @@ Future<CoverListResult> fetchCoverVersions({
   required Map<String, String> headers,
 }) async {
   try {
-    final r =
-        await http.get(url, headers: headers).timeout(const Duration(seconds: 8));
+    final r = await http
+        .get(url, headers: headers)
+        .timeout(const Duration(seconds: 8));
     if (r.statusCode != 200) {
       return CoverListResult(
           false, '读取封面历史失败：${coverActionErrorText(r.statusCode)}');
@@ -202,8 +198,7 @@ Future<CoverActionResult> clearCustomCover({
       return CoverActionResult(
           false, '操作失败：${coverActionErrorText(r.statusCode)}');
     }
-    return CoverActionResult(
-        true, hard ? '已清除自定义封面' : '已恢复自动封面');
+    return CoverActionResult(true, hard ? '已清除自定义封面' : '已恢复自动封面');
   } catch (_) {
     return const CoverActionResult(false, '操作失败：网络异常');
   }

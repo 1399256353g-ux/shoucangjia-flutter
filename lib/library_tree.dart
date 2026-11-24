@@ -22,15 +22,19 @@ class BasicLib {
   final String bigId;
   final int authors;
   final int works;
+
   /// L5-C：自定义封面版本（`_cover/<version>.<ext>`）；空串表示无自定义封面。
   final String coverVersion;
   final String coverExt;
+
   /// 0.9.9：爬虫脚本抓到的封面（作品目录 `cover.jpg`，服务端索引 `cv` 下发）；
   /// 空串表示没有。优先级介于手动封面与自动封面之间。
   final String crawlerCover;
+
   /// G：服务端 `/api/libraries.json` 下发的「首张作品封面」（`fc`，已带
   /// `/media/<lib>/` 前缀，且保证是图片）。只在手动/爬虫/播放量都拿不到图时兜底。
   final String firstCover;
+
   /// J7：来源连接（多 IP 聚合时用于路由与去重展示）。
   final String serverId;
   final String serverBase;
@@ -59,7 +63,8 @@ class BasicLib {
         'big_id': bigId,
         'authors': authors,
         'works': works,
-        if (coverVersion.isNotEmpty) 'cover': {'v': coverVersion, 'e': coverExt},
+        if (coverVersion.isNotEmpty)
+          'cover': {'v': coverVersion, 'e': coverExt},
         if (crawlerCover.isNotEmpty) 'cv': crawlerCover,
         if (firstCover.isNotEmpty) 'fc': firstCover,
         if (serverId.isNotEmpty) '_serverId': serverId,
@@ -92,6 +97,7 @@ class BigLib {
   final String id;
   final String name;
   final String path;
+
   /// 服务端 v2 索引里的统计字段。仅保留结构，不再生成旧「大库描述」。
   final int authors;
   final int works;
@@ -115,20 +121,21 @@ class BigLib {
 
 class LibraryTree {
   final List<BigLib> bigs;
-  final List<BasicLib> starred;
   final List<BasicLib> unassigned;
 
+  /// 注意：这里**不再**持有星标副本。
+  ///
+  /// 星标的唯一真相是 `StarStore`（可监听、跨页同步）。此前 `LibraryTree`
+  /// 还按 `stars` 参数算一份 `starred`，但 `lib/` 里没有任何地方读它——
+  /// 真实渲染全部走 `StarStore.ids`。同一件事两份状态，改一处忘一处时
+  /// 就会出现「星标页有、首页没有」这种没法查的现象，所以直接删掉。
   const LibraryTree({
     required this.bigs,
-    required this.starred,
     required this.unassigned,
   });
 
   /// 解析 v2；不是 v2 或没有大库时返回 null。
-  static LibraryTree? parse(
-    Map<String, dynamic> json, {
-    List<String> stars = const [],
-  }) {
+  static LibraryTree? parse(Map<String, dynamic> json) {
     final rawBigs = json['bigLibraries'];
     final rawBasics = json['basicLibraries'];
     if (rawBigs is! List || rawBasics is! List) return null;
@@ -141,7 +148,8 @@ class LibraryTree {
       final relRaw = '${raw['rel'] ?? ''}'.trim();
       basics.add(BasicLib(
         id: id,
-        name: diskNameOf(relRaw, '${raw['name'] ?? id}'.trim(), where: 'BasicLib'),
+        name: diskNameOf(relRaw, '${raw['name'] ?? id}'.trim(),
+            where: 'BasicLib'),
         rel: relRaw,
         bigId: '${raw['big_id'] ?? ''}'.trim(),
         authors: _num(raw['authors']),
@@ -179,11 +187,7 @@ class LibraryTree {
     final unassigned =
         basics.where((b) => !known.contains(b.bigId)).toList(growable: false);
 
-    return LibraryTree(
-      bigs: bigs,
-      starred: orderStarred(basics, stars),
-      unassigned: unassigned,
-    );
+    return LibraryTree(bigs: bigs, unassigned: unassigned);
   }
 
   /// 全部基础库（含未归属），用于重新排序星标。
@@ -191,13 +195,6 @@ class LibraryTree {
         for (final b in bigs) ...b.basics,
         ...unassigned,
       ];
-
-  /// 用新的星标顺序重建（其余结构不变）。
-  LibraryTree withStars(List<String> stars) => LibraryTree(
-        bigs: bigs,
-        starred: orderStarred(allBasics, stars),
-        unassigned: unassigned,
-      );
 
   BasicLib? basicById(String id) {
     for (final b in bigs) {
@@ -210,27 +207,6 @@ class LibraryTree {
     }
     return null;
   }
-
-  /// 大库里还没被星标的基础库（保持磁盘顺序）。
-  List<BasicLib> visibleBasics(BigLib big) => big.basics
-      .where((b) => !starred.any((s) => s.id == b.id))
-      .toList(growable: false);
-
-  int get totalBasics =>
-      bigs.fold(0, (n, b) => n + b.basics.length) + unassigned.length;
-}
-
-/// 按星标顺序（最近标记在前）排列基础库；无效/重复 id 自动忽略。
-List<BasicLib> orderStarred(List<BasicLib> all, List<String> stars) {
-  final byId = {for (final b in all) b.id: b};
-  final seen = <String>{};
-  final out = <BasicLib>[];
-  for (final id in stars) {
-    if (!seen.add(id)) continue;
-    final b = byId[id];
-    if (b != null) out.add(b);
-  }
-  return out;
 }
 
 /// 切换星标：已标记则移除，未标记则插到最前（最近标记优先）。

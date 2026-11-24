@@ -219,34 +219,6 @@ Map<String, String> authorFallbackThumbs(Iterable<dynamic> works) {
   return out;
 }
 
-/// 方形中心裁剪取景框（以图宽高的比例表示），竖图略微上移对准人脸。
-class AvatarCropBox {
-  final double left;
-  final double top;
-  final double size; // 正方形边长，相对较短边的比例（1 = 铺满短边）
-
-  const AvatarCropBox({this.left = 0, this.top = 0, this.size = 1});
-
-  /// [w]/[h] 为原图像素尺寸，返回裁剪框的像素矩形。
-  (double x, double y, double side) toPixels(int w, int h) {
-    final short = w < h ? w : h;
-    final side = short * size.clamp(0.2, 1.0);
-    final maxX = w - side;
-    final maxY = h - side;
-    var x = left * maxX;
-    var y = top * maxY;
-    if (x < 0) x = 0;
-    if (y < 0) y = 0;
-    if (x > maxX) x = maxX;
-    if (y > maxY) y = maxY;
-    return (x, y, side);
-  }
-
-  /// 标准方形头像的默认取景：横向居中，竖向略偏上（人脸通常在画面 40% 处）。
-  static AvatarCropBox centerFace({double size = 1.0}) =>
-      AvatarCropBox(left: 0.5, top: 0.38, size: size);
-}
-
 /// 头像首字母：空名返回 `?`；按 rune 取第一个完整字符，
 /// 避免 emoji / 代理对被截成半个而显示空白。
 ///

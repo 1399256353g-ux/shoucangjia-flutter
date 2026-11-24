@@ -10,6 +10,8 @@
 /// 服务端只新增/改指针，不动作品原图。本文件不碰网络与文件系统。
 library;
 
+import 'http_error_text.dart';
+
 /// 封面作用域：基础库封面（`_cover/`）与单元库封面（`unit-covers.json` 指针）。
 ///
 /// 两者请求体形状一致（`{lib, work}` / `{lib, clear:true}`），只是接口与文案不同：
@@ -80,7 +82,8 @@ class CoverRequest {
 
   /// 请求体：清除只带 `clear:true`；设置带作品 id，并按需带截帧时间/图片序号。
   Map<String, dynamic> toBody() {
-    if (op == CoverOp.clear) return <String, dynamic>{'lib': lib, 'clear': true};
+    if (op == CoverOp.clear)
+      return <String, dynamic>{'lib': lib, 'clear': true};
     final body = <String, dynamic>{'lib': lib, 'work': work};
     if (at != null) body['at'] = at;
     if (index != null) body['index'] = index;
@@ -96,13 +99,9 @@ class CoverRequest {
   /// 成功后的提示文案。
   String get doneText {
     if (scope == CoverScope.unit) {
-      return op == CoverOp.clear
-          ? '已清除该单元库封面，恢复自动封面'
-          : '已设为该单元库封面（返回主页刷新即可看到）';
+      return op == CoverOp.clear ? '已清除该单元库封面，恢复自动封面' : '已设为该单元库封面（返回主页刷新即可看到）';
     }
-    return op == CoverOp.clear
-        ? '已清除自定义封面，恢复自动封面'
-        : '已设为该库封面（返回主页刷新即可看到）';
+    return op == CoverOp.clear ? '已清除自定义封面，恢复自动封面' : '已设为该库封面（返回主页刷新即可看到）';
   }
 
   /// 失败提示前缀。
@@ -115,15 +114,9 @@ class CoverRequest {
 }
 
 /// 把 HTTP 状态码翻成可读原因；未知状态码只报数字。
-String coverErrorText(int status) {
-  switch (status) {
-    case 404:
-      return '该库不存在或作品里没有可用图片';
-    case 400:
-      return '请求格式不对';
-    case 500:
-      return '服务端写入失败';
-    default:
-      return 'HTTP $status';
-  }
-}
+///
+/// 只有 404 是本业务特指的（「库里/作品里没有可用图片」），其余走
+/// [httpErrorText] 的通用归类，避免与另外两个封面/头像函数各写一份。
+String coverErrorText(int status) => httpErrorText(status, overrides: const {
+      404: '该库不存在或作品里没有可用图片',
+    });

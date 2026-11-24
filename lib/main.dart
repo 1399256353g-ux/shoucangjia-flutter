@@ -94,6 +94,7 @@ import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
 import 'ui_fade.dart';
 import 'immersive.dart';
+import 'interval_label.dart';
 import 'instant_route.dart';
 import 'gesture_verdict.dart';
 import 'volume_control.dart';
@@ -5051,7 +5052,7 @@ class _LibraryPageState extends State<LibraryPage> {
         if (mounted) setState(() => tree = null);
         return;
       }
-      final t = LibraryTree.parse(merged, stars: saved);
+      final t = LibraryTree.parse(merged);
       // 节点文件夹由 owner 在「文件结构」里指定；默认为空 = 只有顶级 SECRET。
       final marked = await _fetchMarkedNodes();
       // owner 2026-11-24：这里原来内联造节点、不带连接标识，于是 buildUnitTree
@@ -5876,7 +5877,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   String _freqText(Map<String, dynamic>? j) {
     final iv = (_cfgOf(j)['intervalMin'] as num?)?.toInt() ?? 0;
     if (iv <= 0) return '不自动抓取';
-    return iv >= 60 ? '每 ${iv ~/ 60} 小时' : '每 $iv 分钟';
+    return everyMinutesLabel(iv);
   }
 
   /// H：单个单元库的配置入口；没有脚本时置灰并写明 J17 原因。
@@ -6117,7 +6118,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                   Text(
                       intervalMin == 0
                           ? '当前：不自动抓取（仍可手动同步）'
-                          : '当前：每 ${intervalMin >= 60 ? '${intervalMin ~/ 60} 小时' : '$intervalMin 分钟'}抓取一次',
+                          : '当前：${everyMinutesLabel(intervalMin)}抓取一次',
                       style: const TextStyle(fontSize: 11, color: Colors.grey)),
                   TextFormField(
                     initialValue: note,

@@ -20,6 +20,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'http_error_text.dart';
 import 'prefs_json.dart';
 
 /// 本机覆盖表：`作者名 -> 媒体路径`（JSON object）。
@@ -32,7 +33,9 @@ String authorAvatarKey(String name) => name.trim();
 bool _validAvatarValue(String v) {
   final s = v.trim();
   if (s.isEmpty || s.length > 600) return false;
-  if (!(s.startsWith('/') || s.startsWith('http://') || s.startsWith('https://'))) {
+  if (!(s.startsWith('/') ||
+      s.startsWith('http://') ||
+      s.startsWith('https://'))) {
     return false;
   }
   return true;
@@ -136,18 +139,14 @@ Map<String, dynamic> authorAvatarClearBody({
     };
 
 /// 头像接口 HTTP 状态码 → 可读原因；未知状态码只报数字。
-String authorAvatarApiErrorText(int status) {
-  switch (status) {
-    case 400:
-      return '请求格式不对或文件名非法';
-    case 404:
-      return '基础库或头像文件不存在';
-    case 500:
-      return '服务端写入注册表失败';
-    default:
-      return 'HTTP $status';
-  }
-}
+///
+/// 400/500 走 [httpErrorText] 的通用归类；只有 404 是本业务特指的。
+String authorAvatarApiErrorText(int status) =>
+    httpErrorText(status, overrides: const {
+      400: '请求格式不对或文件名非法',
+      404: '基础库或头像文件不存在',
+      500: '服务端写入注册表失败',
+    });
 
 /// 作者头像来源优先级：手动覆盖 > 作品自带 `av`/爬虫作者头像 > 自动兜底图。
 ///
@@ -181,7 +180,6 @@ class AuthorAvatarStore extends ChangeNotifier {
 
   /// 已设置手动头像的作者数。
   int get count => _paths.length;
-
 
   /// 该作者的手动头像路径；没有返回 null。
   String? pathFor(String name) => _paths[authorAvatarKey(name)];
@@ -223,8 +221,8 @@ class AuthorAvatarStore extends ChangeNotifier {
     await _persist();
   }
 
-  Future<void> _persist() =>
-      savePrefString(kAuthorAvatarPrefsKey, encodeAuthorAvatarOverrides(_paths));
+  Future<void> _persist() => savePrefString(
+      kAuthorAvatarPrefsKey, encodeAuthorAvatarOverrides(_paths));
 
   /// 仅供测试：注入初始状态。
   @visibleForTesting
