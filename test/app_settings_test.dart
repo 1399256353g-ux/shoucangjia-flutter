@@ -10,14 +10,16 @@ void main() {
     expect(AppSettings.imageIntervalSec, 3);
     expect(AppSettings.hideUiSec, 3);
     expect(AppSettings.keyLabel(PlayerAction.next), 'J');
-    expect(AppSettings.actionFor(LogicalKeyboardKey.keyJ), PlayerAction.next);
+    expect(AppSettings.actionForCombo(LogicalKeyboardKey.keyJ.keyId, 0),
+        PlayerAction.next);
   });
 
   test('json round trip', () {
     AppSettings.defaultSpeed = 1.5;
     AppSettings.imageIntervalSec = 7;
     AppSettings.hideUiSec = 5;
-    AppSettings.bind(PlayerAction.mute, LogicalKeyboardKey.keyN.keyId);
+    AppSettings.bindCombo(
+        PlayerAction.mute, KeyCombo(LogicalKeyboardKey.keyN.keyId));
     AppSettings.stripLibIndex = false;
     final j = AppSettings.toJson();
     AppSettings.resetDefaults();
@@ -26,7 +28,8 @@ void main() {
     expect(AppSettings.defaultSpeed, 1.5);
     expect(AppSettings.imageIntervalSec, 7);
     expect(AppSettings.hideUiSec, 5);
-    expect(AppSettings.actionFor(LogicalKeyboardKey.keyN), PlayerAction.mute);
+    expect(AppSettings.actionForCombo(LogicalKeyboardKey.keyN.keyId, 0),
+        PlayerAction.mute);
   });
 
   test('invalid values fall back and clamp', () {
@@ -43,18 +46,22 @@ void main() {
   });
 
   test('binding conflicts swap keys instead of duplicating', () {
-    final oldNext = AppSettings.keyIds[PlayerAction.next]!;
-    final oldPause = AppSettings.keyIds[PlayerAction.playPause]!;
-    AppSettings.bind(PlayerAction.next, oldPause);
-    expect(AppSettings.actionFor(LogicalKeyboardKey.space), PlayerAction.next);
-    expect(AppSettings.keyIds[PlayerAction.playPause], oldNext);
-    expect(
-        AppSettings.keyIds.values.toSet().length, PlayerAction.values.length);
+    final oldNext = AppSettings.keyBindings[PlayerAction.next]!.keyId;
+    final oldPause = AppSettings.keyBindings[PlayerAction.playPause]!.keyId;
+    AppSettings.bindCombo(PlayerAction.next, KeyCombo(oldPause));
+    expect(AppSettings.actionForCombo(LogicalKeyboardKey.space.keyId, 0),
+        PlayerAction.next);
+    expect(AppSettings.keyBindings[PlayerAction.playPause]!.keyId, oldNext);
+    expect(AppSettings.keyBindings.values.toSet().length,
+        PlayerAction.values.length);
   });
 
   test('arrows kept as fixed navigation', () {
-    AppSettings.bind(PlayerAction.next, LogicalKeyboardKey.keyN.keyId);
-    expect(AppSettings.actionFor(LogicalKeyboardKey.arrowDown), isNull);
+    AppSettings.bindCombo(
+        PlayerAction.next, KeyCombo(LogicalKeyboardKey.keyN.keyId));
+    expect(
+        AppSettings.actionForCombo(LogicalKeyboardKey.arrowDown.keyId, 0),
+        isNull);
     expect(AppSettings.toJson()['keys']['next'],
         {'k': LogicalKeyboardKey.keyN.keyId, 'm': 0});
   });
@@ -63,13 +70,13 @@ void main() {
     test('单键与带修饰键的组合互不冲突', () {
       final fId = LogicalKeyboardKey.keyF.keyId;
       final jId = LogicalKeyboardKey.keyJ.keyId;
-      AppSettings.bind(PlayerAction.fullscreen, fId);
+      AppSettings.bindCombo(PlayerAction.fullscreen, KeyCombo(fId));
       // Ctrl+F 不抢占单键 F
       expect(
           AppSettings.bindCombo(
               PlayerAction.mute, KeyCombo(fId, KeyCombo.modCtrl)),
           isTrue);
-      expect(AppSettings.keyIds[PlayerAction.fullscreen], fId);
+      expect(AppSettings.keyBindings[PlayerAction.fullscreen]!.keyId, fId);
       expect(AppSettings.actionForCombo(fId, 0), PlayerAction.fullscreen);
       expect(AppSettings.actionForCombo(fId, KeyCombo.modCtrl),
           PlayerAction.mute);

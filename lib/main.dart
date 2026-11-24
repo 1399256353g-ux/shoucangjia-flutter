@@ -4396,7 +4396,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     try {
       final r = await http.get(cfg.u('/api/settings'), headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      _apply(jsonOf(r) as Map<String, dynamic>, setLoading: true);
+      _apply(jsonMapOf(r), setLoading: true);
     } catch (e) {
       if (mounted) setState(() => err = errorText(e));
     }
@@ -4422,7 +4422,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
         headers: {...cfg.headers, 'Content-Type': 'application/json'},
         body: jsonEncode(body));
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-    return jsonOf(r) as Map<String, dynamic>;
+    return jsonMapOf(r);
   }
 
   void _toast(String s) {
@@ -5788,7 +5788,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
           .get(Uri.parse('${cfg.base}/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       final list = ((j['libraries'] as List?) ?? const [])
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
@@ -5996,7 +5996,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
       final r = await http
           .get(_u('/api/crawler'), headers: cfg.headersFor(libId))
           .timeout(const Duration(seconds: 10));
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -6158,7 +6158,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
           .get(Uri.parse(withQueryFlag('${_u('/api/maintenance')}', deep ? 'deep=1' : '')),
               headers: cfg.headersFor(libId))
           .timeout(Duration(seconds: deep ? 90 : 15));
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -6358,7 +6358,7 @@ class _HomePageState extends State<HomePage> {
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
-      final lj = jsonOf(r) as Map<String, dynamic>;
+      final lj = jsonMapOf(r);
       final ls = librariesWithDisplayNames(
           ((lj['libraries'] as List?) ?? const [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -6875,7 +6875,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       final list = librariesWithDisplayNames(
           ((j['libraries'] as List?) ?? const [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -14827,7 +14827,7 @@ class _SearchPageState extends State<SearchPage> {
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       final list = librariesWithDisplayNames(
           ((j['libraries'] as List?) ?? const [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -16096,7 +16096,7 @@ class _AuthorPageState extends State<AuthorPage> {
         final r = await http.get(cfg.u('/api/authors.json', lib: lib),
             headers: cfg.headers);
         if (r.statusCode != 200) continue;
-        final idx = jsonOf(r) as Map;
+        final idx = jsonMapOf(r);
         // 服务端作者索引存在 `作者` / `@作者` 两种键；名字可能来自作品 `a`
         // 或媒体路径里的 `%40作者`。统一按裸名匹配，避免「进页后空白」。
         final info = authorInfoFromIndex(idx, widget.name);
@@ -16850,6 +16850,9 @@ class _AuthorPageState extends State<AuthorPage> {
                     selectedIds: selectedWorks,
                     onToggleSelect: _toggleSelect,
                     onEnterSelect: _enterSelect,
+                    // owner 2026-11-24：只有从作者主页进播放页时，
+                    // 点头像才返回作者页（不叠新页）。
+                    fromAuthor: true,
                     manualIds: manualWorkIds),
               )),
             ]),
@@ -16997,6 +17000,13 @@ class WorkGrid extends StatefulWidget {
   /// 为空时沿用内部控制器。
   final ScrollController? controller;
 
+  /// owner 2026-11-24：是否从**作者主页**进入播放页。
+  ///
+  /// 只有作者页传 true。此前这里写死 `fromAuthor: true`，导致推荐页/搜索页
+  /// 进播放页后点头像会执行 `maybePop()` 返回上一页（回到推荐页），
+  /// 而不是打开作者主页。
+  final bool fromAuthor;
+
   // T3：已移除旧「收藏夹」idx/名称传参链
   const WorkGrid({
     super.key,
@@ -17011,6 +17021,7 @@ class WorkGrid extends StatefulWidget {
     this.onEnterSelect,
     this.manualIds = const <String>{},
     this.controller,
+    this.fromAuthor = false,
   });
 
   @override
@@ -17197,11 +17208,13 @@ class _WorkGridState extends State<WorkGrid> {
             // 播放器需要可变列表：续播时直接追加到它自己手里这份。
             final playerWorks = List.of(works, growable: true);
             // owner 2026-11-22：标明来源，播放页据此禁用左滑并把头像改成返回。
+            // owner 2026-11-24：改为跟随组件参数，只有作者页进来才是 true；
+            // 推荐页/搜索页进播放页时点头像必须打开作者主页，不能弹回上一页。
             Navigator.of(context).push(instantRoute((_) => PlayerPage(
                 works: playerWorks,
                 start: i,
                 lib: _libFor(w),
-                fromAuthor: true,
+                fromAuthor: widget.fromAuthor,
                 onNeedMore: widget.onNeedMoreWorks == null
                     ? null
                     : () => widget.onNeedMoreWorks!(playerWorks))));

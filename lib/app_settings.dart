@@ -47,7 +47,6 @@ class KeyCombo {
   const KeyCombo(this.keyId, [this.mods = 0]);
 
   bool get isBound => keyId != 0;
-  bool get hasMods => mods != 0;
 
   KeyCombo copyWith({int? keyId, int? mods}) =>
       KeyCombo(keyId ?? this.keyId, mods ?? this.mods);
@@ -104,11 +103,6 @@ class AppSettings {
   static final Map<PlayerAction, KeyCombo> keyBindings = {
     for (final e in _defaultKeyIds.entries) e.key: KeyCombo(e.value),
   };
-
-  /// 只读视图：动作 → 主键 id（供旧调用点与测试使用）。
-  static Map<PlayerAction, int> get keyIds => {
-        for (final e in keyBindings.entries) e.key: e.value.keyId,
-      };
 
   static Map<String, dynamic> toJson() => {
         'speed': defaultSpeed,
@@ -196,10 +190,6 @@ class AppSettings {
   }
 
   static Future<void> save() => savePrefString(prefsKey, jsonEncode(toJson()));
-
-  /// 单键绑定（等价于无修饰键的组合），保留给旧调用点与测试。
-  static void bind(PlayerAction action, int keyId) =>
-      bindCombo(action, KeyCombo(keyId));
 
   /// 绑定组合键。冲突检测按「修饰键 + 主键」整体比较：
   /// 与已有单键 `F` 冲突的是组合 `F(mods=0)`，`Ctrl+F` 不算冲突。
@@ -317,8 +307,4 @@ class AppSettings {
     }
     return null;
   }
-
-  /// 无修饰键的简写（测试与不需要修饰键的调用点）。
-  static PlayerAction? actionFor(LogicalKeyboardKey k) =>
-      actionForCombo(k.keyId, 0);
 }

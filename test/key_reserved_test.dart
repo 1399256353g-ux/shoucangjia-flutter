@@ -26,8 +26,8 @@ void main() {
           reason: '$k');
     }
     // 被拒后绑定表保持默认，没有被写脏。
-    expect(AppSettings.actionFor(LogicalKeyboardKey.escape), isNull);
-    expect(AppSettings.actionFor(LogicalKeyboardKey.arrowDown), isNull);
+    expect(AppSettings.actionForCombo(LogicalKeyboardKey.escape.keyId, 0), isNull);
+    expect(AppSettings.actionForCombo(LogicalKeyboardKey.arrowDown.keyId, 0), isNull);
   });
 
   test('带修饰键也不能占用保留键（Ctrl+← 同样抢翻页）', () {
@@ -79,8 +79,10 @@ void main() {
     expect(AppSettings.keyBindings[PlayerAction.prev]!.keyId,
         isNot(LogicalKeyboardKey.arrowDown.keyId));
     // 被丢弃的动作回到默认值，而不是变成「未绑定」。
-    expect(AppSettings.keyIds[PlayerAction.fullscreen], 70, reason: '默认 F');
-    expect(AppSettings.keyIds[PlayerAction.prev], 107, reason: '默认 K');
+    expect(AppSettings.keyBindings[PlayerAction.fullscreen]!.keyId, 70,
+        reason: '默认 F');
+    expect(AppSettings.keyBindings[PlayerAction.prev]!.keyId, 107,
+        reason: '默认 K');
     expect(AppSettings.actionForCombo(LogicalKeyboardKey.keyQ.keyId,
         KeyCombo.modAlt), PlayerAction.mute);
   });

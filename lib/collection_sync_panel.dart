@@ -89,7 +89,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
           .get(_settingsUri, headers: widget.headers)
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
       if (!mounted) return;
       setState(() {
@@ -122,7 +122,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
             ],
           }));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
       if (!mounted) return;
       setState(() {

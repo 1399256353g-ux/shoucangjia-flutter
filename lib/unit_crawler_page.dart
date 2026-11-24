@@ -81,7 +81,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       final r = await _client
           .get(Uri.parse(_configUrl), headers: widget.headers)
           .timeout(const Duration(seconds: 10));
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -113,7 +113,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
               },
               body: jsonEncode(config.toJson()))
           .timeout(const Duration(seconds: 10));
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -140,7 +140,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       final r = await _client
           .post(Uri.parse(_runUrl), headers: widget.headers)
           .timeout(const Duration(seconds: 10));
-      final j = jsonOf(r) as Map<String, dynamic>;
+      final j = jsonMapOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
