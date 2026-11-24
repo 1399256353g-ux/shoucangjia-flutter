@@ -12,7 +12,7 @@
   要用一条**没有纹理**的渲染路径：AVPlayer + `AVPlayerLayer` 平台视图。
 - 依赖可用：`video_player 2.10.1` 已解析并写入 `pubspec.yaml` / `pubspec.lock`
   （只新增 5 个传递依赖，未升级任何现有包）。
-- 抽象层 `lib/player_backend.dart` 已就绪，`MpvBackend` 是**零行为改动**包装；
+- 抽象层 `docs/skeletons/player_backend.dart` 已就绪，`MpvBackend` 是**零行为改动**包装；
   `docs/skeletons/ios_native_player.dart` 已能完成打开/播放/暂停/seek/停止/音量/速率与
   七路事件流，**缺三块原生能力**（截图、`videoGravity`、loop-file），已在
   `PlayerCapabilities` 里显式声明，不用猜。
@@ -55,7 +55,7 @@ AVPlayerLayer 由 iOS 合成器直接合成，不存在「Flutter 纹理没拿�
 
 ## 4. 接口设计
 
-`lib/player_backend.dart`
+`docs/skeletons/player_backend.dart`
 
 ```dart
 abstract class PlayerBackend {
@@ -314,7 +314,7 @@ iOS 原生后端连续 2 次在 `open()` 阶段失败（`errorStream` 早于 dur
 
 | 文件 | 说明 |
 |---|---|
-| `lib/player_backend.dart` | 接口 + 数据类型 + `MpvBackend`（零行为改动） + 后端选择纯函数 |
+| `docs/skeletons/player_backend.dart` | 接口 + 数据类型 + `MpvBackend`（零行为改动） + 后端选择纯函数 |
 | `docs/skeletons/ios_native_player.dart` | `IosNativeBackend`（AVPlayer / video_player）+ `IosVideoSurface` |
 | `docs/ios-native-player.md` | 本文档 |
 | `pubspec.yaml` | 新增 `video_player: ^2.10.1` |

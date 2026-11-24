@@ -9308,7 +9308,7 @@ class _PlayerPageState extends State<PlayerPage>
       _slowBuffer = false;
     }
     final wantsPause = next == PlaybackPhase.paused;
-    final wantsPlay = next == PlaybackPhase.playing;
+    final wantsPlay = next.isActivelyPlaying;
     final contradiction = (wantsPause && !paused) || (wantsPlay && paused);
     if (contradiction) {
       _phaseMismatch = 'phase=${next.name} paused=$paused';

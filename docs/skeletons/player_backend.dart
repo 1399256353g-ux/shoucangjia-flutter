@@ -1,20 +1,12 @@
-/// 播放器后端抽象（阶段4 · 平台层）。
+/// 播放器后端抽象（阶段4 · 平台层）——**骨架，未接线**。
 ///
-/// 目标：把「播放器」从「某个具体库」里剥出来，让播放页只依赖本文件的接口。
-/// 现状是播放页直接持有 media_kit 的 `Player` / `VideoController`，
-/// iOS 上的黑屏有声、纹理重建、起播卡顿都锁死在这条 mpv 路径里；
-/// owner 已同意 iOS 长期单独走原生 AVPlayer，因此需要一个可替换的边界。
+/// ⚠️ 2026-11-24：本文件已从 `lib/` 移到 `docs/skeletons/`。
+/// 原因：`lib/` 内**零 import**（`grep -rn "player_backend" lib` = 0），
+/// 播放页仍然直接持有 media_kit 的 `Player`/`VideoController`，即「定义了一个
+/// 谁都不用的接口，只有文档在描述它」。留在 `lib/` 里会让人误以为换后端只要
+/// 改一个枚举。等真要上 iOS 原生（或任何第二后端）时，把它移回 `lib/`、
+/// 让播放页依赖本接口，再按 `docs/ios-native-player.md` 的步骤验收。
 ///
-/// 设计约定（刻意保守，避免本轮破坏三端）：
-/// - [MpvBackend] 是对现有 media_kit 用法的**零行为改动**包装：相同的
-///   `PlayerConfiguration`、相同的 `hwdec` 取值、相同的 [Video] 组件参数。
-/// - 接口按播放页**实际用到的能力**裁剪（open/play/pause/seek/stop/
-///   setVolume/setRate/screenshot + 6 路事件流 + 视频画面组件），
-///   不引入播放页目前没用的概念。
-/// - 能力差异用 [PlayerCapabilities] 显式声明，不靠 `Platform.isIOS` 在
-///   业务代码里到处分叉。
-/// - 本轮**不接线**：`lib/main.dart` 仍然直接用 media_kit，接入步骤见
-///   `docs/ios-native-player.md`。
 library;
 
 import 'dart:async';

@@ -107,4 +107,39 @@ void main() {
       expect(src.contains('preloadKeyFor'), isTrue);
     });
   });
+
+  group('第七批（0.9.205）：未接线抽象 / 孤儿模块 / 无消费 getter', () {
+    test('player_backend 不得回到 lib/（播放页仍直接用 media_kit）', () {
+      final files = libDartFiles().map((f) => f.path).toList();
+      expect(files.any((p) => p.endsWith('player_backend.dart')), isFalse,
+          reason: '该抽象零 import，骨架已移到 docs/skeletons/');
+      final src = libSourceAll();
+      expect(src.contains('selectPlayerBackendKind'), isFalse);
+      expect(src.contains('MpvBackend'), isFalse);
+    });
+
+    test('cover_memo 孤儿模块不得复活', () {
+      final files = libDartFiles().map((f) => f.path).toList();
+      expect(files.any((p) => p.endsWith('cover_memo.dart')), isFalse);
+      expect(libSourceAll().contains('CoverMemo'), isFalse);
+    });
+
+    test('videoContentRect 不得复活（真实排版走 media_kit 的 BoxFit）', () {
+      expect(libSourceAll().contains('videoContentRect'), isFalse);
+    });
+
+    test('pickOnlyIn / countMatchingAuthors / needsAvatarPlaceholder 不得复活', () {
+      final src = libSourceAll();
+      expect(src.contains('pickOnlyIn'), isFalse);
+      expect(src.contains('countMatchingAuthors'), isFalse);
+      expect(src.contains('needsAvatarPlaceholder'), isFalse);
+    });
+
+    test('isActivelyPlaying 是唯一「正在播放」判定，且真实路径在用', () {
+      final src = libSourceAll();
+      expect(src.contains('bool get isActivelyPlaying'), isTrue);
+      // 真实相位应用点必须走这个 getter，而不是再写一遍 == playing。
+      expect(src.contains('next.isActivelyPlaying'), isTrue);
+    });
+  });
 }

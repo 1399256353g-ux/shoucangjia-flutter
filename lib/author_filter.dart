@@ -29,15 +29,6 @@ class AuthorLibNode {
   });
 }
 
-/// 快捷筛选条的单选语义：把某个维度收敛为 [id]（空串 = 全部）。
-///
-/// 快捷条与筛选面板共用同一份 [AuthorFilterState]，这里只改一个维度，
-/// 其他维度（等级/作品类型）保持不变。
-void pickOnlyIn(Set<String> target, String id) {
-  target.clear();
-  if (id.isNotEmpty) target.add(id);
-}
-
 /// 作者筛选状态；全部为空即“未筛选”。
 class AuthorFilterState {
   /// J10 旧维度：基础库/大库（保留以兼容历史数据与测试）。
@@ -273,31 +264,6 @@ Map<String, Set<String>> mergeAuthorTypes(
     }
   }
   return out;
-}
-
-/// 按筛选状态统计命中数量。
-int countMatchingAuthors(
-  Iterable<MapEntry<String, Map<String, dynamic>>> authors,
-  AuthorFilterState filter, {
-  required String Function(Map<String, dynamic> author) basicIdOf,
-  required String Function(Map<String, dynamic> author) bigIdOf,
-  String Function(Map<String, dynamic> author)? unitIdOf,
-  required String Function(String name, Map<String, dynamic> author) gradeOf,
-  required Set<String> Function(String name) typesOf,
-}) {
-  var n = 0;
-  for (final e in authors) {
-    if (filter.matches(
-      basicId: basicIdOf(e.value),
-      bigId: bigIdOf(e.value),
-      unitId: unitIdOf?.call(e.value) ?? '',
-      grade: gradeOf(e.key, e.value),
-      workTypes: typesOf(e.key),
-    )) {
-      n++;
-    }
-  }
-  return n;
 }
 
 /// J11：全 App 共享的作者筛选状态。

@@ -1,32 +1,9 @@
-import 'dart:ui' show Rect, Size;
+import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/video_layout.dart';
 
 void main() {
-  group('O4 videoContentRect', () {
-    test('竖屏框内播放 16:9 → 上下黑边，画面水平撑满', () {
-      final r = videoContentRect(const Size(400, 800), 16 / 9);
-      expect(r.left, 0);
-      expect(r.width, 400);
-      expect(r.height, closeTo(225, 0.001));
-      expect(r.top, closeTo((800 - 225) / 2, 0.001));
-    });
-
-    test('横屏框内播放 16:9 → 左右黑边，画面高度撑满', () {
-      final r = videoContentRect(const Size(1200, 600), 16 / 9);
-      expect(r.top, 0);
-      expect(r.height, 600);
-      expect(r.width, closeTo(600 * 16 / 9, 0.001));
-    });
-
-    test('宽高比缺失/非法时退回整个容器', () {
-      expect(videoContentRect(const Size(100, 200), null).height, 200);
-      expect(videoContentRect(const Size(100, 200), 0).height, 200);
-      expect(videoContentRect(Size.zero, 1.5), Rect.zero);
-    });
-  });
-
   group('T stageBottomInset', () {
     test('正常态舞台按任务栏高度内缩', () {
       expect(

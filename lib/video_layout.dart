@@ -11,7 +11,7 @@
 /// [stageProgressOverlayHeight]）同样集中在这里，便于回归测试。
 library;
 
-import 'dart:ui' show Offset, Rect, Size;
+import 'dart:ui' show Size;
 
 /// 视频显示模式。`fill` = 铺满（BoxFit.cover + 裁剪），
 /// `contain` = 适应（BoxFit.contain，留黑边）。
@@ -84,26 +84,6 @@ double taskbarReservedHeight({
 }) {
   final b = safeBottom > 0 ? safeBottom : 0.0;
   return (contentHeight > 0 ? contentHeight : 0.0) + b;
-}
-
-/// 按容器尺寸与视频宽高比计算 `BoxFit.contain` 后的画面矩形。
-/// [aspect] 非法（<=0）时退回整个容器。
-Rect videoContentRect(Size box, double? aspect) {
-  if (box.width <= 0 || box.height <= 0) return Rect.zero;
-  if (aspect == null || aspect <= 0) {
-    return Offset.zero & box;
-  }
-  final containerAspect = box.width / box.height;
-  if (containerAspect > aspect) {
-    // 容器更宽：左右留黑边，画面高度撑满。
-    final w = box.height * aspect;
-    final left = (box.width - w) / 2;
-    return Rect.fromLTWH(left, 0, w, box.height);
-  }
-  // 容器更高（手机竖屏播放宽屏视频）：上下留黑边，画面宽度撑满。
-  final h = box.width / aspect;
-  final top = (box.height - h) / 2;
-  return Rect.fromLTWH(0, top, box.width, h);
 }
 
 /// 播放器上报的视频参数，换算成「是否已就绪」与「排版比例」。

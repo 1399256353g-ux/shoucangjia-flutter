@@ -285,9 +285,6 @@ bool _isInvisibleRune(int r) {
   return false;
 }
 
-/// 没有可用头像路径时必须显示首字母占位（不能返回空白）。
-bool needsAvatarPlaceholder(String path) => path.trim().isEmpty;
-
 /// 首字母圆形占位：
 /// - 无头像（`mediaPath` 为空）时直接显示；
 /// - 有头像时作为 `CachedNetworkImage` 的 `placeholder`/`errorWidget`，
