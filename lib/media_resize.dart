@@ -20,9 +20,6 @@ const int kAvatarImageWidth = 200;
 /// 原图省一半以上流量与解码内存。
 const int kPlayerImageWidth = 1080;
 
-/// 播放页预加载页（滑动时的相邻作品）只做占位，720px 即可盖满屏幕。
-const int kPlayerPreloadWidth = 720;
-
 final RegExp _imageExt = RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false);
 final RegExp _hasWidthParam = RegExp(r'(?:^|&)w=\d+(?:&|$)');
 

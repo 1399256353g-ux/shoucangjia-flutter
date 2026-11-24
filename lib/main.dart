@@ -8484,9 +8484,6 @@ class _PlayerPageState extends State<PlayerPage>
   ]).animate(_dropAnim);
   // 2026-11-23 owner：去掉双击点赞后，不再需要双击仲裁与红心动画。
   // 单击仍是唯一判定路径（呼出/收起功能区、非全屏暂停），双击就是两次单击。
-  // P0（非全屏）：暂停时只显示播放图标，0.8s / easeOut 淡出。
-  late final AnimationController _playHintAnim = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: kPlayHintFadeMs));
   // P1b §8：长按菜单（不暂停）。500ms / 位移 ≤12px，只作用于非全屏视频舞台。
   final StageLongPressTracker _lpTracker = StageLongPressTracker();
   Timer? _lpTimer;
@@ -8549,10 +8546,6 @@ class _PlayerPageState extends State<PlayerPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // P0：播放图标淡出结束后重建一次，从树上移除该覆盖层。
-    _playHintAnim.addStatusListener((s) {
-      if (s == AnimationStatus.completed && mounted) setState(() {});
-    });
     PerfDiagnostics.instance.beginSpan('page:player');
     _fromAuthor = widget.fromAuthor;
     cur = widget.start;
@@ -10783,7 +10776,6 @@ class _PlayerPageState extends State<PlayerPage>
     // owner 2026-11-22：移动端暂停不再震动（手感差），去掉触感反馈。
     togglePause();
     showUi();
-    if (paused) _playHintAnim.forward(from: 0);
   }
 
   /// M1：立即收起功能区（取消自动隐藏计时器，避免残留定时器再触发）。
@@ -11577,7 +11569,6 @@ class _PlayerPageState extends State<PlayerPage>
     _saveWatchProgress(force: true);
     WatchProgressStore.flush();
     _dropAnim.dispose();
-    _playHintAnim.dispose();
     _menuAnim.dispose();
     _commentAnim.dispose();
     _lpTimer?.cancel();
@@ -13046,7 +13037,9 @@ class _PlayerPageState extends State<PlayerPage>
           curve: Curves.easeOut,
           child: Padding(
             padding: EdgeInsets.only(
-                left: pad.left + 12, right: pad.right + 12, bottom: bottom),
+                left: pad.left + kProgressSideMargin,
+                right: pad.right + kProgressSideMargin,
+                bottom: bottom),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               // 集数标签（视频合集）：随页移动，不再固定在页面级底栏。
               if (chapters > 1)
@@ -14220,11 +14213,8 @@ class _PlayerPageState extends State<PlayerPage>
                           borderRadius: BorderRadius.circular(12)),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(
-                            muted || volume == 0
-                                ? Icons.volume_off
-                                : (volume < 50
-                                    ? Icons.volume_down
-                                    : Icons.volume_up),
+                            volumeIconData(
+                                volumeIconFor(volume, muted: muted)),
                             size: 16,
                             color: Colors.white70),
                         const SizedBox(width: 8),

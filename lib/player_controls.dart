@@ -9,6 +9,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'volume_control.dart';
+
 /// 屏幕方向（只区分竖屏/横屏，横屏两向都接受）。
 enum ScreenMode { portrait, landscape }
 
@@ -238,6 +240,13 @@ class TaskbarToggleButton extends StatelessWidget {
 
 /// 任务栏声音按钮：点击静音；长按/左右拖动调音量（桌面端）。
 /// 移动端不渲染（音量交给系统音量键）。
+/// 档位 → 图标。三处音量读数共用，避免各自写一份三元表达式。
+IconData volumeIconData(VolumeIcon level) => switch (level) {
+      VolumeIcon.mute => Icons.volume_off,
+      VolumeIcon.down => Icons.volume_down,
+      VolumeIcon.up => Icons.volume_up,
+    };
+
 class TaskbarSoundButton extends StatelessWidget {
   const TaskbarSoundButton({
     super.key,
@@ -267,9 +276,7 @@ class TaskbarSoundButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final w = width < kTaskbarTouchTarget ? kTaskbarTouchTarget : width;
-    final icon = muted || volume <= 0
-        ? Icons.volume_off
-        : (volume < 50 ? Icons.volume_down : Icons.volume_up);
+    final icon = volumeIconData(volumeIconFor(volume, muted: muted));
     // Tooltip 必须在 GestureDetector 外层：放在内层时它的长按识别器会
     // 抢在音量长按之前赢得手势仲裁（实测长按调音量失效）。
     return Tooltip(
@@ -374,9 +381,6 @@ TaskbarPolicy taskbarPolicyFor({
 // 只服务非全屏；全屏分支沿用旧值，不调用以下任何一项。
 // ---------------------------------------------------------------------------
 
-/// §5 暂停提示：暂停时只显示播放图标，0.8s / Curves.easeOut 淡出。
-const int kPlayHintFadeMs = 800;
-
 /// §3 进度条：常态 2dp / 白 60%（#99FFFFFF）/ 圆角 1dp；
 /// 按住或拖动 4dp / 全白 / 圆角 2dp。
 const double kProgressIdleHeight = 2;
@@ -443,10 +447,6 @@ const TextStyle kSeekBubbleTextStyle = TextStyle(
   color: Colors.white,
   fontFeatures: [FontFeature.tabularFigures()],
 );
-
-/// §5 暂停提示不透明度：1→0，0.8s，Curves.easeOut。
-double playHintOpacityAt(double t) =>
-    1 - Curves.easeOut.transform(t.clamp(0.0, 1.0));
 
 /// §6 左上角图标：24dp、间距 12dp、无背景圆、按压 white24 + scale 0.92/120ms。
 const double kStageIconSize = 24;
@@ -587,15 +587,6 @@ const Color kStageMenuBackground = Color(0xE6000000);
 /// 上滑/下滑速度阈值（px/s）：超过即按方向 snap。
 const double kCommentPanelFlingVelocity = 420;
 
-/// §8 长按判定纯逻辑：按住时长与最大位移。
-bool stageLongPressQualifies({
-  required int holdMs,
-  required double moved,
-  int holdMsThreshold = kStageLongPressMs,
-  double maxMove = kStageLongPressMaxMove,
-}) =>
-    holdMs >= holdMsThreshold && moved <= maxMove;
-
 /// §8 长按可触发区域：排除顶栏、底部进度/任务栏与右侧互动栏，
 /// 避免按在控件上误弹菜单。
 bool stageLongPressAllowed({
@@ -654,8 +645,8 @@ class StageLongPressTracker {
     final start = _startMs;
     if (start == null || _fired) return false;
     if (_moved) return false;
-    if (nowMs - start < holdMs) return false;
-    return true;
+    // 阈值判定只有这一处：舞台长按的全部路径都走本跟踪器。
+    return nowMs - start >= holdMs;
   }
 
   void fire() => _fired = true;

@@ -22,11 +22,13 @@ void main() {
       expect(volumeAfterMuteToggle(nowMuted: false, current: 0, last: 0), 100);
     });
 
-    test('图标档位', () {
-      expect(volumeIconLevel(0), 'mute');
-      expect(volumeIconLevel(80, muted: true), 'mute');
-      expect(volumeIconLevel(30), 'down');
-      expect(volumeIconLevel(80), 'up');
+    test('图标档位：三处读数共用一个判定', () {
+      expect(volumeIconFor(0), VolumeIcon.mute);
+      expect(volumeIconFor(80, muted: true), VolumeIcon.mute);
+      expect(volumeIconFor(30), VolumeIcon.down);
+      expect(volumeIconFor(49.9), VolumeIcon.down);
+      expect(volumeIconFor(50), VolumeIcon.up);
+      expect(volumeIconFor(80), VolumeIcon.up);
     });
 
     test('I1 音量 UI 仅桌面端开启', () {

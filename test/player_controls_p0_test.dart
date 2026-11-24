@@ -6,10 +6,6 @@ import 'package:shoucangjia/stage_tap.dart';
 /// P0：非全屏抖音式手感（数值见 DOUYIN_VISUAL_SPEC.md §3/§5）。
 void main() {
   group('§5 舞台点击：双击点赞移除后只剩单一路径', () {
-    test('暂停提示固定 0.8s', () {
-      expect(kPlayHintFadeMs, 800);
-    });
-
     test('stageTapAction 无双击：单击即呼出/收起/暂停', () {
       expect(
         stageTapAction(
@@ -32,15 +28,6 @@ void main() {
             doubleTap: false),
         StageTapAction.togglePause,
       );
-    });
-  });
-
-  group('§5 暂停播放图标淡出', () {
-    test('0.8s easeOut，从 1 淡到 0', () {
-      expect(playHintOpacityAt(0), 1);
-      expect(playHintOpacityAt(1), 0);
-      // easeOut 前段下降更快：t=0.5 时剩余不透明度 < 0.5（线性剩余 0.5）。
-      expect(playHintOpacityAt(0.5), lessThan(0.5));
     });
   });
 

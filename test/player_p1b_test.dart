@@ -13,12 +13,6 @@ void main() {
           ['不感兴趣', '保存到本机', '复制文案', '举报']);
     });
 
-    test('恰好 500ms 且位移 ≤12 算长按', () {
-      expect(stageLongPressQualifies(holdMs: 500, moved: 12), isTrue);
-      expect(stageLongPressQualifies(holdMs: 499, moved: 0), isFalse);
-      expect(stageLongPressQualifies(holdMs: 900, moved: 12.1), isFalse);
-    });
-
     test('跟踪器：按住到点触发，且只触发一次', () {
       final t = StageLongPressTracker();
       t.begin(nowMs: 1000, pos: const Offset(50, 300));
@@ -27,6 +21,19 @@ void main() {
       t.fire();
       expect(t.fired, isTrue);
       expect(t.shouldFire(2000), isFalse);
+    });
+
+    test('跟踪器：499ms 不够、恰好 holdMs 触发、位移超限取消', () {
+      // 这是长按判定的唯一实现路径（原来的 stageLongPressQualifies 已删）。
+      final early = StageLongPressTracker();
+      early.begin(nowMs: 1000, pos: const Offset(50, 300));
+      expect(early.shouldFire(1499), isFalse);
+      expect(early.shouldFire(1500), isTrue);
+
+      final moved = StageLongPressTracker();
+      moved.begin(nowMs: 1000, pos: const Offset(50, 300));
+      expect(moved.update(const Offset(50, 313)), isFalse);
+      expect(moved.shouldFire(2000), isFalse);
     });
 
     test('跟踪器：位移超过 12px 取消', () {

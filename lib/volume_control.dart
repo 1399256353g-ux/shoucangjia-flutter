@@ -29,9 +29,14 @@ double volumeAfterMuteToggle({
   return current > 0 ? current.clamp(0.0, 100.0) : 100.0;
 }
 
-/// 音量对应的图标语义档位：0 静音、<50 低、其余高。
-String volumeIconLevel(double volume, {bool muted = false}) {
-  if (muted || volume <= 0) return 'mute';
-  if (volume < 50) return 'down';
-  return 'up';
+/// 音量图标档位。三处读数（任务栏按钮 / 拖动浮层 / 桌面音量模块）共用
+/// 这一条判定，不再各自写一份 `muted || volume == 0 ? off : volume < 50 …`。
+enum VolumeIcon { mute, down, up }
+
+/// 静音或 0 → [VolumeIcon.mute]；<50 → [VolumeIcon.down]；其余 [VolumeIcon.up]。
+VolumeIcon volumeIconFor(double volume, {bool muted = false}) {
+  if (muted || volume <= 0) return VolumeIcon.mute;
+  if (volume < 50) return VolumeIcon.down;
+  return VolumeIcon.up;
 }
+

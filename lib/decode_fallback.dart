@@ -25,9 +25,6 @@ String hwdecFor(DecodeMode mode, {bool androidCopy = false}) =>
         // 只是把帧拷回普通内存，绕开 direct-surface 这条路。
         : (androidCopy ? 'mediacodec-copy' : hwdecAutoSafe);
 
-DecodeMode otherDecodeMode(DecodeMode mode) =>
-    mode == DecodeMode.software ? DecodeMode.hardware : DecodeMode.software;
-
 /// 是否应自动切软件解码重试。
 ///
 /// 只在「视频 + 当前为硬件解码 + 本次进入页面还没重试过 + 失败类型像解码问题」
@@ -45,5 +42,3 @@ bool shouldRetryWithSoftwareDecode({
       kind == PlaybackFailureKind.unknown;
 }
 
-/// 自动重试时给用户的一行提示（不打断播放，浮层淡出）。
-const String softwareDecodeNotice = '已切换软件解码重试…';

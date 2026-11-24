@@ -10,10 +10,6 @@ void main() {
     test('软件解码强制关闭 hwdec', () {
       expect(hwdecFor(DecodeMode.software), 'no');
     });
-    test('otherDecodeMode 往返', () {
-      expect(otherDecodeMode(DecodeMode.hardware), DecodeMode.software);
-      expect(otherDecodeMode(DecodeMode.software), DecodeMode.hardware);
-    });
   });
 
   group('shouldRetryWithSoftwareDecode', () {
@@ -54,7 +50,4 @@ void main() {
     });
   });
 
-  test('提示文案存在', () {
-    expect(softwareDecodeNotice, contains('软件解码'));
-  });
 }
