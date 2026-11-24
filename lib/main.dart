@@ -15781,6 +15781,9 @@ class _AuthorPageState extends State<AuthorPage> {
   final Set<String> typeFilter = <String>{};
   /// 跨库同名作者合并：按来源基础库筛选（空 = 全部）。
   String libFilter = '';
+  /// owner 2026-11-24：顶级单元库（＝媒体库根）作为一级筛选维度。
+  /// 只有该作者的作品跨越多于一个顶级单元库时才出现这一行。
+  String topFilter = '';
   List filteredWorks = [];
   Map<String, int> typeCounts = {};
   String primaryLib = '';
@@ -16146,6 +16149,7 @@ class _AuthorPageState extends State<AuthorPage> {
     primaryLib = '';
     // 重新拉取时来源筛选归零：库可能增减，旧选择不一定还成立。
     libFilter = '';
+    topFilter = '';
     // 各库作品先分别收齐，再统一交给 mergeAuthorWorks 合并。
     //
     // 之前这里是「边拉边用 seen 集合去重」——与 author_merge.dart 里那份
@@ -16473,14 +16477,70 @@ class _AuthorPageState extends State<AuthorPage> {
 
   // 仅在数据加载/筛选变化时重算，避免观看进度刷新时反复重建列表
   void _refreshFilter() {
-    // 先按来源库（跨库同名作者合并后的筛选），再按作品类型。
-    final scoped = filterWorksByLib(
-      works,
+    // 顺序：顶级单元库 → 来源基础库 → 作品类型。
+    var scoped = works.whereType<Map>().toList();
+    if (topFilter.isNotEmpty) {
+      scoped = [
+        for (final w in scoped)
+          if (_topOfWork(w) == topFilter) Map<String, dynamic>.from(w)
+      ];
+    }
+    // 再按来源库（跨库同名作者合并后的筛选）。
+    final byLib = filterWorksByLib(
+      scoped,
       lib: libFilter,
       fallbackLib: primaryLib,
     );
-    filteredWorks = filterWorksByType(scoped, typeFilter);
+    filteredWorks = filterWorksByType(byLib, typeFilter);
     typeCounts = workTypeCounts(works);
+  }
+
+  /// 作品 → 所属顶级单元库 id；拿不到返回空串（不猜）。
+  String _topOfWork(dynamic raw) {
+    if (raw is! Map) return '';
+    final m = meta;
+    if (m == null) return '';
+    var basic = '${raw['_bid'] ?? ''}'.trim();
+    if (basic.isEmpty) {
+      final libId = '${raw['_lib'] ?? ''}'.trim();
+      if (libId.isNotEmpty && m.basicById(libId) != null) basic = libId;
+    }
+    final av = '${raw['av'] ?? ''}'.trim();
+    if (basic.isEmpty && av.isNotEmpty) basic = m.basicIdForPath(av);
+    if (basic.isEmpty) return '';
+    return m.topIdForBasic(basic);
+  }
+
+  /// 作品里实际出现的顶级单元库（按首次出现顺序）；只有 >1 个才显示筛选条。
+  List<MapEntry<String, int>> get _topFilterOptions {
+    final counts = <String, int>{};
+    final order = <String>[];
+    for (final w in works.whereType<Map>()) {
+      final t = _topOfWork(w);
+      if (t.isEmpty) continue;
+      if (!counts.containsKey(t)) order.add(t);
+      counts[t] = (counts[t] ?? 0) + 1;
+    }
+    return [for (final k in order) MapEntry(k, counts[k] ?? 0)];
+  }
+
+  /// 顶级单元库的显示名（取树里的名字，拿不到就用 id）。
+  String _topLabel(String id) {
+    for (final t in meta?.tops ?? const <UnitLibrary>[]) {
+      if (t.id == id) return t.name.isEmpty ? id : t.name;
+    }
+    return id;
+  }
+
+  /// 切换顶级单元库筛选项（空串 = 全部）。
+  void _setTopFilter(String top) {
+    if (topFilter == top) return;
+    setState(() {
+      topFilter = top;
+      // 换顶级后原来的来源库选择可能不再成立，一并归零。
+      libFilter = '';
+      _refreshFilter();
+    });
   }
 
   void _toggleType(String type) {
@@ -16750,6 +16810,39 @@ class _AuthorPageState extends State<AuthorPage> {
                 ),
               ),
               const Divider(height: 1),
+              // owner 2026-11-24：顶级单元库作为一级筛选维度。
+              // 只有该作者的作品跨越多于一个顶级单元库（媒体库）时才出现，
+              // 单库作者（常态）不多占一行。
+              if (_topFilterOptions.length > 1)
+                HorizontalChipBar(
+                  key: const ValueKey('author-top-filter'),
+                  height: 42,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
+                    Center(
+                      child: FilterChip(
+                          label: Text('全部媒体库 ${works.length}',
+                              style: const TextStyle(fontSize: 12)),
+                          selected: topFilter.isEmpty,
+                          showCheckmark: false,
+                          onSelected: (_) => _setTopFilter('')),
+                    ),
+                    for (final o in _topFilterOptions)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Center(
+                          child: FilterChip(
+                              key: ValueKey('author-top-${o.key}'),
+                              label: Text(
+                                  '${LibraryBadge.stripIndex(_topLabel(o.key))} ${o.value}',
+                                  style: const TextStyle(fontSize: 12)),
+                              selected: topFilter == o.key,
+                              showCheckmark: false,
+                              onSelected: (_) => _setTopFilter(o.key)),
+                        ),
+                      ),
+                  ],
+                ),
               // 跨库同名作者合并：只在作者确实来自多个基础库时出现来源筛选，
               // 单库作者（常态）不额外占一行。
               if (libFilterOptions(works, fallbackLib: primaryLib).length > 1)
