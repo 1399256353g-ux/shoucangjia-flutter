@@ -54,8 +54,7 @@ void main() {
             {'ok': true, 'unit': '(1) A', 'groups': [], 'auto': []}, 200);
       }
       expect(req.url.path, '/api/unit/authors.json');
-      return res(
-          {'ok': true, 'unit': '(1) A', 'cards': [], 'explicit': []}, 200);
+      return res({'ok': true, 'unit': '(1) A', 'cards': []}, 200);
     });
     await t.pumpWidget(host(client));
     await t.pumpAndSettle();
@@ -98,8 +97,7 @@ void main() {
           ],
         }, 200);
       }
-      return res(
-          {'ok': true, 'unit': '(1) A', 'cards': [], 'explicit': []}, 200);
+      return res({'ok': true, 'unit': '(1) A', 'cards': []}, 200);
     });
     await t.pumpWidget(host(client));
     await t.pumpAndSettle();

@@ -3903,7 +3903,7 @@ class CustomizationHubPage extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.keyboard),
           title: const Text('按键绑定'),
-          subtitle: const Text('Windows / 桌面端快捷键 · 支持组合键'),
+          subtitle: const Text('桌面/硬件键盘快捷键 · 支持组合键'),
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const KeyBindingsPage())),
         ),
@@ -4268,7 +4268,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
           child: Text(
               '点击任意一行，按下新的按键即可绑定；需要组合键时按住 Ctrl / Shift / Alt / Win '
               '再按主键（如 Ctrl+Shift+F）。冲突按「修饰键+主键」整体判断，'
-              'Ctrl+J 不会与单键 J 冲突。（Windows 桌面端生效，移动端可忽略）'
+              'Ctrl+J 不会与单键 J 冲突。（需硬件键盘；触屏设备可忽略）'
               '方向键与 Esc 是固定键位，不允许绑定；已保存的旧配置里这类绑定会被丢弃。',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),

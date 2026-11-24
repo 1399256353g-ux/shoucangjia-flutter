@@ -30,9 +30,11 @@ Map<String, dynamic> groupJson({
 void main() {
   group('AuthorGroupFile', () {
     test('两段都必须非空，否则视为无效成员', () {
-      expect(AuthorGroupFile.fromJson({'lib': 'l1', 'authorDir': '@a'}), isNotNull);
+      expect(AuthorGroupFile.fromJson({'lib': 'l1', 'authorDir': '@a'}),
+          isNotNull);
       expect(AuthorGroupFile.fromJson({'lib': '', 'authorDir': '@a'}), isNull);
-      expect(AuthorGroupFile.fromJson({'lib': 'l1', 'authorDir': '  '}), isNull);
+      expect(
+          AuthorGroupFile.fromJson({'lib': 'l1', 'authorDir': '  '}), isNull);
       expect(AuthorGroupFile.fromJson('l1/@a'), isNull);
     });
 
@@ -68,7 +70,6 @@ void main() {
       expect(st.auto.length, 1);
       expect(st.groups.first.isMerge, isTrue);
       expect(st.auto.first.auto, isTrue);
-      expect(st.auto.first.editable, isFalse);
     });
 
     test('claimedKeys 把手动组成员摊平，派生组据此排重', () {
@@ -94,7 +95,6 @@ void main() {
         {'lib': 'l1', 'authorDir': '@a'},
       ]))!;
       expect(g.isMerge, isFalse);
-      expect(g.editable, isTrue);
     });
   });
 
@@ -166,17 +166,18 @@ void main() {
               action: UnitAuthorAction.merge, unit: 'A', files: const []),
           '至少要挂载 1 个作者文件夹');
       expect(
-          unitAuthorRequestError(action: UnitAuthorAction.merge, unit: 'A', files: [
-            f('l1', '@a'),
-            f('l1', '@a'),
-          ]),
+          unitAuthorRequestError(
+              action: UnitAuthorAction.merge,
+              unit: 'A',
+              files: [
+                f('l1', '@a'),
+                f('l1', '@a'),
+              ]),
           isNull,
           reason: '同一个文件夹点两次不该被判成 0 个');
       expect(
           unitAuthorRequestError(
-              action: UnitAuthorAction.merge,
-              unit: 'A',
-              files: [f('', '@a')]),
+              action: UnitAuthorAction.merge, unit: 'A', files: [f('', '@a')]),
           '至少要挂载 1 个作者文件夹',
           reason: '缺 lib 的成员不算有效成员');
     });
@@ -212,9 +213,7 @@ void main() {
     });
 
     test('delete / setFiles 缺 groupId 拒绝', () {
-      expect(
-          unitAuthorRequestError(
-              action: UnitAuthorAction.delete, unit: 'A'),
+      expect(unitAuthorRequestError(action: UnitAuthorAction.delete, unit: 'A'),
           '缺少组 id');
       expect(
           unitAuthorRequestError(
@@ -252,7 +251,7 @@ void main() {
   });
 
   group('UnitAuthorCards（/api/unit/authors.json）', () {
-    test('merged 与 singles 按成员数切开', () {
+    test('卡片按成员数区分合并组与独立作者', () {
       final st = UnitAuthorCards.fromJson({
         'ok': true,
         'unit': 'A',
@@ -276,9 +275,10 @@ void main() {
           },
         ],
       });
-      expect(st.merged.length, 1);
-      expect(st.singles.length, 1);
-      expect(st.singles.first.files.single.lib, 'l1');
+      expect(st.cards.length, 2);
+      expect(st.cards[0].merged, isTrue);
+      expect(st.cards[1].merged, isFalse);
+      expect(st.cards[1].files.single.lib, 'l1');
     });
 
     test('名字与成员都空的条目被丢掉（面板不出现空行）', () {

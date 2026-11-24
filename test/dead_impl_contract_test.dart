@@ -993,5 +993,49 @@ void main() {
       expect(main.contains('_NoDistributeMark'), isTrue,
           reason: '非末梢自定义色不分发时，名字旁没有可见标记');
     });
+
+    test('组/作者卡副标题只有一个拼装出口', () {
+      // 0.9.225：
+      // `unitAuthorCardSummary` 曾经只在 test/ 里被断言，面板真实路径
+      // 自己内联了 `N 个文件夹 · M 作品`，并把「已拆」画成另一个标签——
+      // 断言绿、产品里跑的是另一份。这条防止那份内联回来。
+      final page = codeOf('lib/unit_author_mount_page.dart');
+      // 只拦「手写插值拼接」这一种形式（`'...${x} 个文件夹 ...'`），
+      // 不用裸子串：子串断言会被注释/常量误伤（本项目已踩过两次）。
+      expect(
+          RegExp(r'''(['"])\$\{[^}]*\}\s*个文件夹''').hasMatch(page), isFalse,
+          reason: '面板又手拼了「N 个文件夹」；应走 authorMergeSummary/g.summary');
+      expect(page.contains('g.summary'), isTrue);
+      final groups = codeOf('lib/unit_author_groups.dart');
+      expect(groups.contains('String authorMergeSummary('), isTrue);
+      expect(groups.contains('String unitAuthorCardSummary('), isTrue);
+      // 卡片摘要必须转发到同一个实现，不能各自拼。
+      expect(
+          RegExp(r'String unitAuthorCardSummary\(UnitAuthorCard c\) =>\s*authorMergeSummary\(')
+              .hasMatch(groups),
+          isTrue,
+          reason: 'unitAuthorCardSummary 没有转发到 authorMergeSummary');
+    });
+
+    test('按键绑定页不得被平台门禁拦住（曾误记为「仅 Windows」）', () {
+      // 队列长期写着「该页仅 Windows 可见（main.dart:9140 早返回），
+      // Android/MuMu 永远进不去」——但 9140 是 didChangeMetrics 里的
+      // 窗口尺寸门禁，按键页与捕获弹窗里从来没有 Platform. 判断。
+      // 这条注释让这一项连着几轮被记成「不可验证」，实际 widget 测试就能跑。
+      final main = codeOf('lib/main.dart');
+      // 截出 KeyBindingsPage 到下一个顶层 class 之间的源码。
+      final start = main.indexOf('class KeyBindingsPage');
+      expect(start, greaterThan(0));
+      final rest = main.substring(start);
+      final end = rest.indexOf('class _KeyCaptureDialogState');
+      final body = end > 0 ? rest.substring(0, end) : rest;
+      expect(body.contains('Platform.'), isFalse,
+          reason: '按键绑定页又被平台门禁包住了（「只能 Windows 手测」会重演）');
+      // 捕获弹窗同样不能有平台门禁。
+      final dlg = end > 0 ? rest.substring(end) : '';
+      final dlgEnd = dlg.indexOf('class CornerBadgeSettingsPage');
+      final dlgBody = dlgEnd > 0 ? dlg.substring(0, dlgEnd) : dlg;
+      expect(dlgBody.contains('Platform.'), isFalse, reason: '捕获弹窗被平台门禁包住了');
+    });
   });
 }

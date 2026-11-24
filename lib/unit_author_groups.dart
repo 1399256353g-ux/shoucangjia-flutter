@@ -51,7 +51,9 @@ class AuthorGroupFile {
 
   @override
   bool operator ==(Object other) =>
-      other is AuthorGroupFile && other.lib == lib && other.authorDir == authorDir;
+      other is AuthorGroupFile &&
+      other.lib == lib &&
+      other.authorDir == authorDir;
 
   @override
   int get hashCode => Object.hash(lib, authorDir);
@@ -92,8 +94,17 @@ class UnitAuthorGroup {
   /// 至少两个成员才算「合并」；单成员组只是普通作者，不需要特殊显示。
   bool get isMerge => files.length >= 2;
 
-  /// 只有落盘的手动组才能删除/改成员；派生组改不了，只能「拆」出新的手动组。
-  bool get editable => !auto;
+  /// 面板副标题。必须与 [unitAuthorCardSummary] 走同一个出口：此前面板手写
+  /// `N 个文件夹 · M 作品` 再把「已拆」单独渲染成小标签，而摘要函数里写的是
+  /// 「已拆分」，同一条事实两套文案。
+  String get summary => authorMergeSummary(
+        fileCount: files.length,
+        works: works,
+        merged: isMerge,
+        split: split,
+        auto: auto,
+        names: names.length,
+      );
 
   static UnitAuthorGroup? fromJson(Object? v) {
     if (v is! Map) return null;
@@ -402,21 +413,11 @@ class UnitAuthorCard {
 class UnitAuthorCards {
   final String unit;
   final List<UnitAuthorCard> cards;
-  final List<UnitAuthorGroup> explicit;
 
   const UnitAuthorCards({
     this.unit = '',
     this.cards = const <UnitAuthorCard>[],
-    this.explicit = const <UnitAuthorGroup>[],
   });
-
-  /// 已合并的组（≥2 成员）。
-  List<UnitAuthorCard> get merged =>
-      cards.where((c) => c.merged).toList(growable: false);
-
-  /// 还没进组的独立作者（可以勾选参与合并）。
-  List<UnitAuthorCard> get singles =>
-      cards.where((c) => !c.merged && c.files.length == 1).toList(growable: false);
 
   static UnitAuthorCards fromJson(Object? json) {
     if (json is! Map) return const UnitAuthorCards();
@@ -428,31 +429,45 @@ class UnitAuthorCards {
         if (o != null) cards.add(o);
       }
     }
-    final explicit = <UnitAuthorGroup>[];
-    final rawExplicit = json['explicit'];
-    if (rawExplicit is List) {
-      for (final g in rawExplicit) {
-        final o = UnitAuthorGroup.fromJson(g);
-        if (o != null) explicit.add(o);
-      }
-    }
     return UnitAuthorCards(
       unit: '${json['unit'] ?? ''}'.trim(),
       cards: cards,
-      explicit: explicit,
     );
   }
 }
 
-/// 面板卡片的一句话副标题：作品数 + 来源数。
+/// 组/作者卡副标题的**唯一**拼装口。
 ///
-/// 只拼结构信息（作品数、成员数），不含任何作者名/路径——面板显示名字是
-/// owner 自己要看的，但本函数不把它拼进日志或文案以外的位置。
-String unitAuthorCardSummary(UnitAuthorCard c) {
+/// 只拼结构信息（成员数、作者名个数、作品数、标记），不含任何作者名/路径——
+/// 面板显示名字是 owner 自己要看的，但本函数不把名字拼进文案。
+///
+/// 为什么要有这一个函数：`unitAuthorCardSummary` 曾经只在测试里被断言，
+/// 而面板真实路径自己内联了一份 `N 个文件夹 · M 作品` 并把「已拆」单独画成
+/// 标签——断言绿、产品里跑的是另一份，正是本项目反复踩的「替身」模式。
+String authorMergeSummary({
+  required int fileCount,
+  required int works,
+  required bool merged,
+  required bool split,
+  required bool auto,
+  int names = 0,
+}) {
   final parts = <String>[];
-  if (c.merged) parts.add('合并 ${c.files.length} 个文件夹');
-  if (c.works > 0) parts.add('${c.works} 作品');
-  if (c.split) parts.add('已拆分');
-  if (c.auto) parts.add('自动');
+  parts.add(merged ? '合并 $fileCount 个文件夹' : '$fileCount 个文件夹');
+  // 合并组可能由多个不同名的作者目录组成，`names` 比成员数更能说明"并了几个作者"。
+  if (names > 1) parts.add('含 $names 个作者名');
+  if (works > 0) parts.add('$works 作品');
+  if (split) parts.add('已拆分');
+  if (auto) parts.add('自动');
   return parts.join(' · ');
 }
+
+/// 一张作者卡的副标题（转发到 [authorMergeSummary]，保持单一出口）。
+String unitAuthorCardSummary(UnitAuthorCard c) => authorMergeSummary(
+      fileCount: c.files.length,
+      works: c.works,
+      merged: c.merged,
+      split: c.split,
+      auto: c.auto,
+      names: c.names.length,
+    );

@@ -252,22 +252,14 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     final files = g.files;
     return ListTile(
       key: ValueKey('uag-group-${g.id}'),
-      title: Row(children: [
-        Expanded(
-            child: Text(g.name.isEmpty ? '未命名组' : g.name,
-                overflow: TextOverflow.ellipsis)),
-        if (g.split)
-          const Padding(
-            padding: EdgeInsets.only(left: 6),
-            child:
-                Text('已拆', style: TextStyle(fontSize: 11, color: Colors.grey)),
-          ),
-      ]),
+      title: Text(g.name.isEmpty ? '未命名组' : g.name,
+          overflow: TextOverflow.ellipsis),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('${files.length} 个文件夹 · ${g.works} 作品',
-              style: const TextStyle(fontSize: 11)),
+          // 副标题走 authorMergeSummary（唯一出口）：且此前「已拆」是
+          // 标题行上的一个小标签、摘要函数里却写在副标题——同一条事实两套文案。
+          Text(g.summary, style: const TextStyle(fontSize: 11)),
           for (final f in files.take(6))
             Text('· ${_labelOf(f)}',
                 style: const TextStyle(fontSize: 11, color: Colors.grey),
@@ -302,8 +294,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       key: ValueKey('uag-auto-${g.id}'),
       title: Text(g.name.isEmpty ? '未命名' : g.name,
           overflow: TextOverflow.ellipsis),
-      subtitle: Text('自动合并候选 · ${g.files.length} 个文件夹',
-          style: const TextStyle(fontSize: 11)),
+      subtitle: Text(g.summary, style: const TextStyle(fontSize: 11)),
       trailing: FilledButton.tonal(
         onPressed: busy ? null : () => _mergeFiles(g.files, name: g.name),
         child: const Text('固定为手动组'),
