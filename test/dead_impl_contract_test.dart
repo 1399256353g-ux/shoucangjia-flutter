@@ -358,7 +358,6 @@ void main() {
       expect(libSourceAll().contains('List<String> toggleStar('), isTrue);
     });
 
-
     test('十批删掉的零引用成员不得复活', () {
       const gone = <String>[
         'AvatarCropBox', // 真实头像裁剪走 main.dart 的 avatarCropDisplaySize 一族
@@ -380,8 +379,7 @@ void main() {
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '鉴权头格式又被手写了：$offenders');
-      expect(
-          File('lib/basic_auth.dart').readAsStringSync(),
+      expect(File('lib/basic_auth.dart').readAsStringSync(),
           contains('String basicAuthHeader(String user, String pass)'));
       // 真实调用点必须还在（Cfg 的鉴权头仍从这一条出口出去）。
       expect(
@@ -461,10 +459,13 @@ void main() {
       final src = libSourceAll();
       // 规则 A（能否渲染）与规则 B（能否存成版本）是两个不同集合，都必须只剩一处。
       expect(
-          RegExp(r"const List<String> kCoverImageExts").allMatches(src).length, 1);
-      expect(RegExp(r"const List<String> kCoverExts").allMatches(src).length, 1);
+          RegExp(r"const List<String> kCoverImageExts").allMatches(src).length,
+          1);
       expect(
-          RegExp(r"bool isCoverImagePath\(String p\)").allMatches(src).length, 1);
+          RegExp(r"const List<String> kCoverExts").allMatches(src).length, 1);
+      expect(
+          RegExp(r"bool isCoverImagePath\(String p\)").allMatches(src).length,
+          1);
       expect(src.contains('_isCoverImage('), isFalse,
           reason: 'media_priority 的私有副本必须删掉，改为转调 isCoverImagePath');
     });
@@ -472,8 +473,8 @@ void main() {
     test('MM-dd HH:mm 时间文案只有一处（批次键 UTC 是唯一例外）', () {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('time_labels.dart'))
-          .where((f) => RegExp(r"padLeft\(2, '0'\)")
-              .hasMatch(f.readAsStringSync()))
+          .where((f) =>
+              RegExp(r"padLeft\(2, '0'\)").hasMatch(f.readAsStringSync()))
           .where((f) => RegExp(r"\{two\((d|l|t|u|at|l)\.month\)\}")
               .hasMatch(f.readAsStringSync()))
           .map((f) => f.path)
@@ -496,7 +497,9 @@ void main() {
       expect(main.contains('inMinutes.remainder(60)'), isFalse,
           reason: '不进位的旧写法又回来了');
       final pm = File('lib/playback_menu.dart').readAsStringSync();
-      expect(pm.contains('String formatMenuPosition(int ms) => formatClockMs(ms);'),
+      expect(
+          pm.contains(
+              'String formatMenuPosition(int ms) => formatClockMs(ms);'),
           isTrue);
     });
 
@@ -522,8 +525,8 @@ void main() {
       // 现在唯一出口是 http_json.dart 的 jsonOfBytes（始终 UTF-8）。
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('http_json.dart'))
-          .where((f) => RegExp(r'jsonDecode\([^)]*\.body\s*\)')
-              .hasMatch(codeOf(f)))
+          .where((f) =>
+              RegExp(r'jsonDecode\([^)]*\.body\s*\)').hasMatch(codeOf(f)))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '又有人直接用 .body 解 JSON：$offenders');
@@ -535,8 +538,7 @@ void main() {
           .where((f) => codeOf(f).contains('jsonDecode(utf8.decode('))
           .map((f) => f.path)
           .toList();
-      expect(offenders, isEmpty,
-          reason: '字符集规则必须只有一处实现，这里是重复：$offenders');
+      expect(offenders, isEmpty, reason: '字符集规则必须只有一处实现，这里是重复：$offenders');
     });
 
     test('真实路径仍在：jsonOf 有实际调用方', () {
@@ -556,8 +558,8 @@ void main() {
       // 页面上另有过「图片加载失败」这类媒体占位，不属于本契约。
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('load_error_view.dart'))
-          .where((f) => RegExp(r"Text\('加载失败：(\$err|\$\{err\})'")
-              .hasMatch(codeOf(f)))
+          .where((f) =>
+              RegExp(r"Text\('加载失败：(\$err|\$\{err\})'").hasMatch(codeOf(f)))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '错误块又手写回来了：$offenders');
@@ -574,8 +576,8 @@ void main() {
       // ——两个都会原样显示在界面上。
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('error_text.dart'))
-          .where((f) => RegExp(r"err = \'\$e\'|err = \'\$\{?e\}?\'")
-              .hasMatch(codeOf(f)))
+          .where((f) =>
+              RegExp(r"err = \'\$e\'|err = \'\$\{?e\}?\'").hasMatch(codeOf(f)))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '页面又把原始异常塞进界面：$offenders');
@@ -623,11 +625,13 @@ void main() {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('color_codec.dart'))
           .where((f) {
-        final c = codeOf(f);
-        return c.contains("replaceFirst('#', '')") ||
-            c.contains('radix: 16') ||
-            c.contains('0xFF000000 |');
-      }).map((f) => f.path).toList();
+            final c = codeOf(f);
+            return c.contains("replaceFirst('#', '')") ||
+                c.contains('radix: 16') ||
+                c.contains('0xFF000000 |');
+          })
+          .map((f) => f.path)
+          .toList();
       expect(offenders, isEmpty, reason: '颜色编解码被又抄了一份：$offenders');
       final src = libDartFiles().map(codeOf).join('\n');
       // 读入方仍然是两处（词条 / 角标），但都只调 argbFromJson。
@@ -643,16 +647,17 @@ void main() {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('api_url.dart'))
           .where((f) {
-        final c = codeOf(f);
-        return c.contains("endsWith('/') ? '' : '/'") ||
-            c.contains(r"replaceFirst(RegExp(r'/+$'), '')");
-      }).map((f) => f.path).toList();
+            final c = codeOf(f);
+            return c.contains("endsWith('/') ? '' : '/'") ||
+                c.contains(r"replaceFirst(RegExp(r'/+$'), '')");
+          })
+          .map((f) => f.path)
+          .toList();
       expect(offenders, isEmpty, reason: 'base 归一又写了一份：$offenders');
       final src = libDartFiles().map(codeOf).join('\n');
       expect(src.contains('String baseForJoin(String raw)'), isTrue);
-      final joins = RegExp(r'joinApiUrl\(|libApiUrl\(|apiUri\(')
-          .allMatches(src)
-          .length;
+      final joins =
+          RegExp(r'joinApiUrl\(|libApiUrl\(|apiUri\(').allMatches(src).length;
       expect(joins, greaterThanOrEqualTo(10),
           reason: '拼接调用点从 13 处掉到 $joins 处，说明有路径绕开了 api_url');
     });
@@ -694,9 +699,8 @@ void main() {
       final main = codeOf(File('lib/main.dart'));
       // 四个会改变播放设置的地方：乱序、循环、连播、倍速。漏一处就变成
       // 「这次改了，重进没记住」。
-      final persists = RegExp(r'_persistPlaybackPrefs\(\);')
-          .allMatches(main)
-          .length;
+      final persists =
+          RegExp(r'_persistPlaybackPrefs\(\);').allMatches(main).length;
       expect(persists, greaterThanOrEqualTo(4),
           reason: '落盘点只有 $persists 处（应为乱序/循环/连播/倍速至少 4 处）');
       expect(main.contains('loadPlaybackPrefs()'), isTrue,
@@ -724,15 +728,17 @@ void main() {
 
     test('单键兼容壳不得复活', () {
       final s = codeOf('lib/app_settings.dart');
-      expect(RegExp(r'^\s*(static )?Map<PlayerAction, int> get keyIds',
-                      multiLine: true)
+      expect(
+          RegExp(r'^\s*(static )?Map<PlayerAction, int> get keyIds',
+                  multiLine: true)
               .hasMatch(s),
           isFalse,
           reason: 'keyIds 只读视图又回来了：组合键会出现两条真相');
       expect(RegExp(r'^\s*static void bind\(', multiLine: true).hasMatch(s),
           isFalse,
           reason: 'bind() 单键壳又回来了');
-      expect(RegExp(r'^\s*static PlayerAction\? actionFor\(', multiLine: true)
+      expect(
+          RegExp(r'^\s*static PlayerAction\? actionFor\(', multiLine: true)
               .hasMatch(s),
           isFalse,
           reason: 'actionFor() 单键壳又回来了');
@@ -745,8 +751,11 @@ void main() {
     test('响应体 → Map 只有 jsonMapOf 一个入口', () {
       // `jsonOf(r) as Map<String, dynamic>` 散在 11 处时，任何一处改成
       // `as Map`（丢掉类型）都不会有人发现；集中到 jsonMapOf 后只有一份。
-      for (final f in ['lib/main.dart', 'lib/unit_crawler_page.dart',
-                       'lib/collection_sync_panel.dart']) {
+      for (final f in [
+        'lib/main.dart',
+        'lib/unit_crawler_page.dart',
+        'lib/collection_sync_panel.dart'
+      ]) {
         final s = codeOf(f);
         expect(RegExp(r'jsonOf\(\w+\) as Map').hasMatch(s), isFalse,
             reason: '$f 又手写了一遍资源体转型');
@@ -817,24 +826,31 @@ void main() {
     });
 
     test('不得再手写「三种 id 形式」的查表链', () {
-      for (final f in ['lib/library_badge.dart', 'lib/main.dart',
-                       'lib/unit_library.dart']) {
+      for (final f in [
+        'lib/library_badge.dart',
+        'lib/main.dart',
+        'lib/unit_library.dart'
+      ]) {
         final s = codeOf(f);
         // 典型分叉写法：`x[id] ?? x[rel] ?? x['node:$rel']`。
         // 只禁「回退到另一种 id 形式」这一种链；构造 id（`id: 'node:$rel'`）
         // 与别的规则的 ?? 链（如 `covers[rel] ?? covers[raw]`）不在此列。
         expect(RegExp(r"\?\?\s*\w+\[\s*'node:").hasMatch(s), isFalse,
             reason: '$f 又手写了 node: 形式回退查表；用 lookupByLibId');
-        expect(RegExp(r"\?\?\s*\w+\[\s*(rel|prefixed)\s*\]").hasMatch(s),
-            isFalse,
+        expect(
+            RegExp(r"\?\?\s*\w+\[\s*(rel|prefixed)\s*\]").hasMatch(s), isFalse,
             reason: '$f 又手写了一串 ?? 查表；用 lookupByLibId');
       }
     });
 
     test('lib_id 的四个入口都在，删除是幂等的', () {
       final s = codeOf('lib/lib_id.dart');
-      for (final k in ['String relOf(', 'List<String> idFormsOf(',
-                       'T? lookupByLibId<T>(', 'int removeByLibId<T>(']) {
+      for (final k in [
+        'String relOf(',
+        'List<String> idFormsOf(',
+        'T? lookupByLibId<T>(',
+        'int removeByLibId<T>('
+      ]) {
         expect(s.contains(k), isTrue, reason: '$k 不见了');
       }
     });
@@ -877,14 +893,26 @@ void main() {
 
     test('四个 action 名不得在页面里手写', () {
       final page = codeOf('lib/unit_author_mount_page.dart');
-      for (final a in ['"merge"', "'merge'", '"split"', "'split'",
-                       '"setFiles"', "'setFiles'", '"delete"', "'delete'"]) {
+      for (final a in [
+        '"merge"',
+        "'merge'",
+        '"split"',
+        "'split'",
+        '"setFiles"',
+        "'setFiles'",
+        '"delete"',
+        "'delete'"
+      ]) {
         expect(page.contains(a), isFalse,
             reason: '页面里手写了 action 字符串 $a；用 UnitAuthorAction');
       }
       final model = codeOf('lib/unit_author_groups.dart');
-      for (final a in ["merge('merge')", "split('split')",
-                       "setFiles('setFiles')", "delete('delete')"]) {
+      for (final a in [
+        "merge('merge')",
+        "split('split')",
+        "setFiles('setFiles')",
+        "delete('delete')"
+      ]) {
         expect(model.contains(a), isTrue, reason: 'UnitAuthorAction 少了 $a');
       }
     });
@@ -901,8 +929,7 @@ void main() {
 
     test('挂载入口从单元库页接到主页（否则等于没做）', () {
       final view = codeOf('lib/unit_library_view.dart');
-      expect(view.contains('onMountAuthors'), isTrue,
-          reason: '单元库页没有挂载入口参数');
+      expect(view.contains('onMountAuthors'), isTrue, reason: '单元库页没有挂载入口参数');
       final main = codeOf('lib/main.dart');
       expect(main.contains('_openUnitAuthorMount'), isTrue,
           reason: '主页没有把挂载面板接上');
@@ -913,6 +940,58 @@ void main() {
           2,
           reason: '一级/下级单元库页的挂载入口数量不对');
       expect(main.contains('UnitAuthorMountPage'), isTrue);
+    });
+  });
+  // 第二十批（0.9.2xx）：词条注册表只有一份数据。
+  //
+  // 风险不是「算错」，而是**同一张表存两份**：`UnitBadgeRegistry.leaf/topOf`
+  // 与 `LibraryBadge.leafUnits/topOfUnit` 若各存一份，任一处漏填就会出现
+  // 「设置页说可分发给下级、实际不分发」这种两边都自洽的矛盾。
+  // 同理，配色顺序此前在 main.dart 两处各写一遍「注册表优先」三元式。
+  group('第二十批：词条注册表与配色顺序单一出口', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('UnitBadgeRegistry.leaf / topOf 只能是 LibraryBadge 的视图', () {
+      final s = codeOf('lib/unit_library.dart');
+      expect(s.contains('static Map<String, bool> get leaf =>'), isTrue,
+          reason: 'leaf 变成了独立存储；应读 LibraryBadge.leafUnits');
+      expect(s.contains('static Map<String, String> get topOf =>'), isTrue,
+          reason: 'topOf 变成了独立存储；应读 LibraryBadge.topOfUnit');
+      expect(s.contains('static final Map<String, bool> leaf'), isFalse,
+          reason: 'leaf 又存了第二份');
+      expect(s.contains('static final Map<String, String> topOf'), isFalse,
+          reason: 'topOf 又存了第二份');
+      // setFrom 只允许写 LibraryBadge 那一份。
+      expect(s.contains('LibraryBadge.leafUnits'), isTrue);
+      expect(s.contains('LibraryBadge.topOfUnit'), isTrue);
+    });
+
+    test('配色顺序的三元式只允许出现在 orderOr 里', () {
+      final main = codeOf('lib/main.dart');
+      expect(
+          RegExp(r'UnitBadgeRegistry\.order\.isNotEmpty\s*\?').hasMatch(main),
+          isFalse,
+          reason: 'main.dart 又手写了「注册表优先」三元式；用 orderOr');
+      final reg = codeOf('lib/unit_library.dart');
+      expect(reg.contains('static List<String> orderOr('), isTrue);
+      expect(main.contains('UnitBadgeRegistry.orderOr('), isTrue);
+    });
+
+    test('setFiles 必须有真实入口（否则等于协议层摆设）', () {
+      final page = codeOf('lib/unit_author_mount_page.dart');
+      expect(page.contains('UnitAuthorAction.setFiles'), isTrue,
+          reason: '页面没有 setFiles 入口，编辑组成员无从下手');
+      expect(page.contains('_openSetFiles'), isTrue);
+    });
+
+    test('非末梢「仅本层」必须在名字旁可见，而不是只在 subtitle', () {
+      final main = codeOf('lib/main.dart');
+      expect(main.contains('_NoDistributeMark'), isTrue,
+          reason: '非末梢自定义色不分发时，名字旁没有可见标记');
     });
   });
 }

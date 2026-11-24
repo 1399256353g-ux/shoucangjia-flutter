@@ -150,7 +150,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       final j = jsonOf(r);
       final ok = r.statusCode == 200 && j is Map && j['ok'] != false;
       if (!ok) {
-        final msg = j is Map ? '${j['error'] ?? 'HTTP ${r.statusCode}'}' : 'HTTP ${r.statusCode}';
+        final msg = j is Map
+            ? '${j['error'] ?? 'HTTP ${r.statusCode}'}'
+            : 'HTTP ${r.statusCode}';
         throw Exception(msg);
       }
       await load();
@@ -203,7 +205,8 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     final auto = [
       for (final g in state.auto)
         // 派生组里已经被手动组占用的成员要剔掉，否则同一作者两处各出现一次。
-        if (g.files.where((f) => !state.claimedKeys.contains(f.key)).length >= 2)
+        if (g.files.where((f) => !state.claimedKeys.contains(f.key)).length >=
+            2)
           g,
     ];
 
@@ -250,12 +253,14 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     return ListTile(
       key: ValueKey('uag-group-${g.id}'),
       title: Row(children: [
-        Expanded(child: Text(g.name.isEmpty ? '未命名组' : g.name,
-            overflow: TextOverflow.ellipsis)),
+        Expanded(
+            child: Text(g.name.isEmpty ? '未命名组' : g.name,
+                overflow: TextOverflow.ellipsis)),
         if (g.split)
           const Padding(
             padding: EdgeInsets.only(left: 6),
-            child: Text('已拆', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            child:
+                Text('已拆', style: TextStyle(fontSize: 11, color: Colors.grey)),
           ),
       ]),
       subtitle: Column(
@@ -278,13 +283,15 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
         enabled: !busy,
         onSelected: (v) {
           if (v == UnitAuthorAction.split) _openSplit(g);
+          if (v == UnitAuthorAction.setFiles) _openSetFiles(g);
           if (v == UnitAuthorAction.delete) _confirmDelete(g);
         },
         itemBuilder: (_) => const <PopupMenuEntry<UnitAuthorAction>>[
-          PopupMenuItem(
-              value: UnitAuthorAction.split, child: Text('拆出成员')),
-          PopupMenuItem(
-              value: UnitAuthorAction.delete, child: Text('删除该组')),
+          PopupMenuItem(value: UnitAuthorAction.split, child: Text('拆出成员')),
+          // setFiles 此前只在协议层存在、页面零入口：想给已有组增/减成员
+          // 只能删了重建，重建会丢掉 `split:true`（永不再自动合并）的语义。
+          PopupMenuItem(value: UnitAuthorAction.setFiles, child: Text('编辑成员')),
+          PopupMenuItem(value: UnitAuthorAction.delete, child: Text('删除该组')),
         ],
       ),
     );
@@ -304,7 +311,8 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     );
   }
 
-  Future<void> _mergeFiles(List<AuthorGroupFile> files, {String name = ''}) async {
+  Future<void> _mergeFiles(List<AuthorGroupFile> files,
+      {String name = ''}) async {
     final req = UnitAuthorRequest(
       unit: _unitRel,
       action: UnitAuthorAction.merge,
@@ -352,7 +360,8 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
                         title: Text(_labelOf(f),
                             style: const TextStyle(fontSize: 13)),
                         subtitle: Text(f.lib,
-                            style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.grey)),
                         onChanged: (v) => setD(() {
                           if (v == true) {
                             picked.add(f.key);
@@ -374,7 +383,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('取消')),
             FilledButton(
               key: const ValueKey('uag-merge-ok'),
               onPressed: picked.isEmpty ? null : () => Navigator.pop(c, true),
@@ -386,7 +397,10 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     );
     if (ok != true) return;
     await _mergeFiles(
-      [for (final f in available) if (picked.contains(f.key)) f],
+      [
+        for (final f in available)
+          if (picked.contains(f.key)) f
+      ],
       name: nameCtl.text.trim(),
     );
   }
@@ -439,7 +453,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('取消')),
             FilledButton(
               key: const ValueKey('uag-split-ok'),
               onPressed: picked.isEmpty ? null : () => Navigator.pop(c, true),
@@ -450,7 +466,10 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       ),
     );
     if (ok != true) return;
-    final files = [for (final f in g.files) if (picked.contains(f.key)) f];
+    final files = [
+      for (final f in g.files)
+        if (picked.contains(f.key)) f
+    ];
     final req = UnitAuthorRequest(
       unit: _unitRel,
       action: UnitAuthorAction.split,
@@ -472,6 +491,92 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     await _send(req);
   }
 
+  /// setFiles：整组替换成员（增/减都走这一个动作）。
+  ///
+  /// 与 split 的区别必须说清：split 是「搬走勾选的、原组留其余」，
+  /// setFiles 是「保存后的列表就是完整成员表」。所以这里预勾原成员，
+  /// 取消勾选即移出，再从可候选里勾新的。
+  Future<void> _openSetFiles(UnitAuthorGroup g) async {
+    final available = _available;
+    final picked = <String>{for (final f in g.files) f.key};
+    final pool = <AuthorGroupFile>[...g.files];
+    for (final f in available) {
+      if (!picked.contains(f.key)) pool.add(f);
+    }
+    final nameCtl = TextEditingController(text: g.name);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('编辑组成员'),
+          content: SizedBox(
+            width: 460,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('保存后的勾选就是完整成员表；取消勾选即移出该组（不会删任何目录）。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(children: [
+                    for (final f in pool)
+                      CheckboxListTile(
+                        key: ValueKey('uag-setfiles-${f.key}'),
+                        dense: true,
+                        value: picked.contains(f.key),
+                        title: Text(_labelOf(f),
+                            style: const TextStyle(fontSize: 13)),
+                        subtitle: Text(f.lib,
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.grey)),
+                        onChanged: (v) => setD(() {
+                          if (v == true) {
+                            picked.add(f.key);
+                          } else {
+                            picked.remove(f.key);
+                          }
+                        }),
+                      ),
+                  ]),
+                ),
+              ),
+              TextField(
+                controller: nameCtl,
+                decoration: const InputDecoration(
+                  labelText: '组名（可留空，保留原名）',
+                  isDense: true,
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('取消')),
+            FilledButton(
+              key: const ValueKey('uag-setfiles-ok'),
+              onPressed: picked.isEmpty ? null : () => Navigator.pop(c, true),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    await _send(UnitAuthorRequest(
+      unit: _unitRel,
+      action: UnitAuthorAction.setFiles,
+      groupId: g.id,
+      name: nameCtl.text.trim(),
+      files: [
+        for (final f in pool)
+          if (picked.contains(f.key)) f
+      ],
+    ));
+  }
+
   Future<void> _confirmDelete(UnitAuthorGroup g) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -480,7 +585,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
         content: Text('删除「${g.name.isEmpty ? '未命名组' : g.name}」？'
             '只删分组记录，不动任何作者目录与作品文件。'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('取消')),
           FilledButton(
             key: const ValueKey('uag-delete-ok'),
             onPressed: () => Navigator.pop(c, true),
@@ -515,11 +622,13 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               DropdownButtonFormField<String>(
                 initialValue: lib,
-                decoration: const InputDecoration(labelText: '基础库', isDense: true),
+                decoration:
+                    const InputDecoration(labelText: '基础库', isDense: true),
                 items: [
                   for (final b in basics)
-                    DropdownMenuItem(value: b.id, child: Text(b.name,
-                        overflow: TextOverflow.ellipsis)),
+                    DropdownMenuItem(
+                        value: b.id,
+                        child: Text(b.name, overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: (v) => setD(() => lib = v ?? lib),
               ),
@@ -535,7 +644,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             ]),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('取消')),
             FilledButton(
               key: const ValueKey('uag-create-ok'),
               onPressed: nameCtl.text.trim().isEmpty

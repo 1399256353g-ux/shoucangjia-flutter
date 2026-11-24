@@ -28,6 +28,7 @@ class LibNode {
   final String id;
   final String rel;
   final String name;
+
   /// L5-C：自定义封面版本（`_cover/<version>.<ext>`）；空串表示无自定义封面。
   final String coverVersion;
   final String coverExt;
@@ -336,8 +337,7 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
       // /vol1/.../Secret/(1) A → (1) A，保证与基础库的 rel 同一坐标系。
       if (splitRel(path).length == splitRel(rel).length) {
         final segs = splitRel(path);
-        final at = segs.lastIndexWhere(
-            (s) => s.toLowerCase() == 'secret');
+        final at = segs.lastIndexWhere((s) => s.toLowerCase() == 'secret');
         if (at >= 0 && at + 1 < segs.length) {
           rel = segs.skip(at + 1).join('/');
         }
@@ -361,8 +361,7 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
 
   // 手动模式（服务端 `nodesMode: manual`）：节点文件夹只认 owner 在「文件结构」
   // 里勾选的目录（/api/nodes）；空数组＝只有顶级 SECRET，绝不回退自动节点。
-  final manual =
-      '${json['nodesMode'] ?? ''}'.trim().toLowerCase() == 'manual';
+  final manual = '${json['nodesMode'] ?? ''}'.trim().toLowerCase() == 'manual';
   final rawNodes = json['nodes'];
   if (manual) {
     if (rawNodes is List) {
@@ -599,13 +598,28 @@ class UnitBadgeRegistry {
   static final Map<String, String> keys = <String, String>{};
 
   /// P1：单元库 id → 是否末梢单元库（只有末梢可向下分发词条）。
-  static final Map<String, bool> leaf = <String, bool>{};
+  ///
+  /// **不是独立的一份表**：读取端统一回落到 `LibraryBadge.leafUnits`。
+  /// 两份同名表并存时，任一处只填其一时「设置页说可分发给下级、实际不分发」
+  /// 这种两边都自洽的矛盾就会重新出现，所以这里只暴露同一份数据的视图。
+  static Map<String, bool> get leaf => LibraryBadge.leafUnits;
+
   /// 单元库配色顺序（不含顶级 SECRET）：作者词条与基础库卡片共用。
   static final List<String> order = <String>[];
 
+  /// 配色顺序的**唯一**入口：全局注册表优先，结构未加载时才用调用方的兜底。
+  ///
+  /// 此前 `main.dart` 两处各写一遍 `order.isNotEmpty ? order : 本地顺序`，
+  /// 而设置页的「本地顺序」来自 `LibMeta.unitOrder`（只含带基础库的单元库），
+  /// 与注册表的 `flattenUnits` 顺序并不同——同一单元库可能在设置页预览里
+  /// 是一种自动色、在卡片上是另一种，两边都自洽却不同。
+  static List<String> orderOr(List<String> fallback) =>
+      order.isNotEmpty ? order : fallback;
+
   /// P1：单元库 id → 所属顶级单元库 id（顶级单元库＝媒体库根）。
-  /// 只由结构关系算出，不看任何目录名文本。
-  static final Map<String, String> topOf = <String, String>{};
+  /// 只由结构关系算出，不看任何目录名文本；与 [leaf] 同样只是
+  /// `LibraryBadge.topOfUnit` 的视图，不另存一份。
+  static Map<String, String> get topOf => LibraryBadge.topOfUnit;
 
   static void setFrom(UnitLibrary root) {
     labels
@@ -620,19 +634,14 @@ class UnitBadgeRegistry {
         for (final u in flattenUnits(root))
           if (u.node.id != root.node.id) u.id,
       ]);
-    topOf
-      ..clear()
-      ..addAll(topOfUnitIds(root));
-    leaf
-      ..clear()
-      ..addAll(leafUnitIds(root));
-    // 词条继承表同步给 LibraryBadge，配色/分发判定只查这一处。
+    // 词条继承/分发判定只有一处：LibraryBadge 的两张表。
+    // 这里不再写第二份副本，`topOf` / `leaf` 都是它的视图。
     LibraryBadge.topOfUnit
       ..clear()
-      ..addAll(topOf);
+      ..addAll(topOfUnitIds(root));
     LibraryBadge.leafUnits
       ..clear()
-      ..addAll(leaf);
+      ..addAll(leafUnitIds(root));
   }
 
   static String labelFor(String basicId) => labels[basicId] ?? '';

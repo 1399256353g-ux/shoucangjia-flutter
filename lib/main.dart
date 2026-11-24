@@ -1822,6 +1822,31 @@ class _SectionHeader extends StatelessWidget {
       );
 }
 
+/// A2：非末梢单元库的自定义色不分发给下级时，名字后的可见标记。
+///
+/// 为什么是组件而不是 subtitle 里再加一句：subtitle 是连续文案，看完即忘；
+/// 「已设色但不生效」是让人误判下发规则的唯一原因，必须在名字旁就能看到。
+class _NoDistributeMark extends StatelessWidget {
+  const _NoDistributeMark();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Theme.of(context).colorScheme.error;
+    return Tooltip(
+      message: '非末梢单元库：该色只作用于本层，不会分发给下级',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          border: Border.all(color: c.withValues(alpha: 0.75)),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text('仅本层',
+            style: TextStyle(fontSize: 10, height: 1.2, color: c)),
+      ),
+    );
+  }
+}
+
 class LibraryBadgeColorsPage extends StatefulWidget {
   const LibraryBadgeColorsPage({super.key});
   @override
@@ -1918,7 +1943,11 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     }
   }
 
-  List<String> get _order => meta?.unitOrder ?? [for (final u in units) u.id];
+  /// 配色顺序：与卡片同源。此前这里是 `meta.unitOrder`（只含带基础库的
+  /// 单元库），而卡片走的是注册表 `flattenUnits` 顺序——同一个单元库两边
+  /// 自动色可能不同。统一走 [UnitBadgeRegistry.orderOr]。
+  List<String> get _order => UnitBadgeRegistry.orderOr(
+      meta?.unitOrder ?? [for (final u in units) u.id]);
 
   @override
   Widget build(BuildContext context) {
@@ -2141,9 +2170,11 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     final overridden =
         isTop ? LibraryBadge.topColorFor(id) != null : LibraryBadge.customColorFor(id) != null;
     final inheritedOnly = !isTop && LibraryBadge.customColorFor(id) == null &&
-        LibraryBadge.topColorFor(UnitBadgeRegistry.topOf[id] ?? '') != null;
+        LibraryBadge.topColorFor(lookupByLibId(LibraryBadge.topOfUnit, id) ?? '') !=
+            null;
     // P1：只有末梢单元库能向下分发；非末梢的自定义色只作用于本层。
-    final leaf = UnitBadgeRegistry.leaf[id] ?? true;
+    // 查表走 lookupByLibId：`node:rel` / `rel` 两种 id 形式都是同一份数据。
+    final leaf = lookupByLibId(LibraryBadge.leafUnits, id) ?? true;
     final distributeNote = isTop
         ? '向下继承'
         : (leaf ? '可分发给下级' : '非末梢 · 仅本层');
@@ -2163,6 +2194,14 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             color: color,
             unitId: id,
             kind: isTop ? LibEntryKind.top : LibEntryKind.unit),
+        // A2：非末梢单元库设了色也不向下一层分发。此前只有 subtitle 一句话，
+        // 用户设完仍以为下级会变——这里在名字后面直接挂一个可见标记，
+        // 只在「已自定义且不分发」时出现，不占常态一行。
+        if (!isTop && !leaf && overridden)
+          const Padding(
+            padding: EdgeInsets.only(left: 6),
+            child: _NoDistributeMark(),
+          ),
       ]),
       subtitle: Text(
           '${u.basicCount} 个基础库 · $distributeNote · $id'
@@ -2524,8 +2563,7 @@ class LibBadges extends StatelessWidget {
     if (labels.isEmpty && grade.isEmpty) return const SizedBox.shrink();
     final shown = libIds.where((e) => e.isNotEmpty).toList();
     // 配色顺序：全局单元库顺序优先（与基础库卡同源），没有时才用调用方的。
-    final colorOrder =
-        UnitBadgeRegistry.order.isNotEmpty ? UnitBadgeRegistry.order : order;
+    final colorOrder = UnitBadgeRegistry.orderOr(order);
     return Wrap(
       spacing: 3,
       runSpacing: 3,
@@ -5548,9 +5586,7 @@ class _LibraryPageState extends State<LibraryPage> {
         sourceColor: unit == null
             ? LibraryBadge.gray
             : LibraryBadge.colorForUnit(unit.id,
-                order: UnitBadgeRegistry.order.isNotEmpty
-                    ? UnitBadgeRegistry.order
-                    : unitOrder),
+                order: UnitBadgeRegistry.orderOr(unitOrder)),
         onOpenAuthor: (name) => Navigator.of(context).push(
             MaterialPageRoute<void>(
                 builder: (_) => AuthorPage(name: name, libs: [b.id]))),
