@@ -101,6 +101,21 @@ void main() {
     expect(bad.quickCheck, isTrue);
     expect(bad.intervalLabel, contains('快检'));
   });
+  test('旧字段 intervalMin 不能丢掉（旧配置的全量间隔要能读回来）', () {
+    // 0.9.228 实缺陷：`m['intervalMin'] != null ? 60 : 60` 两支相同，
+    // 老配置里的 30/180 全被读成默认 60，界面「当前：…」与真实调度不符。
+    expect(UnitCrawlerConfig.fromJson({'intervalMin': 30}).fullMin, 30);
+    expect(UnitCrawlerConfig.fromJson({'intervalMin': 180}).fullMin, 180);
+    // 新字段优先于旧字段。
+    expect(
+        UnitCrawlerConfig.fromJson({'fullMin': 720, 'intervalMin': 30}).fullMin,
+        720);
+    // 两个都没有时才是默认值。
+    expect(UnitCrawlerConfig.fromJson(const {}).fullMin, 60);
+    // 非法值仍夹回默认（与 normalizeFullMin 同一判定）。
+    expect(UnitCrawlerConfig.fromJson({'intervalMin': 7}).fullMin, 60);
+  });
+
   test('H：/api/nodes 的 crawler 映射解析（缺字段一律按无脚本）', () {
     expect(unitCrawlerFlags({'crawler': {'(1) A': true, '(2) B': false}}),
         {'(1) A': true, '(2) B': false});

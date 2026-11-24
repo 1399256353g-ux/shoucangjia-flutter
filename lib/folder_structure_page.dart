@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'http_json.dart';
+import 'http_error_text.dart';
 
 import 'home_action.dart';
 import 'top_node.dart';
@@ -218,7 +219,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       final r = rs[0] as http.Response;
       final basics = rs[1] as Set<String>?;
       final known = basics ?? const <String>{};
-      if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
+      if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       final j = jsonOf(r);
       final top = j['top'];
       // owner 2026-11-22：名称来自服务端（库根目录名），不写死 SECRET。

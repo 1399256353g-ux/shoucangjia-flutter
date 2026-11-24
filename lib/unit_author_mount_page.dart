@@ -90,9 +90,12 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             .timeout(const Duration(seconds: 10)),
       ]);
       final g = jsonMapOf(results[0]);
-      if (results[0].statusCode != 200 || g['ok'] == false) {
-        throw Exception('${g['error'] ?? 'HTTP ${results[0].statusCode}'}');
-      }
+      // 读接口收尾统一走 throwIfApiFailed：以前这里手拼
+      // `'${g['error'] ?? 'HTTP n'}'`，error 是非字符串时会把 `{code: 500}`
+      // 贴到界面上，g 不是 Map 时直接 NoSuchMethodError。
+      // requireOk: false = 老契约（200 且无显式 ok:false 即成功），与本页
+      // 第二个请求（作者卡）的判定一致。
+      throwIfApiFailed(results[0].statusCode, g);
       // 作者卡失败不算整体失败：分组列表仍然可用（只是没有成员候选）。
       UnitAuthorCards c = const UnitAuthorCards();
       if (results[1].statusCode == 200) {

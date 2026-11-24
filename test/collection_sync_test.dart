@@ -69,11 +69,25 @@ void main() {
       ],
     });
     expect(rows[0].sync, isFalse);
-    expect(rows[0].visible, isFalse);
     expect(rows[0].subtitle, contains('不参与同步'));
     expect(rows[0].subtitle, contains('账号中 · 未下载'));
     expect(rows[0].subtitle, isNot(contains('序号')));
-    expect(rows[1].visible, isTrue);
+    expect(rows[1].sync, isTrue);
+    // 0.9.228：副标题只有一个拼装口，默认同步源也走它。
+    // 此前单元库面板自己手拼「暂无索引」，与本 getter 的
+    // 「账号中 · 未下载」同一件事两种说法；且面板那版没有 account 分支。
+    expect(rows[1].subtitleWith(isDefault: true),
+        contains('默认同步源'));
+    expect(rows[1].subtitleWith(isDefault: true),
+        isNot(contains('默认同步源 ·')));
+    // 面板与设置页对同一个「无索引」的同步源必须给出同一句话。
+    final noIndex = parseCollectionSettings({
+      'collections': [
+        {'idx': 3, 'name': 'x', 'count': 1, 'inIndex': false, 'account': false}
+      ],
+    }).single;
+    expect(noIndex.subtitleWith(), contains('暂无索引'));
+    expect(noIndex.subtitleWith(), isNot(contains('账号中')));
   });
 
   test('H11 全选/全不选只改勾选状态', () {

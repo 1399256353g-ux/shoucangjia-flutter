@@ -37,10 +37,13 @@ class UnitCrawlerConfig {
     return UnitCrawlerConfig(
       enabled: m['enabled'] == true,
       quickCheck: m['quickCheck'] != false,
-      quickMin: normalizeQuickMin(
-          m['quickMin'] ?? (m['intervalMin'] != null ? 5 : 5)),
-      fullMin: normalizeFullMin(
-          m['fullMin'] ?? (m['intervalMin'] != null ? 60 : 60)),
+      quickMin: normalizeQuickMin(m['quickMin']),
+      // 旧版服务端/旧版配置只有 `intervalMin`（本类的 toJson 仍在写它，
+      // 供旧服务端读）。此前这里是 `m['intervalMin'] != null ? 60 : 60`
+      // ——三元两支相同，等于把旧值整个丢掉：老配置里的 30 分钟全量
+      // 会被读成默认 60 分钟，界面上「当前：…」显示的数字与实际调度不符。
+      // 回退链写在 [fullMinFrom] 一处：新字段优先，旧字段次之，最后默认值。
+      fullMin: fullMinFrom(m),
       cooldownMin: normalizeCooldown(m['cooldownMin']),
       note: clipNote('${m['note'] ?? ''}'),
       script: normalizeScriptName('${m['script'] ?? ''}'),
@@ -155,6 +158,12 @@ int normalizeFullMin(dynamic raw) {
   final v = (raw is num) ? raw.toInt() : (int.tryParse('${raw ?? ''}') ?? 60);
   return kFullMinOptions.contains(v) ? v : 60;
 }
+
+/// 全量间隔的取值来源：`fullMin` 优先，缺失时读旧字段 `intervalMin`。
+///
+/// 单独留存这个判定是为了让「旧字段到底还算不算数」只有一个答案；
+/// 读取与测试都引用它，不在别处再写一遍 `??` 链。
+int fullMinFrom(Map m) => normalizeFullMin(m['fullMin'] ?? m['intervalMin']);
 
 int normalizeCooldown(dynamic raw) {
   final v = (raw is num) ? raw.toInt() : (int.tryParse('${raw ?? ''}') ?? 15);

@@ -1173,4 +1173,63 @@ void main() {
       expect(tabBody.contains('perfRevision'), isTrue);
     });
   });
+
+  group('第二十四批：状态码文案 / 同步源副标题 / 旧间隔字段', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('状态码文案只走 httpErrorText（页面不得再手拼 HTTP n）', () {
+      // 0.9.228：basic_lib_page / folder_structure_page / collection_sync_panel
+      // / sync_log_panel / category_tree_page 五处各写了一遍
+      // `throw 'HTTP ${r.statusCode}'`，同一个 400 在「请求格式不对」与
+      // 「HTTP 400」之间摇摆。全部改走唯一出口后，这里钉住不许回退。
+      final offenders = <String>[];
+      for (final f in libDartFiles()) {
+        if (f.path.endsWith('http_error_text.dart')) continue;
+        if (f.path.endsWith('http_json.dart')) continue;
+        final src = codeOf(f.path);
+        if (RegExp(r"throw\s+(?:Exception\(|StateError\()?'HTTP \$\{").hasMatch(src)) {
+          offenders.add(f.path);
+        }
+      }
+      expect(offenders, isEmpty,
+          reason: '状态码文案又手拼回去了：$offenders');
+      final src = libDartFiles().map((f) => codeOf(f.path)).join('\n');
+      final uses = RegExp(r'httpErrorText\(').allMatches(src).length;
+      expect(uses, greaterThanOrEqualTo(4),
+          reason: 'httpErrorText 调用点掉到 $uses 处，说明有页面绕开了唯一出口');
+    });
+
+    test('CollectionSyncInfo 副标题只有一个拼装口，visible 不再复活', () {
+      // visible 曾只在 test/ 断言（产品三处都直接读 sync 或走
+      // syncCollectionsForUnit）；面板又自己手拼「暂无索引」，与本 getter 的
+      // 「账号中 · 未下载」同一件事两种说法。
+      final sync = codeOf('lib/collection_sync.dart');
+      expect(RegExp(r'bool\s+get\s+visible\b').hasMatch(sync), isFalse,
+          reason: 'CollectionSyncInfo.visible 又回来了（测试专用同义 getter）');
+      expect(sync.contains('String subtitleWith('), isTrue,
+          reason: '副标题拼装口 subtitleWith 被删了');
+      final panel = codeOf('lib/collection_sync_panel.dart');
+      expect(panel.contains('subtitleWith(isDefault: defaultIdx == c.idx)'), isTrue,
+          reason: '单元库面板又自己拼同步源副标题了');
+      expect(RegExp(r"' · 暂无索引'").hasMatch(panel), isFalse,
+          reason: '面板又把「暂无索引」手拼回来了');
+    });
+
+    test('旧字段 intervalMin 的回退链只有一处（且不能是两支相同的三元）', () {
+      final crawler = codeOf('lib/unit_crawler.dart');
+      expect(crawler.contains('int fullMinFrom(Map m)'), isTrue,
+          reason: 'fullMinFrom 回退链被删了');
+      expect(
+          RegExp(r"\?\s*60\s*:\s*60").hasMatch(crawler),
+          isFalse,
+          reason: '又出现 `? 60 : 60` 这种两支相同的三元（等于丢掉旧值）');
+      // 新字段优先、旧字段次之的真实语义必须被引用到。
+      expect(crawler.contains("m['fullMin'] ?? m['intervalMin']"), isTrue);
+    });
+  });
+
 }

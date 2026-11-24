@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'http_json.dart';
+import 'http_error_text.dart';
 
 import 'cover_cache.dart';
 import 'decode_plan.dart';
@@ -175,7 +176,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               lib: widget.basic.id),
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 12));
-      if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
+      if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       // 解析放到 isolate：避免大 payload 在 UI 线程卡顿/掉帧。
       final j = await compute(_parseWorksPayload, r.bodyBytes);
       final list = <Map<String, dynamic>>[];
@@ -307,7 +308,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                   lib: widget.basic.id),
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 20));
-      if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
+      if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       final j = jsonOf(r);
       final batch = (j['works'] as List? ?? const []);
       if (!mounted) return;

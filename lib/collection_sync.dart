@@ -40,15 +40,27 @@ class CollectionSyncInfo {
   }
 
   /// 是否显示在主页/库选择页
-  bool get visible => sync;
+  ///
+  /// 0.9.228 删除 `bool get visible => sync;`：它只在 `test/` 里被断言，
+  /// 产品路径（设置页、单元库面板、主页）全部自己读 `sync` 或走
+  /// `syncCollectionsForUnit`。一个「测试专用的同义 getter」会让人以为
+  /// 界面按它过滤，改过滤规则时还以为改的是产品行为。
 
-  /// 列表副标题：不含序号，未勾选时明确提示不参与同步
-  String get subtitle {
+  /// 列表副标题：不含序号，未勾选时明确提示不参与同步。
+  ///
+  /// [isDefault] 为真时追加「默认同步源」。此前这是两份实现：
+  /// 本 getter 说「账号中 · 未下载」，单元库面板却手拼「暂无索引」——
+  /// 同一个同步源在设置页与单元库页有两种说法，且面板那版根本没有
+  /// `account` 分支。现在两处都走这里。
+  String subtitleWith({bool isDefault = false}) {
     final parts = <String>['$count 个作品'];
     if (!inIndex) parts.add(account ? '账号中 · 未下载' : '暂无索引');
     parts.add(sync ? '参与同步' : '不参与同步 · 主页不显示');
+    if (isDefault) parts.add('默认同步源');
     return parts.join(' · ');
   }
+
+  String get subtitle => subtitleWith();
 }
 
 /// 解析 /api/settings 返回的 collections：过滤墓碑、按服务端顺序、去重。

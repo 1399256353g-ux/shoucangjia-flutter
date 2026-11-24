@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'http_json.dart';
+import 'http_error_text.dart';
 
 import 'api_url.dart';
 import 'collection_sync.dart';
@@ -88,7 +89,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
       final r = await _client
           .get(_settingsUri, headers: widget.headers)
           .timeout(const Duration(seconds: 10));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
       if (!mounted) return;
@@ -121,7 +122,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
                 {'idx': c.idx, 'name': c.name, 'sync': c.sync}
             ],
           }));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
       if (!mounted) return;
@@ -212,9 +213,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
             dense: true,
             title: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(
-              '${c.count} 个作品'
-              '${c.inIndex ? '' : ' · 暂无索引'}'
-              '${defaultIdx == c.idx ? ' · 默认同步源' : ''}',
+              c.subtitleWith(isDefault: defaultIdx == c.idx),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

@@ -126,6 +126,7 @@ import 'work_forms.dart';
 import 'work_plays.dart';
 import 'work_safety.dart';
 import 'http_json.dart';
+import 'http_error_text.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
 
@@ -1173,7 +1174,9 @@ Future<Map<String, dynamic>?> postWorkDelete(String lib, String id,
     return {
       'status': r.statusCode,
       'ok': false,
-      'error': 'HTTP ${r.statusCode}'
+      // 文案单一出口：以前这里手拼 `HTTP ${r.statusCode}`，
+      // 同一个 500 在「服务端写入失败」的页面与这里两种说法。
+      'error': httpErrorText(r.statusCode)
     };
   } catch (e) {
     return {'ok': false, 'error': errorText(e)};
@@ -1209,7 +1212,9 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
     return {
       'status': r.statusCode,
       'ok': false,
-      'error': 'HTTP ${r.statusCode}'
+      // 文案单一出口：以前这里手拼 `HTTP ${r.statusCode}`，
+      // 同一个 500 在「服务端写入失败」的页面与这里两种说法。
+      'error': httpErrorText(r.statusCode)
     };
   } catch (e) {
     return {'ok': false, 'error': errorText(e)};
@@ -1466,7 +1471,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 headers: headers)
             .timeout(const Duration(seconds: 8)),
       ]);
-      if (rs[0].statusCode != 200) throw Exception('HTTP ${rs[0].statusCode}');
+      if (rs[0].statusCode != 200) throw Exception(httpErrorText(rs[0].statusCode));
       final cols =
           (jsonOf(rs[0])['collections'] as List?)?.length ?? 0;
       var basics = 0;
@@ -3246,7 +3251,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         final r = await http
             .get(uri, headers: cfg.headers)
             .timeout(const Duration(seconds: 12));
-        if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+        if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
         dynamic raw;
         try {
           // 解析放 isolate：删除记录可能很多，避免在 UI 线程解码 JSON。
@@ -3347,7 +3352,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         _toast(kDeletedNotLocalMessage);
         return;
       }
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       dynamic raw;
       try {
         raw = await parseJsonMapAsync(r.bodyBytes);
@@ -4589,7 +4594,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     });
     try {
       final r = await http.get(cfg.u('/api/settings'), headers: cfg.headers);
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       _apply(jsonMapOf(r), setLoading: true);
     } catch (e) {
       if (mounted) setState(() => err = errorText(e));
@@ -4615,7 +4620,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     final r = await http.post(cfg.u(path),
         headers: {...cfg.headers, 'Content-Type': 'application/json'},
         body: jsonEncode(body));
-    if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+    if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     return jsonMapOf(r);
   }
 
@@ -5680,7 +5685,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final r = await http.post(_u('/api/libraries/default', id, sb),
           headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
           body: jsonEncode({'id': l['id']}));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('已将「${l['name']}」设为当前媒体库')));
@@ -6032,7 +6037,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       final r = await http
           .get(Uri.parse('${cfg.base}/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 10));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = ((j['libraries'] as List?) ?? const [])
           .whereType<Map>()
@@ -6743,7 +6748,7 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
         headers: {
           'Authorization': basicAuthHeader(s.user, s.pass),
         }).timeout(const Duration(seconds: 12));
-    if (r.statusCode != 200) throw StateError('HTTP ${r.statusCode}');
+    if (r.statusCode != 200) throw StateError(httpErrorText(r.statusCode));
     final j = jsonOf(r);
     if (j is! Map) return 0;
     return ((j['libraries'] as List?) ?? const []).length;
@@ -6855,7 +6860,7 @@ class _RankPageState extends State<RankPage> {
       final r = await http.get(
           cfg.u('/api/rank?period=$period&metric=$metric', lib: 'all'),
           headers: cfg.headers);
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonOf(r);
       final meta = await LibMeta.load(cfg.lib);
       if (!mounted) return;
@@ -7111,7 +7116,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
       final r = await http
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = librariesWithDisplayNames(
           ((j['libraries'] as List?) ?? const [])
@@ -7689,7 +7694,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
           .get(cfg.u('/api/author_stats.json', lib: cfg.lib),
               headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
-      if (ar.statusCode != 200) throw Exception('HTTP ${ar.statusCode}');
+      if (ar.statusCode != 200) throw Exception(httpErrorText(ar.statusCode));
       // 作者索引可能上千作者：解析放 isolate。
       final m = await parseJsonMapAsync(ar.bodyBytes);
       for (final e in m.entries) {
@@ -10648,7 +10653,7 @@ class _PlayerPageState extends State<PlayerPage>
       final resp =
           await http.get(Uri.parse(url), headers: cfg.headersFor(_libFor(w)));
       if (resp.statusCode != 200) {
-        _toast('保存失败：HTTP ${resp.statusCode}');
+        _toast('保存失败：${httpErrorText(resp.statusCode)}');
         return;
       }
       await file.writeAsBytes(resp.bodyBytes, flush: true);
@@ -14726,7 +14731,7 @@ class _RecommendPageState extends State<RecommendPage> {
     final r = await http.get(
         cfg.u('/api/recommend?n=$n&seed=$seed', lib: 'all'),
         headers: cfg.headers);
-    if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+    if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     final j = jsonOf(r);
     final out = <Map<String, dynamic>>[];
     for (final w
@@ -16500,7 +16505,7 @@ class _AuthorPageState extends State<AuthorPage> {
           .get(cfg.u('/api/cat/tree', lib: lib), headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) {
-        _toast('读取目录失败：HTTP ${r.statusCode}');
+        _toast('读取目录失败：${httpErrorText(r.statusCode)}');
         return null;
       }
       dynamic tree = jsonOf(r);

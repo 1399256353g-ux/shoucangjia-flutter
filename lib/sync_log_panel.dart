@@ -11,6 +11,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'http_error_text.dart';
+
 import 'sync_ledger.dart';
 import 'error_text.dart';
 
@@ -59,7 +61,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
           .get(syncLogsUri(widget.base, lib: widget.libId, limit: widget.limit),
               headers: widget.headers)
           .timeout(const Duration(seconds: 12));
-      if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
+      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       dynamic raw;
       try {
         raw = decodeSyncJson(r.bodyBytes);
