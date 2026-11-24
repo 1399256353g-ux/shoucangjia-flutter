@@ -333,7 +333,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       if (!mounted) return;
       setState(() => saving = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('保存失败：$e')));
+          .showSnackBar(SnackBar(content: Text('保存失败：${errorText(e)}')));
     }
   }
 

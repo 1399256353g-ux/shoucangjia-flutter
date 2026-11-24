@@ -1290,4 +1290,99 @@ void main() {
     });
   });
 
+  group('第二十六批：界面文案不再插原始异常 / 库段编解码对称', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('界面提示不得再插原始异常（只走 errorText）', () {
+      // `'$e'` 对 Exception 产出 `Exception: HTTP 500`，对 TimeoutException
+      // 产出 `TimeoutException after 0:00:08.000000: Future not completed`。
+      // 0.9.209 只收口了 `err = '$e'` 这一种写法，于是 SnackBar/_toast/
+      // AuthorEditResult 里还有 19 处把运行时前缀直接显示给用户。
+      final offenders = <String>[];
+      for (final f in libDartFiles()) {
+        if (f.path.endsWith('error_text.dart')) continue; // 实现本体
+        final src = codeOf(f.path);
+        // 只匹配「字符串里直接插 $e」的展示形态：排除 errorText(e)、
+        // 集合遍历里的 `'$e'`（把元素转字符串，不是异常）。
+        // `$err` 另行判定：它只有在源头是 `err = errorText(e)` 时才合法，
+        // 所以这里只认精确的 `$e` / `${e}` token（`$exit` / `$err` 不匹配）。
+        final tokenRe = RegExp(r'\$e(?![A-Za-z0-9_])|\$\{e\}');
+        final errFromCatch = RegExp(r'\berr\s*=\s*[^;]*\berrorText\(')
+                .hasMatch(src) ==
+            false;
+        for (final line in src.split('\n')) {
+          final t = line.trim();
+          if (t.startsWith('//')) continue;
+          if (t.contains('errorText(')) continue;
+          final hasBareE = tokenRe.hasMatch(t);
+          // `$err` 未从 errorText 归一 → 也算原始异常直出。
+          final hasRawErr = t.contains(r'$err') && errFromCatch;
+          if (!hasBareE && !hasRawErr) continue;
+          final looksLikeUi = RegExp(
+                  r"(SnackBar|_toast|Text\(|warn =|err =|msg =|firstError|AuthorEditResult|_error =)")
+              .hasMatch(t);
+          if (!looksLikeUi) continue;
+          // `'$e'` 作为纯值（trim/toLowerCase/map 元素）不是异常展示。
+          if (RegExp(r"'\$e'\.(?:trim|toLowerCase|toString)\(").hasMatch(t)) {
+            continue;
+          }
+          offenders.add('${f.path}: $t');
+        }
+      }
+      expect(offenders, isEmpty,
+          reason: '界面又直接插了原始异常（应走 errorText）：\n${offenders.join('\n')}');
+      // 真实路径仍在：errorText 的调用点不能掉。
+      final src = libDartFiles().map((f) => codeOf(f.path)).join('\n');
+      final uses = RegExp(r'errorText\(').allMatches(src).length;
+      expect(uses, greaterThanOrEqualTo(40),
+          reason: 'errorText 调用点掉到 $uses 处，说明有人绕开了唯一出口');
+    });
+
+    test('库段解码只有一个口径：libOfMediaPath 必须解码百分号', () {
+      // `Cfg.media()` 自己写 `Uri.encodeComponent(l)`，所以中文库名的媒体
+      // 路径里库段是 `%E4%B8%AD%E6%96%87`。所有下游都拿这个 id 去查
+      // 绑定表/拼鉴权头——不解码就永远查不到，请求打错服务器。
+      final cover = codeOf('lib/lib_cover.dart');
+      expect(cover.contains('Uri.decodeComponent(seg)'), isTrue,
+          reason: 'libOfMediaPath 又不解码库段了（与 media() 的编码不对称）');
+      // 两处「媒体路径 → 库 id」的实现必须都解码：本文件与头像注册表。
+      final avatar = codeOf('lib/author_avatar_store.dart');
+      expect(avatar.contains('Uri.decodeComponent(parts[0])'), isTrue,
+          reason: 'serverAvatarFileFromPath 的解码被删了');
+    });
+
+    test('media() 比较绑定表前必须归一库段（否则重复前缀）', () {
+      // 同一件事的另一半：`_bindings` 的键是解码后的库 id，
+      // 拿原文 `%E4%B8%AD%E6%96%87` 去 containsKey 永远 false，
+      // 于是已带库段的路径被再前缀一次 → 必然 404。
+      final main = codeOf('lib/main.dart');
+      expect(main.contains('headId'), isTrue,
+          reason: 'media() 又直接拿原始库段去比对了（缺解码后的 headId）');
+      expect(
+          RegExp(r'_bindings\.containsKey\(headId\)').hasMatch(main), isTrue,
+          reason: 'media() 必须用解码后的 headId 查绑定表');
+    });
+
+    test('作者挂载的前置校验只有一个入口（req.error）', () {
+      // `UnitAuthorRequest.error` 曾把 groupFiles 写死 null，于是 split 的
+      // 「不能把整组都拆走」在请求对象上永远不生效；页面只好绕过它直接调
+      // 底层函数并另传 groupFiles。同一校验两入口，其中一个静默放行 400。
+      final req = codeOf('lib/unit_author_groups.dart');
+      expect(RegExp(r'groupFiles: groupFiles,').hasMatch(req), isTrue,
+          reason: '请求对象的 error 又没把原组成员传下去了');
+      expect(RegExp(r'groupFiles: null,').hasMatch(req), isFalse,
+          reason: '请求对象的 error 又把 groupFiles 写死成 null');
+      // 页面不得再绕过 req.error 直接调底层校验。
+      final page = codeOf('lib/unit_author_mount_page.dart');
+      expect(page.contains('unitAuthorRequestError('), isFalse,
+          reason: '挂载页又绕过 req.error 直接调底层校验（两个入口）');
+      expect(page.contains('req.error') || page.contains('.error;'), isTrue,
+          reason: '挂载页必须用请求对象自带的 error');
+    });
+  });
+
 }

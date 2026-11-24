@@ -209,12 +209,18 @@ class UnitAuthorRequest {
   /// `merge` / `split` / `setFiles` 的成员列表。
   final List<AuthorGroupFile> files;
 
+  /// `split` 时的原组成员（判定「不能把整组都拆走」要用）。
+  ///
+  /// 只在 `split` 有意义；`merge` / `setFiles` / `delete` 传空即可。
+  final List<AuthorGroupFile> groupFiles;
+
   const UnitAuthorRequest({
     required this.unit,
     required this.action,
     this.groupId = '',
     this.name = '',
     this.files = const <AuthorGroupFile>[],
+    this.groupFiles = const <AuthorGroupFile>[],
   });
 
   Map<String, dynamic> toBody() {
@@ -228,12 +234,18 @@ class UnitAuthorRequest {
   }
 
   /// 客户端可判定的非法请求（其余交给服务端）。
+  ///
+  /// [groupFiles] 是 `split` 的原组成员。此前这里写死 `null`，于是
+  /// 「不能把整组都拆走」这条**在请求对象上永远不生效**——挂载页只能绕过
+  /// 它、直接调 [unitAuthorRequestError] 并另传 `groupFiles`。同一个校验
+  /// 两个入口，其中一个静默放行了服务端必然 400 的请求（整组拆走＝解散，
+  /// 那是 delete 的语义）。现在把原组成员挂到请求上，`error` 就是唯一入口。
   String? get error => unitAuthorRequestError(
         action: action,
         unit: unit,
         groupId: groupId,
         files: files,
-        groupFiles: null,
+        groupFiles: groupFiles,
       );
 }
 

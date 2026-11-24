@@ -136,7 +136,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
       if (!mounted) return;
       setState(() => saving = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('同步源保存失败：$e')));
+          .showSnackBar(SnackBar(content: Text('同步源保存失败：${errorText(e)}')));
     }
   }
 

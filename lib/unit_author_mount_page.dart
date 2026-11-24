@@ -465,14 +465,11 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       groupId: g.id,
       name: nameCtl.text.trim(),
       files: files,
-    );
-    final bad = unitAuthorRequestError(
-      action: req.action,
-      unit: req.unit,
-      groupId: g.id,
-      files: files,
       groupFiles: g.files,
     );
+    // 前置校验只有 req.error 一个入口（原组成员已挂在请求上，
+    // 不再绕过它直接调底层函数——那正是「同一条规则两个入口」的来源）。
+    final bad = req.error;
     if (bad != null) {
       _toast(bad, bad: true);
       return;

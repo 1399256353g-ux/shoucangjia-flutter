@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'error_text.dart';
+
 /// 与封面按钮同风格、同尺寸（30×30 触达区，18dp 图标）。
 class LibQuickRefreshButton extends StatefulWidget {
   /// 卡片所属库（基础库 id）；单元库卡片传它子树里的第一个基础库。
@@ -41,7 +43,7 @@ class _LibQuickRefreshButtonState extends State<LibQuickRefreshButton> {
     try {
       msg = await fn();
     } catch (e) {
-      msg = '刷新失败：$e';
+      msg = '刷新失败：${errorText(e)}';
     }
     if (!mounted) return;
     setState(() => _busy = false);

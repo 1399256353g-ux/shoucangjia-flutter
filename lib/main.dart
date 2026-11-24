@@ -308,7 +308,19 @@ class Cfg {
     // 卡片只显示默认图标。已知库段一律原样保留。
     final slash = rest.indexOf('/');
     final head = slash >= 0 ? rest.substring(0, slash) : rest;
-    if (head.isNotEmpty && (_bindings.containsKey(head) || head == l)) {
+    // 库段可能是**百分号编码**的（本函数下面自己就写 `Uri.encodeComponent(l)`），
+    // 而绑定表键是解码后的库 id。不归一就永远匹配不上，已带库段的路径会被
+    // 再前缀一次，变成 `/media/<当前库>/%E4%B8%AD%E6%96%87/...` → 必然 404。
+    var headId = head;
+    if (head.contains('%')) {
+      try {
+        headId = Uri.decodeComponent(head);
+      } catch (_) {
+        headId = head;
+      }
+    }
+    if (headId.isNotEmpty &&
+        (_bindings.containsKey(headId) || headId == l)) {
       return path;
     }
     return '/media/${Uri.encodeComponent(l)}/$rest';
@@ -1492,7 +1504,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) {
         setState(() {
           testOk[s.id] = false;
-          testMsg[s.id] = '连接失败：$e';
+          testMsg[s.id] = '连接失败：${errorText(e)}';
         });
       }
     } finally {
@@ -3216,7 +3228,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('检测启动失败：$e')));
+          .showSnackBar(SnackBar(content: Text('检测启动失败：${errorText(e)}')));
     } finally {
       if (mounted) setState(() => checking = false);
     }
@@ -3389,7 +3401,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         builder: (_) => PlayerPage(works: list, start: start, lib: lib),
       ));
     } catch (err) {
-      if (mounted) _toast('打开作品失败：$err');
+      if (mounted) _toast('打开作品失败：${errorText(err)}');
     }
   }
 
@@ -3417,7 +3429,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       } catch (_) {}
       _toast(syncRetryResultLabel(r.statusCode, parsed));
     } catch (err) {
-      _toast('重试失败：$err');
+      _toast('重试失败：${errorText(err)}');
     }
   }
 
@@ -4734,7 +4746,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       });
       _apply(j);
     } catch (e) {
-      _toast('重命名失败：$e');
+      _toast('重命名失败：${errorText(e)}');
     }
   }
 
@@ -4762,7 +4774,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       _apply(j);
       _toast('已移除「${c.name}」并关闭同步');
     } catch (e) {
-      _toast('删除失败：$e');
+      _toast('删除失败：${errorText(e)}');
     }
   }
 
@@ -5175,7 +5187,7 @@ class _LibraryPageState extends State<LibraryPage> {
         setState(() {
           // 刷新失败时保留上次结果，不把已显示的菜单换成错误页。
           if (_hasSnapshot) {
-            warn = '刷新失败：$e（显示的是上次结果）';
+            warn = '刷新失败：${errorText(e)}（显示的是上次结果）';
           } else {
             err = errorText(e);
           }
@@ -5693,7 +5705,7 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('设置失败：$e')));
+            .showSnackBar(SnackBar(content: Text('设置失败：${errorText(e)}')));
       }
     }
   }
@@ -5729,7 +5741,7 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('删除失败：$e')));
+            .showSnackBar(SnackBar(content: Text('删除失败：${errorText(e)}')));
       }
     }
   }
@@ -5814,7 +5826,7 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('添加失败：$e')));
+            .showSnackBar(SnackBar(content: Text('添加失败：${errorText(e)}')));
       }
     }
   }
@@ -6430,7 +6442,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('启动失败：$e')));
+            .showSnackBar(SnackBar(content: Text('启动失败：${errorText(e)}')));
       }
     }
     if (mounted) setState(() => running = false);
@@ -12804,7 +12816,7 @@ class _PlayerPageState extends State<PlayerPage>
       // 封面已写入服务端：通知主页/库页重新拉取封面索引，立即显示新封面。
       coverRevision.value++;
     } catch (e) {
-      _toast('${req.failText}：$e');
+      _toast('${req.failText}：${errorText(e)}');
     }
   }
 
@@ -15557,7 +15569,7 @@ Future<AuthorEditResult> uploadAuthorAvatarBytes({
       }),
     );
   } catch (e) {
-    return AuthorEditResult(false, '上传失败：$e');
+    return AuthorEditResult(false, '上传失败：${errorText(e)}');
   }
   final j = jsonObjectOrEmpty(r);
   final bad = apiFailureText(r.statusCode, j);
@@ -15615,7 +15627,7 @@ Future<AuthorEditResult> setAuthorAvatarFile({
           lib: libId, author: author, file: file)),
     );
   } catch (e) {
-    return AuthorEditResult(false, '设置头像失败：$e');
+    return AuthorEditResult(false, '设置头像失败：${errorText(e)}');
   }
   final j = jsonObjectOrEmpty(r);
   final bad = apiFailureText(r.statusCode, j,
@@ -15641,7 +15653,7 @@ Future<AuthorEditResult> clearAuthorAvatar({
       body: jsonEncode(authorAvatarClearBody(lib: libId, author: author)),
     );
   } catch (e) {
-    return AuthorEditResult(false, '清除头像失败：$e');
+    return AuthorEditResult(false, '清除头像失败：${errorText(e)}');
   }
   final j = jsonObjectOrEmpty(r);
   final bad = apiFailureText(r.statusCode, j,
@@ -15686,7 +15698,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
       }
       setState(() => _image = frame.image);
     } catch (e) {
-      if (mounted) setState(() => _error = '图片解码失败：$e');
+      if (mounted) setState(() => _error = '图片解码失败：${errorText(e)}');
     }
   }
 
@@ -15778,7 +15790,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
       setState(() => _busy = false);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('生成头像失败：$e')));
+        ..showSnackBar(SnackBar(content: Text('生成头像失败：${errorText(e)}')));
     }
   }
 
@@ -16121,7 +16133,7 @@ class _AuthorPageState extends State<AuthorPage> {
         XTypeGroup(label: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp']),
       ]);
     } catch (e) {
-      _toast('打开文件选择器失败：$e');
+      _toast('打开文件选择器失败：${errorText(e)}');
       return;
     }
     if (picked == null) return;
@@ -16129,7 +16141,7 @@ class _AuthorPageState extends State<AuthorPage> {
     try {
       bytes = await picked.readAsBytes();
     } catch (e) {
-      _toast('读取图片失败：$e');
+      _toast('读取图片失败：${errorText(e)}');
       return;
     }
     if (bytes.isEmpty) {
@@ -16566,7 +16578,7 @@ class _AuthorPageState extends State<AuthorPage> {
         ),
       );
     } catch (e) {
-      _toast('读取目录失败：$e');
+      _toast('读取目录失败：${errorText(e)}');
       return null;
     }
   }

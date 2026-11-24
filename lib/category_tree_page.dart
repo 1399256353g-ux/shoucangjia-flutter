@@ -167,7 +167,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => renaming = false);
-      _toast('重命名失败：$e');
+      _toast('重命名失败：${errorText(e)}');
     }
   }
 

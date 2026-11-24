@@ -10,6 +10,7 @@
 // 便于单测覆盖顺序、局部失败与去抖，不需要真的连服务端。
 library;
 
+import 'error_text.dart';
 import 'multi_server.dart';
 
 /// 单次总刷新的结果，用于完成提示与失败展示。
@@ -80,7 +81,7 @@ Future<TotalRefreshOutcome> runTotalRefresh({
     try {
       code = await probe(s);
     } catch (e) {
-      firstError ??= '${s.title}：$e';
+      firstError ??= '${s.title}：${errorText(e)}';
     }
     codes[s.id] = code;
     if (code >= 200 && code < 500) {
@@ -97,7 +98,7 @@ Future<TotalRefreshOutcome> runTotalRefresh({
       final n = await libraryCount(s);
       if (n > libraries) libraries = n;
     } catch (e) {
-      firstError ??= '${s.title}：$e';
+      firstError ??= '${s.title}：${errorText(e)}';
     }
   }
 
@@ -105,12 +106,12 @@ Future<TotalRefreshOutcome> runTotalRefresh({
   try {
     await clearCoverCache();
   } catch (e) {
-    firstError ??= '清除封面缓存失败：$e';
+    firstError ??= '清除封面缓存失败：${errorText(e)}';
   }
   try {
     await reloadAuthors();
   } catch (e) {
-    firstError ??= '重拉作者索引失败：$e';
+    firstError ??= '重拉作者索引失败：${errorText(e)}';
   }
 
   return TotalRefreshOutcome(

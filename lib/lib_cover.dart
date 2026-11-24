@@ -154,13 +154,25 @@ String coverUrlOf(dynamic raw) {
 
 /// 媒体路径里的库 id：`/media/lib-008/a/b.jpg` → `lib-008`；不是媒体路径返回空串。
 /// 用于把「单元库封面」按其所归属的基础库路由到对应服务器。
+///
+/// 必须**解码**库段：`Cfg.media()` 写出的就是 `Uri.encodeComponent(l)`
+/// （中文/空格库名会变成 `%E4%B8%AD%E6%96%87`），而调用方拿到的这个 id
+/// 会直接去查绑定表 `_bindings` / 拼鉴权头。此前这里返回原文，于是中文库
+/// 的封面/删除记录/头像全部解析不到连接，退回当前库 → 请求打错服务器。
+/// 与 `serverAvatarFileFromPath` 的解码口径保持一致（同一规则不允许两份）。
 String libOfMediaPath(String p) {
   final path = p.trim();
   if (!path.startsWith('/media/')) return '';
   final rest = path.substring(7);
   final at = rest.indexOf('/');
   if (at <= 0) return '';
-  return rest.substring(0, at);
+  final seg = rest.substring(0, at);
+  try {
+    return Uri.decodeComponent(seg);
+  } catch (_) {
+    // 非法百分号编码：原样返回，让调用方按「未命中」处理，不抛异常。
+    return seg;
+  }
 }
 
 /// 最后一级兜底：第一张作品的封面（只收图片）。

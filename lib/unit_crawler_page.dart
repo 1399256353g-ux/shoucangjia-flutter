@@ -123,7 +123,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('保存失败：$e')));
+            .showSnackBar(SnackBar(content: Text('保存失败：${errorText(e)}')));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -148,7 +148,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       if (!mounted) return;
       setState(() => running = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('启动失败：$e')));
+          .showSnackBar(SnackBar(content: Text('启动失败：${errorText(e)}')));
     }
   }
 

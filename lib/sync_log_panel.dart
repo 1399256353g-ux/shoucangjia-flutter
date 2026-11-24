@@ -110,7 +110,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('重试失败：$e')));
+          .showSnackBar(SnackBar(content: Text('重试失败：${errorText(e)}')));
     } finally {
       if (mounted) setState(() => retrying = false);
     }

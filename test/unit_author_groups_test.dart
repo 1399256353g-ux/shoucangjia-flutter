@@ -184,6 +184,19 @@ void main() {
 
     test('split：拆走全部成员要挡下（那是 delete 的语义）', () {
       final original = [f('l1', '@a'), f('l2', '@a')];
+      // 关键：走请求对象自身的 error（页面唯一入口），而不是绕过它
+      // 直接调底层函数——后者此前被写死 groupFiles:null，split 的
+      // 「整组拆走」在真实路径上从不生效。
+      expect(
+          UnitAuthorRequest(
+            unit: 'A',
+            action: UnitAuthorAction.split,
+            groupId: 'g',
+            files: original,
+            groupFiles: original,
+          ).error,
+          '不能把整组都拆走（用删除解散）',
+          reason: '请求对象的 error 必须覆盖 split 的整组检查');
       expect(
           unitAuthorRequestError(
               action: UnitAuthorAction.split,
