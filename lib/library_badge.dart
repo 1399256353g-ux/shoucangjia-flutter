@@ -21,6 +21,8 @@ import 'package:flutter/material.dart'
         Widget;
 
 import 'app_settings.dart';
+import 'color_codec.dart';
+import 'index_prefix.dart';
 import 'prefs_json.dart';
 import 'contrast.dart';
 
@@ -381,7 +383,7 @@ class LibraryBadge {
   static String encodeBasic({Map<String, int>? source}) {
     final src = source ?? basicCustom;
     return jsonEncode({
-      for (final e in src.entries) e.key: e.value.toRadixString(16),
+      for (final e in src.entries) e.key: argbToHex(e.value),
     });
   }
 
@@ -404,7 +406,7 @@ class LibraryBadge {
   static String encodeTop({Map<String, int>? source}) {
     final src = source ?? topCustom;
     return jsonEncode({
-      for (final e in src.entries) e.key: e.value.toRadixString(16),
+      for (final e in src.entries) e.key: argbToHex(e.value),
     });
   }
 
@@ -419,13 +421,9 @@ class LibraryBadge {
   /// 目录名里的序号只是排序用，不应出现在作者/作品词条上。
   static String stripIndex(String name) {
     if (!AppSettings.stripLibIndex) return name.trim();
-    var s = name.trim();
+    final s = name.trim();
     if (s.isEmpty) return s;
-    final bracket = RegExp(r'^[(（\[【]\s*\d{1,4}\s*[)）\]】]\s*[._\-·]?\s*');
-    var out = s.replaceFirst(bracket, '').trim();
-    if (out != s && out.isNotEmpty) return out;
-    final dotted = RegExp(r'^\d{1,4}\s*[.、]\s*');
-    out = s.replaceFirst(dotted, '').trim();
+    final out = stripIndexPrefix(s);
     return out.isEmpty ? s : out;
   }
 
@@ -454,13 +452,8 @@ class LibraryBadge {
       final j = jsonDecode(raw);
       if (j is Map) {
         for (final e in j.entries) {
-          final v = e.value;
-          if (v is int && v >= 0 && v <= 0xFFFFFFFF) {
-            m['${e.key}'] = v;
-          } else if (v is String) {
-            final p = int.tryParse(v.replaceFirst('#', ''), radix: 16);
-            if (p != null) m['${e.key}'] = 0xFF000000 | (p & 0xFFFFFF);
-          }
+          final n = argbFromJson(e.value);
+          if (n != null) m['${e.key}'] = n;
         }
       }
     } catch (_) {}
@@ -522,7 +515,7 @@ class LibraryBadge {
   static String encode({Map<String, int>? source}) {
     final src = source ?? custom;
     return jsonEncode({
-      for (final e in src.entries) e.key: e.value.toRadixString(16),
+      for (final e in src.entries) e.key: argbToHex(e.value),
     });
   }
 

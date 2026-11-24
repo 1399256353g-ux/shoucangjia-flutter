@@ -6,6 +6,7 @@
 /// 解析与展示都放在纯函数里，便于单测；网络请求由页面传入 client。
 library;
 
+import 'api_url.dart';
 import 'time_labels.dart';
 import 'http_json.dart';
 
@@ -224,18 +225,15 @@ String syncDurationLabel(int ms) {
 }
 
 Uri syncLogsUri(String base, {String lib = '', int limit = 20}) {
-  final b = base.trim();
-  final q = <String>['limit=$limit'];
-  if (lib.trim().isNotEmpty) q.add('lib=${Uri.encodeQueryComponent(lib.trim())}');
-  final sep = b.endsWith('/') ? '' : '/';
-  return Uri.parse('$b${sep}api/sync/logs?${q.join('&')}');
+  final l = lib.trim();
+  return Uri.parse(joinApiUrl(base, '/api/sync/logs', query: {
+    'limit': '$limit',
+    if (l.isNotEmpty) 'lib': l,
+  }));
 }
 
-Uri syncRetryUri(String base) {
-  final b = base.trim();
-  final sep = b.endsWith('/') ? '' : '/';
-  return Uri.parse('$b${sep}api/sync/retry');
-}
+/// 重试地址。base 为空时得到相对地址（不抛异常，由请求层报连接失败）。
+Uri syncRetryUri(String base) => Uri.parse(joinApiUrl(base, '/api/sync/retry'));
 
 /// `POST /api/sync/retry` 的请求体：{runId, ids}。
 Map<String, dynamic> syncRetryBody({String runId = '', required List<String> ids}) {

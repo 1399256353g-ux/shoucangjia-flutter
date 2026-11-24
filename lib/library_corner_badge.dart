@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'color_codec.dart';
 import 'contrast.dart';
 import 'prefs_json.dart';
 
@@ -109,7 +110,7 @@ class LibraryCornerBadge {
   static Map<String, dynamic> toJson() => {
         'pattern': {for (final e in pattern.entries) e.key.name: e.value},
         'color': {
-          for (final e in color.entries) e.key.name: e.value.toRadixString(16)
+          for (final e in color.entries) e.key.name: argbToHex(e.value)
         },
       };
 
@@ -126,14 +127,8 @@ class LibraryCornerBadge {
     final c = j['color'];
     if (c is Map) {
       for (final k in LibBadgeKind.values) {
-        final v = c[k.name];
-        if (v is num) {
-          final n = v.toInt();
-          if (n >= 0 && n <= 0xFFFFFFFF) color[k] = n;
-        } else if (v is String) {
-          final n = int.tryParse(v.replaceFirst('#', ''), radix: 16);
-          if (n != null) color[k] = 0xFF000000 | (n & 0xFFFFFF);
-        }
+        final n = argbFromJson(c[k.name]);
+        if (n != null) color[k] = n;
       }
     }
   }

@@ -595,4 +595,66 @@ void main() {
       expect(ledger.contains('jsonDecode(utf8.decode('), isFalse);
     });
   });
+
+  group('第十四批：三处「写一份规则、抄一份实现」必须仍只有一个出口', () {
+    String codeOf(File f) => f
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('序号前缀正则只许出现在 index_prefix.dart', () {
+      // 三份实现（词条显示 / 基础库匹配 / 同步源匹配）已合并；任何再往页面
+      // 里抄一份 `\d{1,4}` 前缀正则的行为都会让三者重新分叉。
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('index_prefix.dart'))
+          .where((f) => codeOf(f).contains('d{1,4}'))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '序号前缀规则被又抄了一份：$offenders');
+      final src = libDartFiles().map(codeOf).join('\n');
+      expect(src.contains('String stripIndexPrefix(String raw)'), isTrue);
+      final uses = RegExp(r'stripIndexPrefix\(').allMatches(src).length;
+      expect(uses, greaterThanOrEqualTo(3),
+          reason: '三个调用点（词条/基础库/同步源）少了，实际 $uses 处');
+    });
+
+    test('颜色十六进制编解码只许出现在 color_codec.dart', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('color_codec.dart'))
+          .where((f) {
+        final c = codeOf(f);
+        return c.contains("replaceFirst('#', '')") ||
+            c.contains('radix: 16') ||
+            c.contains('0xFF000000 |');
+      }).map((f) => f.path).toList();
+      expect(offenders, isEmpty, reason: '颜色编解码被又抄了一份：$offenders');
+      final src = libDartFiles().map(codeOf).join('\n');
+      // 读入方仍然是两处（词条 / 角标），但都只调 argbFromJson。
+      final reads = RegExp(r'argbFromJson\(').allMatches(src).length;
+      expect(reads, greaterThanOrEqualTo(2),
+          reason: '角标与词条没有共用同一解析入口，实际 $reads 处');
+      final writes = RegExp(r'argbToHex\(').allMatches(src).length;
+      expect(writes, greaterThanOrEqualTo(4),
+          reason: '写入路径应覆盖词条三张表 + 角标一张表，实际 $writes 处');
+    });
+
+    test('接口地址拼接只许走 api_url.dart', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('api_url.dart'))
+          .where((f) {
+        final c = codeOf(f);
+        return c.contains("endsWith('/') ? '' : '/'") ||
+            c.contains(r"replaceFirst(RegExp(r'/+$'), '')");
+      }).map((f) => f.path).toList();
+      expect(offenders, isEmpty, reason: 'base 归一又写了一份：$offenders');
+      final src = libDartFiles().map(codeOf).join('\n');
+      expect(src.contains('String baseForJoin(String raw)'), isTrue);
+      final joins = RegExp(r'joinApiUrl\(|libApiUrl\(|apiUri\(')
+          .allMatches(src)
+          .length;
+      expect(joins, greaterThanOrEqualTo(10),
+          reason: '拼接调用点从 13 处掉到 $joins 处，说明有路径绕开了 api_url');
+    });
+  });
 }

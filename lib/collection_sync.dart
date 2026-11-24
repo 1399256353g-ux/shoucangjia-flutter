@@ -1,4 +1,5 @@
 import 'emoji_text.dart';
+import 'index_prefix.dart';
 
 /// H11：同步源选择的纯逻辑。
 ///
@@ -88,10 +89,7 @@ String syncUnitKey(String raw) {
   while (s.startsWith('@')) {
     s = s.substring(1).trim();
   }
-  s = s.replaceFirst(
-      RegExp(r'^[(（\[【]\s*\d{1,4}\s*[)）\]】]\s*[._\-·]?\s*'), '');
-  s = s.replaceFirst(RegExp(r'^\d{1,4}\s*[.、]\s*'), '');
-  return s.trim().toLowerCase();
+  return stripIndexPrefix(s).toLowerCase();
 }
 
 List<String> _unitKeys(String unitName, String unitRel) {

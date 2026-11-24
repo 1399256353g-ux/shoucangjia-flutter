@@ -6,6 +6,7 @@
 /// 发现的」；页面按分钟聚合成「本次同步」分组，避免只看到一串无来源的时间。
 library;
 
+import 'api_url.dart';
 import 'time_labels.dart';
 
 class DeletedEntry {
@@ -153,14 +154,13 @@ class DeletedStats {
 
 /// 行点击「打开作品」的请求地址（`libId` 为空时交给服务端用默认库查）。
 Uri? deletedWorkUri(String base, DeletedEntry e) {
-  final b = base.trim();
   final id = e.workId.trim();
-  if (b.isEmpty || id.isEmpty) return null;
-  final q = <String>['id=${Uri.encodeQueryComponent(id)}'];
+  if (baseForJoin(base).isEmpty || id.isEmpty) return null;
   final lib = e.libId.trim();
-  if (lib.isNotEmpty) q.add('lib=${Uri.encodeQueryComponent(lib)}');
-  final sep = b.endsWith('/') ? '' : '/';
-  return Uri.tryParse('$b${sep}api/work.json?${q.join('&')}');
+  return apiUri(base, '/api/work.json', query: {
+    'id': id,
+    if (lib.isNotEmpty) 'lib': lib,
+  });
 }
 
 /// 作品不在本地索引时的提示（与 owner 指定文案一致）。

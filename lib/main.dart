@@ -17,6 +17,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'api_url.dart';
 import 'basic_auth.dart';
 import 'rank_medal.dart';
 import 'time_labels.dart';
@@ -273,13 +274,8 @@ class Cfg {
   /// 当前库所在连接的认证；没有绑定则回落到当前连接。
   Map<String, String> get headers => headersFor(lib);
   // lib 省略时用当前库；显式传入可查询其他库
-  Uri u(String path, {String? lib}) {
-    final l = lib ?? this.lib;
-    final b = baseFor(l);
-    if (b.isEmpty || l.isEmpty) return Uri.parse('$b$path');
-    final sep = path.contains('?') ? '&' : '?';
-    return Uri.parse('$b$path${sep}lib=${Uri.encodeQueryComponent(l)}');
-  }
+  Uri u(String path, {String? lib}) =>
+      Uri.parse(libApiUrl(baseFor(lib ?? this.lib), path, lib ?? this.lib));
 
   // 媒体路径统一带库前缀：/media/<lib>/<相对路径>
   String media(String p, {String? lib}) {
@@ -3074,9 +3070,10 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
     if (cfg.base.isNotEmpty) {
       addAttempt(cfg.u('/api/deleted.json'));
-      addAttempt(Uri.parse('${cfg.base}/api/deleted.json'));
+      addAttempt(Uri.parse(joinApiUrl(cfg.base, '/api/deleted.json')));
       if (cfg.lib != 'douyin') {
-        addAttempt(Uri.parse('${cfg.base}/api/deleted.json?lib=douyin'));
+        addAttempt(Uri.parse(
+            joinApiUrl(cfg.base, '/api/deleted.json', query: {'lib': 'douyin'})));
       }
     }
     DeletedReport best = DeletedReport.empty;
@@ -4823,9 +4820,9 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Uri _u(String path, [String? lib, String? atBase]) {
-    final sep = path.contains('?') ? '&' : '?';
+    // 第十四批：拼接规则统一在 api_url（补协议、去尾斜杠、path 带 `?` 用 `&`）。
     return Uri.parse(
-        '${atBase ?? cfg.baseFor(lib)}$path${sep}lib=${Uri.encodeQueryComponent(lib ?? cfg.lib)}');
+        libApiUrl(atBase ?? cfg.baseFor(lib), path, lib ?? cfg.lib));
   }
 
   /// 最近一次库级快速刷新的时间（防抖用，不新增定时器）。
@@ -4854,8 +4851,7 @@ class _LibraryPageState extends State<LibraryPage> {
       },
       reloadOpenLists: null,
       reindex: (body) async {
-        final uri =
-            Uri.parse('$base/api/reindex?lib=${Uri.encodeQueryComponent(id)}');
+        final uri = Uri.parse(libApiUrl(base, '/api/reindex', id));
         final r = await http
             .post(uri,
                 headers: {...headers, 'Content-Type': 'application/json'},
@@ -5801,9 +5797,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         final id = '${l['id']}';
         try {
           final cr = await http
-              .get(
-                  Uri.parse('${cfg.base}/api/crawler'
-                      '?lib=${Uri.encodeQueryComponent(id)}'),
+              .get(Uri.parse(libApiUrl(cfg.base, '/api/crawler', id)),
                   headers: cfg.headersFor(id))
               .timeout(const Duration(seconds: 8));
           if (cr.statusCode == 200) {
@@ -5984,8 +5978,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
 
   String get libId => '${widget.lib['id']}';
 
-  Uri _u(String path) => Uri.parse(
-      '${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
+  Uri _u(String path) => Uri.parse(libApiUrl(cfg.baseFor(libId), path, libId));
 
   @override
   void initState() {
@@ -6145,8 +6138,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
   bool deepScan = false;
 
   String get libId => '${widget.lib['id']}';
-  Uri _u(String path) => Uri.parse(
-      '${cfg.baseFor(libId)}$path?lib=${Uri.encodeQueryComponent(libId)}');
+  Uri _u(String path) => Uri.parse(libApiUrl(cfg.baseFor(libId), path, libId));
 
   @override
   void initState() {
@@ -6162,7 +6154,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
     });
     try {
       final r = await http
-          .get(Uri.parse('${_u('/api/maintenance')}${deep ? '&deep=1' : ''}'),
+          .get(Uri.parse(withQueryFlag('${_u('/api/maintenance')}', deep ? 'deep=1' : '')),
               headers: cfg.headersFor(libId))
           .timeout(Duration(seconds: deep ? 90 : 15));
       final j = jsonOf(r) as Map<String, dynamic>;
@@ -7419,9 +7411,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       });
       try {
         final cr = await http
-            .get(
-                Uri.parse(
-                    '${cfg.base}/api/crawler?lib=${Uri.encodeQueryComponent(cfg.lib)}'),
+            .get(Uri.parse(libApiUrl(cfg.base, '/api/crawler', cfg.lib)),
                 headers: cfg.headers)
             .timeout(const Duration(seconds: 8));
         if (cr.statusCode == 200) {

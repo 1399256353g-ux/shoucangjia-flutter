@@ -1,4 +1,5 @@
 import 'disk_name.dart';
+import 'index_prefix.dart';
 
 /// 作者来源词条（J9）的纯逻辑：
 /// 从作品/头像的媒体路径反查所属「基础库」，词条显示基础库名称而不是大库名。
@@ -39,13 +40,11 @@ class BasicLibRef {
 }
 
 /// 去掉名称前的编号前缀「(12) 」并折叠空白，用于容错匹配。
+///
+/// 第十四批：规则转调 [stripIndexPrefix]——此前这里只认半角 `(1)`，
+/// `[3] 名称` / `（2）名称` / `01. 名称` 匹配不上但词条上已经去掉了序号。
 String normalizeLibLabel(String raw) {
-  var s = raw.trim();
-  while (true) {
-    final m = RegExp(r'^\(\s*\d+\s*\)\s*').firstMatch(s);
-    if (m == null) break;
-    s = s.substring(m.end).trim();
-  }
+  final s = stripIndexPrefix(raw);
   return s.replaceAll(RegExp(r'\s+'), ' ');
 }
 

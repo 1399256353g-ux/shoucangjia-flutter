@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'http_json.dart';
 
+import 'api_url.dart';
 import 'collection_sync.dart';
 import 'error_text.dart';
 
@@ -51,7 +52,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
   http.Client get _client => widget.client ?? http.Client();
 
   Uri get _settingsUri {
-    final base = widget.base.trim().replaceFirst(RegExp(r'/+$'), '');
+    final base = baseForJoin(widget.base);
     final q = widget.libId.isEmpty
         ? ''
         : '?lib=${Uri.encodeQueryComponent(widget.libId)}';

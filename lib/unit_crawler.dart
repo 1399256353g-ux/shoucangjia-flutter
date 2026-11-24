@@ -6,6 +6,8 @@
 //
 // J17：没有脚本的单元库只读展示「无爬虫脚本」，不启用同步设置。
 
+import 'api_url.dart';
+
 import 'interval_label.dart';
 
 /// 单元库爬虫配置。
@@ -161,13 +163,8 @@ String normalizeScriptName(String raw) {
 
 /// 单元库接口路径（GET/POST 配置、POST 运行）。
 String unitCrawlerUrl(String base, String path,
-    {required String unitId, required String rel}) {
-  final b = base.endsWith('/') ? base.substring(0, base.length - 1) : base;
-  final q = 'unit=${Uri.encodeQueryComponent(unitId)}'
-      '&rel=${Uri.encodeQueryComponent(rel)}';
-  final sep = path.contains('?') ? '&' : '?';
-  return '$b$path$sep$q';
-}
+        {required String unitId, required String rel}) =>
+    joinApiUrl(base, path, query: {'unit': unitId, 'rel': rel});
 
 /// 运行按钮文案。
 String unitCrawlerRunLabel(bool running) => running ? '运行中…' : '运行单元库同步';

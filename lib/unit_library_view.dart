@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import 'api_url.dart';
 import 'cover_cache.dart';
 import 'cover_menu.dart';
 import 'cover_upload.dart';
@@ -177,7 +178,7 @@ String unitCoverUrl(
   if (manual.isNotEmpty) {
     final base = unit.node.serverBase.trim();
     if (base.isNotEmpty) {
-      return '${base.replaceFirst(RegExp(r'/+$'), '')}$manual';
+      return '${baseForJoin(base)}$manual';
     }
   }
   final top = topPlayedInUnit(unit);

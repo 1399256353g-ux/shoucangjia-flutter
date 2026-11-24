@@ -12,6 +12,7 @@
 /// 本文件不碰网络与文件系统，只做「该用哪张图」的判定。
 library;
 
+import 'api_url.dart';
 import 'media_priority.dart';
 import 'cover_ext.dart';
 
@@ -132,7 +133,7 @@ String absoluteMediaUrl(
   required String lib,
   required String path,
 }) {
-  final b = base.trim().replaceFirst(RegExp(r'/+$'), '');
+  final b = baseForJoin(base);
   final p = libraryMediaPath(lib, path);
   if (b.isEmpty || p.isEmpty) return '';
   return '$b$p';
