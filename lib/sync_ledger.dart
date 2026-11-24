@@ -268,5 +268,9 @@ String syncRetryResultLabel(int status, dynamic body) {
   return '重试失败：$err';
 }
 
-/// 便于测试/复用：把响应体按 UTF-8 解码成 JSON。
+/// 把响应体按 UTF-8 解码成 JSON。
+///
+/// 同步日志面板有两处要解同一个响应体（首次加载 + 重试结果），
+/// 两处都手写 `jsonDecode(utf8.decode(r.bodyBytes))` 就会有三份实现。
+/// 统一走这里。
 dynamic decodeSyncJson(List<int> bytes) => jsonDecode(utf8.decode(bytes));

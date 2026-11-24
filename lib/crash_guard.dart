@@ -162,12 +162,6 @@ String crashTailOf(
   return cut ? '…（已截断，仅显示最近的日志）\n$text' : text;
 }
 
-/// 落盘日志的可能路径（去重；只用于界面提示，不做操作）。
-List<String> crashLogPaths() => <String>{
-      CrashLog.logPath,
-      if (Platform.isWindows) r'E:\Dizi\logs\crash.log',
-    }.toList(growable: false);
-
 /// 读取落盘崩溃日志的尾部；文件不存在或读失败返回空串。
 ///
 /// 大文件只读最后 512 KB，避免把内存和 IO 拖住。

@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'author_index.dart';
+import 'haptics.dart';
 
 /// 右侧竖排首字母索引条（owner 2026-11-22 / 2026-11-23 补滑动）。
 ///
@@ -56,10 +56,8 @@ class _AuthorLetterBarState extends State<AuthorLetterBar> {
   Timer? _hudTimer;
 
   void _hapticOnce() {
-    // 桌面端会静默失败，用 try 包住即可，不额外做平台判断。
-    try {
-      HapticFeedback.selectionClick();
-    } catch (_) {}
+    // 统一走 haptics.dart 的唯一选择反馈实现，不在页面里再复制一份。
+    hapticSelect();
   }
 
   void _pick(String letter) {

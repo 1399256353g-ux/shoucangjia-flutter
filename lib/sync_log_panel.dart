@@ -61,7 +61,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       dynamic raw;
       try {
-        raw = jsonDecode(utf8.decode(r.bodyBytes));
+        raw = decodeSyncJson(r.bodyBytes);
       } catch (_) {
         throw Exception('返回不是 JSON');
       }
@@ -93,7 +93,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
           .timeout(const Duration(seconds: 12));
       dynamic parsed;
       try {
-        parsed = jsonDecode(utf8.decode(r.bodyBytes));
+        parsed = decodeSyncJson(r.bodyBytes);
       } catch (_) {
         parsed = null;
       }

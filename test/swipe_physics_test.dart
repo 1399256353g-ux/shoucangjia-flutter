@@ -69,12 +69,10 @@ void main() {
   });
 
   group('DiziPageScrollPhysics', () {
-    test('applyTo 保留自定义弹簧参数', () {
-      const p = DiziPageScrollPhysics(stiffness: 500, dampingRatio: 0.9, fromPage: 3);
+    test('applyTo 保留 fromPage（弹簧参数已删：落位走固定 110ms）', () {
+      const p = DiziPageScrollPhysics(fromPage: 3);
       final q = p.applyTo(const ClampingScrollPhysics());
       expect(q, isA<DiziPageScrollPhysics>());
-      expect(q.stiffness, 500);
-      expect(q.dampingRatio, 0.9);
       expect(q.fromPage, 3);
       expect(q.parent, isA<ClampingScrollPhysics>());
     });

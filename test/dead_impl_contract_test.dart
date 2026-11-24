@@ -33,7 +33,7 @@ void main() {
     });
 
     test('震动门控：SwitchHapticGate / hapticAllowedFor 不得再定义', () {
-      // 真实翻页震动走 main.dart 的 hapticTap()。
+      // 真实翻页震动走 lib/haptics.dart 的 hapticTap()。
       final src = libSourceAll();
       expect(src.contains('SwitchHapticGate'), isFalse);
       expect(src.contains('hapticAllowedFor'), isFalse);
@@ -140,6 +140,69 @@ void main() {
       expect(src.contains('bool get isActivelyPlaying'), isTrue);
       // 真实相位应用点必须走这个 getter，而不是再写一遍 == playing。
       expect(src.contains('next.isActivelyPlaying'), isTrue);
+    });
+  });
+
+  group('第八批（0.9.206）：单源缺陷 + lib/test 双零的死符号', () {
+    /// 只查「定义形状」，不查注释/文档里的历史叙述。
+    bool defines(String src, String pattern) =>
+        RegExp(pattern, multiLine: true).hasMatch(src);
+
+    test('轻震动只有 haptics.dart 一处实现（页面不得再内联 HapticFeedback）', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('haptics.dart'))
+          .where((f) => f.readAsStringSync().contains('HapticFeedback.'))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty,
+          reason: '这些文件各自写了一份震动实现：$offenders');
+      final src = libSourceAll();
+      expect(defines(src, r'^void hapticTap\(\)'), isTrue);
+      expect(defines(src, r'^void hapticSelect\(\)'), isTrue);
+      expect(File('lib/haptics.dart').existsSync(), isTrue);
+    });
+
+    test('预载启动延迟只有一个取值处（300ms 死常量不得复活）', () {
+      final src = libSourceAll();
+      expect(defines(src, r'const int poolPreloadCooldownMs'), isFalse);
+      expect(defines(src, r'const int preloadKickoffDelayMs = 120;'), isTrue);
+      // 真实路径必须引用该常量，而不是再写一个字面量 120。
+      expect(
+          src.contains(
+              'Timer(const Duration(milliseconds: preloadKickoffDelayMs)'),
+          isTrue);
+    });
+
+    test('crashLogPaths 不得复活（真实界面只读 CrashLog.logPath）', () {
+      expect(defines(libSourceAll(), r'^List<String> crashLogPaths\('), isFalse);
+    });
+
+    test('翻页吸附只留 pageSwipeTarget 一套规则', () {
+      final src = libSourceAll();
+      expect(defines(src, r'^double snapTargetPage\('), isFalse);
+      expect(defines(src, r'const Duration kPageSnapMaxDuration'), isFalse);
+      // 弹簧参数从未参与落位（落位早就是固定 110ms 的曲线）。
+      expect(defines(src, r'const double kSnapStiffness'), isFalse);
+      expect(defines(src, r'const double kSnapDampingRatio'), isFalse);
+      expect(defines(src, r'^\s+final double stiffness;'), isFalse);
+      expect(defines(src, r'^\s+final double dampingRatio;'), isFalse);
+      // 真实路径仍在：
+      expect(src.contains('double pageSwipeTarget('), isTrue);
+      expect(src.contains('class FastSettleSimulation'), isTrue);
+    });
+
+    test('topPlayedAny 不得复活（封面规则只有 topPlayed）', () {
+      final src = libSourceAll();
+      expect(defines(src, r'^WorkPlay\? topPlayedAny\('), isFalse);
+      expect(src.contains('WorkPlay? topPlayed('), isTrue);
+    });
+
+    test('同步日志解码走 decodeSyncJson（面板不再手写 jsonDecode）', () {
+      final panel = File('lib/sync_log_panel.dart').readAsStringSync();
+      expect(panel.contains('decodeSyncJson('), isTrue);
+      expect(panel.contains('jsonDecode(utf8.decode('), isFalse,
+          reason: '两处响应体解码必须共用一个实现');
+      expect(libSourceAll().contains('dynamic decodeSyncJson('), isTrue);
     });
   });
 }

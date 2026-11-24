@@ -162,22 +162,6 @@ bool _betterPlay(WorkPlay a, WorkPlay b) {
   return a.at > b.at;
 }
 
-/// 旧的纯播放量最高实现（不看作品类型）；保留给需要跨类型比较的调用方。
-WorkPlay? topPlayedAny(Map<String, WorkPlay> plays) {
-  WorkPlay? best;
-  String? bestKey;
-  plays.forEach((k, v) {
-    if (v.thumb.isEmpty) return;
-    if (best == null ||
-        v.count > best!.count ||
-        (v.count == best!.count && k.compareTo(bestKey!) < 0)) {
-      best = v;
-      bestKey = k;
-    }
-  });
-  return best;
-}
-
 /// 本地播放计数仓库：内存缓存 + 延迟落盘。
 class WorkPlaysStore {
   WorkPlaysStore._();

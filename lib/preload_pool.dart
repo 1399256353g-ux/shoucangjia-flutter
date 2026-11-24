@@ -14,11 +14,15 @@ import 'preload_policy.dart';
 /// 池槽位上限（含当前条）：当前 + 前后各一条。
 const int poolMaxSlots = 3;
 
-/// 切条后禁止预热的静置时间（毫秒）。
+/// 切条后到开始预热邻居的延迟（毫秒）。
 ///
-/// 滑动过程中反复排队会让槽位在「停旧条 → 开新条」之间来回抖，
-/// 起播反而更慢；切条后先让当前条稳定 300ms 再预热邻居。
-const int poolPreloadCooldownMs = 300;
+/// owner 2026-11-19/20：从 600ms → 300ms → 现在**立刻开始**，留 120ms 只是
+/// 让当前条的打开请求先拿到网络，不与它抢带宽。
+///
+/// 历史上这里写过 `poolPreloadCooldownMs = 300`（"切条后静置 300ms 再预热"），
+/// 但真实路径早已改成 120ms，那个常量描述的行为从未存在过——已删除，
+/// 唯一取值处就是本常量。
+const int preloadKickoffDelayMs = 120;
 
 /// 一个槽位的当前占用情况（由播放页采集后传入，纯数据）。
 class PoolSlotState {

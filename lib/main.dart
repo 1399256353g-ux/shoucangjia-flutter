@@ -18,6 +18,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'cover_admin.dart';
+import 'haptics.dart';
 import 'cover_cache.dart';
 import 'cover_crop_page.dart';
 import 'cover_history.dart';
@@ -188,20 +189,6 @@ Future<void> main() async {
     // 首帧后再清理缓存，避免冷启动卡在目录扫描上。
     unawaited(DiziCache.sweep());
   });
-}
-
-// 轻触震动：iOS/Android 生效，桌面端静默忽略
-void hapticTap() {
-  try {
-    HapticFeedback.lightImpact();
-  } catch (_) {}
-}
-
-// 选择震动（拖动进度条跨段时用，比 lightImpact 更轻）
-void hapticSelect() {
-  try {
-    HapticFeedback.selectionClick();
-  } catch (_) {}
 }
 
 // 动图判断：GIF 必须交给 Image.network 才能播放动画，
@@ -9527,7 +9514,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 缩短 iOS 滑动时的黑屏窗口；预载仍是每侧 1 条，内存可控。
     // owner 2026-11-20：切条后立刻开始预载相邻条，不再等 300ms。
     // 留 120ms 只是让当前条的打开请求先拿到网络，不与它抢带宽。
-    _preloadTimer = Timer(const Duration(milliseconds: 120), () {
+    _preloadTimer = Timer(const Duration(milliseconds: preloadKickoffDelayMs), () {
       if (gen == _preloadGen) _runPreloads();
     });
   }
