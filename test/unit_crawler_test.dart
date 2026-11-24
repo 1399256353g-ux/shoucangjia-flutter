@@ -26,16 +26,7 @@ void main() {
     expect(c.syncReady, isTrue);
   });
 
-  test('时间/间隔/备注归一化', () {
-    expect(normalizeSchedule('04:10'), '04:10');
-    expect(normalizeSchedule('4:09'), '04:09');
-    expect(normalizeSchedule('24:00'), '04:10');
-    expect(normalizeSchedule('12:60'), '04:10');
-    expect(normalizeSchedule('bad'), '04:10');
-    expect(normalizeInterval(-5), 0);
-    expect(normalizeInterval(30), 30);
-    expect(normalizeInterval(2000), 1440);
-    expect(normalizeInterval('12'), 12);
+  test('备注归一化', () {
     expect(clipNote('  x  '), 'x');
     expect(clipNote('a' * 250).length, 200);
   });
@@ -64,11 +55,6 @@ void main() {
     expect(list.first.looksRunnable, isTrue);
     expect(list.last.looksRunnable, isFalse);
     expect(UnitCrawlerScript.listFrom(null), isEmpty);
-  });
-
-  test('顶级单元库不可单独配置', () {
-    expect(unitCrawlerConfigurable('(1) A'), isTrue);
-    expect(unitCrawlerConfigurable('  '), isFalse);
   });
 
   test('接口 URL 同时带 unit 与 rel 且正确编码', () {

@@ -244,11 +244,4 @@ List<String> toggleStar(List<String> stars, String id, {int max = 20}) {
   return next;
 }
 
-/// 折叠状态：默认全部折叠（J3 只显示大库）；返回新的集合。
-Set<String> toggleExpanded(Set<String> expanded, String id) {
-  final next = Set<String>.from(expanded);
-  if (!next.remove(id)) next.add(id);
-  return next;
-}
-
 int _num(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);

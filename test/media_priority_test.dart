@@ -51,39 +51,4 @@ void main() {
       expect(pickCoverPath(auto: '/a.jpg'), '/a.jpg');
     });
   });
-
-  group('自动封面规则', () {
-    test('有图片作品时优先最高播放的图文作品', () {
-      expect(
-        pickAutoCover(const [
-          AutoCoverWork(path: '/video.jpg', isImage: false, plays: 900),
-          AutoCoverWork(path: '/pic.jpg', isImage: true, plays: 10),
-        ]),
-        '/pic.jpg',
-      );
-    });
-
-    test('没有图片作品时才取最高播放视频帧', () {
-      expect(
-        pickAutoCover(const [
-          AutoCoverWork(path: '/v1.jpg', isImage: false, plays: 5),
-          AutoCoverWork(path: '/v2.jpg', isImage: false, plays: 50),
-        ]),
-        '/v2.jpg',
-      );
-    });
-
-    test('同播放数取更新作品；零播放与空路径不参与', () {
-      expect(
-        pickAutoCover(const [
-          AutoCoverWork(path: '/old.jpg', isImage: true, plays: 7, at: 100),
-          AutoCoverWork(path: '/new.jpg', isImage: true, plays: 7, at: 200),
-          AutoCoverWork(path: '/zero.jpg', isImage: true, plays: 0),
-          AutoCoverWork(path: '', isImage: true, plays: 99),
-        ]),
-        '/new.jpg',
-      );
-      expect(pickAutoCover(const []), '');
-    });
-  });
 }

@@ -139,23 +139,6 @@ int normalizeCooldown(dynamic raw) {
   return kCooldownOptions.contains(v) ? v : 15;
 }
 
-/// 每日执行时间：只接受 HH:MM（00:00–23:59），否则回落 04:10。
-String normalizeSchedule(String raw) {
-  final s = raw.trim();
-  final m = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(s);
-  if (m == null) return '04:10';
-  final h = int.parse(m.group(1)!);
-  final mi = int.parse(m.group(2)!);
-  if (h > 23 || mi > 59) return '04:10';
-  return '${h.toString().padLeft(2, '0')}:${m.group(2)}';
-}
-
-/// 间隔分钟：0–1440，非法值按 0。
-int normalizeInterval(dynamic raw) {
-  final n = raw is num ? raw.round() : int.tryParse('${raw ?? ''}') ?? 0;
-  return n.clamp(0, 1440);
-}
-
 /// 脚本名：只允许文件名，禁止目录穿越与隐藏文件。
 String normalizeScriptName(String raw) {
   var s = raw.trim().replaceAll('\\', '/');
@@ -167,9 +150,6 @@ String normalizeScriptName(String raw) {
   if (!RegExp(r'^[A-Za-z0-9._-]{1,64}$').hasMatch(s)) return 'sync.sh';
   return s;
 }
-
-/// 顶级单元库（rel 为空）不允许单独配置爬虫。
-bool unitCrawlerConfigurable(String rel) => rel.trim().isNotEmpty;
 
 /// 单元库接口路径（GET/POST 配置、POST 运行）。
 String unitCrawlerUrl(String base, String path,

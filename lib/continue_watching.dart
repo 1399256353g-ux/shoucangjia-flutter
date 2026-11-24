@@ -133,27 +133,6 @@ class ContinueItem {
   String get key => lib.isEmpty ? id : '$lib/$id';
 }
 
-/// 时长格式化：`m:ss` / `h:mm:ss`；非法或 ≤0 返回空串。
-String formatContinueDuration(int ms) {
-  if (ms <= 0) return '';
-  final total = (ms / 1000).round();
-  final h = total ~/ 3600;
-  final m = (total % 3600) ~/ 60;
-  final s = total % 60;
-  final ss = s.toString().padLeft(2, '0');
-  if (h > 0) return '$h:${m.toString().padLeft(2, '0')}:$ss';
-  return '$m:$ss';
-}
-
-/// 「继续观看」卡片上的位置文案：`1:23 / 5:10`，时长未知时只显示位置。
-String formatContinueLabel(int positionMs, int durationMs) {
-  final p = formatContinueDuration(positionMs);
-  final d = formatContinueDuration(durationMs);
-  if (p.isEmpty) return d;
-  if (d.isEmpty) return p;
-  return '$p / $d';
-}
-
 /// 解析整表；非法 JSON / 非法条目直接丢弃。
 List<ContinueItem> parseContinueItems(String? raw) {
   if (raw == null || raw.trim().isEmpty) return const [];
@@ -222,15 +201,6 @@ bool shouldSkipContinueRecord(ContinueItem prev, ContinueItem next) {
   if (prev.collection != next.collection) return false;
   final delta = prev.positionMs - next.positionMs;
   return (delta < 0 ? -delta : delta) < kContinueThrottleMs;
-}
-
-/// 上次停留位置：夹在 0–时长之间，回退 1 秒避开解码边界。
-int continueResumeMs(ContinueItem item) {
-  if (item.positionMs <= 0) return 0;
-  if (item.durationMs > 0 && item.positionMs >= item.durationMs) return 0;
-  final p = item.positionMs > 1000 ? item.positionMs - 1000 : item.positionMs;
-  if (item.durationMs > 0 && p >= item.durationMs) return 0;
-  return p;
 }
 
 /// 本地「继续观看」仓库：内存缓存 + 直接落盘 + 变更通知。

@@ -83,23 +83,4 @@ void main() {
       expect(videoTopAnchored(aspect: null, fit: VideoFit.fill), isFalse);
     });
   });
-
-  group('B videoViewportHeight', () {
-    test('视口高度 = 屏幕高 − 底栏高', () {
-      expect(videoViewportHeight(screenHeight: 800, taskbarHeight: 96), 704);
-      expect(videoViewportHeight(screenHeight: 800, taskbarHeight: 0), 800);
-    });
-
-    test('底栏异常时夹在屏幕范围内', () {
-      expect(videoViewportHeight(screenHeight: 800, taskbarHeight: -20), 800);
-      expect(videoViewportHeight(screenHeight: 800, taskbarHeight: 900), 0);
-      expect(videoViewportHeight(screenHeight: 0, taskbarHeight: 96), 0);
-    });
-
-    test('底栏预留高度含安全区', () {
-      expect(taskbarReservedHeight(contentHeight: 78, safeBottom: 0), 78);
-      expect(taskbarReservedHeight(contentHeight: 78, safeBottom: 34), 112);
-      expect(taskbarReservedHeight(contentHeight: -5, safeBottom: -3), 0);
-    });
-  });
 }

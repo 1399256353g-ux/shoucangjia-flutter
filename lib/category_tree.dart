@@ -128,38 +128,6 @@ List<String> _stringList(dynamic v) {
   return out;
 }
 
-/// 从「相对路径清单」建树（本地/测试用）。
-/// 传 `A/B/@张三` 视为作者叶子，`A/B` 视为分类。
-CategoryNode? treeFromPaths(Iterable<String> paths, {String rootName = '库根'}) {
-  final root = _MutableNode('');
-  for (final p in paths) {
-    final segs = splitCatRel(p);
-    if (segs.isEmpty) continue;
-    var cur = root;
-    for (var i = 0; i < segs.length; i++) {
-      final seg = segs[i];
-      final last = i == segs.length - 1;
-      if (seg.startsWith('@')) {
-        cur.authors.add(seg.substring(1));
-        break;
-      }
-      if (!last) {
-        cur = cur.child(seg);
-      } else {
-        // 末段是普通目录：分类节点（即使没有子节点也保留）。
-        cur = cur.child(seg);
-      }
-    }
-  }
-  final built = root.freeze(prefix: '');
-  return CategoryNode(
-    name: rootName,
-    rel: '',
-    children: built.children,
-    authors: built.authors,
-  );
-}
-
 /// 校验分类新名称；合法返回 null，否则返回原因（中文，可直接展示）。
 String? validateCategoryName(String name) {
   final s = name.trim();
@@ -172,17 +140,6 @@ String? validateCategoryName(String name) {
   if (s.startsWith('@')) return '@ 开头是作者目录，不能用作分类名';
   if (s.length > 80) return '名称过长（最多 80 字）';
   if (s.endsWith(' ')) return '名称不能以空格结尾';
-  return null;
-}
-
-/// 名称通用校验：作者目录改名用（允许 @ 前缀，其余同分类）。
-String? validateAuthorDirName(String name) {
-  final s = name.trim();
-  if (s.isEmpty) return '名称不能为空';
-  if (s == '.' || s == '..') return '名称不能是 . 或 ..';
-  if (RegExp(r'[\\/:*?"<>|]').hasMatch(s)) return '名称不能包含 \\ / : * ? " < > |';
-  if (RegExp(r'[\x00-\x1f]').hasMatch(s)) return '名称不能包含控制字符';
-  if (s.length > 80) return '名称过长（最多 80 字）';
   return null;
 }
 
@@ -288,35 +245,4 @@ Set<String> expandedForQuery(CategoryNode node, String query) {
 
   walk(node);
   return out;
-}
-
-class _MutableNode {
-  final String name;
-  final List<_MutableNode> children = [];
-  final List<String> authors = [];
-
-  _MutableNode(this.name);
-
-  _MutableNode child(String name) {
-    for (final c in children) {
-      if (c.name == name) return c;
-    }
-    final n = _MutableNode(name);
-    children.add(n);
-    return n;
-  }
-
-  CategoryNode freeze({required String prefix}) {
-    children.sort((a, b) => a.name.compareTo(b.name));
-    authors.sort();
-    return CategoryNode(
-      name: name,
-      rel: prefix.isEmpty ? name : '$prefix/$name',
-      authors: authors,
-      children: [
-        for (final c in children)
-          c.freeze(prefix: prefix.isEmpty ? name : '$prefix/$name'),
-      ],
-    );
-  }
 }

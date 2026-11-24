@@ -17,9 +17,6 @@ import 'media_priority.dart';
 /// 自定义封面目录名（位于库/单元库文件夹内）。
 const String kCoverDir = '_cover';
 
-/// 版本指针文件名（服务端读取其内容得到当前版本号）。
-const String kCoverPointerName = 'current';
-
 /// 支持的封面扩展名（按优先级）。
 const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
 
@@ -61,9 +58,6 @@ String joinRel(String a, String b) {
 
 /// 自定义封面目录的相对路径：`<rel>/_cover`。
 String coverDirRel(String rel) => joinRel(rel, kCoverDir);
-
-/// 版本指针文件相对路径：`<rel>/_cover/current`。
-String coverPointerRel(String rel) => joinRel(coverDirRel(rel), kCoverPointerName);
 
 /// 某版本封面的相对路径：`<rel>/_cover/<version>.<ext>`。
 /// 版本非法时返回空串。
@@ -178,27 +172,6 @@ bool isCoverImagePath(String p) {
     if (q.endsWith(e)) return true;
   }
   return false;
-}
-
-/// 第一张作品的封面路径（无播放数据时的兜底，纯函数）：
-/// 优先作品 `th` 缩略图，否则取 `m` 里第一张图片；都没有返回空串。
-String firstWorkCoverPath(List<dynamic> works) {
-  const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
-  for (final w in works) {
-    if (w is! Map) continue;
-    final th = '${w['th'] ?? ''}'.trim();
-    if (th.isNotEmpty) return th;
-    final m = w['m'];
-    if (m is List) {
-      for (final e in m) {
-        final p = '${e ?? ''}'.trim();
-        if (p.isEmpty) continue;
-        final low = p.toLowerCase();
-        if (imageExts.any(low.endsWith)) return p;
-      }
-    }
-  }
-  return '';
 }
 
 /// 最后一级兜底：第一张作品的封面（只收图片）。

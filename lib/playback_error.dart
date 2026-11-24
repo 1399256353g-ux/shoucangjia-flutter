@@ -187,10 +187,6 @@ PlaybackFailure classifyPlaybackError(Object? error) {
   return unknownFailure;
 }
 
-/// 加载超时判定：进入页面 elapsedMs 后仍没有时长，就认为失败。
-bool playbackLoadTimedOut(int elapsedMs, {required bool hasDuration}) =>
-    !hasDuration && elapsedMs >= playbackLoadTimeout.inMilliseconds;
-
 /// 把原始播放器错误整理成**可写日志**的脱敏摘要。
 ///
 /// 媒体地址与文件名属于隐私（AGENTS.md 红线），不能进日志；但

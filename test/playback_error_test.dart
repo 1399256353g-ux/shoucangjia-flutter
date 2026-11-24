@@ -95,24 +95,4 @@ void main() {
       expect(timeoutFailure.retryable, isTrue);
     });
   });
-
-  group('playbackLoadTimedOut', () {    test('未到时长的超时判定', () {
-      expect(
-          playbackLoadTimedOut(playbackLoadTimeout.inMilliseconds - 1,
-              hasDuration: false),
-          isFalse);
-      expect(
-          playbackLoadTimedOut(playbackLoadTimeout.inMilliseconds,
-              hasDuration: false),
-          isTrue);
-    });
-
-    test('已拿到时长则永不判超时', () {
-      expect(
-          playbackLoadTimedOut(playbackLoadTimeout.inMilliseconds * 3,
-              hasDuration: true),
-          isFalse);
-    });
-  });
 }
-

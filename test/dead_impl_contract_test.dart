@@ -52,6 +52,49 @@ void main() {
     });
   });
 
+  group('第六批：删掉的替身不得复活（2026-11-24）', () {
+    const gone = [
+      'authorGridGeometry', // 真实：SliverGridDelegateWithMaxCrossAxisExtent(150)
+      'AuthorGridStyle', // 9 个常量零引用，取值写在页面里
+      'toggleExpanded', // 真实：category_tree_page 自己维护 _expanded
+      'treeFromPaths', // 真实：服务端 /api/cat/tree 下发 parseCategoryTree
+      'validateAuthorDirName', // 真实改名只走 validateCategoryName
+      'firstWorkCoverPath', // 真实：BasicLib.firstCover（fc）单一来源
+      'continueResumeMs', // 真实：watch_progress.resumeMs
+      'formatContinueLabel', // 「继续观看」卡片不存在，只有菜单里一行
+      'formatContinueDuration',
+      'isManualWork', // 真实：widget.manualIds.contains
+      'avatarCropNormalizedOffset', // 裁切只存像素偏移，从不归一化
+      'avatarCropOffsetFromNormalized',
+      'normalizeSchedule', // 服务端字段，客户端只回显 04:10
+      'normalizeInterval',
+      'unitCrawlerConfigurable', // 真实：unitCrawlerFlags
+      'playbackLoadTimedOut', // 真实：Timer(playbackLoadTimeout)
+      'hasBrokenText', // 真实：fixDisplayName / fixEmojiText
+      'containsAstralChar',
+      'coverPointerRel', // 真实：服务端拼 `_cover/current`
+      'pickAutoCover', // 真实：work_plays.topPlayed
+      'videoViewportHeight', // 真实：stageBottomInset
+      'taskbarBottomInset', // 任务栏跟随视频已关闭，恒贴底
+    ];
+
+    test('22 个替身在 lib/ 内一个都不许回来', () {
+      final src = libSourceAll();
+      final alive = gone.where(src.contains).toList();
+      expect(alive, isEmpty, reason: '这些符号已被删除，必须由真实路径承载');
+    });
+
+    test('真实路径仍在', () {
+      final src = libSourceAll();
+      expect(src.contains('SliverGridDelegateWithMaxCrossAxisExtent'), isTrue);
+      expect(src.contains('topPlayed('), isTrue);
+      expect(src.contains('int resumeMs('), isTrue);
+      expect(src.contains('stageBottomInset('), isTrue);
+      expect(src.contains('final String firstCover'), isTrue);
+      expect(src.contains('Timer(playbackLoadTimeout'), isTrue);
+    });
+  });
+
   group('真实路径仍在（删的是替身，不是本体）', () {
     test('预载池计划、自救策略、启动判定、震动、作者筛选条都在', () {
       final src = libSourceAll();

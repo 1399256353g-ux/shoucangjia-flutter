@@ -61,14 +61,6 @@ void main() {
       expect(workSourceLabel(manual: true), '手动');
       expect(workSourceLabel(manual: false), '爬虫');
     });
-
-    test('isManualWork 支持 Set/List 与空 id', () {
-      expect(isManualWork(<String>{'a'}, 'a'), isTrue);
-      expect(isManualWork(<String>{'a'}, 'b'), isFalse);
-      expect(isManualWork(['a', 'b'], 'b'), isTrue);
-      expect(isManualWork(null, 'a'), isFalse);
-      expect(isManualWork(<String>{'a'}, ''), isFalse);
-    });
   });
 
   group('K7 单元库标记剪枝', () {

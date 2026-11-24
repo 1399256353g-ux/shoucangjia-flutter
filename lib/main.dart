@@ -1104,14 +1104,6 @@ String batchMoveConfirmText(int works, String targetRel) =>
 /// K3：来源文案，优先级与 J19 一致（手动 > 爬虫）。
 String workSourceLabel({required bool manual}) => manual ? '手动' : '爬虫';
 
-/// K3：作品是否在手动名单里（名单可接受 Map / List / Set 的 id 集合）。
-bool isManualWork(Object? manualIds, String id) {
-  if (id.isEmpty) return false;
-  if (manualIds is Set) return manualIds.contains(id);
-  if (manualIds is Iterable) return manualIds.any((e) => '$e' == id);
-  return false;
-}
-
 /// K7：剪掉已不存在的单元库标记，保留原顺序并去重。
 List<String> pruneUnitMarks(
     Iterable<String> existingIds, Iterable<String> marks) {
@@ -15314,25 +15306,6 @@ Offset avatarCropClampOffset(Offset offset, Size display, double viewSide) {
   final dx = offset.dx.isFinite ? offset.dx : 0.0;
   final dy = offset.dy.isFinite ? offset.dy : 0.0;
   return Offset(dx.clamp(-mx, mx).toDouble(), dy.clamp(-my, my).toDouble());
-}
-
-/// 当前平移的归一化坐标（-1..1，0=居中）；该方向不可移动时恒为 0。
-Offset avatarCropNormalizedOffset(
-    Offset offset, Size display, double viewSide) {
-  final mx = max(0.0, (display.width - viewSide) / 2);
-  final my = max(0.0, (display.height - viewSide) / 2);
-  final c = avatarCropClampOffset(offset, display, viewSide);
-  return Offset(mx <= 0 ? 0 : c.dx / mx, my <= 0 ? 0 : c.dy / my);
-}
-
-/// 归一化平移还原为像素平移（先夹紧 norm，再夹紧结果）。
-Offset avatarCropOffsetFromNormalized(
-    Offset norm, Size display, double viewSide) {
-  final mx = max(0.0, (display.width - viewSide) / 2);
-  final my = max(0.0, (display.height - viewSide) / 2);
-  final nx = norm.dx.isFinite ? norm.dx.clamp(-1.0, 1.0).toDouble() : 0.0;
-  final ny = norm.dy.isFinite ? norm.dy.clamp(-1.0, 1.0).toDouble() : 0.0;
-  return avatarCropClampOffset(Offset(nx * mx, ny * my), display, viewSide);
 }
 
 /// 渲染像素比：保证输出短边 ≥512，上限 6（避免超大内存）。

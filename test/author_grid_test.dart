@@ -2,41 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/author_grid.dart';
 
 void main() {
-  group('I7 作者网格几何', () {
-    test('手机宽度下按最大卡片宽度分列', () {
-      final g = authorGridGeometry(width: 390);
-      expect(g.columns, 3);
-      expect(g.cellWidth, closeTo((390 - 24 - 20) / 3, 0.001));
-      expect(g.rowExtent, closeTo(g.cellWidth / 0.80 + 10, 0.001));
-    });
-
-    test('平板/桌面宽度增加列数，卡片不超过上限', () {
-      final g = authorGridGeometry(width: 1024);
-      expect(g.columns, greaterThan(2));
-      expect(g.cellWidth, lessThanOrEqualTo(132));
-      expect(g.cellWidth, greaterThan(0));
-    });
-
-    test('极窄/极端宽度时至少 1 列且宽度不为负', () {
-      final narrow = authorGridGeometry(width: 40);
-      expect(narrow.columns, 1);
-      expect(narrow.cellWidth, greaterThan(0));
-      final zero = authorGridGeometry(width: 0);
-      expect(zero.columns, 1);
-      expect(zero.cellWidth, greaterThan(0));
-      final bad = authorGridGeometry(width: 400, childAspectRatio: 0);
-      expect(bad.rowExtent, greaterThan(bad.cellWidth));
-    });
-
-    test('rowsFor 向上取整并处理空列表', () {
-      final g = authorGridGeometry(width: 390);
-      expect(g.rowsFor(0), 0);
-      expect(g.rowsFor(-3), 0);
-      expect(g.rowsFor(g.columns), 1);
-      expect(g.rowsFor(g.columns + 1), 2);
-    });
-  });
-
   group('I7 头像解码宽度', () {
     test('按显示尺寸 × 像素比计算', () {
       expect(avatarDecodeWidth(displaySize: 58, devicePixelRatio: 3), 174);

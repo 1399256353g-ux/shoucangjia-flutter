@@ -62,18 +62,3 @@ String fixDisplayName(String name, {String fallback = '未命名'}) {
   final fixed = fixEmojiText(name);
   return fixed.isEmpty ? fallback : fixed;
 }
-
-/// True when [input] contains something [fixEmojiText] would remove, i.e. the
-/// data needs repair before display.
-bool hasBrokenText(String input) {
-  return fixEmojiText(input) != input;
-}
-
-/// True when the string contains at least one astral-plane code point (most
-/// emoji), useful for diagnostics and tests.
-bool containsAstralChar(String input) {
-  for (final r in input.runes) {
-    if (r > 0xFFFF) return true;
-  }
-  return false;
-}

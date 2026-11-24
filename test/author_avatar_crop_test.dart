@@ -42,25 +42,6 @@ void main() {
           const Offset(20, 0));
     });
 
-    test('归一化平移与还原互为逆运算', () {
-      const display = Size(600, 300);
-      final n = avatarCropNormalizedOffset(const Offset(150, 0), display, 300);
-      expect(n, const Offset(1, 0));
-      final back = avatarCropOffsetFromNormalized(n, display, 300);
-      expect(back.dx, closeTo(150, 1e-9));
-      expect(back.dy, 0);
-      final half =
-          avatarCropOffsetFromNormalized(const Offset(0.5, 0), display, 300);
-      expect(half.dx, closeTo(75, 1e-9));
-    });
-
-    test('归一化输入超界先夹紧', () {
-      const display = Size(600, 300);
-      final o =
-          avatarCropOffsetFromNormalized(const Offset(5, -5), display, 300);
-      expect(o, const Offset(150, 0));
-    });
-
     test('渲染像素比保证短边 ≥512，且不无限放大', () {
       expect(avatarCropPixelRatio(320), closeTo(1.6, 1e-9));
       expect(avatarCropPixelRatio(100), closeTo(5.12, 1e-9));

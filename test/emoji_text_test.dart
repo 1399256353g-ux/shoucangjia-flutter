@@ -13,7 +13,6 @@ void main() {
       final fixed = fixEmojiText(name);
       expect(fixed, name);
       expect(fixed.runes.length, 1);
-      expect(containsAstralChar(fixed), isTrue);
     });
 
     test('keeps ZWJ and variation selectors used by compound emoji', () {
@@ -26,7 +25,6 @@ void main() {
       final broken = 'a\uD83Db';
       final fixed = fixEmojiText(broken);
       expect(fixed, 'ab');
-      expect(hasBrokenText(broken), isTrue);
     });
 
     test('drops a stray low surrogate', () {
@@ -41,10 +39,6 @@ void main() {
       expect(fixEmojiText('  🦶  '), '🦶');
     });
 
-    test('hasBrokenText is false for valid emoji names', () {
-      expect(hasBrokenText('🦶'), isFalse);
-      expect(hasBrokenText('其他'), isFalse);
-    });
   });
 
   group('fixDisplayName', () {

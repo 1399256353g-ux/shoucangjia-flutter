@@ -37,7 +37,6 @@ void main() {
   group('路径拼接', () {
     test('_cover 目录与指针文件', () {
       expect(coverDirRel('(1) A/x'), '(1) A/x/_cover');
-      expect(coverPointerRel('(1) A/x'), '(1) A/x/_cover/current');
       expect(coverDirRel(''), '_cover');
     });
 
@@ -159,71 +158,6 @@ void main() {
           'http://nas:8090/media/lib-01/a.jpg');
       expect(absoluteMediaUrl('', lib: 'lib-01', path: 'a.jpg'), '');
       expect(absoluteMediaUrl('http://nas:8090', lib: 'lib-01', path: ''), '');
-    });
-  });
-  group('G 第一张作品封面兜底', () {
-    test('firstWorkCoverPath：th 优先，其次 m 里第一张图片', () {
-      expect(firstWorkCoverPath([
-        {'th': 'a.jpg', 'm': ['b.mp4']}
-      ]), 'a.jpg');
-      expect(firstWorkCoverPath([
-        {'th': '', 'm': ['x.mp4', 'y.png']}
-      ]), 'y.png');
-      expect(firstWorkCoverPath([{'th': '', 'm': <dynamic>[]}, 'bad']), '');
-    });
-
-    test('pickBasicCover：无播放数据用第一张作品封面，有播放数据时播放封面优先', () {
-      expect(pickBasicCover(rel: '(8) X', firstThumb: 'f.jpg').path, 'f.jpg');
-      expect(
-          pickBasicCover(
-                  rel: '(8) X', bestThumb: 'top.jpg', firstThumb: 'f.jpg')
-              .path,
-          'top.jpg');
-      final custom = pickBasicCover(
-          rel: '(8) X',
-          version: 'v1',
-          bestThumb: 'top.jpg',
-          firstThumb: 'f.jpg');
-      expect(custom.path, '(8) X/_cover/v1.jpg');
-      expect(custom.custom, isTrue);
-    });
-
-    test('pickUnitCover：同一兜底链', () {
-      expect(pickUnitCover(rel: '(8) X', firstThumb: 'f.jpg').path, 'f.jpg');
-      expect(
-          pickUnitCover(rel: '(8) X', bestThumb: 'top.jpg', firstThumb: 'f.jpg')
-              .path,
-          'top.jpg');
-    });
-
-    test('高优先级来源是视频/空时，仍落到第一张作品封面', () {
-      // 有播放记录但记录里的缩略图是视频路径（fc 指向 mp4 的老数据）
-      expect(
-          pickUnitCover(
-                  rel: '(8) X', bestThumb: 'a/top.mp4', firstThumb: 'f.jpg')
-              .path,
-          'f.jpg');
-      expect(
-          pickBasicCover(
-                  rel: '', bestThumb: 'a/top.mp4', firstThumb: 'f.jpg')
-              .path,
-          'f.jpg');
-      // 爬虫封面也是视频时同样跳过
-      expect(
-          pickBasicCover(
-                  rel: '',
-                  crawlerThumb: 'a/cv.mp4',
-                  bestThumb: '',
-                  firstThumb: 'f.jpg')
-              .path,
-          'f.jpg');
-    });
-
-    test('第一张作品封面是视频/空时判为无图（不拼出必 404 的地址）', () {
-      expect(pickBasicCover(rel: '', firstThumb: 'a/x.mp4').isEmpty, isTrue);
-      expect(pickBasicCover(rel: '', firstThumb: '   ').isEmpty, isTrue);
-      expect(pickUnitCover(rel: '(8) X', firstThumb: 'a/x.mov').isEmpty, isTrue);
-      expect(pickFirstWorkCover('a/y.png').path, 'a/y.png');
     });
   });
 }

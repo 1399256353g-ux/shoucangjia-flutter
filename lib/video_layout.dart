@@ -76,17 +76,6 @@ bool videoTopAnchored({required double? aspect, required VideoFit fit}) =>
     aspect > 0 &&
     aspect <= portraitAspectThreshold;
 
-/// 播放视口高度 = 屏幕高 − 底部任务栏高度（含 SafeArea）。
-/// 结果夹在 [0, screenHeight] 内，异常尺寸时退化为 0。
-double videoViewportHeight({
-  required double screenHeight,
-  required double taskbarHeight,
-}) {
-  if (screenHeight <= 0) return 0;
-  final bar = taskbarHeight > 0 ? taskbarHeight : 0.0;
-  return (screenHeight - bar).clamp(0.0, screenHeight).toDouble();
-}
-
 /// 首次布局前对任务栏高度的保守估算：内容高 + 底部安全区。
 /// 实际高度由播放页测量后覆盖，这里只用于避免首帧跳动。
 double taskbarReservedHeight({
@@ -173,22 +162,6 @@ Size videoBaseSize({
     h *= k;
   }
   return Size(w, h);
-}
-
-/// 底栏相对屏幕底部的内缩量：把栏贴在画面下沿。
-/// [fullscreen] 为真时始终贴屏幕底；桌面端调用方直接传 0。
-double taskbarBottomInset({
-  required Size box,
-  required double? aspect,
-  bool fullscreen = false,
-}) {
-  if (fullscreen || box.height <= 0) return 0;
-  final rect = videoContentRect(box, aspect);
-  if (rect.height <= 0) return 0;
-  final inset = box.height - rect.bottom;
-  if (inset <= 0) return 0;
-  // 极端长图/异常宽高比时最多上移 45% 屏高，避免任务栏跑到画面中央。
-  return inset.clamp(0.0, box.height * 0.45);
 }
 
 /// T：舞台（PageView 单页）相对屏幕底部的内缩量。

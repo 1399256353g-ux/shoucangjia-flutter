@@ -27,30 +27,6 @@ void main() {
     });
   });
 
-  group('O4 taskbarBottomInset', () {
-    test('竖屏宽屏视频：任务栏上移到画面下沿', () {
-      final inset = taskbarBottomInset(
-          box: const Size(400, 800), aspect: 16 / 9);
-      expect(inset, closeTo((800 - 225) / 2, 0.001));
-    });
-
-    test('画面撑满、全屏或拿不到宽高比时贴屏幕底', () {
-      expect(taskbarBottomInset(box: const Size(400, 400), aspect: 1),
-          closeTo(0, 0.001));
-      expect(
-          taskbarBottomInset(
-              box: const Size(400, 800), aspect: 16 / 9, fullscreen: true),
-          0);
-      expect(taskbarBottomInset(box: const Size(400, 800), aspect: null), 0);
-    });
-
-    test('异常宽高比时内缩量最多 45% 屏高', () {
-      final inset =
-          taskbarBottomInset(box: const Size(400, 800), aspect: 20);
-      expect(inset, lessThanOrEqualTo(800 * 0.45));
-    });
-  });
-
   group('T stageBottomInset', () {
     test('正常态舞台按任务栏高度内缩', () {
       expect(

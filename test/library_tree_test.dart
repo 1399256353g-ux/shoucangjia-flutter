@@ -64,15 +64,6 @@ void main() {
     expect(capped.length, 20);
   });
 
-  test('折叠默认全部关闭，可往返', () {
-    var e = <String>{};
-    expect(e.contains('big-01'), isFalse); // 默认只显示大库
-    e = toggleExpanded(e, 'big-01');
-    expect(e, {'big-01'});
-    e = toggleExpanded(e, 'big-01');
-    expect(e, isEmpty);
-  });
-
   test('数字格式化与 withStars 重建', () {
     final t = LibraryTree.parse(_payload())!;
     final t2 = t.withStars(['lib-2']);

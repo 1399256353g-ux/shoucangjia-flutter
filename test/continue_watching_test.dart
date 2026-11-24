@@ -25,15 +25,6 @@ ContinueItem item({
     );
 
 void main() {
-  test('位置文案：分秒/时分秒，时长缺失时只显示位置', () {
-    expect(formatContinueDuration(0), '');
-    expect(formatContinueDuration(83000), '1:23');
-    expect(formatContinueDuration(3723000), '1:02:03');
-    expect(formatContinueLabel(83000, 310000), '1:23 / 5:10');
-    expect(formatContinueLabel(83000, 0), '1:23');
-    expect(formatContinueLabel(0, 310000), '5:10');
-  });
-
   test('候选判定：太靠前、已看完、接近片尾都不显示', () {
     expect(isContinueCandidate(item(pos: 500)), isFalse);
     expect(isContinueCandidate(item(pos: 30000, dur: 120000)), isTrue);
@@ -119,12 +110,5 @@ void main() {
     expect(ContinueWatchingStore.items.single.collection, '另一个收藏夹');
     expect(ContinueWatchingStore.items.single.positionMs, 30600);
     ContinueWatchingStore.resetForTest();
-  });
-
-  test('续播位置回退 1 秒并夹紧', () {
-    expect(continueResumeMs(item(pos: 500)), 500);
-    expect(continueResumeMs(item(pos: 30000)), 29000);
-    expect(continueResumeMs(item(pos: 0)), 0);
-    expect(continueResumeMs(item(pos: 120000, dur: 120000)), 0);
   });
 }

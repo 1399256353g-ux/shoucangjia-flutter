@@ -74,32 +74,6 @@ void main() {
     });
   });
 
-  group('treeFromPaths', () {
-    test('普通目录是分类，@ 目录是作者叶子', () {
-      final t = treeFromPaths([
-        'A/B/@张三',
-        'A/B/@李四',
-        'A/C/@王五',
-        'D/@赵六',
-      ])!;
-      expect(t.children.map((c) => c.name), ['A', 'D']);
-      final a = t.children.first;
-      expect(a.children.map((c) => c.name), ['B', 'C']);
-      expect(a.children.first.authors, ['张三', '李四']);
-      expect(a.authorCount, 3);
-      expect(t.childCategoryCount, 4);
-      expect(t.allAuthors.first, '@张三');
-      expect(t.childCategoryCount, 4);
-      expect(a.children.first.isLeaf, isTrue);
-    });
-
-    test('无路径时返回空树', () {
-      final t = treeFromPaths(const [])!;
-      expect(t.children, isEmpty);
-      expect(t.authorCount, 0);
-    });
-  });
-
   group('validateCategoryName', () {
     test('合法名称', () {
       expect(validateCategoryName('旅行'), isNull);
@@ -116,12 +90,6 @@ void main() {
       expect(validateCategoryName('a' * 81), isNotNull);
       // 首尾空格会被自动 trim，不算非法
       expect(validateCategoryName('abc '), isNull);
-    });
-
-    test('作者目录名允许 @，仍禁用路径分隔符', () {
-      expect(validateAuthorDirName('@张三'), isNull);
-      expect(validateAuthorDirName('a/b'), isNotNull);
-      expect(validateAuthorDirName(''), isNotNull);
     });
   });
 
