@@ -23,6 +23,7 @@ import 'package:flutter/material.dart'
 import 'app_settings.dart';
 import 'color_codec.dart';
 import 'index_prefix.dart';
+import 'lib_id.dart';
 import 'prefs_json.dart';
 import 'contrast.dart';
 
@@ -234,8 +235,7 @@ class LibraryBadge {
   static bool canDistribute(String unitId) {
     if (unitId.isEmpty) return false;
     if (leafUnits.isEmpty) return true;
-    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
-    return leafUnits[unitId] ?? leafUnits[rel] ?? leafUnits['node:$rel'] ?? true;
+    return lookupByLibId(leafUnits, unitId) ?? true;
   }
 
   /// 用户在设置里为某个库选择的 emoji 后缀；id -> emoji（最多 8 个字符）。
@@ -285,22 +285,23 @@ class LibraryBadge {
       {List<String> order = const [], bool allowCustom = true}) {
     if (unitId.isEmpty) return gray;
     if (unitId == 'secret') return topColorFor('secret') ?? gray;
-    final rel =
-        unitId.startsWith('node:') ? unitId.substring(5) : unitId;
-    final prefixed = 'node:$rel';
     if (allowCustom) {
-      final c = custom[unitId] ?? custom[rel] ?? custom[prefixed];
+      final c = lookupByLibId(custom, unitId);
       if (c != null) return c;
     }
     // P1：自己没设色 → 继承所属顶级单元库的词条色（顶级设了才有）。
-    final topId = topOfUnit[unitId] ?? topOfUnit[rel] ?? topOfUnit[prefixed];
+    final topId = lookupByLibId(topOfUnit, unitId);
     final inherited = topId == null ? null : topColorFor(topId);
     if (inherited != null) return inherited;
-    var i = order.indexOf(unitId);
-    if (i < 0) i = order.indexOf(rel);
-    if (i < 0) i = order.indexOf(prefixed);
+    // 注册顺序里也可能存着两种 id 形式；按同一份等价键列表找，
+    // 不再在调用点另写一套 indexOf 链。
+    var i = -1;
+    for (final f in idFormsOf(unitId)) {
+      i = order.indexOf(f);
+      if (i >= 0) break;
+    }
     if (i >= 0) return autoColorAt(i);
-    return colorFor(rel, order: order);
+    return colorFor(relOf(unitId), order: order);
   }
 
   /// P1：词条外观。四种层级共用同一圆角与内边距，只改边框与底纹强度，
@@ -331,11 +332,10 @@ class LibraryBadge {
   /// 表里会有 `unitId → unitId`；否则它是下级单元库。
   static LibEntryKind entryKindOfUnit(String unitId) {
     if (unitId.isEmpty || unitId == 'secret') return LibEntryKind.other;
-    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
-    String? top =
-        topOfUnit[unitId] ?? topOfUnit[rel] ?? topOfUnit['node:$rel'];
+    final rel = relOf(unitId);
+    final top = lookupByLibId(topOfUnit, unitId);
     if (top == null) return LibEntryKind.other;
-    final topRel = top.startsWith('node:') ? top.substring(5) : top;
+    final topRel = relOf(top);
     return (top == unitId || top == rel || topRel == rel)
         ? LibEntryKind.top
         : LibEntryKind.unit;
@@ -344,8 +344,7 @@ class LibraryBadge {
   /// 顶级单元库自定义色；没设过返回 null（调用方继续走自动配色/继承链）。
   static int? topColorFor(String topId) {
     if (topId.isEmpty) return null;
-    final rel = topId.startsWith('node:') ? topId.substring(5) : topId;
-    return topCustom[topId] ?? topCustom[rel] ?? topCustom['node:$rel'];
+    return lookupByLibId(topCustom, topId);
   }
 
   /// 基础库词条色：自己的自定义色优先，其次继承所属上级单元库 →
@@ -359,10 +358,7 @@ class LibraryBadge {
     // P1 分发规则：上级单元库自定义色只有它是末梢时才分发到这里；
     // 非末梢单元库只影响自己那层，基础库继续继承顶级单元库色。
     if (unitId.isNotEmpty && !canDistribute(unitId)) {
-      final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
-      final topId = topOfUnit[unitId] ??
-          topOfUnit[rel] ??
-          topOfUnit['node:$rel'];
+      final topId = lookupByLibId(topOfUnit, unitId);
       final inherited = topId == null ? null : topColorFor(topId);
       if (inherited != null) return inherited;
       return colorForUnit(unitId, order: order, allowCustom: false);
@@ -392,12 +388,8 @@ class LibraryBadge {
   /// 设置/清除顶级单元库颜色。清空即撤销该顶级单元库的向下继承。
   static Future<void> setTopColor(String topId, int? argb) async {
     if (topId.isEmpty) return;
-    final rel = topId.startsWith('node:') ? topId.substring(5) : topId;
     if (topColorFor(topId) == argb) return;
-    topCustom
-      ..remove(topId)
-      ..remove(rel)
-      ..remove('node:$rel');
+    removeByLibId(topCustom, topId);
     if (argb != null) topCustom[topId] = argb;
     _bump();
     await saveTop();
@@ -464,8 +456,7 @@ class LibraryBadge {
   /// 之间不一致，两种形式都查；顶级 SECRET / 空 id 不显示。
   static String emojiFor(String unitId) {
     if (unitId.isEmpty || unitId == 'secret') return '';
-    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
-    return emoji[unitId] ?? emoji[rel] ?? emoji['node:$rel'] ?? '';
+    return lookupByLibId(emoji, unitId) ?? '';
   }
 
   /// 词条展示文字：去序号后的名称 + 该库 emoji 后缀。
@@ -554,8 +545,7 @@ class LibraryBadge {
   /// 设置页用它判断「自动 / 自定义」，避免只删一种 id 后仍显示自定义色。
   static int? customColorFor(String unitId) {
     if (unitId.isEmpty) return null;
-    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
-    return custom[unitId] ?? custom[rel] ?? custom['node:$rel'];
+    return lookupByLibId(custom, unitId);
   }
 
   /// 设置或清除单元库自定义颜色。
@@ -563,11 +553,7 @@ class LibraryBadge {
   static Future<void> setColor(String libId, int? argb) async {
     if (libId.isEmpty) return;
     if (customColorFor(libId) == argb) return;
-    final rel = libId.startsWith('node:') ? libId.substring(5) : libId;
-    custom
-      ..remove(libId)
-      ..remove(rel)
-      ..remove('node:$rel');
+    removeByLibId(custom, libId);
     if (argb != null) custom[libId] = argb;
     _bump();
     await save();
@@ -579,13 +565,9 @@ class LibraryBadge {
   /// 一起清掉，避免两种 id 各留一份导致显示不一致。
   static Future<void> setEmoji(String unitId, String? value) async {
     if (unitId.isEmpty) return;
-    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
     final v = sanitizeEmoji(value ?? '');
     if (emojiFor(unitId) == v) return;
-    emoji
-      ..remove(unitId)
-      ..remove(rel)
-      ..remove('node:$rel');
+    removeByLibId(emoji, unitId);
     if (v.isNotEmpty) emoji[unitId] = v;
     _bump();
     await saveEmoji();

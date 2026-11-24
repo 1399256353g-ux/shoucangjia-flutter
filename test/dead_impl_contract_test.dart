@@ -786,4 +786,57 @@ void main() {
           reason: '又出现了一个「enabled && 就绪」的第二判定口');
     });
   });
+
+  // 第十八批（0.9.220）：`node:` 前缀归一曾写 14 遍。
+  //
+  // 危害不是「代码重复」这么抽象：`library_badge.dart` 10 处、`main.dart` 1 处、
+  // `unit_library.dart` 2 处各自 `m[id] ?? m[rel] ?? m['node:$rel']`，其中一处
+  // 顺序写反就会出现「设置页显示自定义、卡片上还是自动色」。归一到 lib_id.dart
+  // 之后，任何调用点再手写这套链都会静默分叉，所以从代码层面禁掉。
+  group('第十八批：库 id 归一只有一套规则', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('生产代码里不得再手剥 node: 前缀', () {
+      final libs = Directory('lib')
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))
+          .toList();
+      final offenders = <String>[];
+      for (final f in libs) {
+        if (f.path.endsWith('lib_id.dart')) continue; // 规则本体
+        final s = f.readAsStringSync();
+        if (s.contains("substring(5)")) offenders.add(f.path);
+      }
+      expect(offenders, isEmpty,
+          reason: '这些文件又自己剥了 node: 前缀，改走 relOf/idFormsOf');
+    });
+
+    test('不得再手写「三种 id 形式」的查表链', () {
+      for (final f in ['lib/library_badge.dart', 'lib/main.dart',
+                       'lib/unit_library.dart']) {
+        final s = codeOf(f);
+        // 典型分叉写法：`x[id] ?? x[rel] ?? x['node:$rel']`。
+        // 只禁「回退到另一种 id 形式」这一种链；构造 id（`id: 'node:$rel'`）
+        // 与别的规则的 ?? 链（如 `covers[rel] ?? covers[raw]`）不在此列。
+        expect(RegExp(r"\?\?\s*\w+\[\s*'node:").hasMatch(s), isFalse,
+            reason: '$f 又手写了 node: 形式回退查表；用 lookupByLibId');
+        expect(RegExp(r"\?\?\s*\w+\[\s*(rel|prefixed)\s*\]").hasMatch(s),
+            isFalse,
+            reason: '$f 又手写了一串 ?? 查表；用 lookupByLibId');
+      }
+    });
+
+    test('lib_id 的四个入口都在，删除是幂等的', () {
+      final s = codeOf('lib/lib_id.dart');
+      for (final k in ['String relOf(', 'List<String> idFormsOf(',
+                       'T? lookupByLibId<T>(', 'int removeByLibId<T>(']) {
+        expect(s.contains(k), isTrue, reason: '$k 不见了');
+      }
+    });
+  });
 }

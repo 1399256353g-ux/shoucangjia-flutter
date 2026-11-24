@@ -64,6 +64,7 @@ import 'home_action.dart';
 import 'lib_names.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
+import 'lib_id.dart';
 export 'library_badge.dart' show LibBadgeChip, LibEntryKind;
 import 'library_corner_badge.dart';
 import 'home_top_bar.dart';
@@ -488,11 +489,9 @@ class LibMeta {
   /// P3：单元库 → 所属顶级节点 id。顶级节点自身返回自己。
   String topIdFor(String unitId) {
     if (unitId.isEmpty) return '';
-    final rel = unitId.startsWith('node:') ? unitId.substring(5) : unitId;
+    final rel = relOf(unitId);
     final pre = 'node:$rel';
-    final t = LibraryBadge.topOfUnit[unitId] ??
-        LibraryBadge.topOfUnit[rel] ??
-        LibraryBadge.topOfUnit[pre];
+    final t = lookupByLibId(LibraryBadge.topOfUnit, unitId);
     if (t != null) return t;
     // 注册表未加载时兑底：只接受「本身就是顶级」的精确命中，不猜。
     for (final top in tops) {

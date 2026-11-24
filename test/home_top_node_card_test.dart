@@ -68,6 +68,65 @@ void main() {
     expect(find.byKey(const ValueKey('unit-cover-tint')), findsNothing);
   });
 
+  testWidgets('顶级单元库卡片带词条色块：有层级图案、无重复文字', (t) async {
+    LibraryBadge.topCustom['top-1'] = 0xFF1D4ED8;
+    await t.pumpWidget(host(UnitLibraryHomeView(
+      tree: tree,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (_) {},
+      onTapBasic: (_) {},
+      onOpenStars: () {},
+      topCoverOf: (_) => '',
+    )));
+
+    // 词条色块出现，尺寸固定（形状尺寸四级一致）。
+    final swatch = find.byKey(const ValueKey('unit-top-entry-top-1'));
+    expect(swatch, findsOneWidget);
+    final box = t.getSize(swatch);
+    expect(box.width, kTopEntrySwatchSize);
+    expect(box.height, kTopEntrySwatchSize);
+
+    // 色块里没有文字：名字只出现一次（标题），词条不重复名字。
+    expect(find.text('T1'), findsOneWidget);
+    expect(
+        find.descendant(of: swatch, matching: find.byType(Text)), findsNothing);
+  });
+
+  testWidgets('词条色块随顶级单元库自定义色变化', (t) async {
+    await t.pumpWidget(host(UnitLibraryHomeView(
+      tree: tree,
+      stars: const {},
+      onOpenUnit: (_) {},
+      onToggleUnitStar: (_) {},
+      onTapBasic: (_) {},
+      onOpenStars: () {},
+      topCoverOf: (_) => '',
+    )));
+    Color swatchColor() {
+      final c = t.widget<Container>(
+          find.byKey(const ValueKey('unit-top-entry-top-1')));
+      return (c.decoration! as BoxDecoration).color!;
+    }
+
+    final before = swatchColor();
+    LibraryBadge.topCustom['top-1'] = 0xFF00FF00;
+    LibraryBadge.revision.value++;
+    await t.pumpAndSettle();
+    expect(swatchColor(), isNot(before));
+    // 底纹浓度由 LibEntryKind.top 决定，不是满不透明。
+    expect(swatchColor().a, lessThan(1.0));
+  });
+
+  testWidgets('非首页卡片（下级单元库）不带顶级词条色块', (t) async {
+    await t.pumpWidget(host(UnitLibraryCard(
+      unit: tree.children.first,
+      headers: const {},
+    )));
+    final id = tree.children.first.id;
+    expect(find.byKey(ValueKey('unit-top-entry-$id')), findsNothing);
+  });
+
   testWidgets('顶级单元库卡片显示连接状态', (t) async {
     await t.pumpWidget(host(UnitLibraryHomeView(
       tree: tree,

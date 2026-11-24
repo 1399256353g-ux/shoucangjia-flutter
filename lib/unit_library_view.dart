@@ -70,6 +70,29 @@ int unitCardDecodeWidth(double devicePixelRatio) => decodeWidthForDisplay(
       maxWidth: kUnitCardMaxDecodeWidth,
     );
 
+/// P3：首页顶级单元库卡片上的词条色块边长（逻辑像素）。
+///
+/// 尺寸固定、不随层级变化——「形状与尺寸一致」是词条体系的硬约束，
+/// 四种词条只在边框/底纹/图案上区分。
+const double kTopEntrySwatchSize = 14;
+const double kTopEntrySwatchPadding = 2.5;
+
+/// 词条色块里的层级图案：与角标共用 [paintCornerGlyph]，只做重绘判定。
+class _SwatchGlyphPainter extends CustomPainter {
+  final int pattern;
+  final Color color;
+
+  const _SwatchGlyphPainter({required this.pattern, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) =>
+      paintCornerGlyph(canvas, size, pattern, color);
+
+  @override
+  bool shouldRepaint(covariant _SwatchGlyphPainter old) =>
+      old.pattern != pattern || old.color != color;
+}
+
 /// 库卡片底部信息层：词条（基础库才有）→ 名称 → 统计 → 服务器。
 ///
 /// [dense] 用于网格更小的基础库卡片（字号/内边距各缩一档），层级与
@@ -788,6 +811,43 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
       // 播放次数变化（WorkPlaysStore）只重绘当前卡片，不带动整块网格。
       RepaintBoundary(child: _buildCard(context));
 
+  /// P3：顶级单元库词条色块（无文字，避免与标题重复）。
+  ///
+  /// 底色取该库生效的顶级词条色，边框/底纹取 [LibEntryKind.top] 的外观，
+  /// 图案与左上角角标同源（[paintCornerGlyph]），三层信息不打架：
+  /// 角标说「这是顶级库」，色块说「属于哪个顶级库、什么颜色」。
+  Widget _topEntrySwatch(UnitLibrary unit) {
+    // 订阅词条唯一变更信号：设置页改色后，已经摆在首页的卡片立即跟着变。
+    // 与 LibBadgeChip 用同一个 notifier，不引入第二套通知机制。
+    return ValueListenableBuilder<int>(
+      valueListenable: LibraryBadge.revision,
+      builder: (_, __, ___) => _paintTopEntrySwatch(unit),
+    );
+  }
+
+  Widget _paintTopEntrySwatch(UnitLibrary unit) {
+    final argb = LibraryBadge.topColorFor(unit.id) ??
+        LibraryBadge.colorForUnit(unit.id, order: UnitBadgeRegistry.order);
+    final deco = LibraryBadge.decorationFor(LibEntryKind.top, argb);
+    final fg = Color(LibraryBadge.textColorOn(argb));
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        key: ValueKey('unit-top-entry-${unit.id}'),
+        width: kTopEntrySwatchSize,
+        height: kTopEntrySwatchSize,
+        decoration: deco,
+        padding: const EdgeInsets.all(kTopEntrySwatchPadding),
+        child: CustomPaint(
+          painter: _SwatchGlyphPainter(
+            pattern: LibraryCornerBadge.patternFor(LibBadgeKind.top),
+            color: fg,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCard(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final unit = widget.unit;
@@ -839,6 +899,12 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
               right: 0,
               bottom: 0,
               child: LibCardInfo(
+                // P3：首页卡片要能看到「顶级单元库词条」。它不写文字——
+                // 名字就在下方标题里，重复一遍只是噪声（0.9.191 踩过）。
+                // 这里给的是该层级真实外观的**色块 + 层级图案**：
+                // 底色＝顶级词条色，边框/底纹走 LibEntryKind.top，
+                // 图案与角标同一套绘制，所以「词条在哪个库」一眼可读。
+                badge: widget.topCard ? _topEntrySwatch(unit) : null,
                 title: unit.name,
                 unitId: unit.id,
                 stats: '${formatCount(unit.authors)} 作者 · '

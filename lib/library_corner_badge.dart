@@ -224,22 +224,18 @@ class LibCornerBadge extends StatelessWidget {
 
 }
 
-/// 内置图案：只用标准几何形状绘制，跨平台一致、无字体依赖。
-class _CornerGlyphPainter extends CustomPainter {
-  final int pattern;
-  final Color color;
-
-  const _CornerGlyphPainter({required this.pattern, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill
-      ..isAntiAlias = true;
-    final w = size.width, h = size.height;
-    final cx = w / 2, cy = h / 2;
-    switch (pattern % kCornerPatternNames.length) {
+/// 内置图案的唯一绘制实现：只用标准几何形状，跨平台一致、无字体依赖。
+///
+/// 角标（[LibCornerBadge]）与词条（`LibBadgeChip` 的 glyphOnly 形态）都调
+/// 这一个函数——层级图案只允许有一套画法，否则同一层级会在两处长得不一样。
+void paintCornerGlyph(Canvas canvas, Size size, int pattern, Color color) {
+  final p = Paint()
+    ..color = color
+    ..style = PaintingStyle.fill
+    ..isAntiAlias = true;
+  final w = size.width, h = size.height;
+  final cx = w / 2, cy = h / 2;
+  switch (pattern % kCornerPatternNames.length) {
       case 0: // 六边形
         final path = Path();
         for (var i = 0; i < 6; i++) {
@@ -327,9 +323,19 @@ class _CornerGlyphPainter extends CustomPainter {
         path.close();
         canvas.drawPath(path, p);
         break;
-    }
   }
+}
 
+/// 角标本体：把 [paintCornerGlyph] 包成 painter（只负责重绘判定）。
+class _CornerGlyphPainter extends CustomPainter {
+  final int pattern;
+  final Color color;
+
+  const _CornerGlyphPainter({required this.pattern, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) =>
+      paintCornerGlyph(canvas, size, pattern, color);
 
   @override
   bool shouldRepaint(covariant _CornerGlyphPainter old) =>

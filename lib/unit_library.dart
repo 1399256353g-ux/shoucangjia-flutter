@@ -16,6 +16,7 @@
 // basicLibraries（基础库，带 rel 相对路径）。
 
 import 'disk_name.dart';
+import 'lib_id.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
@@ -552,8 +553,10 @@ Map<String, String> topOfUnitIds(UnitLibrary root) {
   final out = <String, String>{};
   void walk(UnitLibrary u, String top) {
     if (top.isNotEmpty) {
-      out[u.id] = top;
-      if (u.id.startsWith('node:')) out[u.id.substring(5)] = top;
+      // 两种 id 形式都登记，查询端统一走 lookupByLibId，不必自己归一。
+      for (final f in idFormsOf(u.id)) {
+        out[f] = top;
+      }
       out['node:${u.rel}'] = top;
     }
     for (final c in u.children) {
@@ -575,9 +578,11 @@ Map<String, bool> leafUnitIds(UnitLibrary root) {
   final out = <String, bool>{};
   void walk(UnitLibrary u) {
     final leaf = u.isLeaf;
-    out[u.id] = leaf;
+    // 与 topOfUnitIds 同一份等价键规则（含裸 rel 与带前缀形式）。
+    for (final f in idFormsOf(u.id)) {
+      out[f] = leaf;
+    }
     out['node:${u.rel}'] = leaf;
-    if (u.id.startsWith('node:')) out[u.id.substring(5)] = leaf;
     for (final c in u.children) {
       walk(c);
     }
