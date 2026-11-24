@@ -19,6 +19,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'basic_auth.dart';
 import 'rank_medal.dart';
+import 'time_labels.dart';
 import 'cover_admin.dart';
 import 'haptics.dart';
 import 'cover_cache.dart';
@@ -12871,9 +12872,7 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   String fmt(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
+    return formatClock(d);
   }
 
   // G12：失败提示卡片（标题 + 说明 + 重试），盖在画面上但不影响返回键。
@@ -15310,10 +15309,7 @@ String? validateAuthorBio(String raw) {
 /// 服务端 bioAt（秒）→ 本地时间；0/负数返回空串。
 String formatAuthorBioAt(int ts) {
   if (ts <= 0) return '';
-  final t = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-  String two(int v) => v < 10 ? '0$v' : '$v';
-  return '${t.year}-${two(t.month)}-${two(t.day)} '
-      '${two(t.hour)}:${two(t.minute)}';
+  return yearMonthDayTimeOfSec(ts);
 }
 
 /// J12b/J13：作者头像/简介写入结果。

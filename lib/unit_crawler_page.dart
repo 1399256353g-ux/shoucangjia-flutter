@@ -7,6 +7,7 @@ import 'home_action.dart';
 import 'interval_label.dart';
 import 'collection_sync_panel.dart';
 import 'sync_log_panel.dart';
+import 'time_labels.dart';
 import 'unit_crawler.dart';
 import 'unit_library.dart';
 
@@ -413,10 +414,7 @@ class _ScheduleSummary extends StatelessWidget {
 
   static String _t(dynamic v) {
     final ms = (v is num) ? v.toInt() : int.tryParse('${v ?? ''}') ?? 0;
-    if (ms <= 0) return '—';
-    final d = DateTime.fromMillisecondsSinceEpoch(ms);
-    String two(int x) => x.toString().padLeft(2, '0');
-    return '${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+    return monthDayTimeOfMs(ms);
   }
 
   @override

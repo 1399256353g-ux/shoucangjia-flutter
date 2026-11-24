@@ -8,6 +8,8 @@ library;
 
 import 'dart:convert';
 
+import 'time_labels.dart';
+
 /// 单条同步结果。
 class SyncRunItem {
   final String id;
@@ -209,12 +211,7 @@ SyncLog parseSyncLog(dynamic raw) {
 }
 
 /// `11-23 17:05`（本地时区）；无效时间返回 `—`。
-String syncTimeLabel(int ms) {
-  if (ms <= 0) return '—';
-  final d = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
-  String two(int x) => x.toString().padLeft(2, '0');
-  return '${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
-}
+String syncTimeLabel(int ms) => monthDayTimeOfMs(ms);
 
 /// `820ms` / `2.4s` / `1m 05s`。
 String syncDurationLabel(int ms) {

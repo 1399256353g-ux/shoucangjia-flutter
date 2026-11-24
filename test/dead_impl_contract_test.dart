@@ -432,4 +432,80 @@ void main() {
       expect(main.contains('@override\n  @override'), isFalse);
     });
   });
+
+  group('第十二批：同规则多份实现收口', () {
+    test('字节文案只有 formatBytes 一处（负数=0 B、四级含 GB）', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('byte_size.dart'))
+          .where((f) =>
+              f.readAsStringSync().contains("toStringAsFixed(2)} GB") ||
+              f.readAsStringSync().contains("toStringAsFixed(1)} KB"))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '字节分级又抄了一份：$offenders');
+      final src = libSourceAll();
+      expect(src.contains('String formatBytes(int n)'), isTrue);
+      // 三处旧实现必须都是转调，不得各自再写一遍分级。
+      expect(src.contains('String get human => formatBytes(bytes);'), isTrue);
+      expect(src.contains('static String bytesText(int b) => formatBytes(b);'),
+          isTrue);
+    });
+
+    test('封面扩展名两条规则各只有一处定义', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('cover_ext.dart'))
+          .where((f) => f.readAsStringSync().contains("'.heic'"))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '可显示图片白名单又抄了一份：$offenders');
+      final src = libSourceAll();
+      // 规则 A（能否渲染）与规则 B（能否存成版本）是两个不同集合，都必须只剩一处。
+      expect(
+          RegExp(r"const List<String> kCoverImageExts").allMatches(src).length, 1);
+      expect(RegExp(r"const List<String> kCoverExts").allMatches(src).length, 1);
+      expect(
+          RegExp(r"bool isCoverImagePath\(String p\)").allMatches(src).length, 1);
+      expect(src.contains('_isCoverImage('), isFalse,
+          reason: 'media_priority 的私有副本必须删掉，改为转调 isCoverImagePath');
+    });
+
+    test('MM-dd HH:mm 时间文案只有一处（批次键 UTC 是唯一例外）', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('time_labels.dart'))
+          .where((f) => RegExp(r"padLeft\(2, '0'\)")
+              .hasMatch(f.readAsStringSync()))
+          .where((f) => RegExp(r"\{two\((d|l|t|u|at|l)\.month\)\}")
+              .hasMatch(f.readAsStringSync()))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '时间两位补零又抄了一份：$offenders');
+      final dm = File('lib/deleted_monitor.dart').readAsStringSync();
+      // 批次键必须保持 UTC：跨时区时同一批不能被拆成两组。
+      expect(dm.contains('yearMonthDayTimeUtc(t)'), isTrue,
+          reason: 'syncKeyOf 的 UTC 是有意的，改成本地时区会让批次键随时区漂移');
+      expect(dm.contains('syncKeyOf(String at)'), isTrue);
+      expect(dm.contains('monthDayTimeOfIso(at, fallback: at)'), isTrue,
+          reason: '展示用的 atLabel/syncLabel 必须走本地时区的统一实现');
+    });
+
+    test('播放位置时间进位：进度行与进度条不再各写一份', () {
+      final main = File('lib/main.dart').readAsStringSync();
+      expect(main.contains('String fmt(Duration d) {'), isTrue);
+      expect(main.contains('return formatClock(d);'), isTrue,
+          reason: '播放页时间必须走统一进位实现（65 分钟要显示 1:05:03）');
+      expect(main.contains('inMinutes.remainder(60)'), isFalse,
+          reason: '不进位的旧写法又回来了');
+      final pm = File('lib/playback_menu.dart').readAsStringSync();
+      expect(pm.contains('String formatMenuPosition(int ms) => formatClockMs(ms);'),
+          isTrue);
+    });
+
+    test('封面角标的 m:ss 不补零是有意的，不得并入播放器格式', () {
+      final cb = File('lib/cover_badges.dart').readAsStringSync();
+      expect(cb.contains('formatClockSeconds(total.round())'), isFalse,
+          reason: '角标用 m:ss（0:05），播放器用 mm:ss（00:05）：并入会改掉角标显示');
+      expect(cb.contains("h > 0 ? m.toString().padLeft(2, '0') : m.toString()"),
+          isTrue);
+    });
+  });
 }

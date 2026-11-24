@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'http_error_text.dart';
+import 'cover_ext.dart';
 
 /// `_cover/` 里的一个历史版本。
 class CoverVersion {
@@ -43,8 +44,6 @@ class CoverVersion {
 /// 服务端返回的版本名只允许 `[A-Za-z0-9_-]`，避免路径穿越。
 final RegExp _kCoverVersionName = RegExp(r'^[A-Za-z0-9_-]{1,40}$');
 
-const Set<String> _kCoverExts = <String>{'jpg', 'jpeg', 'png', 'webp'};
-
 /// 单条版本 JSON → [CoverVersion]；非法条目返回 null。
 CoverVersion? coverVersionFromJson(dynamic raw) {
   if (raw is! Map) return null;
@@ -52,7 +51,7 @@ CoverVersion? coverVersionFromJson(dynamic raw) {
   if (!_kCoverVersionName.hasMatch(v)) return null;
   var e = '${raw['e'] ?? raw['ext'] ?? 'jpg'}'.trim().toLowerCase();
   if (e.startsWith('.')) e = e.substring(1);
-  if (!_kCoverExts.contains(e)) e = 'jpg';
+  if (!kCoverExts.contains(e)) e = 'jpg';
   final u = '${raw['u'] ?? raw['url'] ?? ''}'.trim();
   final at = raw['at'] is num ? (raw['at'] as num).toInt() : 0;
   return CoverVersion(

@@ -13,12 +13,15 @@
 library;
 
 import 'media_priority.dart';
+import 'cover_ext.dart';
+
+// `kCoverExts` / `kCoverImageExts` / `isCoverImagePath` 的唯一定义在
+// `cover_ext.dart`（第十二批收口）；本文件继续 re-export，
+// 使既有 import 点不必改。
+export 'cover_ext.dart' show kCoverExts, kCoverImageExts, isCoverImagePath;
 
 /// 自定义封面目录名（位于库/单元库文件夹内）。
 const String kCoverDir = '_cover';
-
-/// 支持的封面扩展名（按优先级）。
-const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
 
 /// 版本号合法化：只允许 `[A-Za-z0-9_-]`，拒绝路径分隔符与 `..`。
 /// 返回空串表示非法（调用方应回退到下一种封面来源）。
@@ -157,21 +160,6 @@ String libOfMediaPath(String p) {
   final at = rest.indexOf('/');
   if (at <= 0) return '';
   return rest.substring(0, at);
-}
-
-/// 封面必须是图片：视频文件（mp4/mov…）当封面会一直渲染失败。
-const List<String> kCoverImageExts = <String>[
-  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic'
-];
-
-bool isCoverImagePath(String p) {
-  final l = p.trim().toLowerCase();
-  if (l.isEmpty) return false;
-  final q = l.split('?').first;
-  for (final e in kCoverImageExts) {
-    if (q.endsWith(e)) return true;
-  }
-  return false;
 }
 
 /// 最后一级兜底：第一张作品的封面（只收图片）。

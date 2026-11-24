@@ -7,6 +7,7 @@
 library;
 
 import 'watch_progress.dart';
+import 'time_labels.dart';
 
 class PlaybackMenuModel {
   /// 视频是否可续播，以及续播位置（毫秒）。
@@ -45,13 +46,5 @@ PlaybackMenuModel buildPlaybackMenu({
   );
 }
 
-/// 毫秒格式化为 mm:ss（超过 1 小时为 h:mm:ss），菜单副标题使用。
-String formatMenuPosition(int ms) {
-  final total = ms < 0 ? 0 : ms ~/ 1000;
-  final h = total ~/ 3600;
-  final m = (total % 3600) ~/ 60;
-  final s = total % 60;
-  final mm = m.toString().padLeft(2, '0');
-  final ss = s.toString().padLeft(2, '0');
-  return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
-}
+/// 毫秒格式化为 mm:ss（超过 1 小时为 h:mm:ss）；统一走 [formatClockMs]。
+String formatMenuPosition(int ms) => formatClockMs(ms);

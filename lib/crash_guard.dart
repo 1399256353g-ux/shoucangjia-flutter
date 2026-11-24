@@ -12,6 +12,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'byte_size.dart';
+import 'time_labels.dart';
+
 /// 一条错误记录（内存态，最多保留 [CrashLog.maxEntries] 条）。
 class CrashEntry {
   final DateTime at;
@@ -36,11 +39,7 @@ class CrashEntry {
         hits: hits + 1,
       );
 
-  String get timeText {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(at.month)}-${two(at.day)} '
-        '${two(at.hour)}:${two(at.minute)}:${two(at.second)}';
-  }
+  String get timeText => monthDayHms(at);
 
   String get kindLabel => kind == 'widget' ? '界面' : '异步';
 }
@@ -207,15 +206,7 @@ Future<String?> crashLogFileInfo({String? path}) async {
     if (!f.existsSync()) return null;
     final len = f.lengthSync();
     final at = f.statSync().modified;
-    String two(int n) => n.toString().padLeft(2, '0');
-    final size = len < 1024
-        ? '$len B'
-        : (len < 1024 * 1024
-            ? '${(len / 1024).toStringAsFixed(1)} KB'
-            : '${(len / (1024 * 1024)).toStringAsFixed(1)} MB');
-    return '$size · 最近写入 '
-        '${two(at.month)}-${two(at.day)} '
-        '${two(at.hour)}:${two(at.minute)}';
+    return '${formatBytes(len)} · 最近写入 ${monthDayTime(at)}';
   } catch (_) {
     return null;
   }

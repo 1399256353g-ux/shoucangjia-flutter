@@ -16,6 +16,9 @@ String formatBadgeDuration(num? seconds) {
   final h = s ~/ 3600;
   final m = (s % 3600) ~/ 60;
   final sec = s % 60;
+  // 角标贴近封面、横向空间紧：不足 1 小时时分钟**不补零**（`0:05` 而非
+  // `00:05`）。这是与播放页进度（`00:05`）有意的区别，不是同一规则的副本，
+  // 因此不并入 [formatClockSeconds]。
   final mm = h > 0 ? m.toString().padLeft(2, '0') : m.toString();
   final ss = sec.toString().padLeft(2, '0');
   return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';

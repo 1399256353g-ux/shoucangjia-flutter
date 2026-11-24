@@ -11,6 +11,7 @@
 import 'dart:io';
 
 import 'crash_guard.dart';
+import 'time_labels.dart';
 
 /// 一条暂停记录。
 class PauseTraceEntry {
@@ -26,11 +27,7 @@ class PauseTraceEntry {
     required this.stack,
   });
 
-  String get timeText {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(at.hour)}:${two(at.minute)}:${two(at.second)}.'
-        '${at.millisecond.toString().padLeft(3, '0')}';
-  }
+  String get timeText => clockHmsMs(at);
 
   /// 一行文本：`HH:mm:ss.SSS  reason  <- 调用方`。
   String get line {

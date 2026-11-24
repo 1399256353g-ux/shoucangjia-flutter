@@ -4,6 +4,10 @@
 ///
 /// 记录里的 `at` 是爬虫**发现**该作品被删除/不可见的时间，也就是「哪一次同步
 /// 发现的」；页面按分钟聚合成「本次同步」分组，避免只看到一串无来源的时间。
+library;
+
+import 'time_labels.dart';
+
 class DeletedEntry {
   final String at;
   final String author;
@@ -49,14 +53,9 @@ class DeletedEntry {
   /// `at` 的毫秒时间戳；无法解析时为 0。
   int get atMs => DateTime.tryParse(at)?.millisecondsSinceEpoch ?? 0;
 
-  /// `2026-11-17T01:06:37.489Z` → `11-17 09:06`（本地时区）。
-  String get atLabel {
-    final t = DateTime.tryParse(at);
-    if (t == null) return at;
-    final l = t.toLocal();
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
-  }
+  /// `2026-11-17T01:06:37.489Z` → `11-17 09:06`（本地时区）；
+  /// 解析失败时回显原始字符串（这里不能显示 `—`，否则丢线索）。
+  String get atLabel => monthDayTimeOfIso(at, fallback: at);
 
   /// 同步批次键：精确到分钟。同一轮爬虫通常在同一分钟内写入多条。
   String get syncKey => syncKeyOf(at);
@@ -171,18 +170,10 @@ const String kDeletedNotLocalMessage = '仅在收藏列表出现过，未同步�
 String syncKeyOf(String at) {
   final t = DateTime.tryParse(at);
   if (t == null) return at;
-  final u = t.toUtc();
-  String two(int v) => v.toString().padLeft(2, '0');
-  return '${u.year}-${two(u.month)}-${two(u.day)}T${two(u.hour)}:${two(u.minute)}';
+  return yearMonthDayTimeUtc(t);
 }
 
-String syncLabelOf(String at) {
-  final t = DateTime.tryParse(at);
-  if (t == null) return at;
-  final l = t.toLocal();
-  String two(int v) => v.toString().padLeft(2, '0');
-  return '${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
-}
+String syncLabelOf(String at) => monthDayTimeOfIso(at, fallback: at);
 
 class DeletedReport {
   final int total;
@@ -200,12 +191,8 @@ class DeletedReport {
 
   static const empty = DeletedReport(total: 0, updated: 0, items: []);
 
-  String get updatedLabel {
-    if (updated <= 0) return '';
-    final t = DateTime.fromMillisecondsSinceEpoch(updated * 1000).toLocal();
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
-  }
+  String get updatedLabel =>
+      updated <= 0 ? '' : yearMonthDayTimeOfSec(updated);
 
   /// 最近一次同步发现（按 `at` 最大）。
   String get lastDiscoveryLabel {

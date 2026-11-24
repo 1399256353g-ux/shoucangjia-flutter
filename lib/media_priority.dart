@@ -15,6 +15,8 @@
 ///    图文作品图片，没有图片作品时才取最高播放视频的帧。
 library;
 
+import 'cover_ext.dart';
+
 /// 取图来源层级，数值越小优先级越高。
 enum MediaTier {
   manual(0),
@@ -82,19 +84,7 @@ String pickAvatarPath({
 
 /// 封面必须是图片：视频文件（mp4/mov…）当封面会渲染失败，
 /// 表现成「库封面从来没显示过」。
-const List<String> _coverImageExts = <String>[
-  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic'
-];
-
-bool _isCoverImage(String p) {
-  final l = p.trim().toLowerCase();
-  if (l.isEmpty) return false;
-  final q = l.split('?').first;
-  for (final e in _coverImageExts) {
-    if (q.endsWith(e)) return true;
-  }
-  return false;
-}
+/// 判定落在 [isCoverImagePath]（唯一定义在 `cover_ext.dart`）。
 
 /// 封面取图：手动 > 爬虫 > 自动；同级按时间新→旧。
 ///
@@ -111,6 +101,6 @@ String pickCoverPath({
     MediaCandidate(manual, MediaTier.manual, at: manualAt),
     MediaCandidate(crawler, MediaTier.crawler, at: crawlerAt),
     MediaCandidate(auto, MediaTier.auto, at: autoAt),
-  ].where((c) => _isCoverImage(c.path)).toList();
+  ].where((c) => isCoverImagePath(c.path)).toList();
   return pickMediaPath(candidates);
 }

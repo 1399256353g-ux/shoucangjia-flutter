@@ -7,6 +7,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'byte_size.dart';
+
 /// `/api/cache/stats` 的解析结果；字段缺失一律按 0，不抛异常。
 class ResizeCacheStats {
   final int files;
@@ -75,16 +77,8 @@ class ResizeCacheStats {
     );
   }
 
-  /// 人类可读字节：B / KB / MB / GB，保留一位小数。
-  static String bytesText(int b) {
-    if (b <= 0) return '0 B';
-    if (b < 1024) return '$b B';
-    final kb = b / 1024;
-    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
-    final mb = kb / 1024;
-    if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
-    return '${(mb / 1024).toStringAsFixed(2)} GB';
-  }
+  /// 人类可读字节；口径统一在 [formatBytes]（B / 1 位 KB / 1 位 MB / 2 位 GB）。
+  static String bytesText(int b) => formatBytes(b);
 
   /// 「33.0 MB / 1.50 GB」；未知上限时只显示占用。
   String get usageText => maxBytes > 0

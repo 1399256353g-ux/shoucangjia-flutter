@@ -14,6 +14,7 @@ import 'package:flutter/widgets.dart';
 
 import 'decode_plan.dart';
 import 'perf_diagnostics.dart';
+import 'time_labels.dart';
 
 /// 首屏需要预热的封面张数。
 ///
@@ -83,8 +84,7 @@ class ThumbPrefetchStats {
   String get lastRunText {
     final t = lastRun;
     if (t == null) return '尚未预热';
-    String two(int v) => v.toString().padLeft(2, '0');
-    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}';
+    return clockHms(t);
   }
 }
 

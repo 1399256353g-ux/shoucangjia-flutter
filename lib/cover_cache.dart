@@ -20,6 +20,12 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'byte_size.dart';
+
+// `formatBytes` 的唯一定义在 `byte_size.dart`（第十二批收口）；
+// 这里 re-export，使既有 import 'cover_cache.dart' 的调用点与测试不必改。
+export 'byte_size.dart' show formatBytes;
+
 /// Windows 缓存根目录（E 盘；严禁 C 盘）。
 const String kWindowsCacheDir = r'E:\Dizi\cache\covers';
 
@@ -32,15 +38,6 @@ class CacheUsage {
   static const CacheUsage empty = CacheUsage(0, 0);
 
   String get human => formatBytes(bytes);
-}
-
-String formatBytes(int n) {
-  if (n < 1024) return '$n B';
-  if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
-  if (n < 1024 * 1024 * 1024) {
-    return '${(n / (1024 * 1024)).toStringAsFixed(1)} MB';
-  }
-  return '${(n / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
 }
 
 /// 自定义缓存目录：缓存文件只写在这里。

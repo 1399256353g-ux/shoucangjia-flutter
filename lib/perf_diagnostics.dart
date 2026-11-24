@@ -15,6 +15,8 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'time_labels.dart';
+
 /// 日志文件上限：超过就先截断（清空）再写。
 const int kPerfLogMaxBytes = 1024 * 1024;
 
@@ -25,13 +27,7 @@ const String kPerfLogFileName = 'perf.log';
 const int kPerfTimelineLimit = 200;
 
 /// 本地时间 → `2026-11-17T23:14:05.123`（带毫秒，便于对齐卡顿时间点）。
-String perfIsoMs(DateTime at) {
-  String two(int n) => n.toString().padLeft(2, '0');
-  String three(int n) => n.toString().padLeft(3, '0');
-  return '${at.year.toString().padLeft(4, '0')}-${two(at.month)}-${two(at.day)}'
-      'T${two(at.hour)}:${two(at.minute)}:${two(at.second)}'
-      '.${three(at.millisecond)}';
-}
+String perfIsoMs(DateTime at) => isoLikeLocalMs(at);
 
 /// 一行日志：时间 + 标签 + `k=v` 字段（保持字段插入顺序）。
 ///
