@@ -1105,6 +1105,10 @@ class UnitLibraryPage extends StatefulWidget {
   /// L5-D：非顶级单元库可配置独立爬虫（SECRET 顶级不显示入口）。
   final void Function(UnitLibrary unit)? onConfigureUnit;
 
+  /// A1：作者文件夹挂载（合并同名作者 / 拆分 / 新建作者目录）。
+  /// 顶级单元库（rel 为空）不显示入口——它没有可挂载的作者目录。
+  final void Function(UnitLibrary unit)? onMountAuthors;
+
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。
   final CoverUploader? coverUploader;
 
@@ -1128,6 +1132,7 @@ class UnitLibraryPage extends StatefulWidget {
     this.coverUploader,
     this.coverMenuOf,
     this.refreshOf,
+    this.onMountAuthors,
   });
 
   @override
@@ -1272,6 +1277,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     final onToggleUnitStar = widget.onToggleUnitStar;
     final onTapBasic = widget.onTapBasic;
     final onConfigureUnit = widget.onConfigureUnit;
+    final onMountAuthors = widget.onMountAuthors;
     final liveStars = StarStore.instance.ready ? StarStore.instance.ids : stars;
     // 只列直属基础库；下级基础库跟随各自的单元库，避免 SECRET 直通全部。
     final sorted = unit.basics;
@@ -1295,6 +1301,13 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
               LibraryBadge.stripIndex(unit.name), unit.id)),
           actions: [
         const HomeAction(),
+        if (onMountAuthors != null && unit.rel.trim().isNotEmpty)
+          IconButton(
+            key: ValueKey('unit-author-mount-${unit.id}'),
+            tooltip: '作者文件夹挂载',
+            icon: const Icon(Icons.folder_shared_outlined),
+            onPressed: () => onMountAuthors(unit),
+          ),
         if (onConfigureUnit != null && UnitLibraryCard.canConfigure(unit))
           IconButton(
             key: ValueKey('unit-crawler-${unit.id}'),

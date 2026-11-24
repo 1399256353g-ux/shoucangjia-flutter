@@ -839,4 +839,80 @@ void main() {
       }
     });
   });
+
+  // 第十九批（0.9.221）：A1 作者文件夹挂载——服务端早就有，客户端长期没有入口。
+  //
+  // 这一批的风险不是「写错」，而是**协议字符串被抄第二份**：
+  // `unit-author-groups.json` 与四个 action 名（merge/split/setFiles/delete）
+  // 一旦在页面里再拼一遍，服务端改字段时只会改到其中一处，表现是
+  // 「有的操作生效、有的静默 400」。
+  group('第十九批：作者挂载协议只有一处', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('接口路径只在 unit_author_groups.dart 出现', () {
+      final libs = Directory('lib')
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))
+          .toList();
+      final offenders = <String>[];
+      for (final f in libs) {
+        if (f.path.endsWith('unit_author_groups.dart')) continue;
+        final s = codeOf(f.path);
+        for (final p in [
+          '/api/unit-author-groups.json',
+          '/api/unit/authors.json',
+          '/api/unit/authors/create',
+        ]) {
+          if (s.contains(p)) offenders.add('${f.path} → $p');
+        }
+      }
+      expect(offenders, isEmpty,
+          reason: '这些文件又自己拼了一份作者挂载地址，改走 unit_author_groups.dart');
+    });
+
+    test('四个 action 名不得在页面里手写', () {
+      final page = codeOf('lib/unit_author_mount_page.dart');
+      for (final a in ['"merge"', "'merge'", '"split"', "'split'",
+                       '"setFiles"', "'setFiles'", '"delete"', "'delete'"]) {
+        expect(page.contains(a), isFalse,
+            reason: '页面里手写了 action 字符串 $a；用 UnitAuthorAction');
+      }
+      final model = codeOf('lib/unit_author_groups.dart');
+      for (final a in ["merge('merge')", "split('split')",
+                       "setFiles('setFiles')", "delete('delete')"]) {
+        expect(model.contains(a), isTrue, reason: 'UnitAuthorAction 少了 $a');
+      }
+    });
+
+    test('作者目录 @ 规则只有一处入口', () {
+      final model = codeOf('lib/unit_author_groups.dart');
+      expect(model.contains('String? authorDirError('), isTrue);
+      expect(model.contains('String authorDirForName('), isTrue);
+      // 页面不得自己判 @ 前缀（否则改名规则要改两处）。
+      final page = codeOf('lib/unit_author_mount_page.dart');
+      expect(page.contains("startsWith('@')"), isFalse,
+          reason: '页面自己判 @ 前缀；用 authorDirError');
+    });
+
+    test('挂载入口从单元库页接到主页（否则等于没做）', () {
+      final view = codeOf('lib/unit_library_view.dart');
+      expect(view.contains('onMountAuthors'), isTrue,
+          reason: '单元库页没有挂载入口参数');
+      final main = codeOf('lib/main.dart');
+      expect(main.contains('_openUnitAuthorMount'), isTrue,
+          reason: '主页没有把挂载面板接上');
+      expect(
+          RegExp(r'onMountAuthors:\s*_openUnitAuthorMount')
+              .allMatches(main)
+              .length,
+          2,
+          reason: '一级/下级单元库页的挂载入口数量不对');
+      expect(main.contains('UnitAuthorMountPage'), isTrue);
+    });
+  });
 }

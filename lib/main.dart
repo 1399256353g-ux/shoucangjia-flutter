@@ -80,6 +80,7 @@ import 'json_isolate.dart';
 import 'library_tree.dart';
 import 'unit_crawler.dart';
 import 'unit_crawler_page.dart';
+import 'unit_author_mount_page.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
 import 'header_collapse.dart';
@@ -5359,6 +5360,7 @@ class _LibraryPageState extends State<LibraryPage> {
             coverOf: _coverUrlFor,
             unitCoverOf: _unitCoverUrl,
             onConfigureUnit: _openUnitCrawler,
+            onMountAuthors: _openUnitAuthorMount,
             coverUploader: uploadCoverFromPicker,
             coverMenuOf: _coverMenuFor,
             refreshOf: _quickRefresh,
@@ -5369,9 +5371,36 @@ class _LibraryPageState extends State<LibraryPage> {
         coverOf: _coverUrlFor,
         unitCoverOf: _unitCoverUrl,
         onConfigureUnit: _openUnitCrawler,
+        onMountAuthors: _openUnitAuthorMount,
         coverUploader: uploadCoverFromPicker,
         coverMenuOf: _coverMenuFor,
         refreshOf: _quickRefresh,
+      ),
+    ));
+  }
+
+  /// A1：打开作者文件夹挂载面板（合并/拆分/新建作者目录）。
+  ///
+  /// 鉴权头沿用该单元库第一个基础库的连接——与爬虫配置、封面请求同一口径，
+  /// 避免在一个页面里出现「用的不是同一个连接」的情况。
+  void _openUnitAuthorMount(UnitLibrary u) {
+    if (u.rel.trim().isEmpty) return;
+    final base = u.node.serverBase.isNotEmpty
+        ? u.node.serverBase
+        : cfg.baseFor(u.basics.isNotEmpty ? u.basics.first.id : null);
+    var headers =
+        cfg.headersFor(u.basics.isNotEmpty ? u.basics.first.id : null);
+    for (final s in servers) {
+      if (s.base == base) {
+        headers = {'Authorization': basicAuthHeader(s.user, s.pass)};
+        break;
+      }
+    }
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => UnitAuthorMountPage(
+        unit: u,
+        base: base,
+        headers: headers,
       ),
     ));
   }
