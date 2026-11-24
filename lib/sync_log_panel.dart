@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'sync_ledger.dart';
+import 'error_text.dart';
 
 class SyncLogPanel extends StatefulWidget {
   final String base;
@@ -74,7 +75,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        err = '$e';
+        err = errorText(e);
         loading = false;
       });
     }

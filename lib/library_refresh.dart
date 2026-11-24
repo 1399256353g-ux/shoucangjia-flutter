@@ -10,6 +10,8 @@
 // 便于单测覆盖顺序、局部失败与防抖，不需要真的连服务端。
 library;
 
+import 'error_text.dart';
+
 /// 单次快速刷新的结果。
 class LibRefreshOutcome {
   /// 目标库 id（基础库；单元库会解析成它下面的基础库）。
@@ -136,7 +138,7 @@ Future<LibRefreshOutcome> runLibRefresh({
       outcome = parseReindexResponse(200, resp, lib: id, server: server);
     }
   } catch (e) {
-    return LibRefreshOutcome(lib: id, server: server, error: '$e');
+    return LibRefreshOutcome(lib: id, server: server, error: errorText(e));
   }
   if (!outcome.ok) return outcome;
 

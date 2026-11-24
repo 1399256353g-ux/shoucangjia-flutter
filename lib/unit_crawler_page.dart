@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'http_json.dart';
 
 import 'home_action.dart';
 import 'interval_label.dart';
@@ -10,6 +11,8 @@ import 'sync_log_panel.dart';
 import 'time_labels.dart';
 import 'unit_crawler.dart';
 import 'unit_library.dart';
+import 'error_text.dart';
+import 'load_error_view.dart';
 
 /// L5-D：单个单元库的爬虫配置页。
 ///
@@ -78,7 +81,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       final r = await _client
           .get(Uri.parse(_configUrl), headers: widget.headers)
           .timeout(const Duration(seconds: 10));
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -93,7 +96,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
             : const {};
       });
     } catch (e) {
-      if (mounted) setState(() => err = '$e');
+      if (mounted) setState(() => err = errorText(e));
     }
     if (mounted) setState(() => loading = false);
   }
@@ -110,7 +113,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
               },
               body: jsonEncode(config.toJson()))
           .timeout(const Duration(seconds: 10));
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -137,7 +140,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       final r = await _client
           .post(Uri.parse(_runUrl), headers: widget.headers)
           .timeout(const Duration(seconds: 10));
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -328,16 +331,8 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     );
   }
 
-  Widget _errorView() => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('加载失败：$err', textAlign: TextAlign.center),
-            const SizedBox(height: 12),
-            OutlinedButton(onPressed: load, child: const Text('重试')),
-          ]),
-        ),
-      );
+  Widget _errorView() =>
+      LoadErrorView(message: '加载失败：$err', onRetry: load);
 
   Widget _capabilityBanner() {
     final ok = hasScript;

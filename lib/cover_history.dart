@@ -8,6 +8,7 @@ library;
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'http_json.dart';
 
 import 'http_error_text.dart';
 import 'cover_ext.dart';
@@ -123,7 +124,7 @@ Future<CoverListResult> fetchCoverVersions({
       return CoverListResult(
           false, '读取封面历史失败：${coverActionErrorText(r.statusCode)}');
     }
-    final json = jsonDecode(utf8.decode(r.bodyBytes));
+    final json = jsonOf(r);
     return CoverListResult(true, '', versions: parseCoverVersions(json));
   } catch (_) {
     return const CoverListResult(false, '读取封面历史失败：网络异常');
@@ -161,7 +162,7 @@ Future<CoverActionResult> restoreCoverVersion({
     }
     String u = '';
     try {
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       if (j is Map) u = '${j['u'] ?? ''}'.trim();
     } catch (_) {}
     return CoverActionResult(true, '已切换到该封面', url: u);

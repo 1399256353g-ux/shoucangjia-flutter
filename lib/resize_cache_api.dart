@@ -3,11 +3,11 @@
 // 服务端把卡片/头像/海报的缩图落在 NAS `~/.cache/gallery-resize`，只读源图、
 // 不覆盖媒体；总量超过上限时按最久未用自动清理。设置 → 诊断信息里展示
 // 「文件数 / 占用 / 上限 / 命中率」，并提供手动清理（只删缓存，不碰原图）。
-import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
 import 'byte_size.dart';
+import 'http_json.dart';
 
 /// `/api/cache/stats` 的解析结果；字段缺失一律按 0，不抛异常。
 class ResizeCacheStats {
@@ -108,7 +108,7 @@ Future<ResizeCacheStats?> fetchResizeCacheStats(
   try {
     final r = await c.get(uri, headers: headers).timeout(timeout);
     if (r.statusCode != 200) return null;
-    return ResizeCacheStats.fromJson(jsonDecode(utf8.decode(r.bodyBytes)));
+    return ResizeCacheStats.fromJson(jsonOf(r));
   } catch (_) {
     return null;
   } finally {
@@ -135,7 +135,7 @@ Future<String?> pruneResizeCache(
   try {
     final r = await c.get(target, headers: headers).timeout(timeout);
     if (r.statusCode != 200) return null;
-    final j = jsonDecode(utf8.decode(r.bodyBytes));
+    final j = jsonOf(r);
     if (j is! Map) return null;
     final deleted = j['deleted'] is num ? (j['deleted'] as num).round() : 0;
     final freed = j['freed'] is num ? (j['freed'] as num).round() : 0;

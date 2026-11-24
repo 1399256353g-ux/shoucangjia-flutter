@@ -3,9 +3,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'http_json.dart';
 
 import 'home_action.dart';
 import 'top_node.dart';
+import 'error_text.dart';
+import 'load_error_view.dart';
 
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
 /// 供 owner 指定「节点文件夹」（单元库）。顶级单元库＝当前媒体库根（名称取根目录名）。
@@ -216,7 +219,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       final basics = rs[1] as Set<String>?;
       final known = basics ?? const <String>{};
       if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       final top = j['top'];
       // owner 2026-11-22：名称来自服务端（库根目录名），不写死 SECRET。
       // 服务端没给 top 时才用刚刚落盘的库根名，仍为空才回落到常量。
@@ -247,7 +250,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       if (!mounted) return;
       setState(() {
         loading = false;
-        err = '$e';
+        err = errorText(e);
       });
     }
   }
@@ -261,7 +264,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
           .get(widget.urlOf('/api/libraries.json'), headers: widget.headersOf())
           .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) return null;
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       if (j is! Map) return null;
       final raw = j['basicLibraries'];
       if (raw is! List) return null;
@@ -315,7 +318,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
           )
           .timeout(const Duration(seconds: 20));
       final j =
-          r.statusCode == 200 ? jsonDecode(utf8.decode(r.bodyBytes)) : null;
+          r.statusCode == 200 ? jsonOf(r) : null;
       if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
         throw (j is Map && j['error'] != null)
             ? '${j['error']}'
@@ -604,13 +607,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
         body: loading
             ? const Center(child: CircularProgressIndicator())
             : err != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Text('加载失败：$err',
-                          style: const TextStyle(fontSize: 12)),
-                    ),
-                  )
+                ? LoadErrorView(message: '加载失败：$err')
                 : ListView(
                     padding: const EdgeInsets.only(bottom: 24),
                     children: [

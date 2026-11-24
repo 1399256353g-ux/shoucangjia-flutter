@@ -508,4 +508,91 @@ void main() {
           isTrue);
     });
   });
+  group('第十三批：响应解码字符集单一出口', () {
+    // 注释里提到旧写法是说明，不是实现；判断前先剥掉行注释。
+    String codeOf(File f) => f
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('lib/ 内不得再出现 Response.body 直接解 JSON', () {
+      // 旧写法 `jsonDecode(r.body)` 的字符集由响应的 Content-Type 决定：
+      // 不是 application/json 就按 latin1 解，同一份 UTF-8 响应里的中文变乱码。
+      // 现在唯一出口是 http_json.dart 的 jsonOfBytes（始终 UTF-8）。
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('http_json.dart'))
+          .where((f) => RegExp(r'jsonDecode\([^)]*\.body\s*\)')
+              .hasMatch(codeOf(f)))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '又有人直接用 .body 解 JSON：$offenders');
+    });
+
+    test('lib/ 内不得再手写 jsonDecode(utf8.decode(...))', () {
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('http_json.dart'))
+          .where((f) => codeOf(f).contains('jsonDecode(utf8.decode('))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty,
+          reason: '字符集规则必须只有一处实现，这里是重复：$offenders');
+    });
+
+    test('真实路径仍在：jsonOf 有实际调用方', () {
+      final src = libDartFiles().map(codeOf).join('\n');
+      expect(src.contains('dynamic jsonOfBytes(List<int> bytes)'), isTrue);
+      expect(src.contains('dynamic jsonOf(http.Response r) =>'), isTrue);
+      // 调用点数量是"真的接上了"的证据：少于 60 说明有人改回了 .body。
+      final calls = RegExp(r'\bjsonOf\(').allMatches(src).length;
+      expect(calls, greaterThanOrEqualTo(60),
+          reason: 'jsonOf 调用点从 78 处掉到 $calls 处，说明有路径回退到 .body');
+    });
+
+    test('「加载失败」错误块只走 LoadErrorView（不再手写 11 份）', () {
+      // 之前 main.dart 手写 11 次、另两个页面各手写一次，三种形态：
+      // 有内边距/无内边距/无重试。同一句错误在不同页面字号不一。
+      // 只认「把错误文本直接摆进 Text 里」这一种手写形态；
+      // 页面上另有过「图片加载失败」这类媒体占位，不属于本契约。
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('load_error_view.dart'))
+          .where((f) => RegExp(r"Text\('加载失败：(\$err|\$\{err\})'")
+              .hasMatch(codeOf(f)))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '错误块又手写回来了：$offenders');
+      // 真实路径仍在：控件被多处使用。
+      final src = libDartFiles().map(codeOf).join('\n');
+      final uses = RegExp(r'LoadErrorView\(').allMatches(src).length;
+      expect(uses, greaterThanOrEqualTo(13),
+          reason: 'LoadErrorView 使用点从 13 处掉到 $uses 处');
+    });
+
+    test('异常转文案只走 errorText（页面不得再写原始异常插值）', () {
+      // `'$e'` 对 Exception 产出 `Exception: HTTP 500`，对 TimeoutException
+      // 产出 `TimeoutException after 0:00:08.000000: Future not completed`
+      // ——两个都会原样显示在界面上。
+      final offenders = libDartFiles()
+          .where((f) => !f.path.endsWith('error_text.dart'))
+          .where((f) => RegExp(r"err = \'\$e\'|err = \'\$\{?e\}?\'")
+              .hasMatch(codeOf(f)))
+          .map((f) => f.path)
+          .toList();
+      expect(offenders, isEmpty, reason: '页面又把原始异常塞进界面：$offenders');
+      final src = libDartFiles().map(codeOf).join('\n');
+      expect(src.contains('String errorText(Object? e)'), isTrue);
+      final uses = RegExp(r'errorText\(').allMatches(src).length;
+      expect(uses, greaterThanOrEqualTo(25),
+          reason: 'errorText 调用点从 30 处掉到 $uses 处');
+    });
+
+    test('isolate 模块与 sync_ledger 都转发到同一出口', () {
+      final iso = codeOf(File('lib/json_isolate.dart'));
+      expect(iso.contains('jsonOfBytes(bytes)'), isTrue);
+      expect(iso.contains('jsonDecode(utf8.decode('), isFalse);
+      final ledger = codeOf(File('lib/sync_ledger.dart'));
+      expect(ledger.contains('=> jsonOfBytes(bytes);'), isTrue);
+      expect(ledger.contains('jsonDecode(utf8.decode('), isFalse);
+    });
+  });
 }

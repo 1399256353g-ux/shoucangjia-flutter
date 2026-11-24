@@ -1,9 +1,9 @@
-import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'http_json.dart';
 
 import 'cover_cache.dart';
 import 'decode_plan.dart';
@@ -25,6 +25,7 @@ import 'work_forms.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
 import 'library_badge.dart';
+import 'error_text.dart';
 
 /// 作者卡片头像：手动设置 > 爬虫脚本（服务端下发 `av`）> 自动生成（作品图兜底）。
 /// 同级按时间新→旧；都为空时由调用方回退到「首字」占位。
@@ -56,7 +57,7 @@ String pickAuthorAvatar({
 /// 在 isolate 里解析 works.json：把 UTF-8 解码 + JSON 解析都移出 UI 线程。
 /// 大库单页几十到上百条，主线程解析会直接卡住首帧。
 Map<String, dynamic> _parseWorksPayload(List<int> bytes) =>
-    jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+    jsonOfBytes(bytes) as Map<String, dynamic>;
 
 class BasicLibPage extends StatefulWidget {
   final BasicLib basic;
@@ -199,7 +200,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       if (!mounted) return;
       setState(() {
         loadingAuthors = false;
-        err = '$e';
+        err = errorText(e);
       });
     }
   }
@@ -245,7 +246,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) return;
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       if (j is! Map) return;
       final map = <String, String>{};
       j.forEach((k, v) {
@@ -275,7 +276,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) return;
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       final authors = j is Map ? j['authors'] : null;
       if (authors is! Map) return;
       if (!mounted) return;
@@ -307,7 +308,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       final batch = (j['works'] as List? ?? const []);
       if (!mounted) return;
       setState(() {
@@ -332,7 +333,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       setState(() {
         loadingWorks = false;
         loadingMore = false;
-        if (err == null) err = '$e';
+        if (err == null) err = errorText(e);
       });
     }
   }

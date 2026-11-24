@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'http_json.dart';
 
 /// C2：库卡片「本地选图上传封面」的结果。
 class CoverUploadResult {
@@ -148,14 +149,14 @@ Future<CoverUploadResult> uploadCoverBytes({
   if (r.statusCode != 200) {
     var msg = 'HTTP ${r.statusCode}';
     try {
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       if (j is Map && j['error'] is String) msg = j['error'] as String;
     } catch (_) {}
     return CoverUploadResult(false, '上传失败：$msg');
   }
   var coverPath = '';
   try {
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is Map) coverPath = '${j['u'] ?? ''}'.trim();
   } catch (_) {}
   return CoverUploadResult(

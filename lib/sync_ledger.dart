@@ -6,9 +6,8 @@
 /// 解析与展示都放在纯函数里，便于单测；网络请求由页面传入 client。
 library;
 
-import 'dart:convert';
-
 import 'time_labels.dart';
+import 'http_json.dart';
 
 /// 单条同步结果。
 class SyncRunItem {
@@ -267,7 +266,6 @@ String syncRetryResultLabel(int status, dynamic body) {
 
 /// 把响应体按 UTF-8 解码成 JSON。
 ///
-/// 同步日志面板有两处要解同一个响应体（首次加载 + 重试结果），
-/// 两处都手写 `jsonDecode(utf8.decode(r.bodyBytes))` 就会有三份实现。
-/// 统一走这里。
-dynamic decodeSyncJson(List<int> bytes) => jsonDecode(utf8.decode(bytes));
+/// 保留这个名字只因为它是面板的既有入口；字符集规则已统一到
+/// `http_json.dart`（始终 UTF-8，不看 Content-Type），这里只做转发。
+dynamic decodeSyncJson(List<int> bytes) => jsonOfBytes(bytes);

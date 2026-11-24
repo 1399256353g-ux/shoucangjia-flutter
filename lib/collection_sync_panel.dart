@@ -2,8 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'http_json.dart';
 
 import 'collection_sync.dart';
+import 'error_text.dart';
 
 /// 单元库爬虫设置里的「同步源」区块（owner 2026-11-21 要求）。
 ///
@@ -86,7 +88,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
           .get(_settingsUri, headers: widget.headers)
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       final list = parseCollectionSettings(j);
       if (!mounted) return;
       setState(() {
@@ -99,7 +101,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        err = '$e';
+        err = errorText(e);
         loading = false;
       });
     }
@@ -119,7 +121,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
             ],
           }));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       final list = parseCollectionSettings(j);
       if (!mounted) return;
       setState(() {

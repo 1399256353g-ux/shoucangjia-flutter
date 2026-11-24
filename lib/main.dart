@@ -121,6 +121,9 @@ import 'work_author.dart';
 import 'work_forms.dart';
 import 'work_plays.dart';
 import 'work_safety.dart';
+import 'http_json.dart';
+import 'error_text.dart';
+import 'load_error_view.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -388,7 +391,7 @@ Future<void> ensureAuthorAvatarsLoaded() async {
         .get(cfg.u('/api/authors.json', lib: 'all'), headers: cfg.headers)
         .timeout(const Duration(seconds: 20));
     if (r.statusCode == 200) {
-      final m = jsonDecode(utf8.decode(r.bodyBytes));
+      final m = jsonOf(r);
       if (m is Map) {
         for (final e in m.entries) {
           final v = e.value;
@@ -545,8 +548,8 @@ class LibMeta {
           http.get(cfg.u('/api/nodes', lib: lib), headers: cfg.headers),
         ]).timeout(const Duration(seconds: 10));
         if (rs[0].statusCode == 200 && rs[1].statusCode == 200) {
-          final lj = jsonDecode(rs[0].body);
-          final reg = jsonDecode(rs[1].body);
+          final lj = jsonOf(rs[0]);
+          final reg = jsonOf(rs[1]);
           var base = '';
           if (reg is Map && reg['libraries'] is List) {
             for (final e in reg['libraries'] as List) {
@@ -612,7 +615,7 @@ class LibMeta {
               final markCovers = <String, String>{};
               if (rs[3].statusCode == 200) {
                 try {
-                  final nj = jsonDecode(utf8.decode(rs[3].bodyBytes));
+                  final nj = jsonOf(rs[3]);
                   final list = nj is Map ? nj['nodes'] : null;
                   if (list is List) {
                     for (final e in list) {
@@ -665,7 +668,7 @@ class LibMeta {
           }
         }
         if (rs[2].statusCode == 200) {
-          final sj = jsonDecode(rs[2].body);
+          final sj = jsonOf(rs[2]);
           if (sj is Map && sj['authors'] is Map) {
             stats = Map<String, dynamic>.from(sj['authors'] as Map);
           }
@@ -801,7 +804,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
               headers: cfg.headers)
           .timeout(const Duration(seconds: 12));
       if (lj.statusCode != 200) return <String, Set<String>>{};
-      final regJson = jsonDecode(utf8.decode(reg.bodyBytes));
+      final regJson = jsonOf(reg);
       var base = '';
       if (regJson is Map && regJson['libraries'] is List) {
         for (final e in regJson['libraries'] as List) {
@@ -811,7 +814,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
           }
         }
       }
-      final libJson = jsonDecode(utf8.decode(lj.bodyBytes));
+      final libJson = jsonOf(lj);
       if (base.isEmpty || libJson is! Map) return <String, Set<String>>{};
       final basics = basicsUnderBase(Map<String, dynamic>.from(libJson), base);
       final parts = await Future.wait(
@@ -831,7 +834,7 @@ Future<Map<String, Set<String>>> _typesFromLibIndex(
             headers: cfg.headers)
         .timeout(const Duration(seconds: 12));
     if (r.statusCode != 200) return <String, Set<String>>{};
-    return authorTypesFromIndex(jsonDecode(utf8.decode(r.bodyBytes)));
+    return authorTypesFromIndex(jsonOf(r));
   } catch (_) {
     return <String, Set<String>>{};
   }
@@ -864,7 +867,7 @@ Future<Map<String, dynamic>?> fetchDropStatus(String id, {String? lib}) async {
         .get(cfg.u('/api/drops?id=${Uri.encodeQueryComponent(id)}', lib: lib),
             headers: cfg.headers)
         .timeout(const Duration(seconds: 8));
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
     }
@@ -891,7 +894,7 @@ Future<Map<String, dynamic>?> startServerSync(
               'full': full,
             }))
         .timeout(const Duration(seconds: 15));
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is Map)
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
   } catch (_) {}
@@ -904,7 +907,7 @@ Future<Map<String, dynamic>?> serverSyncStatus() async {
     final r = await http
         .get(cfg.u('/api/sync'), headers: cfg.headers)
         .timeout(const Duration(seconds: 8));
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is Map) return Map<String, dynamic>.from(j);
   } catch (_) {}
   return null;
@@ -1033,7 +1036,7 @@ Future<Map<String, dynamic>?> sendDrop(String id, String author,
             headers: {...cfg.headers, 'Content-Type': 'application/json'},
             body: jsonEncode({'id': id, 'author': author}))
         .timeout(const Duration(seconds: 8));
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
     }
@@ -1133,7 +1136,7 @@ Future<Set<String>> fetchManualWorkIds(String lib) async {
         .get(cfg.u('/api/work/manual', lib: lib), headers: cfg.headersFor(lib))
         .timeout(const Duration(seconds: 8));
     if (r.statusCode != 200) return <String>{};
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     final list = (j is Map ? j['works'] : null);
     if (list is! List) return <String>{};
     return list
@@ -1166,7 +1169,7 @@ Future<Map<String, dynamic>?> postWorkDelete(String lib, String id,
               'manual': true,
             }))
         .timeout(const Duration(seconds: 20));
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
     }
@@ -1176,7 +1179,7 @@ Future<Map<String, dynamic>?> postWorkDelete(String lib, String id,
       'error': 'HTTP ${r.statusCode}'
     };
   } catch (e) {
-    return {'ok': false, 'error': '$e'};
+    return {'ok': false, 'error': errorText(e)};
   }
 }
 
@@ -1202,7 +1205,7 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
               'manual': true,
             }))
         .timeout(const Duration(seconds: 20));
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
     }
@@ -1212,7 +1215,7 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
       'error': 'HTTP ${r.statusCode}'
     };
   } catch (e) {
-    return {'ok': false, 'error': '$e'};
+    return {'ok': false, 'error': errorText(e)};
   }
 }
 
@@ -1458,10 +1461,10 @@ class _SettingsPageState extends State<SettingsPage> {
       ]);
       if (rs[0].statusCode != 200) throw Exception('HTTP ${rs[0].statusCode}');
       final cols =
-          (jsonDecode(rs[0].body)['collections'] as List?)?.length ?? 0;
+          (jsonOf(rs[0])['collections'] as List?)?.length ?? 0;
       var basics = 0;
       if (rs[1].statusCode == 200) {
-        final j = jsonDecode(rs[1].body);
+        final j = jsonOf(rs[1]);
         if (j is Map) basics = (j['basicLibraries'] as List?)?.length ?? 0;
       }
       sw.stop();
@@ -1911,7 +1914,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          err = '$e';
+          err = errorText(e);
           loading = false;
         });
       }
@@ -1932,16 +1935,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text('加载失败：$err',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 12))),
-                  const SizedBox(height: 12),
-                  FilledButton(onPressed: _loadLibs, child: const Text('重试')),
-                ]))
+              ? LoadErrorView(
+                  message: '加载失败：$err',
+                  onRetry: _loadLibs)
               : ListView(children: [
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
@@ -3029,7 +3025,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
           .get(cfg.u('/api/authors.json'), headers: cfg.headers)
           .timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) return;
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       if (j is! Map || !mounted) return;
       setState(() => _authorIdx = Map<String, dynamic>.from(j));
     } catch (_) {}
@@ -3043,7 +3039,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       final r = await http
           .post(cfg.u('/api/deleted/check'), headers: cfg.headers)
           .timeout(const Duration(seconds: 15));
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
         throw (j is Map && j['error'] != null)
             ? '${j['error']}'
@@ -3098,7 +3094,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
           raw = await parseJsonMapAsync(r.bodyBytes);
         } catch (_) {
           // 兼容旧服务端/代理返回顶层数组的情况。
-          raw = jsonDecode(utf8.decode(r.bodyBytes));
+          raw = jsonOf(r);
         }
         final parsed = parseDeletedReport(raw, source: uri.toString());
         anyOk = true;
@@ -3197,7 +3193,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       try {
         raw = await parseJsonMapAsync(r.bodyBytes);
       } catch (_) {
-        raw = jsonDecode(utf8.decode(r.bodyBytes));
+        raw = jsonOf(r);
       }
       final m = raw is Map ? raw : const <dynamic, dynamic>{};
       final work = m['work'];
@@ -3253,7 +3249,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
           .timeout(const Duration(seconds: 12));
       dynamic parsed;
       try {
-        parsed = jsonDecode(utf8.decode(r.bodyBytes));
+        parsed = jsonOf(r);
       } catch (_) {}
       _toast(syncRetryResultLabel(r.statusCode, parsed));
     } catch (err) {
@@ -3416,16 +3412,9 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text('加载失败：$err',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 12))),
-                  const SizedBox(height: 12),
-                  FilledButton(onPressed: load, child: const Text('重试')),
-                ]))
+              ? LoadErrorView(
+                  message: '加载失败：$err',
+                  onRetry: load)
               : Column(children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
@@ -4409,9 +4398,9 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     try {
       final r = await http.get(cfg.u('/api/settings'), headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      _apply(jsonDecode(r.body) as Map<String, dynamic>, setLoading: true);
+      _apply(jsonOf(r) as Map<String, dynamic>, setLoading: true);
     } catch (e) {
-      if (mounted) setState(() => err = '$e');
+      if (mounted) setState(() => err = errorText(e));
     }
     if (mounted) setState(() => loading = false);
   }
@@ -4435,7 +4424,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
         headers: {...cfg.headers, 'Content-Type': 'application/json'},
         body: jsonEncode(body));
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-    return jsonDecode(r.body) as Map<String, dynamic>;
+    return jsonOf(r) as Map<String, dynamic>;
   }
 
   void _toast(String s) {
@@ -4461,7 +4450,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       if (!mounted || seq != _seq) return;
       _apply(j);
     } catch (e) {
-      if (mounted && seq == _seq) _toast('保存失败：$e');
+      if (mounted && seq == _seq) _toast('保存失败：${errorText(e)}');
     } finally {
       if (mounted && seq == _seq) setState(() => saving = false);
     }
@@ -4614,12 +4603,9 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text('加载失败：$err'),
-                  const SizedBox(height: 12),
-                  FilledButton(onPressed: load, child: const Text('重试')),
-                ]))
+              ? LoadErrorView(
+                  message: '加载失败：$err',
+                  onRetry: load)
               : cols.isEmpty
                   ? const Center(child: Text('没有同步源'))
                   : Column(children: [
@@ -4877,7 +4863,7 @@ class _LibraryPageState extends State<LibraryPage> {
             .timeout(const Duration(seconds: 60));
         dynamic parsed;
         try {
-          parsed = jsonDecode(utf8.decode(r.bodyBytes));
+          parsed = jsonOf(r);
         } catch (_) {}
         return (status: r.statusCode, body: parsed);
       },
@@ -4948,14 +4934,14 @@ class _LibraryPageState extends State<LibraryPage> {
           }
           Map<String, dynamic>? treeJson;
           if (rs[1].statusCode == 200) {
-            final j = jsonDecode(rs[1].body);
+            final j = jsonOf(rs[1]);
             if (j is Map) treeJson = Map<String, dynamic>.from(j);
           }
           if (def.isNotEmpty && defaultId == null) defaultId = def;
           snaps
               .add(ServerLibraries(server: s, libraries: list, tree: treeJson));
         } catch (e) {
-          snaps.add(ServerLibraries(server: s, error: '$e'));
+          snaps.add(ServerLibraries(server: s, error: errorText(e)));
         }
       }
       final merged = mergeRegisteredLibraries(snaps);
@@ -5000,7 +4986,7 @@ class _LibraryPageState extends State<LibraryPage> {
           if (_hasSnapshot) {
             warn = '刷新失败：$e（显示的是上次结果）';
           } else {
-            err = '$e';
+            err = errorText(e);
           }
         });
       }
@@ -5033,7 +5019,7 @@ class _LibraryPageState extends State<LibraryPage> {
                   headers: h)
               .timeout(const Duration(seconds: 8));
           if (r.statusCode != 200) continue;
-          final j = jsonDecode(r.body);
+          final j = jsonOf(r);
           if (j is! Map) continue;
           // owner 2026-11-22：顶级节点名＝媒体库根目录名。先到先用，
           // 多个连接时以首条连接（servers.first，与文件结构页一致）为准。
@@ -5284,7 +5270,7 @@ class _LibraryPageState extends State<LibraryPage> {
         'Authorization': _authFor(s),
       }).timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return const [];
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       final list = (j is Map) ? j['nodes'] : null;
       if (list is! List) return const [];
       return list
@@ -5496,7 +5482,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final r = await http.post(_u('/api/libraries/delete', id, sb),
           headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
           body: jsonEncode({'id': l['id']}));
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -5583,7 +5569,7 @@ class _LibraryPageState extends State<LibraryPage> {
             'base': base.text.trim(),
             'dir': dir.text.trim(),
           }));
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -5637,7 +5623,7 @@ class _LibraryPageState extends State<LibraryPage> {
 
   /// 内容区：主页内嵌与独立「媒体库」页共用。
   Widget _body() {
-    if (err != null) return Center(child: Text('加载失败：$err'));
+    if (err != null) return LoadErrorView(message: '加载失败：$err');
     if (loading) return const Center(child: CircularProgressIndicator());
     final list = ListView(
       controller: _menuScroll,
@@ -5805,7 +5791,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
           .get(Uri.parse('${cfg.base}/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       final list = ((j['libraries'] as List?) ?? const [])
           .whereType<Map>()
           .map((e) => Map<String, dynamic>.from(e))
@@ -5821,7 +5807,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                   headers: cfg.headersFor(id))
               .timeout(const Duration(seconds: 8));
           if (cr.statusCode == 200) {
-            final cj = jsonDecode(cr.body);
+            final cj = jsonOf(cr);
             if (cj is Map) {
               crawlers[id] = Map<String, dynamic>.from(cj);
             }
@@ -5843,7 +5829,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
             .get(Uri.parse('${cfg.base}/api/nodes'), headers: cfg.headers)
             .timeout(const Duration(seconds: 8));
         if (nr.statusCode == 200) {
-          flags = unitCrawlerFlags(jsonDecode(utf8.decode(nr.bodyBytes)));
+          flags = unitCrawlerFlags(jsonOf(nr));
         }
       } catch (_) {}
       if (!mounted) return;
@@ -5856,7 +5842,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          err = '$e';
+          err = errorText(e);
           loading = false;
         });
       }
@@ -5925,7 +5911,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? Center(child: Text('加载失败：$err'))
+              ? LoadErrorView(message: '加载失败：$err')
               : ListView(children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
@@ -6016,7 +6002,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
       final r = await http
           .get(_u('/api/crawler'), headers: cfg.headersFor(libId))
           .timeout(const Duration(seconds: 10));
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -6030,7 +6016,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
         scripts = (j['scripts'] as List?) ?? const [];
       });
     } catch (e) {
-      if (mounted) setState(() => err = '$e');
+      if (mounted) setState(() => err = errorText(e));
     }
     if (mounted) setState(() => loading = false);
   }
@@ -6049,7 +6035,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
             'intervalMin': intervalMin,
             'note': note,
           }));
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -6060,7 +6046,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('保存失败：$e')));
+            .showSnackBar(SnackBar(content: Text('保存失败：${errorText(e)}')));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -6075,7 +6061,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
             child: Text(saving ? '保存中…' : '保存')),
       ]),
       body: err != null
-          ? Center(child: Text('加载失败：$err'))
+          ? LoadErrorView(message: '加载失败：$err')
           : loading
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(16), children: [
@@ -6179,13 +6165,13 @@ class _MaintenancePageState extends State<MaintenancePage> {
           .get(Uri.parse('${_u('/api/maintenance')}${deep ? '&deep=1' : ''}'),
               headers: cfg.headersFor(libId))
           .timeout(Duration(seconds: deep ? 90 : 15));
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
       if (mounted) setState(() => data = j);
     } catch (e) {
-      if (mounted) setState(() => err = '$e');
+      if (mounted) setState(() => err = errorText(e));
     }
     if (mounted) setState(() => loading = false);
   }
@@ -6199,7 +6185,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
             'Content-Type': 'application/json'
           },
           body: jsonEncode({'action': 'run-crawler', 'lib': libId}));
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       if (r.statusCode != 200 || j['ok'] == false) {
         throw Exception('${j['error'] ?? 'HTTP ${r.statusCode}'}');
       }
@@ -6237,7 +6223,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
             tooltip: '重新扫描'),
       ]),
       body: err != null
-          ? Center(child: Text('加载失败：$err'))
+          ? LoadErrorView(message: '加载失败：$err')
           : loading
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(16), children: [
@@ -6359,7 +6345,7 @@ class _HomePageState extends State<HomePage> {
       out = await performTotalRefresh();
     } catch (e) {
       out = TotalRefreshOutcome(
-          servers: 0, online: 0, libraries: 0, firstError: '$e');
+          servers: 0, online: 0, libraries: 0, firstError: errorText(e));
     }
     if (!mounted) return;
     setState(() {
@@ -6379,7 +6365,7 @@ class _HomePageState extends State<HomePage> {
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
-      final lj = jsonDecode(r.body) as Map<String, dynamic>;
+      final lj = jsonOf(r) as Map<String, dynamic>;
       final ls = librariesWithDisplayNames(
           ((lj['libraries'] as List?) ?? const [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -6528,7 +6514,7 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
           'Authorization': basicAuthHeader(s.user, s.pass),
         }).timeout(const Duration(seconds: 12));
     if (r.statusCode != 200) throw StateError('HTTP ${r.statusCode}');
-    final j = jsonDecode(r.body);
+    final j = jsonOf(r);
     if (j is! Map) return 0;
     return ((j['libraries'] as List?) ?? const []).length;
   }
@@ -6640,7 +6626,7 @@ class _RankPageState extends State<RankPage> {
           cfg.u('/api/rank?period=$period&metric=$metric', lib: 'all'),
           headers: cfg.headers);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(r.body);
+      final j = jsonOf(r);
       final meta = await LibMeta.load(cfg.lib);
       if (!mounted) return;
       metas[cfg.lib] = meta;
@@ -6654,7 +6640,7 @@ class _RankPageState extends State<RankPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          err = '$e';
+          err = errorText(e);
           loading = false;
         });
       }
@@ -6811,16 +6797,9 @@ class _RankPageState extends State<RankPage> {
           child: loading
               ? const Center(child: CircularProgressIndicator())
               : err != null
-                  ? Center(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Text('加载失败：$err',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 12))),
-                      const SizedBox(height: 12),
-                      FilledButton(onPressed: load, child: const Text('重试')),
-                    ]))
+                  ? LoadErrorView(
+                      message: '加载失败：$err',
+                      onRetry: load)
                   : visible.isEmpty
                       ? Center(
                           child: Text(
@@ -6903,7 +6882,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       final list = librariesWithDisplayNames(
           ((j['libraries'] as List?) ?? const [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -6927,7 +6906,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
             offline++;
             continue;
           }
-          loaded[id] = statsAuthors(jsonDecode(sr.body));
+          loaded[id] = statsAuthors(jsonOf(sr));
         } catch (_) {
           offline++;
         }
@@ -6948,7 +6927,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          err = '$e';
+          err = errorText(e);
           loading = false;
         });
       }
@@ -7003,16 +6982,9 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
           child: loading
               ? const Center(child: CircularProgressIndicator())
               : err != null
-                  ? Center(
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Text('加载失败：$err',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 12))),
-                      const SizedBox(height: 12),
-                      FilledButton(onPressed: load, child: const Text('重试')),
-                    ]))
+                  ? LoadErrorView(
+                      message: '加载失败：$err',
+                      onRetry: load)
                   : rows.isEmpty
                       ? const Center(
                           child: Text('暂无可参与排行的库',
@@ -7453,7 +7425,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 headers: cfg.headers)
             .timeout(const Duration(seconds: 8));
         if (cr.statusCode == 200) {
-          final cj = jsonDecode(cr.body);
+          final cj = jsonOf(cr);
           final scripts = (cj is Map ? cj['scripts'] : null);
           if (mounted) {
             setState(() => hasScripts = scripts is List && scripts.isNotEmpty);
@@ -7503,7 +7475,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       dynamic sj;
       if (sr.statusCode == 200) {
         try {
-          sj = jsonDecode(sr.body);
+          sj = jsonOf(sr);
         } catch (_) {}
       }
       if (sj is Map && sj['authors'] is Map) {
@@ -7541,7 +7513,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         // 静默刷新失败时保留现有列表，不打扰用户
         if (quiet) return;
         setState(() {
-          err = '$e';
+          err = errorText(e);
           loading = false;
         });
       }
@@ -7707,7 +7679,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       final r = await http.get(cfg.u('/api/a/$idx.json', lib: lib),
           headers: cfg.headers);
       if (r.statusCode != 200) return;
-      final m = jsonDecode(r.body);
+      final m = jsonOf(r);
       final pick = pickFallbackAvatar(avatarCandidatesFromWorks(
           ((m is Map ? m['works'] : null) as List?)?.whereType<Map>() ??
               const <Map>[]));
@@ -7778,16 +7750,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       body: loading
           ? const WorkGridSkeleton(count: 18)
           : err != null
-              ? Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text('加载失败：$err',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 12))),
-                  const SizedBox(height: 12),
-                  FilledButton(onPressed: load, child: const Text('重试')),
-                ]))
+              ? LoadErrorView(
+                  message: '加载失败：$err',
+                  onRetry: load)
               : Column(children: [
                   SizedBox(
                     height: 46,
@@ -10421,7 +10386,7 @@ class _PlayerPageState extends State<PlayerPage>
       await file.writeAsBytes(resp.bodyBytes, flush: true);
       _toast('已保存到 ${file.path}');
     } catch (e) {
-      _toast('保存失败：$e');
+      _toast('保存失败：${errorText(e)}');
     }
   }
 
@@ -14485,7 +14450,7 @@ class _RecommendPageState extends State<RecommendPage> {
               .get(cfg.u('/api/libraries'), headers: cfg.headers)
               .timeout(const Duration(seconds: 8));
           if (lr.statusCode == 200) {
-            final lj = jsonDecode(lr.body);
+            final lj = jsonOf(lr);
             if (lj is Map && lj['libraries'] is List) {
               libs = librariesWithDisplayNames((lj['libraries'] as List)
                   .whereType<Map>()
@@ -14516,7 +14481,7 @@ class _RecommendPageState extends State<RecommendPage> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          err = '$e';
+          err = errorText(e);
           loading = false;
         });
       }
@@ -14532,7 +14497,7 @@ class _RecommendPageState extends State<RecommendPage> {
         cfg.u('/api/recommend?n=$n&seed=$seed', lib: 'all'),
         headers: cfg.headers);
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
-    final j = jsonDecode(utf8.decode(r.bodyBytes));
+    final j = jsonOf(r);
     final out = <Map<String, dynamic>>[];
     for (final w
         in (j is Map && j['works'] is List) ? (j['works'] as List) : const []) {
@@ -14754,14 +14719,9 @@ class _RecommendPageState extends State<RecommendPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text('加载失败：$err'),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                      onPressed: () => load(refresh: false),
-                      child: const Text('重试')),
-                ]))
+              ? LoadErrorView(
+                  message: '加载失败：$err',
+                  onRetry: () => load(refresh: false))
               : Column(children: [
                   // J11：推荐与总览/排行/搜索共用同一套作者筛选与状态
                   AuthorFilterBar(
@@ -14874,7 +14834,7 @@ class _SearchPageState extends State<SearchPage> {
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final j = jsonOf(r) as Map<String, dynamic>;
       final list = librariesWithDisplayNames(
           ((j['libraries'] as List?) ?? const [])
               .map((e) => Map<String, dynamic>.from(e as Map))
@@ -14996,7 +14956,7 @@ class _SearchPageState extends State<SearchPage> {
                 headers: cfg.headers)
             .timeout(const Duration(seconds: 20));
         if (r.statusCode != 200) break;
-        final j = jsonDecode(utf8.decode(r.bodyBytes));
+        final j = jsonOf(r);
         final batch =
             (j is Map && j['works'] is List) ? j['works'] as List : const [];
         ws.addAll(batch);
@@ -15339,7 +15299,7 @@ Future<bool> syncAuthorGradeFromServer({String? lib}) async {
   if (r.statusCode != 200) return false;
   Map<String, dynamic> j;
   try {
-    final d = jsonDecode(r.body);
+    final d = jsonOf(r);
     if (d is! Map) return false;
     j = Map<String, dynamic>.from(d);
   } catch (_) {
@@ -15372,7 +15332,7 @@ Future<AuthorEditResult> uploadAuthorAvatarBytes({
   }
   Map<String, dynamic> j = const {};
   try {
-    final d = jsonDecode(r.body);
+    final d = jsonOf(r);
     if (d is Map<String, dynamic>) j = d;
   } catch (_) {}
   if (r.statusCode != 200 || j['ok'] != true) {
@@ -15400,11 +15360,11 @@ Future<AuthorEditResult> uploadAuthorBio({
       body: jsonEncode({'lib': libId, 'author': author, 'bio': clean}),
     );
   } catch (e) {
-    return AuthorEditResult(false, '保存失败：$e');
+    return AuthorEditResult(false, '保存失败：${errorText(e)}');
   }
   Map<String, dynamic> j = const {};
   try {
-    final d = jsonDecode(r.body);
+    final d = jsonOf(r);
     if (d is Map<String, dynamic>) j = d;
   } catch (_) {}
   if (r.statusCode != 200 || j['ok'] != true) {
@@ -15444,7 +15404,7 @@ Future<AuthorEditResult> setAuthorAvatarFile({
   }
   Map<String, dynamic> j = const {};
   try {
-    final d = jsonDecode(r.body);
+    final d = jsonOf(r);
     if (d is Map<String, dynamic>) j = d;
   } catch (_) {}
   if (r.statusCode != 200 || j['ok'] != true) {
@@ -15477,7 +15437,7 @@ Future<AuthorEditResult> clearAuthorAvatar({
   }
   Map<String, dynamic> j = const {};
   try {
-    final d = jsonDecode(r.body);
+    final d = jsonOf(r);
     if (d is Map<String, dynamic>) j = d;
   } catch (_) {}
   if (r.statusCode != 200 || j['ok'] != true) {
@@ -16143,7 +16103,7 @@ class _AuthorPageState extends State<AuthorPage> {
         final r = await http.get(cfg.u('/api/authors.json', lib: lib),
             headers: cfg.headers);
         if (r.statusCode != 200) continue;
-        final idx = jsonDecode(r.body) as Map;
+        final idx = jsonOf(r) as Map;
         // 服务端作者索引存在 `作者` / `@作者` 两种键；名字可能来自作品 `a`
         // 或媒体路径里的 `%40作者`。统一按裸名匹配，避免「进页后空白」。
         final info = authorInfoFromIndex(idx, widget.name);
@@ -16151,7 +16111,7 @@ class _AuthorPageState extends State<AuthorPage> {
         final d = await http.get(cfg.u('/api/a/${info['i']}.json', lib: lib),
             headers: cfg.headers);
         if (d.statusCode != 200) continue;
-        final m = jsonDecode(d.body);
+        final m = jsonOf(d);
         if (bio.isEmpty) bio = (m['bio'] ?? '').toString();
         if (av.isEmpty) av = (m['av'] ?? '').toString();
         if (primaryLib.isEmpty) primaryLib = lib;
@@ -16335,7 +16295,7 @@ class _AuthorPageState extends State<AuthorPage> {
         _toast('读取目录失败：HTTP ${r.statusCode}');
         return null;
       }
-      dynamic tree = jsonDecode(r.body);
+      dynamic tree = jsonOf(r);
       // 用选中作品第一条媒体路径推断作者前缀，只列出该作者下的目录。
       String prefix = '';
       for (final id in selectedWorks) {

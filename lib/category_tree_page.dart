@@ -2,10 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'http_json.dart';
 
 import 'home_action.dart';
 import 'category_tree.dart';
 import 'library_tree.dart';
+import 'error_text.dart';
 
 /// J14：通用分类树页面。
 ///
@@ -74,7 +76,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) throw 'HTTP ${r.statusCode}';
-      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      final j = jsonOf(r);
       final t = j is Map<String, dynamic> ? parseCategoryTree(j) : null;
       if (t == null) throw '返回结构异常';
       if (!mounted) return;
@@ -87,7 +89,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
       if (!mounted) return;
       setState(() {
         loading = false;
-        err = '$e';
+        err = errorText(e);
       });
     }
   }
@@ -148,7 +150,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
           )
           .timeout(const Duration(seconds: 30));
       final j = r.statusCode == 200
-          ? jsonDecode(utf8.decode(r.bodyBytes))
+          ? jsonOf(r)
           : null;
       if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
         throw (j is Map && j['error'] != null)
