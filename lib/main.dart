@@ -4957,7 +4957,6 @@ class _LibraryPageState extends State<LibraryPage> {
             'user': s.user,
             'pass': s.pass,
             'server': s.id,
-            // owner 2026-11-24：卡片名不能用 s.title（没填会回退成网址）。
             'label': s.cardLabel,
           };
         }
@@ -5044,11 +5043,16 @@ class _LibraryPageState extends State<LibraryPage> {
       // 标记节点来自 servers.first（_fetchMarkedNodes 的取数口径），
       // 因此连接标识也必须取同一条连接，不能留空。
       final firstServer = servers.isEmpty ? null : servers.first;
-      final nodes = marked
+      final nodes = marked.rels
           .map((rel) => LibNode(
                 id: 'node:$rel',
                 rel: rel,
                 name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
+                // owner 2026-11-24：必须带上服务端下发的封面指针，
+                // 否则选完过往封面返回界面就回落到自动封面。
+                coverUrl: marked.covers[rel] ?? '',
+                // serverId 必须是连接 id（buildUnitTree 按它归组），
+                // 不能写成 cardLabel——那会让分层再次错位。
                 serverId: firstServer?.id ?? '',
                 serverBase: firstServer?.base ?? '',
                 serverLabel: firstServer?.cardLabel ?? '',
@@ -5260,27 +5264,43 @@ class _LibraryPageState extends State<LibraryPage> {
   String _authFor(ServerConn s) => basicAuthHeader(s.user, s.pass);
 
   /// 读取 owner 指定的节点文件夹（服务端 nodes.json）；失败时按「只有 SECRET」处理。
-  Future<List<String>> _fetchMarkedNodes() async {
-    if (servers.isEmpty) return const [];
+  Future<MarkedNodes> _fetchMarkedNodes() async {
+    if (servers.isEmpty) return const MarkedNodes([], {});
     final s = servers.first;
     try {
       final r = await http.get(Uri.parse('${s.base}/api/nodes'), headers: {
         'Authorization': _authFor(s),
       }).timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) return const [];
+      if (r.statusCode != 200) return const MarkedNodes([], {});
       final j = jsonOf(r);
       final list = (j is Map) ? j['nodes'] : null;
-      if (list is! List) return const [];
-      return list
+      if (list is! List) return const MarkedNodes([], {});
+      // owner 2026-11-24：把 `/api/nodes` 的 covers 映射一并带出，
+      // 否则 LibNode.coverUrl 恒为空，手动设过的单元库封面永远不生效
+      // （选完过往封面返回界面就回落到自动封面）。
+      final rels = list
           .map((e) =>
               (e is Map ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}' : '$e')
                   .trim())
           .where((e) => e.isNotEmpty)
           .toList();
+      final covers = <String, String>{};
+      final cm = (j is Map) ? j['covers'] : null;
+      if (cm is Map) {
+        for (final e in cm.entries) {
+          final k = '${e.key}'.trim();
+          final v = '${e.value ?? ''}'.trim();
+          if (k.isEmpty || v.isEmpty) continue;
+          if (!v.startsWith('/media/')) continue;
+          covers[k] = v;
+        }
+      }
+      return MarkedNodes(rels, covers);
     } catch (_) {
-      return const [];
+      return const MarkedNodes([], {});
     }
   }
+
 
   /// 已注册媒体库管理（添加/删除/默认/爬虫），从首页移入独立面板。
   void _openRegisteredLibs() {
@@ -5756,6 +5776,19 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 }
 
+
+/// 「文件结构」里勾选的节点 + 服务端下发的封面指针。
+///
+/// owner 2026-11-24：把 rel 列表和 covers 映射一起返回，
+/// 否则单元库手动封面在首页永远不生效。
+class MarkedNodes {
+  final List<String> rels;
+
+  /// rel → `/media/<lib>/_cover/<version>.<ext>`（owner 设过的单元库封面）。
+  final Map<String, String> covers;
+
+  const MarkedNodes(this.rels, this.covers);
+}
 /// 设置 → 媒体库与爬虫：独立管理页，不再打开主页（避免套叠重复）。
 class MediaCrawlerSettingsPage extends StatefulWidget {
   const MediaCrawlerSettingsPage({super.key});
