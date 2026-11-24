@@ -297,12 +297,25 @@ UnitLibrary? buildUnitTree({
   );
 }
 
-/// 把一个连接下的根单元库摊平成「该媒体库的下级单元库」列表。
+/// 把一个连接下的根单元库整理成「该媒体库的下级单元库」列表。
 ///
-/// 根单元库本身如果挂了基础库（节点就是库根），要保留它作为一个下级，
-/// 否则这些基础库在首页第二层会消失。
+/// owner 2026-11-24：「媒体库下面的单元库都拆散开了，没有按照文件结构
+/// 设置里的层级」。
+///
+/// 原实现把根节点和它的直接子节点**平铺**成同一层（`root.children` 逐个
+/// 塞进 `out`），于是 `/api/nodes` 下发的三层结构（深度 1:5 / 2:24 / 3:2）
+/// 在首页被压成一层，层级关系丢失。
+///
+/// 现在：
+/// - 根节点自己挂了基础库（节点就是库根）→ 它本身作为下级，**连同其子树**；
+/// - 根节点没挂基础库（纯容器）→ 它的 children 按原父子关系保留，不拆平。
 void _collectServerBasics(UnitLibrary root, List<UnitLibrary> out) {
-  if (root.basics.isNotEmpty) out.add(root);
+  if (root.basics.isNotEmpty) {
+    // 节点就是库根：整个子树照原样保留，不能只取直接子节点。
+    out.add(root);
+    return;
+  }
+  // 纯容器节点：children 原样输出（各自带着自己的 children），层级不丢。
   for (final c in root.children) {
     out.add(c);
   }
