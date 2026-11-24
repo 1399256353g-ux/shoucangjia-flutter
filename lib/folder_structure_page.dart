@@ -317,13 +317,9 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
             body: jsonEncode({'nodes': nodes.toList()}),
           )
           .timeout(const Duration(seconds: 20));
-      final j =
-          r.statusCode == 200 ? jsonOf(r) : null;
-      if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
-        throw (j is Map && j['error'] != null)
-            ? '${j['error']}'
-            : 'HTTP ${r.statusCode}';
-      }
+      final j = r.statusCode == 200 ? jsonOf(r) : null;
+      final bad = apiFailureText(r.statusCode, j);
+      if (bad != null) throw bad;
       saved
         ..clear()
         ..addAll(nodes);

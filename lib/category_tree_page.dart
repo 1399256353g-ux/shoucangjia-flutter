@@ -71,7 +71,8 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
     try {
       final r = await http
           .get(
-              widget.urlOf('/api/cat/tree', lib: widget.basic.id)
+              widget
+                  .urlOf('/api/cat/tree', lib: widget.basic.id)
                   .replace(queryParameters: {'lib': widget.basic.id}),
               headers: widget.headersOf(widget.basic.id))
           .timeout(const Duration(seconds: 20));
@@ -140,7 +141,8 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
     try {
       final r = await http
           .post(
-            widget.urlOf('/api/cat/rename', lib: widget.basic.id)
+            widget
+                .urlOf('/api/cat/rename', lib: widget.basic.id)
                 .replace(queryParameters: {'lib': widget.basic.id}),
             headers: {
               ...widget.headersOf(widget.basic.id),
@@ -149,14 +151,9 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
             body: jsonEncode({'rel': node.rel, 'name': clean}),
           )
           .timeout(const Duration(seconds: 30));
-      final j = r.statusCode == 200
-          ? jsonOf(r)
-          : null;
-      if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
-        throw (j is Map && j['error'] != null)
-            ? '${j['error']}'
-            : 'HTTP ${r.statusCode}';
-      }
+      final j = r.statusCode == 200 ? jsonOf(r) : null;
+      final bad = apiFailureText(r.statusCode, j);
+      if (bad != null) throw bad;
       if (!mounted) return;
       // 本地先映射，随后重新拉取以对齐磁盘（索引重扫是异步的）。
       final next = renameNodeInTree(tree!, node.rel, clean);
@@ -175,15 +172,13 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
 
   void _toast(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = tree == null
-        ? null
-        : filterCategoryTree(tree!, _filter.text);
+    final filtered =
+        tree == null ? null : filterCategoryTree(tree!, _filter.text);
     return Scaffold(
       appBar: AppBar(
         title: Text('分类 · ${widget.basic.name}',
@@ -216,8 +211,8 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
                 isDense: true,
                 prefixIcon: const Icon(Icons.filter_alt_outlined, size: 18),
                 hintText: '筛选分类或作者',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 suffixIcon: _filter.text.isEmpty
                     ? null
                     : IconButton(
@@ -260,8 +255,9 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
 
   Widget _nodeTile(CategoryNode node, int depth) {
     final q = _filter.text.trim();
-    final open = q.isNotEmpty && expandedForQuery(tree!, q).contains(node.rel) ||
-        _expanded.contains(node.rel);
+    final open =
+        q.isNotEmpty && expandedForQuery(tree!, q).contains(node.rel) ||
+            _expanded.contains(node.rel);
     return Padding(
       padding: EdgeInsets.only(left: depth * 12.0),
       child: Column(
@@ -273,7 +269,8 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
             leading: Icon(open ? Icons.folder_open : Icons.folder_outlined,
                 size: 20),
             title: Text(node.name,
-                maxLines: 1, overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 13)),
             subtitle: Text(node.subtitle,
                 style: const TextStyle(fontSize: 10, color: Colors.grey)),

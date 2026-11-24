@@ -24,6 +24,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'http_error_text.dart';
+
 /// 字节 → JSON。[bytes] 必须是 UTF-8 编码（服务端契约）。
 ///
 /// 非 UTF-8 字节会抛 [FormatException]，由调用方现有的 catch 处理；
@@ -37,3 +39,47 @@ dynamic jsonOf(http.Response r) => jsonOfBytes(r.bodyBytes);
 /// 响应 → JSON Map（服务端绝大多数接口返回对象）。
 Map<String, dynamic> jsonMapOf(http.Response r) =>
     jsonOf(r) as Map<String, dynamic>;
+
+/// 响应 → JSON Map；**解析失败或不是对象时返回空 Map**，不抛异常。
+///
+/// 写接口的收尾普遍是「先尽力解析、再根据 ok/error 决定文案」：解析失败时
+/// 不该抛出去（那样用户看到的是一堆 `FormatException` 堆栈），而应回到
+/// 「拿状态码说话」的分支。空 Map 让 `apiFailureText` 能给出状态码文案。
+Map<String, dynamic> jsonObjectOrEmpty(http.Response r) {
+  try {
+    final d = jsonOf(r);
+    if (d is Map) return Map<String, dynamic>.from(d);
+  } catch (_) {}
+  return <String, dynamic>{};
+}
+
+/// 服务端「成功/失败 + 失败原因」的唯一判定。
+///
+/// 写接口的收尾此前在 6 处各写一遍：
+///
+///     if (r.statusCode != 200 || j is! Map || j['ok'] != true) {
+///       throw/return (j is Map && j['error'] != null) ? '${j['error']}' : 'HTTP ${r.statusCode}';
+///     }
+///
+/// 三处细节很容易各写错一个：①有的先判 `statusCode == 200` 才解析，
+/// 有的先解析再看状态码；②`j['error']` 可能是非字符串（Map/num），
+/// 直接插值会把 `{code: 500}` 这样的对象贴到界面上；③状态码文案有的走
+/// `httpErrorText`，有的手拼 `HTTP n`，同一个 404 在两个页面是两种说法。
+///
+/// 这里返回 **null 表示成功**，否则返回可直接展示的失败原因。
+/// [statusText] 允许业务传入自己的状态码文案（如封面/头像的 404 特指），
+/// 不传则回落到 [httpErrorText] 的通用归类。
+String? apiFailureText(
+  int status,
+  dynamic json, {
+  String Function(int status)? statusText,
+}) {
+  final ok = status == 200 && json is Map && json['ok'] == true;
+  if (ok) return null;
+  if (json is Map) {
+    final e = json['error'];
+    if (e is String && e.trim().isNotEmpty) return e.trim();
+  }
+  final text = statusText ?? httpErrorText;
+  return text(status);
+}

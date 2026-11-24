@@ -15,7 +15,16 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 import 'time_labels.dart';
+
+/// 诊断页「性能计数」tab 的刷新信号：任一条计数变化都自增一次。
+///
+/// 计数写在 [PerfDiagnostics.instance] 里是普通 int，页面不会自己重建；
+/// 只靠打开页面时读一次会停在旧数字。用这一个 notifier 取代页面上再起
+/// 一个轮询定时器——本项目已经明确禁止「靠定时器猜状态」。
+final ValueNotifier<int> perfRevision = ValueNotifier<int>(0);
 
 /// 日志文件上限：超过就先截断（清空）再写。
 const int kPerfLogMaxBytes = 1024 * 1024;
@@ -146,6 +155,7 @@ class PerfDiagnostics {
     if (_timeline.length > kPerfTimelineLimit) {
       _timeline.removeRange(0, _timeline.length - kPerfTimelineLimit);
     }
+    perfRevision.value++;
     if (!writeFile) return;
     _tail = _tail.then((_) => _append(line));
   }
@@ -221,6 +231,7 @@ class PerfDiagnostics {
     if (active > decodePeakActive) decodePeakActive = active;
     if (waiting > decodePeakWaiting) decodePeakWaiting = waiting;
     if (limit > 0) decodeLimit = limit;
+    perfRevision.value++;
   }
 
   /// 当前计数器快照。

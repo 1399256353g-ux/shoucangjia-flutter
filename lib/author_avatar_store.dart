@@ -21,6 +21,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'http_error_text.dart';
+import 'media_priority.dart';
 import 'prefs_json.dart';
 
 /// 本机覆盖表：`作者名 -> 媒体路径`（JSON object）。
@@ -154,17 +155,28 @@ String authorAvatarApiErrorText(int status) =>
 /// 手动挑的头像会被爬虫结果盖回去。这里把优先级收成一个纯函数，
 /// 播放页与其它入口共用，避免两处口径再次分叉。
 /// 空串/null 视为「没有」，直接看下一档。
+///
+/// 0.9.226：本函数此前自己写了一遍「逐档取第一个非空」，与
+/// `media_priority.pickAvatarPath`（封面/头像共用的唯一规则）是**两份实现**，
+/// 而且它丢掉了「同级新图优先」——只传了路径，没有 `at`。两处规则一旦
+/// 有人改一处（例如把爬虫提到兜底之后），另一个入口不会跟着变。
+/// 现在只转发，时间戳也一并透传；不传时间时行为与旧实现完全一致。
 String resolveAuthorAvatarPath({
   String? manual,
   String? crawled,
   String? fallback,
-}) {
-  for (final v in <String?>[manual, crawled, fallback]) {
-    final s = v?.trim() ?? '';
-    if (s.isNotEmpty) return s;
-  }
-  return '';
-}
+  int manualAt = 0,
+  int crawledAt = 0,
+  int fallbackAt = 0,
+}) =>
+    pickAvatarPath(
+      manual: manual ?? '',
+      crawler: crawled ?? '',
+      auto: fallback ?? '',
+      manualAt: manualAt,
+      crawlerAt: crawledAt,
+      autoAt: fallbackAt,
+    );
 
 /// 手动头像全局状态：`ChangeNotifier`，三处作者头像都监听它即时刷新。
 class AuthorAvatarStore extends ChangeNotifier {

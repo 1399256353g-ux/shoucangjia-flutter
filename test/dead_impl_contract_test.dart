@@ -1002,8 +1002,7 @@ void main() {
       final page = codeOf('lib/unit_author_mount_page.dart');
       // 只拦「手写插值拼接」这一种形式（`'...${x} 个文件夹 ...'`），
       // 不用裸子串：子串断言会被注释/常量误伤（本项目已踩过两次）。
-      expect(
-          RegExp(r'''(['"])\$\{[^}]*\}\s*个文件夹''').hasMatch(page), isFalse,
+      expect(RegExp(r'''(['"])\$\{[^}]*\}\s*个文件夹''').hasMatch(page), isFalse,
           reason: '面板又手拼了「N 个文件夹」；应走 authorMergeSummary/g.summary');
       expect(page.contains('g.summary'), isTrue);
       final groups = codeOf('lib/unit_author_groups.dart');
@@ -1036,6 +1035,89 @@ void main() {
       final dlgEnd = dlg.indexOf('class CornerBadgeSettingsPage');
       final dlgBody = dlgEnd > 0 ? dlg.substring(0, dlgEnd) : dlg;
       expect(dlgBody.contains('Platform.'), isFalse, reason: '捕获弹窗被平台门禁包住了');
+    });
+  });
+
+  group('第二十二批：写接口收尾 / 头像优先级 / 性能计数只有一个出口（2026-11-25）', () {
+    String codeOf(String path) =>
+        File(path).readAsStringSync().replaceAll('\r\n', '\n');
+
+    test('写接口收尾不得再手写「statusCode != 200 || ok != true」四连判定', () {
+      // 这条判定曾在 6 处各写一遍，且三处细节各不相同（先解析还是先看
+      // 状态码、error 是否字符串、状态码文案走哪套）。现在唯一出口是
+      // http_json.dart 的 apiFailureText。
+      final http = codeOf('lib/http_json.dart');
+      expect(http.contains('String? apiFailureText('), isTrue);
+      expect(http.contains("if (json is Map) {"), isTrue);
+      // 三处作者写接口 + 两个页面都必须转发，不得自己判 ok。
+      for (final f in const [
+        'lib/main.dart',
+        'lib/category_tree_page.dart',
+        'lib/folder_structure_page.dart',
+      ]) {
+        final src = codeOf(f);
+        expect(src.contains('apiFailureText('), isTrue,
+            reason: '$f 没有用 apiFailureText');
+      }
+      // 这些文件里不得再出现「ok != true 手写判定」的旧形状。
+      for (final f in const [
+        'lib/category_tree_page.dart',
+        'lib/folder_structure_page.dart',
+      ]) {
+        final src = codeOf(f);
+        expect(RegExp(r"j\['ok'\]\s*!=\s*true").hasMatch(src), isFalse,
+            reason: '$f 又手写了 ok != true 判定');
+      }
+      // 作者四个写接口（含 bio）也不得再各自拼 error 文案。
+      final main = codeOf('lib/main.dart');
+      final start =
+          main.indexOf('Future<AuthorEditResult> uploadAuthorAvatarBytes');
+      final end = main.indexOf('class AvatarCropPage');
+      expect(start, greaterThan(0));
+      final body = main.substring(start, end);
+      expect(RegExp(r"j\['error'\] is String").hasMatch(body), isFalse,
+          reason: '作者写接口又自己拼 error 文案了');
+      expect(RegExp(r"'HTTP \$\{r\.statusCode\}'").hasMatch(body), isFalse,
+          reason: '作者写接口又手拼 HTTP 状态码文案了');
+    });
+
+    test('头像优先级不得另写一份「逐档取第一个非空」', () {
+      // resolveAuthorAvatarPath 曾是 pickAvatarPath 的第二份实现，且丢了
+      // 同级时间戳。现在必须是纯转发。
+      final store = codeOf('lib/author_avatar_store.dart');
+      expect(
+          RegExp(r'String resolveAuthorAvatarPath\(\{[\s\S]*?\}\)\s*=>\s*pickAvatarPath\(')
+              .hasMatch(store),
+          isTrue,
+          reason: 'resolveAuthorAvatarPath 没有转发到 pickAvatarPath');
+      expect(
+          store.contains(
+              "for (final v in <String?>[manual, crawled, fallback])"),
+          isFalse,
+          reason: '第二份优先级实现复活了');
+      expect(store.contains("import 'media_priority.dart';"), isTrue);
+    });
+
+    test('性能计数必须有人读（snapshot/timeline 不能只活在测试里）', () {
+      // 这是本项目最隐蔽的替身形态：测试为一块不存在的界面作证。
+      // PerfDiagnostics.snapshot() 与 .timeline 此前只有 test/ 在读，
+      // 产品里零消费点——数字写了没人看，验收还得去拷 perf.log。
+      final main = codeOf('lib/main.dart');
+      expect(main.contains('p.snapshot()'), isTrue,
+          reason: '没有任何产品代码读 snapshot()');
+      expect(main.contains('p.timeline'), isTrue, reason: '没有任何产品代码读 timeline');
+      expect(main.contains("Tab(text: '性能计数')"), isTrue, reason: '性能计数页被移除了');
+      // 刷新必须靠 notifier，不许在**这个 tab 里**再起轮询定时器
+      // （main.dart 别处的定时器是同步轮询/轮播/淡入，与本页无关）。
+      expect(
+          codeOf('lib/perf_diagnostics.dart').contains('perfRevision'), isTrue);
+      final tabStart = main.indexOf('class _PerfTab');
+      expect(tabStart, greaterThan(0), reason: '_PerfTab 被删了？');
+      final tabBody =
+          main.substring(tabStart, main.indexOf('class DeletedMonitorPage'));
+      expect(tabBody.contains('Timer.'), isFalse,
+          reason: '性能计数页又用定时器轮询状态了（应靠 perfRevision）');
+      expect(tabBody.contains('perfRevision'), isTrue);
     });
   });
 }

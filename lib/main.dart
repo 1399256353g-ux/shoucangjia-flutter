@@ -2947,13 +2947,14 @@ class DiagnosticsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('诊断'),
           bottom: const TabBar(tabs: [
             Tab(text: '动作记录'),
             Tab(text: '错误记录'),
+            Tab(text: '性能计数'),
           ]),
         ),
         body: TabBarView(children: [
@@ -2966,8 +2967,66 @@ class DiagnosticsPage extends StatelessWidget {
             // 合并后不再自带 Scaffold/AppBar（外层已有）。
             embedded: true,
           ),
+          const _PerfTab(),
         ]),
       ),
+    );
+  }
+}
+
+/// 性能计数 tab：只显示**数字**（首帧毫秒、槽位峰值、解码并发、页面耗时）。
+///
+/// 这些计数以前只写进本地 `perf.log`，验收时必须把日志文件拷出来才能看；
+/// 而「起播耗时 / 重建次数 / 并发峰值」正是 owner 定的量化判据（不看画面）。
+/// 页面直接读 [PerfDiagnostics.instance] 的同一份数据，判据与落盘内容
+/// 不会出现两套口径。
+///
+/// 全部是计数与毫秒数，不含任何媒体路径、文件名或作者名——截图/复制
+/// 这段输出不会泄露内容。
+class _PerfTab extends StatelessWidget {
+  const _PerfTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: perfRevision,
+      builder: (context, _, __) {
+        final p = PerfDiagnostics.instance;
+        final snap = p.snapshot();
+        final lines = p.timeline.reversed.toList(growable: false);
+        return Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(spacing: 14, runSpacing: 6, children: [
+                for (final e in snap.entries)
+                  Text('${e.key}=${e.value}',
+                      style: const TextStyle(
+                          fontSize: 12, fontFamily: 'monospace')),
+              ]),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: lines.isEmpty
+                ? const Center(child: Text('暂无性能记录'))
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                    itemCount: lines.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: SelectableText(
+                        lines[i],
+                        style: const TextStyle(
+                            fontSize: 11.5, fontFamily: 'monospace'),
+                      ),
+                    ),
+                  ),
+          ),
+        ]);
+      },
     );
   }
 }
@@ -15479,14 +15538,8 @@ Future<bool> syncAuthorGradeFromServer({String? lib}) async {
     return false;
   }
   if (r.statusCode != 200) return false;
-  Map<String, dynamic> j;
-  try {
-    final d = jsonOf(r);
-    if (d is! Map) return false;
-    j = Map<String, dynamic>.from(d);
-  } catch (_) {
-    return false;
-  }
+  final j = jsonObjectOrEmpty(r);
+  if (j.isEmpty) return false;
   final ok = AuthorGrade.applyRemote(j);
   if (ok) await AuthorGrade.cacheLocal();
   return ok;
@@ -15512,16 +15565,9 @@ Future<AuthorEditResult> uploadAuthorAvatarBytes({
   } catch (e) {
     return AuthorEditResult(false, '上传失败：$e');
   }
-  Map<String, dynamic> j = const {};
-  try {
-    final d = jsonOf(r);
-    if (d is Map<String, dynamic>) j = d;
-  } catch (_) {}
-  if (r.statusCode != 200 || j['ok'] != true) {
-    final msg =
-        j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
-    return AuthorEditResult(false, '头像上传失败：$msg');
-  }
+  final j = jsonObjectOrEmpty(r);
+  final bad = apiFailureText(r.statusCode, j);
+  if (bad != null) return AuthorEditResult(false, '头像上传失败：$bad');
   return AuthorEditResult(true, '头像已更新', path: '${j['u'] ?? ''}');
 }
 
@@ -15544,16 +15590,9 @@ Future<AuthorEditResult> uploadAuthorBio({
   } catch (e) {
     return AuthorEditResult(false, '保存失败：${errorText(e)}');
   }
-  Map<String, dynamic> j = const {};
-  try {
-    final d = jsonOf(r);
-    if (d is Map<String, dynamic>) j = d;
-  } catch (_) {}
-  if (r.statusCode != 200 || j['ok'] != true) {
-    final msg =
-        j['error'] is String ? j['error'] as String : 'HTTP ${r.statusCode}';
-    return AuthorEditResult(false, '保存失败：$msg');
-  }
+  final j = jsonObjectOrEmpty(r);
+  final fail = apiFailureText(r.statusCode, j);
+  if (fail != null) return AuthorEditResult(false, '保存失败：$fail');
   final saved = j['bio'] is String ? j['bio'] as String : clean;
   return AuthorEditResult(true, '简介已更新', path: saved);
 }
@@ -15584,17 +15623,10 @@ Future<AuthorEditResult> setAuthorAvatarFile({
   } catch (e) {
     return AuthorEditResult(false, '设置头像失败：$e');
   }
-  Map<String, dynamic> j = const {};
-  try {
-    final d = jsonOf(r);
-    if (d is Map<String, dynamic>) j = d;
-  } catch (_) {}
-  if (r.statusCode != 200 || j['ok'] != true) {
-    final msg = j['error'] is String
-        ? j['error'] as String
-        : authorAvatarApiErrorText(r.statusCode);
-    return AuthorEditResult(false, '设置头像失败：$msg');
-  }
+  final j = jsonObjectOrEmpty(r);
+  final bad = apiFailureText(r.statusCode, j,
+      statusText: authorAvatarApiErrorText);
+  if (bad != null) return AuthorEditResult(false, '设置头像失败：$bad');
   return AuthorEditResult(true, '已设为该作者头像', path: '${j['u'] ?? ''}');
 }
 
@@ -15617,17 +15649,10 @@ Future<AuthorEditResult> clearAuthorAvatar({
   } catch (e) {
     return AuthorEditResult(false, '清除头像失败：$e');
   }
-  Map<String, dynamic> j = const {};
-  try {
-    final d = jsonOf(r);
-    if (d is Map<String, dynamic>) j = d;
-  } catch (_) {}
-  if (r.statusCode != 200 || j['ok'] != true) {
-    final msg = j['error'] is String
-        ? j['error'] as String
-        : authorAvatarApiErrorText(r.statusCode);
-    return AuthorEditResult(false, '清除头像失败：$msg');
-  }
+  final j = jsonObjectOrEmpty(r);
+  final bad = apiFailureText(r.statusCode, j,
+      statusText: authorAvatarApiErrorText);
+  if (bad != null) return AuthorEditResult(false, '清除头像失败：$bad');
   return const AuthorEditResult(true, '已恢复自动头像');
 }
 

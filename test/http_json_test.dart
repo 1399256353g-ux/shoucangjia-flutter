@@ -53,5 +53,79 @@ void main() {
       final arr = http.Response.bytes(utf8.encode('[1,2]'), 200);
       expect(() => jsonMapOf(arr), throwsA(isA<TypeError>()));
     });
+
+    test('jsonObjectOrEmpty 失败时给空 Map，不把解析异常抛给调用方', () {
+      expect(
+          jsonObjectOrEmpty(
+              http.Response.bytes(utf8.encode('{"a":1}'), 200))['a'],
+          1);
+      // 非对象 / 坏字节 / 空体：一律空 Map（调用方据此回落到状态码文案）。
+      expect(jsonObjectOrEmpty(http.Response.bytes(utf8.encode('[1,2]'), 200)),
+          isEmpty);
+      expect(jsonObjectOrEmpty(http.Response.bytes([0x7B, 0xFF, 0x7D], 500)),
+          isEmpty);
+      expect(jsonObjectOrEmpty(http.Response('', 502)), isEmpty);
+      // 合法对象照常返回（哪怕 ok:false —— 判定交给 apiFailureText）。
+      final m = jsonObjectOrEmpty(http.Response('{"ok":false}', 400));
+      expect(m['ok'], false);
+      m['x'] = 1; // 可写，不抛
+      expect(jsonObjectOrEmpty(http.Response('{"a":1}', 200)),
+          isA<Map<String, dynamic>>());
+    });
+  });
+
+  group('apiFailureText：写接口收尾的唯一判定', () {
+    test('200 + ok:true 才算成功（null）', () {
+      expect(apiFailureText(200, {'ok': true}), isNull);
+      expect(apiFailureText(200, {'ok': true, 'u': '/x.jpg'}), isNull);
+    });
+
+    test('ok 缺失/为假/false 字符串都算失败', () {
+      expect(apiFailureText(200, {'ok': false}), isNotNull);
+      expect(apiFailureText(200, {'ok': 'true'}), isNotNull);
+      expect(apiFailureText(200, {}), isNotNull);
+      expect(apiFailureText(200, null), isNotNull);
+      expect(apiFailureText(200, [1, 2]), isNotNull);
+    });
+
+    test('服务端 error 文案优先，且必须是非空字符串', () {
+      expect(apiFailureText(400, {'ok': false, 'error': '文件名非法'}), '文件名非法');
+      expect(apiFailureText(400, {'ok': false, 'error': '   '}), '请求格式不对');
+      // 非字符串的 error 不得被插值成 `{code: 500}` 之类贴到界面上。
+      expect(
+          apiFailureText(400, {
+            'ok': false,
+            'error': {'code': 500}
+          }),
+          '请求格式不对');
+      expect(apiFailureText(400, {'ok': false, 'error': 500}), '请求格式不对');
+    });
+
+    test('没有 error 时按状态码归类（与 httpErrorText 同源）', () {
+      expect(apiFailureText(400, {'ok': false}), '请求格式不对');
+      expect(apiFailureText(413, null), '图片过大');
+      expect(apiFailureText(500, {'ok': false}), '服务端写入失败');
+      expect(apiFailureText(401, {'ok': false}), 'HTTP 401');
+      expect(apiFailureText(418, null), 'HTTP 418');
+    });
+
+    test('业务可覆盖状态码文案（如头像 404 特指）', () {
+      expect(
+        apiFailureText(404, {'ok': false},
+            statusText: (s) => s == 404 ? '基础库或头像文件不存在' : 'HTTP $s'),
+        '基础库或头像文件不存在',
+      );
+      // 服务端自带 error 时仍然优先，不被覆盖函数顶掉。
+      expect(
+        apiFailureText(404, {'ok': false, 'error': '服务端说的原因'},
+            statusText: (_) => '兜底文案'),
+        '服务端说的原因',
+      );
+    });
+
+    test('非 200 但 body 带 ok:true 仍算失败（状态码是硬门槛）', () {
+      expect(apiFailureText(500, {'ok': true}), '服务端写入失败');
+      expect(apiFailureText(302, {'ok': true}), 'HTTP 302');
+    });
   });
 }
