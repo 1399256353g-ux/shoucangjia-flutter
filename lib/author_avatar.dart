@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'work_safety.dart';
 
 /// 头像候选图。`width/height` 未知时填 0（列表接口通常不给尺寸）。
 class AvatarCandidate {
@@ -125,14 +126,9 @@ List<AvatarCandidate> avatarCandidatesFromWorks(Iterable<Map> works) {
   for (final w in works) {
     final kind = '${w['t'] ?? ''}';
     final th = '${w['th'] ?? ''}'.trim();
-    final pics = <String>[];
-    final raw = w['m'];
-    if (raw is List) {
-      for (final e in raw) {
-        final p = '$e'.trim();
-        if (p.isNotEmpty) pics.add(p);
-      }
-    }
+    // 单图作品的 `m` 是字符串：只认 List 会让这类作品根本进不了候选，
+    // 表现为「作者有几条图文作品，但选头像时一张都列不出来」。
+    final pics = workMediaPaths(w);
     final picsOnly = pics.where(isAvatarImagePath).toList();
     if (kind == 'p' && picsOnly.isNotEmpty) {
       for (var i = 0; i < picsOnly.length && i < 3; i++) {
@@ -180,12 +176,8 @@ String workAvatarFallbackPath(dynamic work) {
   if (work is! Map) return '';
   final t = '${work['th'] ?? ''}'.trim();
   if (isAvatarImagePath(t)) return t;
-  final m = work['m'];
-  if (m is List) {
-    for (final x in m) {
-      final u = '$x'.trim();
-      if (isAvatarImagePath(u)) return u;
-    }
+  for (final u in workMediaPaths(work)) {
+    if (isAvatarImagePath(u)) return u;
   }
   return '';
 }

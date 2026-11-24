@@ -120,6 +120,10 @@ class CoverPick {
 String libraryMediaPath(String lib, String path) {
   final p = path.trim();
   if (p.isEmpty) return '';
+  // 绝对地址是自描述的：爬虫封面（`cv`）可能直接是 `http(s)://…` 的外链。
+  // 再补 `/media/<lib>/` 会拼出 `…/media/lib/http://cdn/x.jpg`，服务端把
+  // `http:` 当库内子目录，必然 404。绝对地址原样返回。
+  if (isAbsoluteMediaUrl(p)) return p;
   if (p.startsWith('/media/')) return p;
   final l = lib.trim();
   final rest = p.replaceFirst(RegExp(r'^/+'), '');

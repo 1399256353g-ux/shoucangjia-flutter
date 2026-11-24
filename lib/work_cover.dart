@@ -57,13 +57,11 @@ bool isVideoWork(dynamic work) =>
     work is Map && '${work['t'] ?? ''}' == 'v';
 
 /// 视频扩展名判断（用于 `m` 里混着视频文件的场景）。
-bool isVideoPath(String p) {
-  final l = p.toLowerCase();
-  for (final ext in const ['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi']) {
-    if (l.endsWith(ext)) return true;
-  }
-  return false;
-}
+///
+/// 规则本体在 `media_path.isVideoMediaPath`：`work_forms.chapterIsImage`
+/// 此前自己列了一份更短的清单（缺 mkv/avi），同一个 `.mkv` 在封面判定里
+/// 是视频、在合集排序里是图片——两套清单必须收敛成一条。这里保留旧名字。
+bool isVideoPath(String p) => isVideoMediaPath(p);
 
 /// 这个封面路径是**服务端接口**（`/api/thumb/...`）而不是媒体文件？
 ///

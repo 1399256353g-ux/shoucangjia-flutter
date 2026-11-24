@@ -6,9 +6,19 @@
 library;
 
 /// 作品媒体路径列表。数据缺失/类型错误时返回空列表，绝不抛异常。
+///
+/// 服务端对 `m` 有两种写法：数组 `["a.jpg"]` 与单图作品直接给字符串
+/// `"a.jpg"`。**只认数组**会让后者在整条链路上被判成「没有媒体」：
+/// 播放页显示「作品数据损坏」占位、预载拿不到源、封面角标算 0 张、
+/// 「保存到本机」与「移动到文件夹」都直接失败。所以两种写法在这里归一，
+/// 凡是读作品媒体的地方都必须走本函数，不得自己 `m is List` 再解一遍。
 List<String> workMediaPaths(dynamic w) {
   if (w is! Map) return const <String>[];
   final m = w['m'];
+  if (m is String) {
+    final one = m.trim();
+    return one.isEmpty ? const <String>[] : <String>[one];
+  }
   if (m is! List) return const <String>[];
   final out = <String>[];
   for (final e in m) {

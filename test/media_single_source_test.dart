@@ -76,12 +76,53 @@ void main() {
       expect(defs, ['lib/media_path.dart'],
           reason: 'encodeMediaPath 出现了多份实现：$defs');
     });
+
+    test('绝对地址不得被套上 /media/<lib>/（爬虫封面外链）', () {
+      // 0.9.232 前 libraryMediaPath 只判 `/media/` 前缀，`http(s)://`
+      // 会被当成相对路径补前缀 → `…/media/lib-01/http://cdn/x.jpg` → 404。
+      expect(libraryMediaPath('lib-01', 'http://cdn.example.com/a.jpg'),
+          'http://cdn.example.com/a.jpg');
+      expect(absoluteMediaUrl('http://nas:8090',
+              lib: 'lib-01', path: 'https://cdn.example.com/a.jpg'),
+          'https://cdn.example.com/a.jpg');
+      final parsed =
+          Uri.parse('https://cdn.example.com/a.jpg');
+      expect(parsed.host, 'cdn.example.com');
+    });
+
+    test('契约：视频扩展名清单只有 media_path 一处', () {
+      final files = Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'));
+      final offenders = <String>[];
+      for (final f in files) {
+        if (f.path.endsWith('media_path.dart')) continue;
+        final src = _code(f.path);
+        // 任何再次列出的视频扩展名字面量（至少 3 个成员）都视为第二份清单。
+        for (final lit in RegExp(r"const\s+\w*\s*=\s*\[([^\]]*)\]")
+            .allMatches(src)) {
+          final body = lit.group(1) ?? '';
+          final hits = RegExp(r"'\s*\.?(?:mp4|mov|m4v|webm|mkv|avi)\s*'")
+              .allMatches(body)
+              .length;
+          if (hits >= 3) {
+            offenders.add('${f.path}: $body');
+          }
+        }
+      }
+      expect(offenders, isEmpty,
+          reason: '视频扩展名清单出现了第二份（chapterIsImage 曾少列 mkv/avi，'
+              '同一个 .mkv 在封面判定里是视频、在合集排序里是图片）：\n'
+              '${offenders.join('\n')}');
+    });
   });
 
   group('单图作品：m 可能是字符串，不得直接 as List', () {
     test('workMediaPaths 认字符串形式的 m', () {
-      expect(workMediaPaths({'t': 'p', 'm': '/a/b.jpg'}).isEmpty, isTrue,
-          reason: '当前实现只认 List（此断言记录事实，改动时须同步产品决定）');
+      // 0.9.232：字符串形式此前被当成「没有媒体」，单图作品在播放页
+      // 显示「数据损坏」占位、预载无源、角标 0 张。读侧已归一。
+      expect(workMediaPaths({'t': 'p', 'm': '/a/b.jpg'}), ['/a/b.jpg']);
       expect(workMediaPaths({'t': 'p', 'm': ['/a/b.jpg']}), ['/a/b.jpg']);
       expect(workMediaPaths({'t': 'v'}), isEmpty);
       expect(workMediaPaths('junk'), isEmpty);
@@ -95,6 +136,35 @@ void main() {
       expect(RegExp(r'final n = workMediaPaths\(w\)\.length;').allMatches(src).length,
           greaterThanOrEqualTo(2),
           reason: '切图数量没有走 workMediaPaths');
+    });
+
+    test('契约：读作品媒体的地方不得自己写 `m is List` / `m is! List`', () {
+      // 0.9.232：单图作品的 `m` 是字符串。谁自己判一次 `is List`，谁就把
+      // 这类作品判成「没有媒体」——预载无源、角标 0 张、保存/移动失败、
+      // 头像候选空、合集章节排序错。取数只有 workMediaPaths 一个入口。
+      final offenders = <String>[];
+      final files = Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'));
+      for (final f in files) {
+        if (f.path.endsWith('work_safety.dart')) continue; // 归一实现本身
+        if (f.path.endsWith('app_settings.dart')) continue; // 按键 combo 的 m
+        final src = _code(f.path);
+        for (final m in RegExp(r'''\[['"]m['"]\]''').allMatches(src)) {
+          // 取该行上下文，命中「is List」即视为自行解析媒体数组。
+          final lineStart = src.lastIndexOf('\n', m.start) + 1;
+          final lineEnd = src.indexOf('\n', m.end);
+          final line = src.substring(
+              lineStart, lineEnd < 0 ? src.length : lineEnd);
+          if (RegExp(r'\bis\s+!?\s*List\b').hasMatch(line)) {
+            offenders.add('${f.path}: ${line.trim()}');
+          }
+        }
+      }
+      expect(offenders, isEmpty,
+          reason: '这些地方自行判断 m 的类型，单图作品会被当成没有媒体：\n'
+              '${offenders.join('\n')}');
     });
   });
 

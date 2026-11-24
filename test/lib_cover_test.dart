@@ -145,6 +145,12 @@ void main() {
       expect(libraryMediaPath('lib-01', '/a/b.jpg'), '/media/lib-01/a/b.jpg');
       expect(libraryMediaPath('', '/a/b.jpg'), '/media/a/b.jpg');
       expect(libraryMediaPath('lib-01', ''), '');
+      // 绝对地址是自描述的（爬虫封面可能是外链），不得再补 /media/<lib>/
+      // ——否则拼出 `…/media/lib-01/http://cdn/x.jpg`，服务端必然 404。
+      expect(libraryMediaPath('lib-01', 'http://cdn.example.com/a.jpg'),
+          'http://cdn.example.com/a.jpg');
+      expect(libraryMediaPath('lib-01', 'https://cdn.example.com/a.jpg?w=2'),
+          'https://cdn.example.com/a.jpg?w=2');
     });
 
     test('绝对地址拼接（去掉 base 尾部斜杠）', () {

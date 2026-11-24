@@ -29,6 +29,34 @@ bool isAbsoluteMediaUrl(String path) {
 /// `/media/<lib>/api/thumb/...`——服务端把 `api` 当库内子目录，必然 404。
 bool isApiMediaPath(String path) => path.trim().startsWith('/api/');
 
+/// 媒体路径是否指向视频文件（按扩展名，忽略查询串与片段）。
+///
+/// **唯一定义**：此前 `work_cover.isVideoPath` 与 `work_forms.chapterIsImage`
+/// 各写了一份视频扩展名清单，两份的成员不同（后者少了 mkv/avi）——
+/// 同一个 `.mkv` 章节在「封面选取」里算视频、在「合集章节排序」里算图片，
+/// 会被排到图片章节末尾。视频格式只在这里列一次。
+const List<String> kVideoExts = <String>[
+  '.mp4',
+  '.mov',
+  '.m4v',
+  '.webm',
+  '.mkv',
+  '.avi',
+];
+
+bool isVideoMediaPath(String p) {
+  var l = p.trim().toLowerCase();
+  if (l.isEmpty) return false;
+  final q = l.indexOf('?');
+  if (q >= 0) l = l.substring(0, q);
+  final h = l.indexOf('#');
+  if (h >= 0) l = l.substring(0, h);
+  for (final ext in kVideoExts) {
+    if (l.endsWith(ext)) return true;
+  }
+  return false;
+}
+
 String encodeMediaPath(String path) {
   if (path.isEmpty) return path;
   if (isAbsoluteMediaUrl(path)) return path;

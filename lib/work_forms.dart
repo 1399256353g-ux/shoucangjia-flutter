@@ -7,21 +7,20 @@
 /// 视频合集额外提供 `ch`，播放页按章节切换 `m`/`du` 即可。
 library;
 
+import 'work_safety.dart';
+import 'media_path.dart';
+
 /// 章节是否为图片（混合合集里图片章节排在最后）。
 bool chapterIsImage(dynamic chapter) {
   if (chapter is! Map) return false;
   final t = '${chapter['t'] ?? ''}'.trim();
   if (t == 'p' || t == 'i') return true;
   if (t == 'v') return false;
-  final m = chapter['m'];
-  if (m is List && m.isNotEmpty) {
-    final u = '${m.first}'.toLowerCase();
-    return !(u.endsWith('.mp4') ||
-        u.endsWith('.webm') ||
-        u.endsWith('.mov') ||
-        u.endsWith('.m4v'));
-  }
-  return false;
+  // 没有显式 `t` 时按第一个媒体文件的扩展名判断。视频清单只有
+  // `media_path` 一处（此前这里少列 mkv/avi，`.mkv` 章节会被排到图片末尾）。
+  final paths = workMediaPaths(chapter);
+  if (paths.isEmpty) return false;
+  return !isVideoMediaPath(paths.first);
 }
 
 /// 章节列表；没有合集时返回空列表。
@@ -58,8 +57,12 @@ String workKind(dynamic work) {
     return k;
   }
   if (work['t'] == 'v') return workChapterCount(work) > 1 ? 'chapters' : 'single';
-  final m = work['m'];
-  if (work['t'] == 'p') return (m is List && m.length > 1) ? 'post' : 'single';
+  // `m` 可能是数组也可能是单图字符串：读侧只走 workMediaPaths，
+  // 否则单图作品永远被判成 `single`（图数 1 → 恰好也一样），
+  // 但多图字符串形式（含分隔）与「有媒体/无媒体」的判定会分叉。
+  if (work['t'] == 'p') {
+    return workMediaPaths(work).length > 1 ? 'post' : 'single';
+  }
   return 'single';
 }
 
@@ -103,8 +106,10 @@ Map<String, dynamic> workWithChapter(dynamic work, int index) {
   // 混合合集：图片章节切回图片模式，视频章节切回视频模式。
   final ct = '${c['t'] ?? ''}'.trim();
   if (ct == 'p' || ct == 'v') base['t'] = ct;
-  final m = c['m'];
-  if (m is List && m.isNotEmpty) base['m'] = m;
+  // 章节的 `m` 同样可能是单图字符串：只认 List 会让切到该章节时不换媒体，
+  // 停在上一章的画面上。归一后统一写成数组交给播放器。
+  final cm = workMediaPaths(c);
+  if (cm.isNotEmpty) base['m'] = cm;
   if (c['du'] != null) base['du'] = c['du'];
   base['c'] = i;
   return base;

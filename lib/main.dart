@@ -10608,8 +10608,10 @@ class _PlayerPageState extends State<PlayerPage>
       _toast('移动端暂不支持保存到本机');
       return;
     }
-    final m = w['m'];
-    final first = (m is List && m.isNotEmpty) ? '${m.first}' : '';
+    // 单图作品的 `m` 是字符串：只认 List 会让「保存到本机」对这类作品
+    // 一律报「暂无可保存的媒体」。
+    final paths = workMediaPaths(w);
+    final first = paths.isEmpty ? '' : paths.first;
     if (first.isEmpty) {
       _toast('暂无可保存的媒体');
       return;
@@ -16502,8 +16504,8 @@ class _AuthorPageState extends State<AuthorPage> {
       String prefix = '';
       for (final id in selectedWorks) {
         final w = _workById(id);
-        final m = (w == null) ? null : w['m'];
-        final media = (m is List && m.isNotEmpty) ? '${m.first}' : '';
+        final paths = workMediaPaths(w);
+        final media = paths.isEmpty ? '' : paths.first;
         if (media.startsWith('/media/')) {
           prefix = authorPrefixOfMedia(media);
           break;

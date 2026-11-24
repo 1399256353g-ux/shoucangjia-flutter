@@ -5,6 +5,7 @@
 library;
 
 import 'work_forms.dart';
+import 'work_safety.dart';
 
 /// 把秒数格式化成 `m:ss`（超过 1 小时为 `h:mm:ss`）。
 /// 非法/非正数返回空串，调用方据此隐藏角标。
@@ -39,8 +40,8 @@ String? workCoverBadge(dynamic work) {
     return n > 1 ? '$n 集' : null;
   }
   if (type == 'p') {
-    final media = work['m'];
-    final n = media is List ? media.length : 0;
+    // 单图作品的 `m` 是字符串：只数 List 会让它没有「1 图」角标。
+    final n = workMediaPaths(work).length;
     return n > 0 ? '$n 图' : null;
   }
   if (type == 'v') {

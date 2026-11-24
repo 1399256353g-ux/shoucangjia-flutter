@@ -14,7 +14,15 @@ void main() {
       expect(workMediaPaths('oops'), isEmpty);
       expect(workMediaPaths(<String, dynamic>{}), isEmpty);
       expect(workMediaPaths({'t': 'v', 'm': null}), isEmpty);
-      expect(workMediaPaths({'t': 'v', 'm': 'a.mp4'}), isEmpty);
+      expect(workMediaPaths({'t': 'v', 'm': '  '}), isEmpty);
+    });
+
+    test('单图作品的 m 是字符串：归一成一条路径，不再当成没有媒体', () {
+      // 服务端两种写法并存。只认 List 会让单图作品被判「数据损坏」：
+      // 播放页占位、预载无源、角标 0 张、保存/移动直接失败。
+      expect(workMediaPaths({'t': 'p', 'm': '/a/b.jpg'}), ['/a/b.jpg']);
+      expect(workMediaPaths({'t': 'v', 'm': 'a.mp4'}), ['a.mp4']);
+      expect(workMediaPaths({'t': 'p', 'm': '  x.jpg  '}), ['x.jpg']);
     });
 
     test('过滤空项并容忍非字符串元素', () {
