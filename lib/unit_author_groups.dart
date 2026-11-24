@@ -132,8 +132,8 @@ class UnitAuthorGroup {
       name: '${v['name'] ?? ''}'.trim(),
       names: names,
       files: files,
-      split: v['split'] == true,
-      auto: v['auto'] == true,
+      split: boolOf(v['split']),
+      auto: boolOf(v['auto']),
       works: intOf(v['works']),
       avatar: '${v['av'] ?? ''}'.trim(),
       bio: '${v['bio'] ?? ''}'.trim(),
@@ -416,8 +416,8 @@ class UnitAuthorCard {
       works: intOf(v['works']),
       avatar: '${v['av'] ?? ''}'.trim(),
       bio: '${v['bio'] ?? ''}'.trim(),
-      split: v['split'] == true,
-      auto: v['auto'] == true,
+      split: boolOf(v['split']),
+      auto: boolOf(v['auto']),
     );
   }
 }

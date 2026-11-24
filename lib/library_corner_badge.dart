@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'color_codec.dart';
 import 'contrast.dart';
+import 'json_num.dart';
 import 'prefs_json.dart';
 
 /// 库种类 / 等级 —— 决定左上角角标的默认图案。
@@ -120,8 +121,8 @@ class LibraryCornerBadge {
     final p = j['pattern'];
     if (p is Map) {
       for (final k in LibBadgeKind.values) {
-        final v = p[k.name];
-        if (v is num) pattern[k] = clampPattern(k, v.toInt());
+        final v = intOrNull(p[k.name]);
+        if (v != null) pattern[k] = clampPattern(k, v);
       }
     }
     final c = j['color'];

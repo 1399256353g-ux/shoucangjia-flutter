@@ -69,7 +69,7 @@ class WatchProgress {
     return WatchProgress(
       positionMs: p,
       durationMs: d,
-      done: raw['f'] == 1 || raw['f'] == true,
+      done: boolOf(raw['f']),
       updatedAt: n(raw['t']),
     );
   }

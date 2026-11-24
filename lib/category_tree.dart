@@ -10,6 +10,7 @@
 //   { root, name, dirs:[{name, rel, authors:[...], dirs:[...]}] }
 // 本文件只做解析、校验、改名后的本地映射与筛选，不做 IO。
 
+import 'http_json.dart';
 import 'rel_path.dart';
 
 /// 一个分类节点（对应磁盘上的一个真实目录）。
@@ -103,7 +104,7 @@ List<CategoryNode> _parseNodes(List raw, String parentRel) {
     out.add(CategoryNode(
       name: name,
       rel: rel,
-      children: _parseNodes(item['dirs'] as List? ?? const [], rel),
+      children: _parseNodes(listOf(item['dirs']), rel),
       authors: _stringList(item['authors']),
     ));
   }

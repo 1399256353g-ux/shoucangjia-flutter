@@ -135,14 +135,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
 
   static bool? _explicitBasicFlag(Map raw) {
     for (final k in _basicFlagKeys) {
-      final v = raw[k];
-      if (v is bool) return v;
-      if (v is num) return v != 0;
-      if (v is String && v.trim().isNotEmpty) {
-        final s = v.trim().toLowerCase();
-        if (s == 'true' || s == '1' || s == 'yes') return true;
-        if (s == 'false' || s == '0' || s == 'no') return false;
-      }
+      final v = boolOrNull(raw[k]);
+      if (v != null) return v;
     }
     return null;
   }
@@ -234,7 +228,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       topName = TopNodeName.current;
       topRel = '${top is Map ? (top['rel'] ?? '') : ''}';
       final serverNodes =
-          ((j['nodes'] as List?) ?? const []).map((e) => '$e').toList();
+          [for (final e in listOf(j['nodes'])) '$e'];
       nodes
         ..clear()
         ..addAll(serverNodes);
@@ -243,7 +237,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
         ..addAll(serverNodes);
       basicRels = known.toSet();
       basicsKnown = basics != null;
-      rows = _parse(((j['folders'] as List?) ?? const []), known);
+      rows = _parse(listOf(j['folders']), known);
       // 基础库永远不能是节点：按「实时基础库特征」清掉历史误选（保留 saved 原值）。
       nodes.removeWhere((e) => _isBasicRel(e));
       if (!mounted) return;
@@ -295,7 +289,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
         name: '${raw['name'] ?? rel}'.trim(),
         depth: raw['depth'] == null ? 1 : intOf(raw['depth'], 1),
         authors: authors,
-        children: _parse((raw['dirs'] as List?) ?? const [], basics),
+        children: _parse(listOf(raw['dirs']), basics),
         isBasic: _isBasicFolder(raw, rel, authors, basics),
         listed: _explicitBasicFlag(raw) == true ||
             basics.contains(normalizeRel(rel)),

@@ -23,6 +23,7 @@ import 'package:flutter/material.dart'
 import 'app_settings.dart';
 import 'color_codec.dart';
 import 'index_prefix.dart';
+import 'json_num.dart';
 import 'lib_id.dart';
 import 'prefs_json.dart';
 import 'contrast.dart';
@@ -85,10 +86,9 @@ class EntryStyle {
   /// 容错解析：缺失或非法字段保留 [fallback] 的对应值。
   static EntryStyle fromJson(Object? v, EntryStyle fallback) {
     if (v is! Map) return fallback;
-    double? d(dynamic x) => x is num ? x.toDouble() : null;
-    final w = d(v['w']);
-    final ba = d(v['ba']);
-    final fa = d(v['fa']);
+    final w = doubleOrNull(v['w']);
+    final ba = doubleOrNull(v['ba']);
+    final fa = doubleOrNull(v['fa']);
     return EntryStyle(
       borderWidth: clampW(w ?? fallback.borderWidth),
       borderAlpha: clampA(ba ?? fallback.borderAlpha),

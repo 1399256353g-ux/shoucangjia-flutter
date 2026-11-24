@@ -524,8 +524,8 @@ class LibMeta {
           final lj = jsonOf(rs[0]);
           final reg = jsonOf(rs[1]);
           var base = '';
-          if (reg is Map && reg['libraries'] is List) {
-            for (final e in reg['libraries'] as List) {
+          if (reg is Map) {
+            for (final e in listOf(reg['libraries'])) {
               if (e is Map && '${e['id']}' == lib) {
                 base = '${e['base'] ?? e['dir'] ?? ''}';
                 break;
@@ -778,8 +778,8 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
       if (lj.statusCode != 200) return <String, Set<String>>{};
       final regJson = jsonOf(reg);
       var base = '';
-      if (regJson is Map && regJson['libraries'] is List) {
-        for (final e in regJson['libraries'] as List) {
+      if (regJson is Map) {
+        for (final e in listOf(regJson['libraries'])) {
           if (e is Map && '${e['id']}' == lib) {
             base = '${e['base'] ?? ''}';
             break;
@@ -955,7 +955,7 @@ class _SyncAllProgressDialogState extends State<_SyncAllProgressDialog> {
       return;
     }
     tries = 0;
-    if (s['running'] == true) return;
+    if (boolOf(s['running'])) return;
     _finish(intOf(s['exit'], -1));
   }
 
@@ -1229,7 +1229,7 @@ List<String> moveTargetCandidates(dynamic catTree, String authorPrefix) {
     }
   }
 
-  if (catTree is Map && catTree['dirs'] is List) walk(catTree['dirs'] as List);
+  if (catTree is Map) walk(listOf(catTree['dirs']));
   return out;
 }
 
@@ -1446,12 +1446,11 @@ class _SettingsPageState extends State<SettingsPage> {
             .timeout(const Duration(seconds: 8)),
       ]);
       if (rs[0].statusCode != 200) throw Exception(httpErrorText(rs[0].statusCode));
-      final cols =
-          (jsonOf(rs[0])['collections'] as List?)?.length ?? 0;
+      final cols = listLengthOf(jsonOf(rs[0])['collections']);
       var basics = 0;
       if (rs[1].statusCode == 200) {
         final j = mapOrNull(jsonOf(rs[1]));
-        basics = (j?['basicLibraries'] as List?)?.length ?? 0;
+        basics = listLengthOf(j?['basicLibraries']);
       }
       sw.stop();
       if (mounted) {
@@ -5118,7 +5117,7 @@ class _LibraryPageState extends State<LibraryPage> {
       final bindings = buildBindings(servers: use, libraries: merged);
       final byBase = {for (final s in use) s.base: s};
       if (treeJson != null) {
-        for (final raw in (treeJson['basicLibraries'] as List?) ?? const []) {
+        for (final raw in listOf(treeJson['basicLibraries'])) {
           if (raw is! Map) continue;
           final id = '${raw['id'] ?? ''}'.trim();
           final s = byBase['${raw['_serverBase'] ?? ''}'];
@@ -5903,8 +5902,8 @@ class _LibraryPageState extends State<LibraryPage> {
     final id = '${l['id']}';
     final isCur = id == cfg.lib;
     final isDef = id == defaultId;
-    final cr = (l['crawler'] as Map?) ?? const {};
-    final scripts = (l['crawlerScripts'] as List?) ?? const [];
+    final cr = mapOrNull(l['crawler']) ?? const <String, dynamic>{};
+    final scripts = listOf(l['crawlerScripts']);
     return ListTile(
       leading: Icon(
           isCur ? Icons.radio_button_checked : Icons.radio_button_unchecked,
@@ -5926,11 +5925,11 @@ class _LibraryPageState extends State<LibraryPage> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           Text(
-              '爬虫：${cr['enabled'] == true ? '已启用' : '未启用'} · ${cr['schedule'] ?? '04:10'} · 脚本 ${scripts.length} 个 · ${(l['indexOk'] == true) ? '索引正常' : '索引缺失'}',
+              '爬虫：${boolOf(cr['enabled']) ? '已启用' : '未启用'} · ${cr['schedule'] ?? '04:10'} · 脚本 ${scripts.length} 个 · ${boolOf(l['indexOk']) ? '索引正常' : '索引缺失'}',
               style: TextStyle(
                   fontSize: 11,
                   color:
-                      l['indexOk'] == true ? Colors.grey : Colors.redAccent)),
+                      boolOf(l['indexOk']) ? Colors.grey : Colors.redAccent)),
         ],
       ),
       isThreeLine: true,
@@ -6011,10 +6010,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
-      final list = ((j['libraries'] as List?) ?? const [])
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .toList();
+      final list = mapsOf(j['libraries']);
       crawlers.clear();
       for (final l in list) {
         final id = '${l['id']}';
@@ -6067,12 +6063,10 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   }
 
   Map _cfgOf(Map<String, dynamic>? j) =>
-      (j != null && j['crawler'] is Map) ? j['crawler'] as Map : const {};
+      mapOrNull(j == null ? null : j['crawler']) ?? const <String, dynamic>{};
 
-  int _scriptCount(Map<String, dynamic>? j) {
-    final s = j == null ? null : j['scripts'];
-    return s is List ? s.length : 0;
-  }
+  int _scriptCount(Map<String, dynamic>? j) =>
+      listLengthOf(j == null ? null : j['scripts']);
 
   String _freqText(Map<String, dynamic>? j) {
     final iv = intOf(_cfgOf(j)['intervalMin']);
@@ -6082,8 +6076,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
 
   /// H：单个单元库的配置入口；没有脚本时置灰并写明 J17 原因。
   Widget _unitTile(UnitLibrary u) {
-    final has = unitFlags[u.rel] == true ||
-        unitFlags[u.id.replaceFirst('node:', '')] == true;
+    final has = boolOf(unitFlags[u.rel]) ||
+        boolOf(unitFlags[u.id.replaceFirst('node:', '')]);
     return ListTile(
       enabled: has,
       leading: Icon(
@@ -6220,10 +6214,10 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
           .timeout(const Duration(seconds: 10));
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
-      final c = (j['crawler'] as Map?) ?? const {};
+      final c = mapOrNull(j['crawler']) ?? const <String, dynamic>{};
       if (!mounted) return;
       setState(() {
-        enabled = c['enabled'] == true;
+        enabled = boolOf(c['enabled']);
         schedule = '${c['schedule'] ?? '04:10'}';
         intervalMin = intOf(c['intervalMin']);
         note = '${c['note'] ?? ''}';
@@ -6408,8 +6402,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
     if (mounted) setState(() => running = false);
   }
 
-  String _list(Object? v) =>
-      ((v as List?) ?? const []).map((e) => '$e').join(', ');
+  String _list(Object? v) => stringsOf(v).join(', ');
 
   String _deadLine(dynamic e) {
     if (e is! Map) return '$e';
@@ -6420,8 +6413,8 @@ class _MaintenancePageState extends State<MaintenancePage> {
   @override
   Widget build(BuildContext context) {
     final deep = data['deep'] is Map ? data['deep'] as Map : null;
-    final deepOk = deep == null || deep['ok'] == true;
-    final ok = data['indexOk'] == true && data['baseOk'] == true && deepOk;
+    final deepOk = deep == null || boolOf(deep['ok']);
+    final ok = boolOf(data['indexOk']) && boolOf(data['baseOk']) && deepOk;
     return Scaffold(
       appBar: AppBar(title: Text('维护 · ${widget.lib['name']}'), actions: [
         IconButton(
@@ -6445,14 +6438,14 @@ class _MaintenancePageState extends State<MaintenancePage> {
                   _row('库 ID', libId),
                   _row('数据目录', '${data['dir']}'),
                   _row('媒体目录', '${data['base']}'),
-                  _row('索引', '${data['indexOk'] == true ? '正常' : '缺失/损坏'}'),
+                  _row('索引', '${boolOf(data['indexOk']) ? '正常' : '缺失/损坏'}'),
                   _row('作品/同步源',
                       '${data['total'] ?? 0} / ${data['collections'] ?? 0}'),
                   _row('索引文件', '${data['cFiles'] ?? 0} 个'),
                   _row('缺失', _list(data['missing'])),
                   _row('孤儿', _list(data['orphans'])),
                   _row('损坏', _list(data['bad'])),
-                  _row('媒体目录存在', '${data['baseOk'] == true ? '是' : '否'}'),
+                  _row('媒体目录存在', '${boolOf(data['baseOk']) ? '是' : '否'}'),
                   _row('爬虫目录', '${data['crawlerDir'] ?? '未创建'}'),
                   if (deep != null) ...[
                     const Divider(height: 24),
@@ -6470,10 +6463,10 @@ class _MaintenancePageState extends State<MaintenancePage> {
                         '${deep['thumbs'] ?? 0} 个，缺失 ${deep['thumbMissing'] ?? 0}'),
                     _row('音频缺失', '${deep['audioMissing'] ?? 0}'),
                     _row('耗时', '${deep['ms'] ?? 0} ms'),
-                    if ((deep['dead'] as List?)?.isNotEmpty == true)
+                    if (listOf(deep['dead']).isNotEmpty)
                       _row(
                           '失效明细',
-                          (deep['dead'] as List)
+                          listOf(deep['dead'])
                               .take(10)
                               .map(_deadLine)
                               .join('\n')),
@@ -6720,7 +6713,7 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
     if (r.statusCode != 200) throw StateError(httpErrorText(r.statusCode));
     final j = jsonOf(r);
     if (j is! Map) return 0;
-    return ((j['libraries'] as List?) ?? const []).length;
+    return listLengthOf(j['libraries']);
   }
 
   return runTotalRefresh(
@@ -6834,8 +6827,7 @@ class _RankPageState extends State<RankPage> {
       final meta = await LibMeta.load(cfg.lib);
       if (!mounted) return;
       metas[cfg.lib] = meta;
-      final list =
-          (j is Map && j['authors'] is List) ? j['authors'] as List : [];
+      final list = listOf(j is Map ? j['authors'] : null);
       setState(() {
         rows = list;
         loading = false;
@@ -6917,11 +6909,11 @@ class _RankPageState extends State<RankPage> {
         break;
       }
     }
-    final ls = row is Map && row['libs'] is List
-        ? (row['libs'] as List).map((e) => '$e').toList()
-        : [sel == 'all' ? cfg.lib : sel];
+    final ls = row is Map ? stringsOf(row['libs']) : const <String>[];
+    final target = ls.isEmpty ? [sel == 'all' ? cfg.lib : sel] : ls;
     await Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => AuthorPage(name: name, libs: ls.isEmpty ? null : ls)));
+        builder: (_) =>
+            AuthorPage(name: name, libs: target.isEmpty ? null : target)));
     if (mounted) load();
   }
 
@@ -7599,7 +7591,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         }
         return;
       }
-      if (s['running'] == true) return;
+      if (boolOf(s['running'])) return;
       t.cancel();
       setState(() => syncing = false);
       final code = s['exit'];
@@ -7666,8 +7658,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       for (final e in m.entries) {
         final v = mapOrNull(e.value);
         if (v == null) continue;
-        final ls = (v['libs'] as List?)?.whereType<String>().toList() ??
-            const <String>[];
+        final ls = stringsOf(v['libs']);
         auMap[e.key] = {...v, '_lib': ls.isNotEmpty ? ls.first : cfg.lib};
         if (ls.isNotEmpty) auLibs[e.key] = ls;
       }
@@ -7880,8 +7871,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       if (r.statusCode != 200) return;
       final m = jsonOf(r);
       final pick = pickFallbackAvatar(avatarCandidatesFromWorks(
-          ((m is Map ? m['works'] : null) as List?)?.whereType<Map>() ??
-              const <Map>[]));
+          [for (final w in listOf(m is Map ? m['works'] : null)) if (w is Map) w]));
       if (pick == null || pick.isEmpty || !mounted) return;
       setState(() => _avFallback[key] = pick);
     } catch (_) {}
@@ -10339,7 +10329,7 @@ class _PlayerPageState extends State<PlayerPage>
         dropGlow = false;
       }
     });
-    if (r != null && r['ok'] == true) {
+    if (r != null && boolOf(r['ok'])) {
       _toast('已送 1 颗小水滴 · 今日剩余 $dropDayLeft · 本周剩余 $dropWeekLeft');
     } else {
       _toast(serverErrorText(r) ?? '发送失败，请检查网络');
@@ -12842,8 +12832,7 @@ class _PlayerPageState extends State<PlayerPage>
                 itemCount: chs.length,
                 itemBuilder: (_, i) {
                   final selected = i == _chapter;
-                  final dur = formatBadgeDuration(
-                      chs[i]['du'] is num ? chs[i]['du'] as num : null);
+                  final dur = formatBadgeDuration(numOrNull(chs[i]['du']));
                   return ListTile(
                     dense: true,
                     leading: Icon(
@@ -14704,8 +14693,7 @@ class _RecommendPageState extends State<RecommendPage> {
     if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     final j = jsonOf(r);
     final out = <Map<String, dynamic>>[];
-    for (final w
-        in (j is Map && j['works'] is List) ? (j['works'] as List) : const []) {
+    for (final w in listOf(j is Map ? j['works'] : null)) {
       if (w is! Map) continue;
       final m = Map<String, dynamic>.from(w);
       out.add({...m, '_lib': '${m['_lib'] ?? cfg.lib}'});
@@ -15159,8 +15147,7 @@ class _SearchPageState extends State<SearchPage> {
             .timeout(const Duration(seconds: 20));
         if (r.statusCode != 200) break;
         final j = jsonOf(r);
-        final batch =
-            (j is Map && j['works'] is List) ? j['works'] as List : const [];
+        final batch = listOf(j is Map ? j['works'] : null);
         ws.addAll(batch);
         offset += batch.length;
         final total =
@@ -15395,7 +15382,7 @@ class _SearchPageState extends State<SearchPage> {
                         for (final e in res)
                           if (e['w'] is Map)
                             {
-                              ...Map<String, dynamic>.from(e['w'] as Map),
+                              ...mapOrNull(e['w'])!,
                               '_lib': '${e['_lib']}',
                               '_bid': '${e['_bid'] ?? ''}',
                             }
@@ -16290,9 +16277,8 @@ class _AuthorPageState extends State<AuthorPage> {
         if (primaryLib.isEmpty) primaryLib = lib;
         // 本库作品打上 `_lib` 后整批交给合并器；去重与顺序由它保证。
         perLib.add([
-          for (final w in ((m['works'] as List?) ?? const []))
-            if (w is Map)
-              {...Map<String, dynamic>.from(w), '_lib': lib},
+          for (final w in listOf(m is Map ? m['works'] : null))
+            if (w is Map) {...Map<String, dynamic>.from(w), '_lib': lib},
         ]);
         postStat('visit', widget.name, lib: lib);
       } catch (_) {}

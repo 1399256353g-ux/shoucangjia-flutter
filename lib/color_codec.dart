@@ -11,6 +11,8 @@
 /// 本身是同一件事的两种口径，改一处忘一处就会变成角标与词条不同色。
 library;
 
+import 'json_num.dart';
+
 /// 解析 `#rgb` / `#rrggbb` / `#aarrggbb`（`#` 可省，大小写不限）。
 /// 非法输入返回 null，由调用方保留旧值（不抛异常、不写半截）。
 int? argbFromHex(String raw) {
@@ -35,10 +37,11 @@ int? argbFromHex(String raw) {
   return n & 0xFFFFFFFF;
 }
 
-/// JSON 值 → ARGB：数值直接用（越界视为无效），字符串走 [argbFromHex]。
+/// JSON 值 → ARGB：数值直接用（越界/非有限值视为无效），字符串走 [argbFromHex]。
 int? argbFromJson(Object? v) {
   if (v is num) {
-    final n = v.toInt();
+    final n = intOrNull(v);
+    if (n == null) return null;
     return (n >= 0 && n <= 0xFFFFFFFF) ? n : null;
   }
   if (v is String) return argbFromHex(v);

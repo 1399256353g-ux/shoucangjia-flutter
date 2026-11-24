@@ -126,21 +126,17 @@ String workWatchKeyFor(dynamic work, int chapter) {
 
 /// 合集总时长（秒，仅统计有 `du` 的章节）；无数据返回 0。
 num workTotalDuration(dynamic work) {
-  num asNum(dynamic v) {
-    if (v is num && v > 0) return v;
-    if (v is String) return num.tryParse(v.trim()) ?? 0;
-    return 0;
-  }
-
   final chs = workChapters(work);
   if (chs.length > 1) {
     num total = 0;
     for (final c in chs) {
-      total += asNum(c['du']);
+      final d = numOrNull(c['du']);
+      if (d != null && d > 0) total += d;
     }
     return total;
   }
-  return work is Map ? asNum(work['du']) : 0;
+  final d = work is Map ? numOrNull(work['du']) : null;
+  return (d != null && d > 0) ? d : 0;
 }
 
 /// J6：作者主页作品筛选分类。

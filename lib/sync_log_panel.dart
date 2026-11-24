@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'http_error_text.dart';
+import 'http_json.dart';
 
 import 'sync_ledger.dart';
 import 'error_text.dart';
@@ -86,7 +87,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
   Future<void> _retry(SyncRun run, List<String> ids) async {
     if (retrying) return;
     final body = syncRetryBody(runId: run.id, ids: ids);
-    if ((body['ids'] as List).isEmpty) return;
+    if (stringsOf(body['ids']).isEmpty) return;
     setState(() => retrying = true);
     try {
       final r = await _client

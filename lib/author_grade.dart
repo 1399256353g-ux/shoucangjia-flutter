@@ -89,15 +89,9 @@ class AuthorGrade {
   /// 解析配置；非法字段逐项回落默认值，门槛自动去负并补齐/截断。
   static void applyJson(Map<String, dynamic> j) {
     reset();
-    int? readInt(dynamic v) {
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v.trim());
-      return null;
-    }
-
-    playWeight = (readInt(j['play']) ?? defaultPlayWeight).clamp(0, 1000);
-    dropWeight = (readInt(j['drop']) ?? defaultDropWeight).clamp(0, 10000);
-    workWeight = (readInt(j['work']) ?? defaultWorkWeight).clamp(0, 1000);
+    playWeight = (intOrNull(j['play']) ?? defaultPlayWeight).clamp(0, 1000);
+    dropWeight = (intOrNull(j['drop']) ?? defaultDropWeight).clamp(0, 10000);
+    workWeight = (intOrNull(j['work']) ?? defaultWorkWeight).clamp(0, 1000);
 
     // P6：配色同属配置，本机只读缓存的往返也要带上它。
     final colorList = _strictColors(j['c']);
@@ -108,7 +102,7 @@ class AuthorGrade {
       final list = <int>[];
       var ok = true;
       for (var i = 0; i < grades.length - 1; i++) {
-        final v = readInt(raw[i]);
+        final v = intOrNull(raw[i]);
         if (v == null || v < 0) {
           ok = false;
           break;
@@ -183,15 +177,8 @@ class AuthorGrade {
   }
 
   static int? _intOf(Object? v) {
-    if (v is num) {
-      final n = v.toInt();
-      return n < 0 ? null : n;
-    }
-    if (v is String) {
-      final n = int.tryParse(v.trim());
-      return (n == null || n < 0) ? null : n;
-    }
-    return null;
+    final n = intOrNull(v);
+    return (n == null || n < 0) ? null : n;
   }
 
   /// 门槛必须恰好 [grades].length-1 个且严格递增，否则整组作废。

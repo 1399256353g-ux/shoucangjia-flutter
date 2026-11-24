@@ -61,7 +61,10 @@ class KeyCombo {
   /// `_TypeError`，而 `applyJson` 是在**启动时**调用的——整份设置（速度、
   /// 预载、词条、全部按键绑定）会一起退回默认，用户只会觉得「设置总是自己变」。
   static KeyCombo? fromJson(Object? v) {
-    if (v is num) return KeyCombo(v.toInt(), 0);
+    if (v is num) {
+      final k = intOrNull(v);
+      return k == null ? null : KeyCombo(k, 0);
+    }
     if (v is Map) {
       final rawKey = v['k'] ?? v['id'];
       if (rawKey == null || '${rawKey}'.trim().isEmpty) return null;

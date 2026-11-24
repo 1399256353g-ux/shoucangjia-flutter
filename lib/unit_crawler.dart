@@ -36,8 +36,8 @@ class UnitCrawlerConfig {
   factory UnitCrawlerConfig.fromJson(Map? raw) {
     final m = raw ?? const {};
     return UnitCrawlerConfig(
-      enabled: m['enabled'] == true,
-      quickCheck: m['quickCheck'] != false,
+      enabled: boolOf(m['enabled']),
+      quickCheck: boolOf(m['quickCheck'], true),
       quickMin: normalizeQuickMin(m['quickMin']),
       // 旧版服务端/旧版配置只有 `intervalMin`（本类的 toJson 仍在写它，
       // 供旧服务端读）。此前这里是 `m['intervalMin'] != null ? 60 : 60`

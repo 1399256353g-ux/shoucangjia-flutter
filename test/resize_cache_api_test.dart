@@ -55,4 +55,28 @@ void main() {
     expect(ResizeCacheStats.bytesText(5 * 1024 * 1024), '5.0 MB');
     expect(ResizeCacheStats.bytesText(3 * 1024 * 1024 * 1024), '3.00 GB');
   });
+
+  test('命中率：服务端给字符串/数字都认，坏值才自算', () {
+    // 0.62 被序列化成字符串 "0.62" 时旧实现（is num）直接丢掉服务端值。
+    expect(ResizeCacheStats.fromJson({'hit': 1, 'miss': 1, 'hitRate': '0.62'})!
+        .hitRate, closeTo(0.62, 1e-9));
+    expect(ResizeCacheStats.fromJson({'hit': 1, 'miss': 1, 'hitRate': 0.4})!
+        .hitRate, closeTo(0.4, 1e-9));
+    // 坏值（非数值/非有限）回落自算 1/2。
+    expect(ResizeCacheStats.fromJson({'hit': 1, 'miss': 1, 'hitRate': 'x'})!
+        .hitRate, closeTo(0.5, 1e-9));
+    expect(
+        ResizeCacheStats.fromJson(
+                {'hit': 1, 'miss': 1, 'hitRate': double.infinity})!
+            .hitRate,
+        closeTo(0.5, 1e-9));
+  });
+
+  test('数值字段是字符串/1e999 也不抛', () {
+    final s = ResizeCacheStats.fromJson(
+        {'files': '12', 'bytes': 1e999, 'hit': '3', 'miss': 1})!;
+    expect(s.files, 12);
+    expect(s.bytes, 0); // 非有限值按 0，而不是抛 Unsupported operation
+    expect(s.hit, 3);
+  });
 }

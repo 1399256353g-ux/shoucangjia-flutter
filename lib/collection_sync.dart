@@ -1,4 +1,5 @@
 import 'emoji_text.dart';
+import 'http_json.dart';
 import 'json_num.dart';
 import 'index_prefix.dart';
 
@@ -66,7 +67,7 @@ class CollectionSyncInfo {
 
 /// 解析 /api/settings 返回的 collections：过滤墓碑、按服务端顺序、去重。
 List<CollectionSyncInfo> parseCollectionSettings(Map<String, dynamic> j) {
-  final raw = (j['collections'] as List?) ?? const [];
+  final raw = listOf(j['collections']);
   final out = <CollectionSyncInfo>[];
   final seen = <int>{};
   for (final e in raw) {

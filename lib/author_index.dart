@@ -151,24 +151,45 @@ int authorLetterHitIndex({
   return i;
 }
 
+/// 作者网格内边距（**唯一定义**）：左侧固定，右侧在字母索引条出现时让出
+/// 28dp 条带 + 6dp 间隙。网格的实际 `padding` 与「按序号算滚动偏移」必须
+/// 用同一组数，否则列数会算错——此前偏移按左右各 12 算，宽 400 时得出 3 列，
+/// 而网格实际只排 2 列。
+const double kAuthorGridPadLeft = 12;
+const double kAuthorGridPadRight = 12;
+const double kAuthorIndexBarWidth = 28;
+const double kAuthorIndexBarGap = 6;
+
+/// 作者网格右侧内边距：[hasIndexBar] 时给字母条让位。
+double authorGridPadRight({required bool hasIndexBar}) =>
+    hasIndexBar ? kAuthorIndexBarWidth + kAuthorIndexBarGap : kAuthorGridPadRight;
+
 /// 作者网格中第 [index] 项对应的滚动偏移。
 ///
 /// 与 `SliverGridDelegateWithMaxCrossAxisExtent` 的算法一致：
 /// 列数 = ceil((可用宽 + 间距) / (最大列宽 + 间距))，
 /// 列宽 = (可用宽 - 间距 × (列数-1)) / 列数，行高 = 列宽 / 宽高比。
 /// 结果夹在 [0, maxScrollExtent]，避免索引条把列表拖到超界再回弹。
+///
+/// **左右内边距必须分别传入**：字母索引条只占右边缘，网格的右内边距因此
+/// 从 12 变成 34（给索引条让位），左内边距仍是 12。此前这里只有一个 `padding`，
+/// 两边都按 12 算，于是宽 400 时算出 3 列、网格实际只排 2 列——点一个字母
+/// 滚到的行是错的（差一列就错一整行，而且越往下差得越多）。
+/// 两边同值时传两个一样的数，不要再加第二个入口。
 double authorGridOffsetForIndex({
   required int index,
   required double viewportWidth,
   required double maxScrollExtent,
-  double padding = 12,
+  double paddingLeft = kAuthorGridPadLeft,
+  double paddingRight = kAuthorGridPadRight,
   double maxCrossAxisExtent = 180,
   double spacing = 10,
   double aspectRatio = 0.86,
 }) {
   if (index <= 0) return 0;
-  final pad = padding < 0 ? 0.0 : padding;
-  final avail = viewportWidth - pad * 2;
+  final left = paddingLeft < 0 ? 0.0 : paddingLeft;
+  final right = paddingRight < 0 ? 0.0 : paddingRight;
+  final avail = viewportWidth - left - right;
   if (avail <= 0 || maxCrossAxisExtent <= 0 || aspectRatio <= 0) return 0;
   final gap = spacing < 0 ? 0.0 : spacing;
   var columns = ((avail + gap) / (maxCrossAxisExtent + gap)).ceil();
@@ -177,7 +198,7 @@ double authorGridOffsetForIndex({
   if (childWidth <= 0) return 0;
   final childHeight = childWidth / aspectRatio;
   final row = index ~/ columns;
-  final offset = pad + row * (childHeight + gap);
+  final offset = left + row * (childHeight + gap);
   if (maxScrollExtent > 0 && offset > maxScrollExtent) {
     return maxScrollExtent;
   }

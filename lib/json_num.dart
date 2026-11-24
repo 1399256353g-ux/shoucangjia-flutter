@@ -16,22 +16,84 @@
 /// 计数字段永远不该被向上取整——`1.6 个文件` 四舍五入成 2 是凭空多一个文件。
 library;
 
-/// 数值/数字字符串 → int；无法解析时返回 [fallback]（默认 0）。
-int intOf(dynamic v, [int fallback = 0]) {
+/// 数值/数字字符串 → int；无法解析时返回 **null**（**唯一实现**）。
+///
+/// 与 [intOf] 的区别只在失败时给不给默认值。**必须用这个版本**的场合是
+/// 「失败要能与 0 区分」的解析（键码、配置项、越界判定）：这些地方把失败
+/// 写成 0 会变成「合法的 0」——0 号键、0 权重，语义完全不同。
+///
+/// 关键点：`v is num` 之后**不能直接 `toInt()`**。JSON 里的 `1e999` 会被
+/// `jsonDecode` 解析成 `double.infinity`，而 `infinity.toInt()` 抛
+/// `Unsupported operation: Infinity or NaN toInt`——这发生在**启动读配置**的
+/// 路径上（角标配色、等级权重、按键键码），一次坏值就让整份设置退回默认。
+int? intOrNull(dynamic v) {
   if (v is num) {
-    if (v is double && !v.isFinite) return fallback;
+    if (v is double && !v.isFinite) return null;
     return v.toInt();
   }
-  if (v is String) return int.tryParse(v.trim()) ?? fallback;
-  return fallback;
+  if (v is String) return int.tryParse(v.trim());
+  return null;
 }
 
-/// 数值/数字字符串 → double；无法解析时返回 [fallback]（默认 0）。
-double doubleOf(dynamic v, [double fallback = 0]) {
+/// 数值/数字字符串 → double；无法解析或非有限值时返回 **null**。
+double? doubleOrNull(dynamic v) {
   if (v is num) {
     final d = v.toDouble();
-    return d.isFinite ? d : fallback;
+    return d.isFinite ? d : null;
   }
-  if (v is String) return double.tryParse(v.trim()) ?? fallback;
-  return fallback;
+  if (v is String) return double.tryParse(v.trim());
+  return null;
 }
+
+/// 数值/数字字符串 → int；无法解析时返回 [fallback]（默认 0）。
+int intOf(dynamic v, [int fallback = 0]) => intOrNull(v) ?? fallback;
+
+/// 数值/数字字符串 → double；无法解析时返回 [fallback]（默认 0）。
+double doubleOf(dynamic v, [double fallback = 0]) => doubleOrNull(v) ?? fallback;
+
+/// 数值/数字字符串 → num；无法解析或非有限值时返回 **null**。
+///
+/// 需要保留「整数就还是整数」的调用方用它（时长累加、封面角标）：
+/// `intOf` 会把 `2.5` 截成 `2`，而时长角标应当显示 `0:02` 还是 `0:03`
+/// 是另一件事，不该在解析层就丢掉小数。
+num? numOrNull(dynamic v) {
+  if (v is num) {
+    if (v is double && !v.isFinite) return null;
+    return v;
+  }
+  if (v is String) return num.tryParse(v.trim());
+  return null;
+}
+
+/// 数值/字符串/布尔 → bool；无法判断时返回 **null**（**唯一实现**）。
+///
+/// 同一个服务端字段可能发 `true`、`1`、`"true"`、`"yes"`、`"0"`。
+/// 此前每个调用方自己写一遍 `== true`，于是 `"true"`（字符串）在某些
+/// 地方算 true、在另一些地方算 false——取决于是不是恰好写了 `== 1 ||`。
+/// 本文件只认三种答案：明确真、明确假、无法判断；无法判断的**不要**
+/// 默默当成 false，交给调用方决定。
+bool? boolOrNull(dynamic v) {
+  if (v is bool) return v;
+  if (v is num) {
+    if (v is double && !v.isFinite) return null;
+    return v != 0;
+  }
+  if (v is String) {
+    switch (v.trim().toLowerCase()) {
+      case 'true':
+      case '1':
+      case 'yes':
+      case 'on':
+        return true;
+      case 'false':
+      case '0':
+      case 'no':
+      case 'off':
+        return false;
+    }
+  }
+  return null;
+}
+
+/// 同 [boolOrNull]，无法判断时用 [fallback]。
+bool boolOf(dynamic v, [bool fallback = false]) => boolOrNull(v) ?? fallback;

@@ -117,4 +117,49 @@ void main() {
           0);
     });
   });
+
+  group('作者网格偏移：左右内边距分别计入（索引条让位）', () {
+    test('索引条可见时右侧 34、左侧 12 → 宽 400 只排 2 列', () {
+      // avail = 400 - 12 - 34 = 354；columns = ceil((354+10)/190) = 2
+      // childWidth = (354-10)/2 = 172；height = 172/0.86 = 200
+      // index 2 → row 1 → offset = 12 + (200 + 10) = 222
+      final off = authorGridOffsetForIndex(
+        index: 2,
+        viewportWidth: 400,
+        maxScrollExtent: 9999,
+        paddingRight: authorGridPadRight(hasIndexBar: true),
+      );
+      expect(off, closeTo(222, 0.01));
+    });
+
+    test('没有索引条时两侧 12 → 宽 400 排 3 列', () {
+      final off = authorGridOffsetForIndex(
+        index: 3,
+        viewportWidth: 400,
+        maxScrollExtent: 9999,
+      );
+      expect(off, closeTo(159.984, 0.01));
+    });
+
+    test('两侧不同内边距时列数按实际可用宽度算', () {
+      // 同样的下标，右侧多让 22dp 会把该条目推到更靠下的行。
+      final narrow = authorGridOffsetForIndex(
+        index: 2,
+        viewportWidth: 400,
+        maxScrollExtent: 99999,
+        paddingRight: 34,
+      );
+      final wide = authorGridOffsetForIndex(
+        index: 2,
+        viewportWidth: 400,
+        maxScrollExtent: 99999,
+      );
+      expect(narrow, greaterThan(wide));
+    });
+
+    test('authorGridPadRight：索引条 28 + 间隙 6，否则 12', () {
+      expect(authorGridPadRight(hasIndexBar: true), 34);
+      expect(authorGridPadRight(hasIndexBar: false), 12);
+    });
+  });
 }

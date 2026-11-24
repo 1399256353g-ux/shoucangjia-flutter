@@ -13,7 +13,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/app_settings.dart';
 import 'package:shoucangjia/http_json.dart';
+import 'package:shoucangjia/author_grade.dart';
 import 'package:shoucangjia/json_num.dart';
+import 'package:shoucangjia/watch_progress.dart';
 
 String _code(String path) => File(path)
     .readAsStringSync()
@@ -153,6 +155,106 @@ void main() {
       expect(RegExp(r'as\s+num\??').hasMatch(src), isFalse,
           reason: '启动路径上的裸 cast 会让整份设置退回默认');
       expect(src.contains('intOf('), isTrue);
+    });
+  });
+
+  group('第三十批（0.9.234）：列表 / 布尔 / 非有限数值', () {
+    test('listOf 只认列表，其余一律空（不抛）', () {
+      // `(j['works'] as List?) ?? const []` 判的是 null：字段是字符串/对象时
+      // 照样抛 _TypeError。基础库页作者与作品两栏会一起停在加载中。
+      expect(listOf([1, 2]).length, 2);
+      expect(listOf('a'), isEmpty);
+      expect(listOf({'k': 1}), isEmpty);
+      expect(listOf(null), isEmpty);
+      expect(listOf(42), isEmpty);
+      expect(listLengthOf([1, 2, 3]), 3);
+      expect(listLengthOf('a'), 0);
+      expect(listLengthOf(null), 0);
+    });
+
+    test('stringsOf 跳过对象条目，不把 {a: 1} 插值进列表', () {
+      expect(stringsOf(['a', ' b ', null, {'x': 1}, ['y'], 3]),
+          ['a', 'b', '3']);
+      expect(stringsOf('a'), isEmpty);
+      expect(stringsOf(null), isEmpty);
+    });
+
+    test('契约：lib/ 内不得再写 as List（写坏字段会让整块界面卡在加载中）', () {
+      final offenders = <String>[];
+      for (final f in Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))) {
+        final lines = File(f.path).readAsLinesSync();
+        for (var i = 0; i < lines.length; i++) {
+          final t = lines[i].trimLeft();
+          if (t.startsWith('//')) continue;
+          if (RegExp(r'\bas\s+List\b').hasMatch(t)) {
+            offenders.add('${f.path}:${i + 1}');
+          }
+        }
+      }
+      expect(offenders, isEmpty, reason: '列表字段只用 listOf/stringsOf：$offenders');
+    });
+  });
+
+  group('非有限数值：JSON 的 1e999 会让启动路径抛异常', () {
+    test('intOrNull 对 infinity/NaN 返回 null，不当成 0', () {
+      // jsonDecode('{"x":1e999}') 得到 double.infinity，而 infinity.toInt()
+      // 抛 Unsupported operation。0 是合法值（0 号键、0 权重），不能拿来做失败标记。
+      expect(intOrNull(double.infinity), isNull);
+      expect(intOrNull(double.negativeInfinity), isNull);
+      expect(intOrNull(double.nan), isNull);
+      expect(intOrNull(0), 0);
+      expect(intOrNull('12'), 12);
+      expect(intOrNull('x'), isNull);
+      expect(doubleOrNull(double.infinity), isNull);
+      expect(doubleOrNull(0.0), 0.0);
+      expect(numOrNull(double.nan), isNull);
+      expect(numOrNull(2.5), 2.5);
+    });
+
+    test('等级权重是 1e999 时回默认，不抛', () {
+      AuthorGrade.applyJson(<String, dynamic>{
+        'play': double.infinity,
+        'drop': 10,
+        'work': 2,
+        't': [100, 500, 2000, 8000],
+      });
+      expect(AuthorGrade.playWeight, AuthorGrade.defaultPlayWeight);
+      expect(AuthorGrade.dropWeight, 10);
+    });
+  });
+
+  group('布尔解析：true / 1 / "true" / "yes" 是同一个答案', () {
+    test('boolOrNull 三态明确', () {
+      for (final t in [true, 1, 'true', ' TRUE ', 'yes', 'on']) {
+        expect(boolOrNull(t), isTrue, reason: '$t 应为真');
+      }
+      for (final f in [false, 0, 'false', '0', 'no', 'off']) {
+        expect(boolOrNull(f), isFalse, reason: '$f 应为假');
+      }
+      expect(boolOrNull(null), isNull);
+      expect(boolOrNull('maybe'), isNull);
+      expect(boolOrNull({'a': 1}), isNull);
+      expect(boolOrNull(double.infinity), isNull);
+    });
+
+    test('boolOf 无法判断时用 fallback', () {
+      expect(boolOf('maybe'), isFalse);
+      expect(boolOf('maybe', true), isTrue);
+      expect(boolOf('1'), isTrue);
+    });
+
+    test('关注记录 f 写成 1/true/"1" 都算已看完', () {
+      expect(WatchProgress.fromJson({'p': 1000, 'd': 5000, 'f': 1})!.done,
+          isTrue);
+      expect(WatchProgress.fromJson({'p': 1000, 'd': 5000, 'f': true})!.done,
+          isTrue);
+      expect(WatchProgress.fromJson({'p': 1000, 'd': 5000, 'f': '1'})!.done,
+          isTrue);
+      expect(WatchProgress.fromJson({'p': 1000, 'd': 5000, 'f': 0})!.done,
+          isFalse);
     });
   });
 }

@@ -147,6 +147,38 @@ List<Map<String, dynamic>> mapsOf(dynamic raw) {
   return out;
 }
 
+/// JSON 字段按**列表**读：不是列表时返回空列表（**唯一实现**）。
+///
+/// `x as List?` 最常见的写法是 `(j['works'] as List?) ?? const []`，读起来
+/// 像「没有就是空」，实际判的是 **null**——字段是字符串、数字或对象时照样抛
+/// `_TypeError`。这在本项目里反复出现：
+///
+///   - 基础库页 `j['authors']` / `j['works']` 一旦被服务端写成对象，作者与
+///     作品两栏同时停在加载中（异常进不了 setState 前那帧）；
+///   - 库树 `json['bigLibraries']` / `groups` 写坏 → 整棵单元库树为空；
+///   - 分类树 `item['dirs']` 写坏 → 该分类整个消失（不是丢一层，是丢整枝）。
+///
+/// 正确行为与 [mapsOf] 一致：**这条字段不可用就当它没有**，不要连累其余。
+List<dynamic> listOf(dynamic raw) => raw is List ? raw : const <dynamic>[];
+
+/// JSON 字段的列表长度；不是列表时 0（供只计数的调用方用）。
+int listLengthOf(dynamic raw) => raw is List ? raw.length : 0;
+
+/// JSON 字段按**字符串列表**读：跳过非标量条目、去空白、丢空串。
+///
+/// 用于 `libs` / `ids` / 路径清单这类「只关心元素文本」的字段；
+/// 嵌套对象不会被插值成 `{a: 1}` 混进列表。
+List<String> stringsOf(dynamic raw) {
+  if (raw is! List) return const <String>[];
+  final out = <String>[];
+  for (final e in raw) {
+    if (e == null || e is Map || e is Iterable) continue;
+    final s = '$e'.trim();
+    if (s.isNotEmpty) out.add(s);
+  }
+  return out;
+}
+
 /// 服务端下发的「对象」→ `Map<String, dynamic>`；不是对象时返回 null。
 ///
 /// `Map<String, dynamic>.from(x)` 对字符串/数字会抛 `_TypeError`，对

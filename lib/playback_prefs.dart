@@ -14,6 +14,7 @@ library;
 
 import 'dart:convert';
 
+import 'json_num.dart';
 import 'loop_link.dart';
 import 'prefs_json.dart';
 
@@ -59,8 +60,9 @@ class PlaybackPrefs {
     if (raw is! Map) return defaults;
     final speedRaw = raw['speed'];
     var speed = 1.0;
-    if (speedRaw is num && speedRaw.isFinite) {
-      speed = speedRaw.toDouble().clamp(0.5, 3.0).toDouble();
+    final speedNum = doubleOrNull(speedRaw);
+    if (speedNum != null) {
+      speed = speedNum.clamp(0.5, 3.0).toDouble();
     }
     bool boolOf(dynamic v, bool d) => v is bool ? v : d;
     final loopOne = boolOf(raw['loopOne'], false);

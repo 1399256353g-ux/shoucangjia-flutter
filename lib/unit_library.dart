@@ -16,6 +16,7 @@
 // basicLibraries（基础库，带 rel 相对路径）。
 
 import 'disk_name.dart';
+import 'http_json.dart';
 import 'lib_id.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
@@ -388,10 +389,10 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     if (used) return out;
   }
 
-  for (final x in (json['bigLibraries'] as List? ?? const [])) {
+  for (final x in listOf(json['bigLibraries'])) {
     add(x);
   }
-  for (final x in (json['groups'] as List? ?? const [])) {
+  for (final x in listOf(json['groups'])) {
     add(x);
   }
   return out;

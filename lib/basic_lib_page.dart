@@ -181,7 +181,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       // 解析放到 isolate：避免大 payload 在 UI 线程卡顿/掉帧。
       final j = await compute(_parseWorksPayload, r.bodyBytes);
       final list = <Map<String, dynamic>>[];
-      for (final a in (j['authors'] as List? ?? const [])) {
+      for (final a in listOf(j['authors'])) {
         if (a is Map) list.add(Map<String, dynamic>.from(a));
       }
       // 有首字母索引条后，列表必须按名称分组排列，否则「跳到某字母」
@@ -311,7 +311,7 @@ class _BasicLibPageState extends State<BasicLibPage>
           .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       final j = jsonOf(r);
-      final batch = (j['works'] as List? ?? const []);
+      final batch = listOf(j['works']);
       if (!mounted) return;
       setState(() {
         if (reset) works = [];
@@ -446,7 +446,11 @@ class _BasicLibPageState extends State<BasicLibPage>
           controller: _authorScroll,
           // 右侧让出索引条宽度（≥28dp）：字母条只占右边缘条带，
           // 但卡片不能被它压住，否则最后一列点击会被抢。
-          padding: EdgeInsets.fromLTRB(12, 12, letters.length > 1 ? 34 : 12, 12),
+          padding: EdgeInsets.fromLTRB(
+              kAuthorGridPadLeft,
+              12,
+              authorGridPadRight(hasIndexBar: letters.length > 1),
+              12),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
             maxCrossAxisExtent: 180,
             mainAxisSpacing: 10,
@@ -618,13 +622,14 @@ class _BasicLibPageState extends State<BasicLibPage>
     return AuthorLetterBar(
       keyPrefix: 'basic-author-index-',
       letters: letters,
-      width: 28,
-      onLetter: (l) => _jumpToAuthorLetter(l, starts, viewportWidth),
+      width: kAuthorIndexBarWidth,
+      onLetter: (l) =>
+          _jumpToAuthorLetter(l, starts, viewportWidth, letters.length > 1),
     );
   }
 
-  void _jumpToAuthorLetter(
-      String letter, Map<String, int> starts, double viewportWidth) {
+  void _jumpToAuthorLetter(String letter, Map<String, int> starts,
+      double viewportWidth, bool hasIndexBar) {
     final idx = starts[letter];
     if (idx == null) return;
     final max = _authorScroll.hasClients
@@ -634,6 +639,8 @@ class _BasicLibPageState extends State<BasicLibPage>
       index: idx,
       viewportWidth: viewportWidth,
       maxScrollExtent: max,
+      // 与网格实际内边距同源：索引条可见时右侧多让一条条带。
+      paddingRight: authorGridPadRight(hasIndexBar: hasIndexBar),
     );
     _authorScroll.animateTo(target,
         duration: const Duration(milliseconds: 180), curve: Curves.easeOut);

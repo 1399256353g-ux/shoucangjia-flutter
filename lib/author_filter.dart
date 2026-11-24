@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'http_json.dart';
 import 'json_num.dart';
 
 import 'work_forms.dart';
@@ -233,8 +234,7 @@ String authorTypeFromKind(String kind) {
 Map<String, Set<String>> authorTypesFromIndex(dynamic indexJson) {
   final out = <String, Set<String>>{};
   if (indexJson is! Map) return out;
-  final authors = indexJson['authors'];
-  if (authors is! List) return out;
+  final authors = listOf(indexJson['authors']);
   for (final e in authors) {
     if (e is! Map) continue;
     final name = '${e['name'] ?? ''}'.trim();
@@ -243,9 +243,10 @@ Map<String, Set<String>> authorTypesFromIndex(dynamic indexJson) {
     if (kinds is! Map) continue;
     final set = out[name] ??= <String>{};
     for (final k in kinds.entries) {
-      final n = k.value is num
-          ? intOf(k.value)
-          : intOf(k.value);
+      // 计数值可能是 `3` 也可能是 `"3"`：intOf 两种都认。
+      // 此前这里写成 `k.value is num ? intOf(...) : intOf(...)`——两个分支逐字相同，
+      // 读起来像「数字和字符串分开处理」，实际是同一个调用的死分支。
+      final n = intOf(k.value);
       if (n <= 0) continue;
       final t = authorTypeFromKind('${k.key}');
       if (t.isNotEmpty) set.add(t);

@@ -50,13 +50,23 @@ class ResizeCacheStats {
   // 同一个 1.6 个文件在缓存页显示 2、在别处显示 1。
   static int _int(dynamic v) => intOf(v);
 
-  static double _dbl(dynamic v) => doubleOf(v);
+  /// 命中率：优先用服务端给的值，缺失/非数值/非有限值时按 `hit / (hit+miss)` 自算。
+  ///
+  /// 此前写成 `json['hitRate'] is num`：服务端把 `0.62` 序列化成字符串
+  /// `"0.62"`（或换了类型）时这条分支直接跳过，看起来「用了自算值」其实是
+  /// 把服务端给的准确值丢了。判定改成「能不能解析成有限 double」只有一个答案。
+  static double _rate(dynamic raw, int hit, int total) {
+    final v = doubleOrNull(raw);
+    if (v != null) return v;
+    return total > 0 ? hit / total : 0;
+  }
 
   /// 解析失败（非对象）返回 null，调用方显示「读取失败」而不是 0。
   static ResizeCacheStats? fromJson(dynamic json) {
     if (json is! Map) return null;
     final prune = json['prune'];
-    final total = _int(json['hit']) + _int(json['miss']);
+    final hit = _int(json['hit']);
+    final total = hit + _int(json['miss']);
     return ResizeCacheStats(
       files: _int(json['files']),
       bytes: _int(json['bytes']),
@@ -69,9 +79,7 @@ class ResizeCacheStats {
       servedBytes: _int(json['servedBytes']),
       queue: _int(json['warmQueue']),
       active: _int(json['warmActive']),
-      hitRate: json['hitRate'] is num
-          ? _dbl(json['hitRate'])
-          : (total > 0 ? _int(json['hit']) / total : 0),
+      hitRate: _rate(json['hitRate'], hit, total),
       pruneRuns: prune is Map ? _int(prune['runs']) : 0,
       pruneDeleted: prune is Map ? _int(prune['deleted']) : 0,
       pruneFreed: prune is Map ? _int(prune['freed']) : 0,

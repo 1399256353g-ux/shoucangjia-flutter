@@ -63,7 +63,7 @@ CoverVersion? coverVersionFromJson(dynamic raw) {
     ext: e,
     url: isMediaPath(u) ? u : '',
     at: at < 0 ? 0 : at,
-    current: raw['current'] == true,
+    current: boolOf(raw['current']),
   );
 }
 

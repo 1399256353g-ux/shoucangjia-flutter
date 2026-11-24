@@ -87,12 +87,10 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       if (!mounted) return;
       setState(() {
         path = '${j['path'] ?? ''}';
-        config = UnitCrawlerConfig.fromJson(j['crawler'] as Map?);
+        config = UnitCrawlerConfig.fromJson(mapOrNull(j['crawler']));
         scripts = UnitCrawlerScript.listFrom(j['scripts']);
-        running = (j['running'] as Map?)?['running'] == true;
-        schedule = (j['schedule'] is Map)
-            ? Map<String, dynamic>.from(j['schedule'] as Map)
-            : const {};
+        running = mapOrNull(j['running'])?['running'] == true;
+        schedule = mapOrNull(j['schedule']) ?? const <String, dynamic>{};
       });
     } catch (e) {
       if (mounted) setState(() => err = errorText(e));
@@ -116,7 +114,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       setState(() {
-        config = UnitCrawlerConfig.fromJson(j['crawler'] as Map?);
+        config = UnitCrawlerConfig.fromJson(mapOrNull(j['crawler']));
         scripts = UnitCrawlerScript.listFrom(j['scripts']);
       });
       ScaffoldMessenger.of(context)

@@ -4,6 +4,7 @@
 /// 避免用 0:00 误导。图文张数直接取媒体列表长度。
 library;
 
+import 'json_num.dart';
 import 'work_forms.dart';
 import 'work_safety.dart';
 
@@ -25,11 +26,7 @@ String formatBadgeDuration(num? seconds) {
   return h > 0 ? '$h:$mm:$ss' : '$mm:$ss';
 }
 
-num? _asSeconds(dynamic raw) {
-  if (raw is num) return raw;
-  if (raw is String) return num.tryParse(raw.trim());
-  return null;
-}
+num? _asSeconds(dynamic raw) => numOrNull(raw);
 
 /// 作品在封面右下角显示的角标文字；无可用信息时返回 null。
 String? workCoverBadge(dynamic work) {
