@@ -15,6 +15,7 @@ library;
 import 'api_url.dart';
 import 'media_priority.dart';
 import 'cover_ext.dart';
+import 'media_path.dart';
 
 // `kCoverExts` / `kCoverImageExts` / `isCoverImagePath` 的唯一定义在
 // `cover_ext.dart`（第十二批收口）；本文件继续 re-export，
@@ -128,6 +129,10 @@ String libraryMediaPath(String lib, String path) {
 
 /// 媒体绝对地址：`<base>/media/<lib>/<相对路径>`。
 /// [base] 为空时返回空串（调用方回退默认图）。
+///
+/// 必须经过 [encodeMediaPath]：文件名里的 `#` / `?` / 空格会让 `Uri.parse`
+/// 把路径断成 fragment / query。此前这条规则只在 `Cfg.mediaUrl` 里执行，
+/// 库卡片封面走本函数直拼，同一个文件「作品列表能播、卡片 404」。
 String absoluteMediaUrl(
   String base, {
   required String lib,
@@ -136,7 +141,15 @@ String absoluteMediaUrl(
   final b = baseForJoin(base);
   final p = libraryMediaPath(lib, path);
   if (b.isEmpty || p.isEmpty) return '';
-  return '$b$p';
+  // 绝对地址自带前缀（不补服务器）但**仍然要转义**：`encodeMediaPath` 对
+  // 绝对地址一律原样返回是为了避免重复编码，所以这里只把路径部分交给它，
+  // 再拼回前缀——直接传 `'$b$p'` 会让转义整个跳过。
+  if (isAbsoluteMediaUrl(p)) {
+    final slash = p.indexOf('/', p.indexOf('//') + 2);
+    if (slash < 0) return p;
+    return '${p.substring(0, slash)}${encodeMediaPath(p.substring(slash))}';
+  }
+  return '$b${encodeMediaPath(p)}';
 }
 
 /// 单元库自定义封面的媒体路径（`cover: {u: "/media/<lib>/..."}`）。

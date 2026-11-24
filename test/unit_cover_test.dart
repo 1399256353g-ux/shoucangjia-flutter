@@ -103,8 +103,11 @@ void main() {
         ],
         basics: [basic('l9', '(9) C/z', serverBase: 'http://nas:8090')],
       )!;
+      // 0.9.231：库卡片封面也走 encodeMediaPath（与作品媒体地址同一条规则），
+      // 目录名里的空格转成 %20——服务端解码后仍是同一个路径，而 `#`/`?`
+      // 这类真会断路径的字符此前在库卡片上完全没有转义。
       expect(unitCoverUrl(t.children.first),
-          'http://nas:8090/media/l9/(9) C/_cover/v3.webp');
+          'http://nas:8090/media/l9/(9)%20C/_cover/v3.webp');
       // 调用方已解析好的地址优先（鉴权/路由由调用方掌握）
       expect(unitCoverUrl(t.children.first, customUrl: 'http://nas:8090/x.jpg'),
           'http://nas:8090/x.jpg');

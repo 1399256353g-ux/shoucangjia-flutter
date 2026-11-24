@@ -14,6 +14,8 @@
 //  4. 其余 → 空串（卡片回退底色），不要拼出必然 404 的地址。
 library;
 
+import 'media_path.dart';
+
 /// 服务端按需抽帧 URL 的版本参数。
 ///
 /// 旧版本把目录级 `thumb.jpg` 当作任意作品的首帧返回，客户端磁盘缓存里可能
@@ -73,11 +75,11 @@ bool isVideoPath(String p) {
 /// 必然 404，卡片就永远只有底色。
 ///
 /// 接口地址必须原样走 `rawUrl`（只补服务器前缀），不能再加 `/media/<lib>/`。
-bool isApiThumbPath(String p) {
-  final t = p.trim();
-  if (t.isEmpty) return false;
-  return t.startsWith('/api/');
-}
+///
+/// 规则本体在 `media_path.isApiMediaPath`（媒体地址拼接与封面解析必须同一条
+/// 判据，否则一处认为是接口、另一处认为是媒体文件）。这里保留旧名字，
+/// 因为调用点与测试都用它。
+bool isApiThumbPath(String p) => isApiMediaPath(p);
 
 /// 不经过抽帧接口就能直接用上的封面路径；没有则返回空串。
 String workCoverPath(dynamic work) {

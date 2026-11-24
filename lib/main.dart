@@ -37,6 +37,7 @@ import 'crash_guard.dart';
 import 'crash_reports_page.dart';
 import 'decode_plan.dart';
 import 'work_cover.dart';
+import 'media_path.dart';
 import 'media_resize.dart';
 import 'recommend_grid.dart';
 import 'horizontal_chip_bar.dart';
@@ -129,6 +130,10 @@ import 'http_json.dart';
 import 'http_error_text.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
+
+/// `encodeMediaPath` 的唯一实现在 `media_path.dart`；main.dart 继续转发，
+/// 免得既有 import 点（含测试）全部改路径。
+export 'media_path.dart' show encodeMediaPath, isApiMediaPath, isAbsoluteMediaUrl;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -343,42 +348,6 @@ Future<void> loadAppVersion() async {
   } catch (_) {
     // 测试环境或平台通道不可用时保持为空，界面退化为不显示版本号
   }
-}
-
-/// 媒体路径转义：只处理会让 `Uri.parse` 把一个文件名断成片段/查询的字符。
-///
-/// NAS 上的文件名可能带 `#`、`?` 或空格（如 `1#花絮.mp4`），直接拼进 URL 后
-/// `Uri.parse` 会把 `#` 之后当 fragment、`?` 之后当 query，请求到的就是另一个路径，
-/// 表现为封面 404 / 播放失败。这里按字符做最小转义：
-/// - 已有合法 `%XX` 原样保留，避免二次编码（`%25`）；
-/// - 孤立 `%`（后面不是两位十六进制）转成 `%25`；
-/// - `#`、`?`、空格、控制字符转义成 `%XX`；
-/// - 其余字符（含中文、`/` 分段符）不动，交给 Uri 自己编码。
-String encodeMediaPath(String path) {
-  if (path.isEmpty) return path;
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  final hex2 = RegExp(r'^[0-9A-Fa-f]{2}$');
-  final out = StringBuffer();
-  for (var i = 0; i < path.length; i++) {
-    final ch = path[i];
-    if (ch == '%') {
-      final hex = i + 2 < path.length ? path.substring(i + 1, i + 3) : '';
-      if (hex2.hasMatch(hex)) {
-        out.write(path.substring(i, i + 3));
-        i += 2;
-      } else {
-        out.write('%25');
-      }
-      continue;
-    }
-    final code = ch.codeUnitAt(0);
-    if (ch == '#' || ch == '?' || ch == ' ' || ch == '\u007f' || code < 0x20) {
-      out.write(Uri.encodeComponent(ch));
-    } else {
-      out.write(ch);
-    }
-  }
-  return out.toString();
 }
 
 /// 全局作者头像索引：作者名 → `av` 路径（来自 `/api/authors.json`）。
@@ -948,7 +917,7 @@ Future<void> syncAllCollectionsFlow(BuildContext context,
   if (!context.mounted) return;
   if (j == null || j['ok'] != true) {
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+        SnackBar(content: Text('同步启动失败：${serverErrorText(j) ?? '网络错误'}')));
     return;
   }
   final exit = await showDialog<int>(
@@ -7620,7 +7589,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     if (j == null || j['ok'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('同步启动失败：${j?['error'] ?? '网络错误'}')));
+            SnackBar(content: Text('同步启动失败：${serverErrorText(j) ?? '网络错误'}')));
       }
       return;
     }
@@ -10389,7 +10358,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (r != null && r['ok'] == true) {
       _toast('已送 1 颗小水滴 · 今日剩余 $dropDayLeft · 本周剩余 $dropWeekLeft');
     } else {
-      _toast('${r?['error'] ?? '发送失败，请检查网络'}');
+      _toast(serverErrorText(r) ?? '发送失败，请检查网络');
     }
   }
 
@@ -10417,7 +10386,9 @@ class _PlayerPageState extends State<PlayerPage>
       if (!mounted || paused) return;
       final w = _workAt(cur);
       if (w['t'] == 'v') return;
-      final n = (w['m'] as List).length;
+      // 单图作品的 `m` 可能是字符串（服务端两种写法都出现过）；直接
+      // `as List` 会抛 CastError，自动轮播的定时器里没人接，整条播放页卡死。
+      final n = workMediaPaths(w).length;
       final hasAudio = (w['au'] ?? '').toString().isNotEmpty;
       switch (slideshowAction(
           index: img,
@@ -11707,7 +11678,10 @@ class _PlayerPageState extends State<PlayerPage>
     final w = _workAt(cur);
     if (w['t'] != 'v') {
       stopAuto();
-      final n = (w['m'] as List).length;
+      // 同上：`m` 为字符串时 `as List` 会抛异常，方向键切图直接崩。
+      final n = workMediaPaths(w).length;
+      // 没有可展示图片（封面链断/字段缺失）时 `clamp(0, -1)` 本身会抛。
+      if (n == 0) return;
       setState(() => _setPicIndex((img + dir).clamp(0, n - 1)));
     } else {
       // 视频：← / → 快退快进 10 秒（时长未知时也尝试 seek）
@@ -16619,14 +16593,14 @@ class _AuthorPageState extends State<AuthorPage> {
         // 先 dry 预检（服务端校验同作者/同单元库），再确认执行。
         final dry = await postWorkMove(lib, id, target);
         if (dry == null || dry['ok'] != true) {
-          errors.add('${dry?['error'] ?? '网络错误'}');
+          errors.add(serverErrorText(dry) ?? '网络错误');
           continue;
         }
         final j = await postWorkMove(lib, id, target, confirm: true);
         if (j != null && j['ok'] == true) {
           done++;
         } else {
-          errors.add('${j?['error'] ?? '网络错误'}');
+          errors.add(serverErrorText(j) ?? '网络错误');
         }
       }
       _exitSelect();
