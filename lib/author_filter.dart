@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'json_num.dart';
 
 import 'work_forms.dart';
 
@@ -243,8 +244,8 @@ Map<String, Set<String>> authorTypesFromIndex(dynamic indexJson) {
     final set = out[name] ??= <String>{};
     for (final k in kinds.entries) {
       final n = k.value is num
-          ? (k.value as num).toInt()
-          : (int.tryParse('${k.value ?? ''}') ?? 0);
+          ? intOf(k.value)
+          : intOf(k.value);
       if (n <= 0) continue;
       final t = authorTypeFromKind('${k.key}');
       if (t.isNotEmpty) set.add(t);

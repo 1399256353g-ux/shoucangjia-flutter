@@ -1,5 +1,6 @@
 import 'disk_name.dart';
 import 'index_prefix.dart';
+import 'media_path.dart';
 
 /// 作者来源词条（J9）的纯逻辑：
 /// 从作品/头像的媒体路径反查所属「基础库」，词条显示基础库名称而不是大库名。
@@ -54,10 +55,8 @@ String decodeMediaRel(String mediaPath) {
   var p = mediaPath.trim();
   final q = p.indexOf('?');
   if (q >= 0) p = p.substring(0, q);
-  if (p.startsWith('/media/')) p = p.substring(7);
-  try {
-    p = Uri.decodeComponent(p);
-  } catch (_) {}
+  if (isMediaPath(p)) p = p.substring(7);
+  p = decodeComponentOrRaw(p);
   while (p.startsWith('/')) {
     p = p.substring(1);
   }

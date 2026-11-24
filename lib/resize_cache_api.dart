@@ -5,6 +5,7 @@
 // 「文件数 / 占用 / 上限 / 命中率」，并提供手动清理（只删缓存，不碰原图）。
 
 import 'package:http/http.dart' as http;
+import 'json_num.dart';
 
 import 'byte_size.dart';
 import 'http_json.dart';
@@ -45,11 +46,11 @@ class ResizeCacheStats {
     this.pruneFreed = 0,
   });
 
-  static int _int(dynamic v) =>
-      v is num ? v.round() : int.tryParse('${v ?? ''}') ?? 0;
+  // 数值解析统一走 `json_num`：此前这里是全仓库唯一用 `round()` 的地方，
+  // 同一个 1.6 个文件在缓存页显示 2、在别处显示 1。
+  static int _int(dynamic v) => intOf(v);
 
-  static double _dbl(dynamic v) =>
-      v is num ? v.toDouble() : double.tryParse('${v ?? ''}') ?? 0;
+  static double _dbl(dynamic v) => doubleOf(v);
 
   /// 解析失败（非对象）返回 null，调用方显示「读取失败」而不是 0。
   static ResizeCacheStats? fromJson(dynamic json) {
@@ -137,9 +138,9 @@ Future<String?> pruneResizeCache(
     if (r.statusCode != 200) return null;
     final j = jsonOf(r);
     if (j is! Map) return null;
-    final deleted = j['deleted'] is num ? (j['deleted'] as num).round() : 0;
-    final freed = j['freed'] is num ? (j['freed'] as num).round() : 0;
-    final after = j['bytesAfter'] is num ? (j['bytesAfter'] as num).round() : 0;
+    final deleted = intOf(j['deleted']);
+    final freed = intOf(j['freed']);
+    final after = intOf(j['bytesAfter']);
     if (dryRun) {
       return deleted > 0
           ? '可清理 $deleted 个文件，释放 ${ResizeCacheStats.bytesText(freed)}'

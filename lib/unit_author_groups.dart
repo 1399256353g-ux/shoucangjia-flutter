@@ -26,6 +26,7 @@
 library;
 
 import 'api_url.dart';
+import 'json_num.dart';
 
 /// 一个被挂载的作者文件夹：基础库 id + 库内作者目录名。
 class AuthorGroupFile {
@@ -133,7 +134,7 @@ class UnitAuthorGroup {
       files: files,
       split: v['split'] == true,
       auto: v['auto'] == true,
-      works: v['works'] is num ? (v['works'] as num).toInt() : 0,
+      works: intOf(v['works']),
       avatar: '${v['av'] ?? ''}'.trim(),
       bio: '${v['bio'] ?? ''}'.trim(),
     );
@@ -412,7 +413,7 @@ class UnitAuthorCard {
       name: name,
       names: names,
       files: files,
-      works: v['works'] is num ? (v['works'] as num).toInt() : 0,
+      works: intOf(v['works']),
       avatar: '${v['av'] ?? ''}'.trim(),
       bio: '${v['bio'] ?? ''}'.trim(),
       split: v['split'] == true,

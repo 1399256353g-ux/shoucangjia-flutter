@@ -9,6 +9,7 @@
 library;
 
 import 'dart:async';
+import 'json_num.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -60,7 +61,7 @@ class WatchProgress {
   /// 容错解析：任何字段类型不对都按 0/false 处理。
   static WatchProgress? fromJson(dynamic raw) {
     if (raw is! Map) return null;
-    int n(dynamic v) => v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
+    int n(dynamic v) => intOf(v);
     final p = n(raw['p']);
     final d = n(raw['d']);
     if (p < 0 || d < 0) return null;

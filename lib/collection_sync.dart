@@ -1,4 +1,5 @@
 import 'emoji_text.dart';
+import 'json_num.dart';
 import 'index_prefix.dart';
 
 /// H11：同步源选择的纯逻辑。
@@ -29,9 +30,9 @@ class CollectionSyncInfo {
     final rawName = fixEmojiText(
         '${j['name'] ?? ''}'.replaceAll(RegExp(r'[\x00-\x1f]'), ''));
     return CollectionSyncInfo(
-      idx: (j['idx'] as num?)?.toInt() ?? 0,
+      idx: intOf(j['idx']),
       name: rawName.isEmpty ? '同步源' : rawName,
-      count: (j['count'] as num?)?.toInt() ?? 0,
+      count: intOf(j['count']),
       sync: j['sync'] != false,
       inIndex: j['inIndex'] == true,
       account: j['account'] == true,

@@ -1346,13 +1346,25 @@ void main() {
       // `Cfg.media()` 自己写 `Uri.encodeComponent(l)`，所以中文库名的媒体
       // 路径里库段是 `%E4%B8%AD%E6%96%87`。所有下游都拿这个 id 去查
       // 绑定表/拼鉴权头——不解码就永远查不到，请求打错服务器。
+      // 0.9.233：解码本身收口到 `media_path.decodeComponentOrRaw`（非法百分号
+      // 原样返回，不抛 ArgumentError）。断言「解码发生过」仍成立，但检查点从
+      // 内联的 `Uri.decodeComponent(...)` 改为唯一实现的调用。
       final cover = codeOf('lib/lib_cover.dart');
-      expect(cover.contains('Uri.decodeComponent(seg)'), isTrue,
+      expect(cover.contains('decodeComponentOrRaw(seg)'), isTrue,
           reason: 'libOfMediaPath 又不解码库段了（与 media() 的编码不对称）');
       // 两处「媒体路径 → 库 id」的实现必须都解码：本文件与头像注册表。
       final avatar = codeOf('lib/author_avatar_store.dart');
-      expect(avatar.contains('Uri.decodeComponent(parts[0])'), isTrue,
+      expect(avatar.contains('decodeComponentOrRaw(parts[0])'), isTrue,
           reason: 'serverAvatarFileFromPath 的解码被删了');
+      // 解码只能有一份实现：`Uri.decodeComponent` 不得再出现在别处（那样
+      // 又回到「有的地方 try 保护、有的地方直接抛」的分叉）。
+      final redefs = <String>[];
+      for (final f in libDartFiles()) {
+        if (f.path.endsWith('media_path.dart')) continue;
+        if (codeOf(f.path).contains('Uri.decodeComponent(')) redefs.add(f.path);
+      }
+      expect(redefs, isEmpty,
+          reason: '百分号解码出现了第二份实现（非法编码会抛 ArgumentError）：$redefs');
     });
 
     test('media() 比较绑定表前必须归一库段（否则重复前缀）', () {

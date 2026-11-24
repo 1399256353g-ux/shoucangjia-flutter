@@ -11,6 +11,7 @@
 library;
 
 import 'error_text.dart';
+import 'json_num.dart';
 import 'http_error_text.dart';
 import 'http_json.dart';
 
@@ -86,9 +87,7 @@ LibRefreshOutcome parseReindexResponse(
     }
   }
   final okRow = row != null && row['ok'] == true;
-  final works = row != null && row['works'] is num
-      ? (row['works'] as num).toInt()
-      : null;
+  final works = row?['works'] == null ? null : intOf(row!['works']);
   var err = serverErrorText(row) ?? '';
   if (err.isEmpty && !okRow) {
     // 顶层 error 与状态码文案都走唯一出口：`'${map['error']}'` 会把

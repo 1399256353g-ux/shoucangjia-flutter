@@ -21,6 +21,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'http_error_text.dart';
+import 'media_path.dart';
 import 'media_priority.dart';
 import 'prefs_json.dart';
 
@@ -107,11 +108,11 @@ bool isServerAvatarFileName(String file) {
 /// `@manual-avatar/...` 不是「按文件注册」的来源，交给旧上传链路处理。
 ({String lib, String file})? serverAvatarFileFromPath(String? mediaPath) {
   final s = mediaPath?.trim() ?? '';
-  if (!s.startsWith('/media/')) return null;
+  if (!isMediaPath(s)) return null;
   final parts = s.substring(7).split('/');
   if (parts.length != 3 || parts[1] != '.avatars') return null;
-  final lib = Uri.decodeComponent(parts[0]);
-  final file = Uri.decodeComponent(parts[2]);
+  final lib = decodeComponentOrRaw(parts[0]);
+  final file = decodeComponentOrRaw(parts[2]);
   if (lib.isEmpty || !isServerAvatarFileName(file)) return null;
   return (lib: lib, file: file);
 }

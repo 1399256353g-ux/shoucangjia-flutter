@@ -1,5 +1,6 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'json_num.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -339,7 +340,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     }
   }
 
-  static int _int(dynamic v) => v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
+  static int _int(dynamic v) => intOf(v);
 
   static String _kindsLabel(Map<String, dynamic> a) {
     final k = a['kinds'];

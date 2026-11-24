@@ -7,6 +7,7 @@
 library;
 
 import 'api_url.dart';
+import 'json_num.dart';
 import 'time_labels.dart';
 
 class DeletedEntry {
@@ -289,14 +290,8 @@ DeletedReport parseDeletedReport(dynamic raw, {String source = ''}) {
     }
   }
   final deduped = dedupeDeletedEntries(out);
-  final total = raw is Map
-      ? ((raw['total'] as num?)?.toInt() ?? deduped.length)
-      : deduped.length;
-  final updated = raw is Map
-      ? ((raw['updated'] as num?)?.toInt() ??
-          int.tryParse('${raw['updated'] ?? ''}') ??
-          0)
-      : 0;
+  final total = raw is Map ? intOf(raw['total'], deduped.length) : deduped.length;
+  final updated = raw is Map ? intOf(raw['updated']) : 0;
   return DeletedReport(
       total: total, updated: updated, items: deduped, source: source);
 }

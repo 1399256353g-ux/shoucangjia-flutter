@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'json_num.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -109,7 +110,7 @@ class ContinueItem {
   /// 容错解析：非 Map / 缺关键字段 / 负数位置一律丢弃。
   static ContinueItem? fromJson(dynamic raw) {
     if (raw is! Map) return null;
-    int n(dynamic v) => v is num ? v.toInt() : (int.tryParse('$v') ?? 0);
+    int n(dynamic v) => intOf(v);
     String s(dynamic v) => v == null ? '' : '$v';
     final id = s(raw['i']).trim();
     if (id.isEmpty) return null;

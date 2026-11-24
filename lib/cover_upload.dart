@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'cover_admin.dart';
 import 'http_json.dart';
+import 'media_path.dart';
 
 /// C2：库卡片「本地选图上传封面」的结果。
 class CoverUploadResult {
@@ -162,5 +163,5 @@ Future<CoverUploadResult> uploadCoverBytes({
   } catch (_) {}
   return CoverUploadResult(
       true, unitRel.isEmpty ? '封面已更新' : '单元库封面已更新',
-      url: coverPath.startsWith('/media/') ? coverPath : '');
+      url: isMediaPath(coverPath) ? coverPath : '');
 }

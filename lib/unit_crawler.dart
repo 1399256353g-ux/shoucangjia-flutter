@@ -7,6 +7,7 @@
 // J17：没有脚本的单元库只读展示「无爬虫脚本」，不启用同步设置。
 
 import 'api_url.dart';
+import 'json_num.dart';
 
 import 'interval_label.dart';
 
@@ -127,8 +128,8 @@ class UnitCrawlerScript {
       if (name.isEmpty) continue;
       out.add(UnitCrawlerScript(
         name: name,
-        size: (e['size'] as num?)?.toInt() ?? 0,
-        mtimeMs: (e['mtime'] as num?)?.toInt() ?? 0,
+        size: intOf(e['size']),
+        mtimeMs: intOf(e['mtime']),
       ));
     }
     out.sort((a, b) => a.name.compareTo(b.name));
@@ -150,12 +151,12 @@ const List<int> kFullMinOptions = <int>[30, 60, 180, 720];
 const List<int> kCooldownOptions = <int>[5, 15, 30, 60];
 
 int normalizeQuickMin(dynamic raw) {
-  final v = (raw is num) ? raw.toInt() : (int.tryParse('${raw ?? ''}') ?? 5);
+  final v = intOf(raw, 5);
   return kQuickMinOptions.contains(v) ? v : 5;
 }
 
 int normalizeFullMin(dynamic raw) {
-  final v = (raw is num) ? raw.toInt() : (int.tryParse('${raw ?? ''}') ?? 60);
+  final v = intOf(raw, 60);
   return kFullMinOptions.contains(v) ? v : 60;
 }
 
@@ -166,7 +167,7 @@ int normalizeFullMin(dynamic raw) {
 int fullMinFrom(Map m) => normalizeFullMin(m['fullMin'] ?? m['intervalMin']);
 
 int normalizeCooldown(dynamic raw) {
-  final v = (raw is num) ? raw.toInt() : (int.tryParse('${raw ?? ''}') ?? 15);
+  final v = intOf(raw, 15);
   return kCooldownOptions.contains(v) ? v : 15;
 }
 

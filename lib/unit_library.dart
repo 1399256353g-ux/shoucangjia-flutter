@@ -20,6 +20,7 @@ import 'lib_id.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
+import 'media_path.dart';
 import 'rel_path.dart';
 import 'top_node.dart';
 
@@ -434,7 +435,7 @@ List<LibNode> nodesFromMarks(
       id: rel,
       rel: rel,
       name: splitRel(rel).last,
-      coverUrl: u.startsWith('/media/') ? u : '',
+      coverUrl: isMediaPath(u) ? u : '',
       serverBase: base,
       // owner 2026-11-24：节点必须带连接标识，否则 buildUnitTree 退回
       // 「第一层目录当卡片」的旧形态，把下级单元库错标成「媒体库」。

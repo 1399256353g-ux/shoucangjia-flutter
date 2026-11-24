@@ -1,4 +1,5 @@
 import 'disk_name.dart';
+import 'json_num.dart';
 import 'lib_cover.dart';
 import 'source_lib.dart';
 
@@ -209,4 +210,4 @@ List<String> toggleStar(List<String> stars, String id, {int max = 20}) {
   return next;
 }
 
-int _num(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+int _num(dynamic v) => intOf(v);

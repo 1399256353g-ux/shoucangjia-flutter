@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'json_num.dart';
 import 'dart:convert';
 import 'dart:io' show Directory, File, Platform;
 import 'dart:math' show Random, max, min;
@@ -296,11 +297,11 @@ class Cfg {
     // 扫描器会把这类地址直接写进作品的 `th`，若再套 `/media/<lib>/` 就变成
     // `/media/<lib>/api/thumb/...` —— 服务端把 `api` 当库内子目录 → 必然 404。
     // 实测 2026-11-23：2288 条图文作品是这种 `th`，对应「comics / AI 单图无封面」。
-    if (path.startsWith('/api/')) return path;
+    if (isApiMediaPath(path)) return path;
     if (l.isEmpty) return path;
     // 相对路径（如手动封面 `_cover/v1.jpg`）必须补成 /media/<lib>/...，
     // 否则会被直接拼到域名后面变成 `http://ip:8090_cover/...`，永远加载不出来。
-    if (!path.startsWith('/media/')) {
+    if (!isMediaPath(path)) {
       final rel = path.replaceFirst(RegExp(r'^/+'), '');
       return '/media/${Uri.encodeComponent(l)}/$rel';
     }
@@ -316,14 +317,7 @@ class Cfg {
     // 库段可能是**百分号编码**的（本函数下面自己就写 `Uri.encodeComponent(l)`），
     // 而绑定表键是解码后的库 id。不归一就永远匹配不上，已带库段的路径会被
     // 再前缀一次，变成 `/media/<当前库>/%E4%B8%AD%E6%96%87/...` → 必然 404。
-    var headId = head;
-    if (head.contains('%')) {
-      try {
-        headId = Uri.decodeComponent(head);
-      } catch (_) {
-        headId = head;
-      }
-    }
+    final headId = decodeComponentOrRaw(head);
     if (headId.isNotEmpty &&
         (_bindings.containsKey(headId) || headId == l)) {
       return path;
@@ -648,9 +642,8 @@ class LibMeta {
         }
         if (rs[2].statusCode == 200) {
           final sj = jsonOf(rs[2]);
-          if (sj is Map && sj['authors'] is Map) {
-            stats = Map<String, dynamic>.from(sj['authors'] as Map);
-          }
+          final auth = mapOrNull(sj is Map ? sj['authors'] : null);
+          if (auth != null) stats = auth;
         }
       } catch (_) {}
       final meta = LibMeta(
@@ -963,7 +956,7 @@ class _SyncAllProgressDialogState extends State<_SyncAllProgressDialog> {
     }
     tries = 0;
     if (s['running'] == true) return;
-    _finish((s['exit'] as num?)?.toInt() ?? -1);
+    _finish(intOf(s['exit'], -1));
   }
 
   void _finish(int exit) {
@@ -1206,7 +1199,7 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
 /// 路径形如 `/media/<lib>/<rel>`，先去掉 `/media/` 与库 id 再取前缀。
 String authorPrefixOfMedia(String path) {
   var p = path.trim();
-  if (p.startsWith('/media/')) {
+  if (isMediaPath(p)) {
     p = p.substring(7);
     final at = p.indexOf('/');
     if (at > 0) p = p.substring(at + 1);
@@ -1457,8 +1450,8 @@ class _SettingsPageState extends State<SettingsPage> {
           (jsonOf(rs[0])['collections'] as List?)?.length ?? 0;
       var basics = 0;
       if (rs[1].statusCode == 200) {
-        final j = jsonOf(rs[1]);
-        if (j is Map) basics = (j['basicLibraries'] as List?)?.length ?? 0;
+        final j = mapOrNull(jsonOf(rs[1]));
+        basics = (j?['basicLibraries'] as List?)?.length ?? 0;
       }
       sw.stop();
       if (mounted) {
@@ -3358,7 +3351,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       if (list.isEmpty) {
         list.add({...Map<String, dynamic>.from(work), '_lib': lib});
       }
-      var start = m['index'] is num ? (m['index'] as num).toInt() : 0;
+      var start = intOf(m['index']);
       start = start.clamp(0, list.length - 1);
       // 服务端索引可能与作者文件顺序略有差异：以被点的作品为准。
       final want = e.workId.trim();
@@ -4588,9 +4581,10 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     final list = parseCollectionSettings(j);
     setState(() {
       cols = list;
-      defaultIdx = (j['default'] as num?)?.toInt();
-      accountCount = (j['accountCount'] as num?)?.toInt() ??
-          list.where((c) => c.account).length;
+      defaultIdx = j['default'] == null ? null : intOf(j['default']);
+      accountCount = j['accountCount'] == null
+          ? list.where((c) => c.account).length
+          : intOf(j['accountCount'], list.where((c) => c.account).length);
       err = null;
       if (setLoading) loading = false;
     });
@@ -5102,10 +5096,7 @@ class _LibraryPageState extends State<LibraryPage> {
             // 首页库列表可能上千条：解析放 isolate，避免卡首帧。
             final j = await parseJsonMapAsync(rs[0].bodyBytes);
             if (j.isNotEmpty) {
-              list = librariesWithDisplayNames(
-                  ((j['libraries'] as List?) ?? const [])
-                      .map((e) => Map<String, dynamic>.from(e as Map))
-                      .toList());
+              list = librariesWithDisplayNames(mapsOf(j['libraries']));
               def = '${j['default'] ?? ''}';
             }
           }
@@ -5466,7 +5457,7 @@ class _LibraryPageState extends State<LibraryPage> {
           final k = '${e.key}'.trim();
           final v = '${e.value ?? ''}'.trim();
           if (k.isEmpty || v.isEmpty) continue;
-          if (!v.startsWith('/media/')) continue;
+          if (!isMediaPath(v)) continue;
           covers[k] = v;
         }
       }
@@ -6084,7 +6075,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   }
 
   String _freqText(Map<String, dynamic>? j) {
-    final iv = (_cfgOf(j)['intervalMin'] as num?)?.toInt() ?? 0;
+    final iv = intOf(_cfgOf(j)['intervalMin']);
     if (iv <= 0) return '不自动抓取';
     return everyMinutesLabel(iv);
   }
@@ -6206,7 +6197,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
   String schedule = '04:10';
   int intervalMin = 0;
   String note = '';
-  List scripts = [];
+  List<UnitCrawlerScript> scripts = const [];
 
   String get libId => '${widget.lib['id']}';
 
@@ -6234,9 +6225,9 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
       setState(() {
         enabled = c['enabled'] == true;
         schedule = '${c['schedule'] ?? '04:10'}';
-        intervalMin = (c['intervalMin'] as num?)?.toInt() ?? 0;
+        intervalMin = intOf(c['intervalMin']);
         note = '${c['note'] ?? ''}';
-        scripts = (j['scripts'] as List?) ?? const [];
+        scripts = UnitCrawlerScript.listFrom(j['scripts']);
       });
     } catch (e) {
       if (mounted) setState(() => err = errorText(e));
@@ -6342,8 +6333,8 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.terminal, size: 18),
-                      title: Text('${(s as Map)['name']}'),
-                      subtitle: Text('${((s['size'] as num?)?.toInt() ?? 0)} B',
+                      title: Text(s.name),
+                      subtitle: Text('${s.size} B',
                           style: const TextStyle(fontSize: 11)),
                     ),
                 ]),
@@ -6582,10 +6573,7 @@ class _HomePageState extends State<HomePage> {
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
       final lj = jsonMapOf(r);
-      final ls = librariesWithDisplayNames(
-          ((lj['libraries'] as List?) ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList());
+      final ls = librariesWithDisplayNames(mapsOf(lj['libraries']));
       if (ls.isEmpty) return;
       Map<String, dynamic>? pick;
       for (final e in ls) {
@@ -6863,7 +6851,7 @@ class _RankPageState extends State<RankPage> {
     }
   }
 
-  int _n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+  int _n(dynamic v) => intOf(v);
 
   /// 0.9.30：排行榜首屏头像预热。
   ///
@@ -7099,10 +7087,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
-      final list = librariesWithDisplayNames(
-          ((j['libraries'] as List?) ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList());
+      final list = librariesWithDisplayNames(mapsOf(j['libraries']));
 
       final loaded = <String, Map<String, dynamic>>{};
       var offline = 0;
@@ -7679,8 +7664,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       // 作者索引可能上千作者：解析放 isolate。
       final m = await parseJsonMapAsync(ar.bodyBytes);
       for (final e in m.entries) {
-        if (e.value is! Map) continue;
-        final v = Map<String, dynamic>.from(e.value as Map);
+        final v = mapOrNull(e.value);
+        if (v == null) continue;
         final ls = (v['libs'] as List?)?.whereType<String>().toList() ??
             const <String>[];
         auMap[e.key] = {...v, '_lib': ls.isNotEmpty ? ls.first : cfg.lib};
@@ -7692,10 +7677,12 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
           sj = jsonOf(sr);
         } catch (_) {}
       }
-      if (sj is Map && sj['authors'] is Map) {
-        for (final e in (sj['authors'] as Map).entries) {
-          if (e.value is! Map) continue;
-          stMap['${e.key}'] = Map<String, dynamic>.from(e.value as Map);
+      final authStats = mapOrNull(sj is Map ? sj['authors'] : null);
+      if (authStats != null) {
+        for (final e in authStats.entries) {
+          final v = mapOrNull(e.value);
+          if (v == null) continue;
+          stMap['${e.key}'] = v;
         }
       }
       final meta = await LibMeta.load(cfg.lib);
@@ -7766,12 +7753,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     return b.toString();
   }
 
-  Map<String, dynamic> _s(String name) => stats[name] is Map
-      ? Map<String, dynamic>.from(stats[name] as Map)
-      : const {};
+  Map<String, dynamic> _s(String name) =>
+      mapOrNull(stats[name]) ?? const <String, dynamic>{};
 
-  int _num(dynamic v) =>
-      v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+  int _num(dynamic v) => intOf(v);
 
   int _metric(MapEntry<String, Map<String, dynamic>> e) {
     final s = _s(e.key);
@@ -10305,8 +10290,7 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
-  int _intOf(dynamic v, int fallback) =>
-      v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? fallback);
+  int _intOf(dynamic v, int fallback) => intOf(v, fallback);
 
   Future<void> _sendDrop() async {
     final w = _workAt(cur);
@@ -14675,9 +14659,7 @@ class _RecommendPageState extends State<RecommendPage> {
           if (lr.statusCode == 200) {
             final lj = jsonOf(lr);
             if (lj is Map && lj['libraries'] is List) {
-              libs = librariesWithDisplayNames((lj['libraries'] as List)
-                  .whereType<Map>()
-                  .map((e) => Map<String, dynamic>.from(e))
+              libs = librariesWithDisplayNames(mapsOf(lj['libraries'])
                   .where((e) => '${e['id'] ?? ''}'.isNotEmpty)
                   .toList());
             }
@@ -15058,10 +15040,7 @@ class _SearchPageState extends State<SearchPage> {
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
       final j = jsonMapOf(r);
-      final list = librariesWithDisplayNames(
-          ((j['libraries'] as List?) ?? const [])
-              .map((e) => Map<String, dynamic>.from(e as Map))
-              .toList());
+      final list = librariesWithDisplayNames(mapsOf(j['libraries']));
       if (!mounted || list.isEmpty) return;
       var next = sel;
       if (next.isEmpty ||
@@ -15185,7 +15164,7 @@ class _SearchPageState extends State<SearchPage> {
         ws.addAll(batch);
         offset += batch.length;
         final total =
-            (j is Map && j['total'] is num) ? (j['total'] as num).toInt() : 0;
+            j is Map ? intOf(j['total']) : 0;
         if (batch.isEmpty || (total > 0 && offset >= total)) break;
       } catch (_) {
         break;
@@ -15414,11 +15393,12 @@ class _SearchPageState extends State<SearchPage> {
                   : WorkGrid(
                       works: [
                         for (final e in res)
-                          {
-                            ...Map<String, dynamic>.from(e['w'] as Map),
-                            '_lib': '${e['_lib']}',
-                            '_bid': '${e['_bid'] ?? ''}',
-                          }
+                          if (e['w'] is Map)
+                            {
+                              ...Map<String, dynamic>.from(e['w'] as Map),
+                              '_lib': '${e['_lib']}',
+                              '_bid': '${e['_bid'] ?? ''}',
+                            }
                       ],
                       lib: sel.isEmpty ? cfg.lib : sel,
                       // 搜索结果在卡片上保留作者，双击即从结果列表起播
@@ -16421,7 +16401,7 @@ class _AuthorPageState extends State<AuthorPage> {
     // `postWorkDelete` 把状态码塞在返回体的 `status` 字段（内部码，不是 HTTP 层）。
     // 返回 null 表示「按读接口口径这不叫失败」（200 且没有显式 ok:false），
     // 此时只能说「服务端未确认」——不能说「HTTP 200」，那是自相矛盾的文案。
-    final st = (j['status'] as num?)?.toInt() ?? 0;
+    final st = intOf(j['status']);
     return apiFailureText(st, j, requireOk: false) ?? '服务端未确认';
   }
 
@@ -16443,7 +16423,7 @@ class _AuthorPageState extends State<AuthorPage> {
             errors.add(_deleteFailureText(j));
             continue;
           }
-          files += (j['count'] is num) ? (j['count'] as num).toInt() : 0;
+          files += intOf(j['count']);
         }
       }
       if (errors.isNotEmpty) {
@@ -16506,7 +16486,7 @@ class _AuthorPageState extends State<AuthorPage> {
         final w = _workById(id);
         final paths = workMediaPaths(w);
         final media = paths.isEmpty ? '' : paths.first;
-        if (media.startsWith('/media/')) {
+        if (isMediaPath(media)) {
           prefix = authorPrefixOfMedia(media);
           break;
         }

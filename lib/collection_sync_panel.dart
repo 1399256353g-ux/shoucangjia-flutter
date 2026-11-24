@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'json_num.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -95,9 +96,10 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
       if (!mounted) return;
       setState(() {
         all = list;
-        defaultIdx = (j['default'] as num?)?.toInt();
-        accountCount =
-            (j['accountCount'] as num?)?.toInt() ?? list.where((e) => e.account).length;
+        defaultIdx = j['default'] == null ? null : intOf(j['default']);
+        accountCount = j['accountCount'] == null
+            ? list.where((e) => e.account).length
+            : intOf(j['accountCount'], list.where((e) => e.account).length);
         loading = false;
       });
     } catch (e) {
@@ -128,7 +130,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
       if (!mounted) return;
       setState(() {
         all = list;
-        defaultIdx = (j['default'] as num?)?.toInt();
+        defaultIdx = j['default'] == null ? null : intOf(j['default']);
         saving = false;
       });
       widget.onChanged?.call();

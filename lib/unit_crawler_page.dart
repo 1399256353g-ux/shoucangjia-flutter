@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'json_num.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -402,7 +403,7 @@ class _ScheduleSummary extends StatelessWidget {
   const _ScheduleSummary({required this.schedule});
 
   static String _t(dynamic v) {
-    final ms = (v is num) ? v.toInt() : int.tryParse('${v ?? ''}') ?? 0;
+    final ms = intOf(v);
     return monthDayTimeOfMs(ms);
   }
 
@@ -411,9 +412,7 @@ class _ScheduleSummary extends StatelessWidget {
     if (schedule.isEmpty) return const SizedBox.shrink();
     final mode = '${schedule['lastMode'] ?? ''}';
     final exit = schedule['lastExit'];
-    final qh = schedule['quickRunsHour'] is num
-        ? (schedule['quickRunsHour'] as num).toInt()
-        : 0;
+    final qh = intOf(schedule['quickRunsHour']);
     final style = TextStyle(
         fontSize: 11, color: Theme.of(context).colorScheme.onSurfaceVariant);
     return Container(

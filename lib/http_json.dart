@@ -123,3 +123,34 @@ void throwIfApiFailed(
       requireOk: requireOk, statusText: statusText);
   if (bad != null) throw Exception(bad);
 }
+
+/// 服务端下发的「对象数组」→ `List<Map<String, dynamic>>`（**唯一实现**）。
+///
+/// 同一段 `((j['list'] as List?) ?? const []).map((e) => Map.from(e as Map))`
+/// 此前在 `main.dart` 抄了 6 遍（首页库列表、当前库同步、爬虫页、搜索页、
+/// 维护页……）。它们的坏数据行为都是**抛异常**，而位置各不相同：
+///
+///   - `e` 是字符串或数字（服务端把空列表写成 `[null]`、或版本切换期混进
+///     旧格式）→ `_TypeError: type 'String' is not a subtype of Map`；
+///   - 首页那条在 `Future.wait` 的 catch 里，表现为**整个连接列表变空**；
+///   - 爬虫页那条没有 catch，异常直接进 `setState` 的前一帧，界面卡在加载中；
+///   - 搜索页那条会连带把整页结果清空。
+///
+/// 正确行为是「跳过这条坏数据、保留其余」：一条脏记录不该让整张列表消失，
+/// 更不该让界面卡死。所有读列表的地方都走这里。
+List<Map<String, dynamic>> mapsOf(dynamic raw) {
+  if (raw is! List) return const <Map<String, dynamic>>[];
+  final out = <Map<String, dynamic>>[];
+  for (final e in raw) {
+    if (e is Map) out.add(Map<String, dynamic>.from(e));
+  }
+  return out;
+}
+
+/// 服务端下发的「对象」→ `Map<String, dynamic>`；不是对象时返回 null。
+///
+/// `Map<String, dynamic>.from(x)` 对字符串/数字会抛 `_TypeError`，对
+/// `Map<dynamic, dynamic>` 才会成功。服务端字段类型漂移（`authors` 从对象
+/// 变成字符串）时，界面不该整个崩掉。
+Map<String, dynamic>? mapOrNull(dynamic raw) =>
+    raw is Map ? Map<String, dynamic>.from(raw) : null;

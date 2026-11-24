@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'json_num.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -288,11 +289,11 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       final rel = '${raw['rel'] ?? ''}'.trim();
       if (rel.isEmpty) continue;
       final authors =
-          (raw['authors'] is num) ? (raw['authors'] as num).toInt() : 0;
+          intOf(raw['authors']);
       out.add(_FolderRow(
         rel: rel,
         name: '${raw['name'] ?? rel}'.trim(),
-        depth: (raw['depth'] is num) ? (raw['depth'] as num).toInt() : 1,
+        depth: raw['depth'] == null ? 1 : intOf(raw['depth'], 1),
         authors: authors,
         children: _parse((raw['dirs'] as List?) ?? const [], basics),
         isBasic: _isBasicFolder(raw, rel, authors, basics),

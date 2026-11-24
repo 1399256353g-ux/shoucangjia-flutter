@@ -8,6 +8,7 @@
 library;
 
 import 'work_safety.dart';
+import 'json_num.dart';
 import 'media_path.dart';
 
 /// 章节是否为图片（混合合集里图片章节排在最后）。
@@ -207,11 +208,7 @@ String workSortLabel(WorkSort sort) {
   }
 }
 
-int _intOf(dynamic v) {
-  if (v is num) return v.toInt();
-  if (v is String) return int.tryParse(v.trim()) ?? 0;
-  return 0;
-}
+int _intOf(dynamic v) => intOf(v);
 
 /// 时间戳统一到毫秒：`srcAt` 是毫秒，旧数据可能是秒。
 int _msOf(dynamic v) {

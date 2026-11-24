@@ -10,6 +10,9 @@
 //  - 没有取到统计的库（stats 缺失）同样不参与，避免把网络失败当成 0
 //  - 总播放量 = 作者 p 之和；总水滴数 = 作者 dr 之和
 //  - 按所选指标降序，同分按库名、id 稳定排序
+library;
+
+import 'json_num.dart';
 
 class LibraryRankRow {
   final String id;
@@ -39,7 +42,7 @@ bool libraryOnline(Map<String, dynamic> lib) {
   return true;
 }
 
-int _num(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+int _num(dynamic v) => intOf(v);
 
 /// 从一份 author_stats 响应中取出 authors 映射。
 Map<String, dynamic> statsAuthors(dynamic raw) {

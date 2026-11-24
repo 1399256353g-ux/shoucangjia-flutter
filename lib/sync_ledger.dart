@@ -7,6 +7,7 @@
 library;
 
 import 'api_url.dart';
+import 'json_num.dart';
 import 'time_labels.dart';
 import 'http_json.dart';
 
@@ -150,10 +151,7 @@ class SyncLog {
   bool get isEmpty => runs.isEmpty;
 }
 
-int _intOf(dynamic v, [int d = 0]) {
-  if (v is num) return v.toInt();
-  return int.tryParse('${v ?? ''}') ?? d;
-}
+int _intOf(dynamic v, [int d = 0]) => intOf(v, d);
 
 SyncRunItem _itemOf(Map m) => SyncRunItem(
       id: '${m['id'] ?? ''}',

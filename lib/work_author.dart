@@ -9,6 +9,8 @@
 /// 并同时兼容 `m` 为字符串/数组以及 `media`/`path` 等旧字段。
 library;
 
+import 'media_path.dart';
+
 const List<String> _authorKeys = <String>['a', 'author', 'authorName'];
 
 const List<String> _mediaKeys = <String>[
@@ -21,14 +23,7 @@ const List<String> _mediaKeys = <String>[
   'images',
 ];
 
-String _decodeSegment(String seg) {
-  if (seg.isEmpty || !seg.contains('%')) return seg;
-  try {
-    return Uri.decodeComponent(seg);
-  } catch (_) {
-    return seg;
-  }
-}
+String _decodeSegment(String seg) => decodeComponentOrRaw(seg);
 
 String? _authorFromMediaValue(dynamic raw) {
   Iterable<String> paths = const <String>[];

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'json_num.dart';
 
 import 'prefs_json.dart';
 
@@ -73,7 +74,7 @@ class AuthorGrade {
   /// 缺失或不是 Map 时按 0 统计，只保留作品数权重。
   static String fromStats(dynamic stats, {int works = 0}) {
     final m = stats is Map ? stats : const {};
-    int n(dynamic v) => v is num ? v.toInt() : (int.tryParse('${v ?? ''}') ?? 0);
+    int n(dynamic v) => intOf(v);
     return gradeFor(plays: n(m['p']), drops: n(m['dr']), works: works);
   }
 
@@ -177,7 +178,7 @@ class AuthorGrade {
     final c = _strictColors(src['c']);
     if (c != null) colors = c;
     remoteManaged = true;
-    remoteAt = (src['at'] is num ? (src['at'] as num).toInt() : 0);
+    remoteAt = intOf(src['at']);
     return true;
   }
 

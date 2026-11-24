@@ -27,7 +27,33 @@ bool isAbsoluteMediaUrl(String path) {
 ///
 /// 扫描器会把这类地址写进作品的 `th`/`fc`，若再套 `/media/<lib>/` 就变成
 /// `/media/<lib>/api/thumb/...`——服务端把 `api` 当库内子目录，必然 404。
+/// 实测 2026-11-23：2288 条图文作品的 `th` 就是这种接口地址。
 bool isApiMediaPath(String path) => path.trim().startsWith('/api/');
+
+/// 已经是 `/media/` 起头的库内媒体路径？
+///
+/// **唯一定义**。此前这条判定在 6 处各写一遍
+/// （`lib_cover.coverUrlOf` / `nodesFromMarks` / `cover_history` /
+/// `unit_library` / `cover_upload` / `source_lib`），都是裸
+/// `startsWith('/media/')`：哪天服务端把前缀改成 `/m/` 或加上域名，
+/// 六处得同时改，漏一处就是「封面/头像/节点封面一半显示一半空」。
+bool isMediaPath(String path) => path.trim().startsWith('/media/');
+
+/// 百分号解码，非法编码原样返回（**唯一实现**）。
+///
+/// 媒体路径的库段与 `.avatars` 文件名都可能是百分号编码的，而文件名本身
+/// 可以含孤立 `%`（如 `100%成品.jpg` 被拼进路径后仍是裸 `%`）。
+/// `Uri.decodeComponent` 遇到非法编码直接抛 `ArgumentError`：
+/// `libOfMediaPath` 早有 try 保护，`serverAvatarFileFromPath` 没有——
+/// 点一次这种头像就在 UI 回调里抛异常。规则只允许有一份。
+String decodeComponentOrRaw(String s) {
+  if (s.isEmpty || !s.contains('%')) return s;
+  try {
+    return Uri.decodeComponent(s);
+  } catch (_) {
+    return s;
+  }
+}
 
 /// 媒体路径是否指向视频文件（按扩展名，忽略查询串与片段）。
 ///
@@ -60,6 +86,9 @@ bool isVideoMediaPath(String p) {
 String encodeMediaPath(String path) {
   if (path.isEmpty) return path;
   if (isAbsoluteMediaUrl(path)) return path;
+  // 接口地址（`/api/thumb/<lib>/<id>`）不是媒体文件：它自带的 `?v=` 是
+  // 抽帧版本参数，把 `?` 转义成 `%3F` 会让服务端收到一个不存在的路径。
+  if (isApiMediaPath(path)) return path;
   final hex2 = RegExp(r'^[0-9A-Fa-f]{2}$');
   final out = StringBuffer();
   for (var i = 0; i < path.length; i++) {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'json_num.dart';
 import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
@@ -54,13 +55,19 @@ class KeyCombo {
   Map<String, dynamic> toJson() => {'k': keyId, 'm': mods};
 
   /// 兼容三种历史/新格式：纯数字（旧单键）、`{k,m}`、以及带 `id` 的对象。
+  ///
+  /// 键码/修饰键一律走 [intOf]，不用 `as num?`：落盘 JSON 里这两个字段可能是
+  /// 字符串（`{"k":"32"}`，旧版本或手工改过的配置）。裸 cast 遇到字符串会抛
+  /// `_TypeError`，而 `applyJson` 是在**启动时**调用的——整份设置（速度、
+  /// 预载、词条、全部按键绑定）会一起退回默认，用户只会觉得「设置总是自己变」。
   static KeyCombo? fromJson(Object? v) {
     if (v is num) return KeyCombo(v.toInt(), 0);
     if (v is Map) {
-      final k = (v['k'] ?? v['id']) as num?;
-      if (k == null) return null;
-      final m = (v['m'] ?? v['mods']) as num?;
-      return KeyCombo(k.toInt(), m?.toInt() ?? 0);
+      final rawKey = v['k'] ?? v['id'];
+      if (rawKey == null || '${rawKey}'.trim().isEmpty) return null;
+      final k = intOf(rawKey);
+      if (k == 0) return null;
+      return KeyCombo(k, intOf(v['m'] ?? v['mods']));
     }
     return null;
   }
@@ -120,16 +127,25 @@ class AppSettings {
   /// 容错解析：非法或缺失字段回落默认值。
   static void applyJson(Map<String, dynamic> j) {
     resetDefaults();
-    final s = (j['speed'] as num?)?.toDouble();
-    if (s != null) defaultSpeed = s.clamp(0.5, 3.0).toDouble();
-    final ii = (j['imageInterval'] as num?)?.toInt();
-    if (ii != null) imageIntervalSec = ii.clamp(1, 20);
-    final h = (j['hideUi'] as num?)?.toInt();
-    if (h != null) hideUiSec = h.clamp(1, 30);
-    final pp = (j['preloadPerSide'] as num?)?.toInt();
-    if (pp != null) preloadPerSide = clampPreloadPerSide(pp);
-    final pm = (j['preloadMemory'] as num?)?.toInt();
-    if (pm != null) preloadMemoryMb = clampPreloadMemoryMb(pm);
+    // 数值字段一律走 json_num：`as num?` 遇到字符串（`"speed": "1.5"`）会抛
+    // `_TypeError`，而这里是启动路径——异常让整份设置退回默认而不是只跳过
+    // 那一个坏字段，表现是「重启后速度/预载/按键全丢」。
+    // 用 null 判断「字段存在且可解析」，缺失字段保持 resetDefaults 的值。
+    if (j['speed'] != null) {
+      defaultSpeed = doubleOf(j['speed'], defaultSpeed).clamp(0.5, 3.0).toDouble();
+    }
+    if (j['imageInterval'] != null) {
+      imageIntervalSec = intOf(j['imageInterval'], imageIntervalSec).clamp(1, 20);
+    }
+    if (j['hideUi'] != null) {
+      hideUiSec = intOf(j['hideUi'], hideUiSec).clamp(1, 30);
+    }
+    if (j['preloadPerSide'] != null) {
+      preloadPerSide = clampPreloadPerSide(intOf(j['preloadPerSide'], preloadPerSide));
+    }
+    if (j['preloadMemory'] != null) {
+      preloadMemoryMb = clampPreloadMemoryMb(intOf(j['preloadMemory'], preloadMemoryMb));
+    }
     final si = j['stripIndex'];
     if (si is bool) stripLibIndex = si;
     final vf = j['videoFit'];

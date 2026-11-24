@@ -90,6 +90,50 @@ void main() {
       expect(parsed.host, 'cdn.example.com');
     });
 
+    test('接口地址不被套 /media/<lib>/（th 已是 /api/thumb 的作品）', () {
+      // 0.9.233：`workCoverPath` 会把 `th` 原样交给 `urls.mediaUrl`，而库卡片
+      // 走的是 `libraryMediaPath`。后者此前只判 `/media/` 与 `http(s)://`，
+      // `/api/thumb/<lib>/<id>` 被当成相对路径 → `…/media/lib-019/api/thumb/…`
+      // → 服务端把 `api` 当库内子目录，2288 条图文作品的卡片永远只有底色。
+      expect(libraryMediaPath('lib-019', '/api/thumb/lib-019/g1'),
+          '/api/thumb/lib-019/g1');
+      expect(
+          absoluteMediaUrl('http://nas:8090',
+              lib: 'lib-019', path: '/api/thumb/lib-019/g1?v=2'),
+          'http://nas:8090/api/thumb/lib-019/g1?v=2');
+      // `?v=` 是抽帧版本参数，不能被转义成 `%3F`（服务端会收到另一个路径）。
+      expect(encodeMediaPath('/api/thumb/lib-019/g1?v=2'),
+          '/api/thumb/lib-019/g1?v=2');
+      // 相对媒体路径仍然要补前缀，别把修复变成「全都不补」。
+      expect(libraryMediaPath('lib-019', 'a/b.jpg'), '/media/lib-019/a/b.jpg');
+    });
+
+    test('契约：/media/ 前缀判定只有 media_path 一处', () {
+      // 这条判定此前在 6 个文件里各写一遍裸 startsWith('/media/')。
+      final offenders = <String>[];
+      for (final f in Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))) {
+        if (f.path.endsWith('media_path.dart')) continue;
+        final src = _code(f.path);
+        if (src.contains("startsWith('/media/')")) offenders.add(f.path);
+      }
+      expect(offenders, isEmpty,
+          reason: '前缀判定又出现第二份（服务端改前缀时要改六处）：$offenders');
+      expect(isMediaPath('/media/x/y'), isTrue);
+      expect(isMediaPath('/api/x'), isFalse);
+    });
+
+    test('百分号解码只有 media_path 一处，且非法编码不抛', () {
+      expect(decodeComponentOrRaw('%E4%B8%AD'), '中');
+      expect(decodeComponentOrRaw('100%成品'), '100%成品'); // 孤立 % 不能抛
+      expect(decodeComponentOrRaw('%zz'), '%zz');
+      expect(decodeComponentOrRaw(''), '');
+      expect(libOfMediaPath('/media/%E4%B8%AD/a.jpg'), '中');
+      expect(libOfMediaPath('/media/100%成品/a.jpg'), '100%成品');
+    });
+
     test('契约：视频扩展名清单只有 media_path 一处', () {
       final files = Directory('lib')
           .listSync(recursive: true)

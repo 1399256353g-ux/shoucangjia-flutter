@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'json_num.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -62,13 +63,13 @@ class WorkPlay {
 
   static WorkPlay? fromJson(dynamic raw) {
     if (raw is! Map) return null;
-    final n = raw['n'] is num ? (raw['n'] as num).toInt() : int.tryParse('${raw['n'] ?? ''}') ?? 0;
+    final n = intOf(raw['n']);
     if (n <= 0) return null;
     return WorkPlay(
       count: n,
       thumb: '${raw['t'] ?? ''}'.trim(),
       kind: '${raw['k'] ?? ''}'.trim(),
-      at: raw['a'] is num ? (raw['a'] as num).toInt() : int.tryParse('${raw['a'] ?? ''}') ?? 0,
+      at: intOf(raw['a']),
     );
   }
 }

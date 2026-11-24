@@ -6,8 +6,11 @@
 library;
 
 import 'dart:convert';
+import 'json_num.dart';
 
 import 'package:http/http.dart' as http;
+
+import 'media_path.dart';
 import 'http_json.dart';
 
 import 'http_error_text.dart';
@@ -54,11 +57,11 @@ CoverVersion? coverVersionFromJson(dynamic raw) {
   if (e.startsWith('.')) e = e.substring(1);
   if (!kCoverExts.contains(e)) e = 'jpg';
   final u = '${raw['u'] ?? raw['url'] ?? ''}'.trim();
-  final at = raw['at'] is num ? (raw['at'] as num).toInt() : 0;
+  final at = intOf(raw['at']);
   return CoverVersion(
     version: v,
     ext: e,
-    url: u.startsWith('/media/') ? u : '',
+    url: isMediaPath(u) ? u : '',
     at: at < 0 ? 0 : at,
     current: raw['current'] == true,
   );

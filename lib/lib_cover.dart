@@ -124,7 +124,12 @@ String libraryMediaPath(String lib, String path) {
   // 再补 `/media/<lib>/` 会拼出 `…/media/lib/http://cdn/x.jpg`，服务端把
   // `http:` 当库内子目录，必然 404。绝对地址原样返回。
   if (isAbsoluteMediaUrl(p)) return p;
-  if (p.startsWith('/media/')) return p;
+  // 服务端接口地址（`th` 被扫描器写成 `/api/thumb/<lib>/<id>`）：它不是媒体
+  // 文件，套 `/media/<lib>/` 会变成 `/media/lib-019/api/thumb/...`，服务端把
+  // `api` 当库内子目录 → 404，卡片就永远只有底色。原样返回，交给
+  // `absoluteMediaUrl` 只补服务器前缀。
+  if (isApiMediaPath(p)) return p;
+  if (isMediaPath(p)) return p;
   final l = lib.trim();
   final rest = p.replaceFirst(RegExp(r'^/+'), '');
   if (l.isEmpty) return '/media/$rest';
@@ -166,7 +171,7 @@ String coverUrlOf(dynamic raw) {
   if (raw is! Map) return '';
   final u = '${raw['u'] ?? raw['url'] ?? ''}'.trim();
   if (u.isEmpty) return '';
-  return u.startsWith('/media/') ? u : '';
+  return isMediaPath(u) ? u : '';
 }
 
 /// 媒体路径里的库 id：`/media/lib-008/a/b.jpg` → `lib-008`；不是媒体路径返回空串。
@@ -179,17 +184,13 @@ String coverUrlOf(dynamic raw) {
 /// 与 `serverAvatarFileFromPath` 的解码口径保持一致（同一规则不允许两份）。
 String libOfMediaPath(String p) {
   final path = p.trim();
-  if (!path.startsWith('/media/')) return '';
+  if (!isMediaPath(path)) return '';
   final rest = path.substring(7);
   final at = rest.indexOf('/');
   if (at <= 0) return '';
   final seg = rest.substring(0, at);
-  try {
-    return Uri.decodeComponent(seg);
-  } catch (_) {
-    // 非法百分号编码：原样返回，让调用方按「未命中」处理，不抛异常。
-    return seg;
-  }
+  // 非法百分号编码：原样返回，让调用方按「未命中」处理，不抛异常。
+  return decodeComponentOrRaw(seg);
 }
 
 /// 最后一级兜底：第一张作品的封面（只收图片）。
