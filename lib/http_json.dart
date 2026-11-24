@@ -88,12 +88,24 @@ String? apiFailureText(
       ? status == 200 && json is Map && json['ok'] == true
       : status == 200 && !(json is Map && json['ok'] == false);
   if (ok) return null;
+  final serverSaid = serverErrorText(json);
+  if (serverSaid != null) return serverSaid;
+  final text = statusText ?? httpErrorText;
+  return text(status);
+}
+
+/// 服务端 `error` 字段 → 可直接展示的原因；没有可展示的字符串时返回 null。
+///
+/// 「有没有失败原因」这一判断此前在多处各写一遍，且两种写法都不对：
+/// `'${j['error']}'`（对象/数字也被插值成 `{code: 500}` 贴到界面），
+/// `j['error'] != null`（判存在不判类型）。抽成一个函数后，
+/// 「哪些响应算带了原因」只有一个答案。
+String? serverErrorText(dynamic json) {
   if (json is Map) {
     final e = json['error'];
     if (e is String && e.trim().isNotEmpty) return e.trim();
   }
-  final text = statusText ?? httpErrorText;
-  return text(status);
+  return null;
 }
 
 /// 读接口的收尾：非成功就抛异常，消息可直接展示给用户。

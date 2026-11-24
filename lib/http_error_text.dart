@@ -14,9 +14,13 @@
 ///
 /// 通用归类只覆盖三个跨业务一致的语义：请求格式（400）、图片过大（413）、
 /// 服务端写入失败（500）；其余一律 `HTTP <状态码>`，不猜。
+///
+/// `status <= 0` 表示**根本没有 HTTP 状态码**（内部错误码缺省、网络异常短路），
+/// 这时说「HTTP 0」只会让人去找一个不存在的响应。
 String httpErrorText(int status, {Map<int, String> overrides = const {}}) {
   final o = overrides[status];
   if (o != null) return o;
+  if (status <= 0) return '服务端未确认';
   switch (status) {
     case 400:
       return '请求格式不对';

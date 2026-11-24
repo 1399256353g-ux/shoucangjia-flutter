@@ -11,6 +11,8 @@
 library;
 
 import 'error_text.dart';
+import 'http_error_text.dart';
+import 'http_json.dart';
 
 /// 单次快速刷新的结果。
 class LibRefreshOutcome {
@@ -87,15 +89,13 @@ LibRefreshOutcome parseReindexResponse(
   final works = row != null && row['works'] is num
       ? (row['works'] as num).toInt()
       : null;
-  var err = row != null ? '${row['error'] ?? ''}'.trim() : '';
+  var err = serverErrorText(row) ?? '';
   if (err.isEmpty && !okRow) {
-    if (map['error'] != null) {
-      err = '${map['error']}';
-    } else if (status != 200) {
-      err = 'HTTP $status';
-    } else {
-      err = '服务端未返回结果';
-    }
+    // 顶层 error 与状态码文案都走唯一出口：`'${map['error']}'` 会把
+    // `{code: 500}` 这样的对象插值贴到界面，`'HTTP $status'` 又与本文件
+    // 其它地方（httpErrorText）同一个 400 两种说法。
+    err = serverErrorText(map) ??
+        (status != 200 ? httpErrorText(status) : '服务端未返回结果');
   }
   return LibRefreshOutcome(
     lib: lib,

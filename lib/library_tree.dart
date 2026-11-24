@@ -56,21 +56,10 @@ class BasicLib {
     this.serverLabel = '',
   });
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'rel': rel,
-        'big_id': bigId,
-        'authors': authors,
-        'works': works,
-        if (coverVersion.isNotEmpty)
-          'cover': {'v': coverVersion, 'e': coverExt},
-        if (crawlerCover.isNotEmpty) 'cv': crawlerCover,
-        if (firstCover.isNotEmpty) 'fc': firstCover,
-        if (serverId.isNotEmpty) '_serverId': serverId,
-        if (serverBase.isNotEmpty) '_serverBase': serverBase,
-        if (serverLabel.isNotEmpty) '_serverLabel': serverLabel,
-      };
+  // 0.9.229 删掉 `toJson()`：它只在 `test/basic_lib_first_cover_test.dart`
+  // 被断言，`lib/` 里没有任何调用点——库树从不回写本地快照（重启是重拉
+  // `/api/libraries.json`）。一条「写了没人读」的序列化会让人误以为存在缓存，
+  // 甚至照着它改字段名，而产品行为其实只取决于 `LibraryTree.parse`。
 }
 
 /// 把 `BasicLibRef` 转成页面用的 `BasicLib`（单元库树构建时用）。

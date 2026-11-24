@@ -16430,8 +16430,11 @@ class _AuthorPageState extends State<AuthorPage> {
   /// 字段（不是 HTTP 层），所以要显式传进去；两处调用共用一个出口，
   /// 避免同一个内部错误码在两段循环里出现两种说法。
   String _deleteFailureText(Map<String, dynamic> j) {
+    // `postWorkDelete` 把状态码塞在返回体的 `status` 字段（内部码，不是 HTTP 层）。
+    // 返回 null 表示「按读接口口径这不叫失败」（200 且没有显式 ok:false），
+    // 此时只能说「服务端未确认」——不能说「HTTP 200」，那是自相矛盾的文案。
     final st = (j['status'] as num?)?.toInt() ?? 0;
-    return apiFailureText(st, j, requireOk: false) ?? '服务端未确认（HTTP $st）';
+    return apiFailureText(st, j, requireOk: false) ?? '服务端未确认';
   }
 
   Future<void> _batchDelete() async {

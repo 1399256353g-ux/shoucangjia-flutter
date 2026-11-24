@@ -250,15 +250,20 @@ Map<String, dynamic> syncRetryBody({String runId = '', required List<String> ids
   };
 }
 
-/// 重试响应 → 展示文案；非 200 时用 error 字段。
+/// 重试响应 → 展示文案；失败原因走 [apiFailureText]（读接口口径）。
+///
+/// 此前这里自己拼了一遍失败原因，与本文件/其它页面的唯一出口有两处分叉：
+///  - `'${body['error']}'`：`error` 是非字符串（`{code: 500}` / `500`）时把对象
+///    贴到界面上（0.9.227 已在 13 处修掉同一写法，这里是漏网的第 14 处）；
+///  - `'HTTP $status'`：同一个 400 在别的页面显示「请求格式不对」，这里显示
+///    「HTTP 400」——状态码文案必须只有一个说法。
+/// 成功判定仍要求 `ok == true`（重试是写接口，缺字段不能当成功）。
 String syncRetryResultLabel(int status, dynamic body) {
   if (body is Map && body['ok'] == true) {
     final n = _intOf(body['retried']);
     return '已开始重试 $n 条（任务 ${body['retryRunId'] ?? ''}）';
   }
-  final err = (body is Map && body['error'] != null)
-      ? '${body['error']}'
-      : 'HTTP $status';
+  final err = apiFailureText(status, body, requireOk: false) ?? '';
   return '重试失败：$err';
 }
 

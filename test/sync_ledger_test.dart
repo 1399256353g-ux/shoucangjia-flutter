@@ -113,6 +113,11 @@ void main() {
         contains('已开始重试 2 条'));
     expect(syncRetryResultLabel(400, {'ok': false, 'error': '缺少 ids'}),
         contains('缺少 ids'));
-    expect(syncRetryResultLabel(500, null), contains('HTTP 500'));
+    expect(syncRetryResultLabel(500, null), contains('服务端写入失败'));
+    // 状态码文案与 error 字段都走唯一出口：对象型 error 不得被插值贴到界面。
+    expect(syncRetryResultLabel(400, {'ok': false, 'error': {'code': 500}}),
+        contains('请求格式不对'));
+    expect(syncRetryResultLabel(418, {'ok': false, 'error': 418}),
+        contains('HTTP 418'));
   });
 }

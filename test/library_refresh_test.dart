@@ -67,10 +67,18 @@ void main() {
       expect(out.message, '刷新失败：缺少 lib');
     });
 
-    test('body 不是 Map 时用 HTTP 码兜底，不崩', () {
+    test('body 不是 Map 时用状态码文案兜底，不崩', () {
+      // 以前手拼 `HTTP 500`，与 httpErrorText 的「服务端写入失败」两种说法。
       final out = parseReindexResponse(500, 'oops', lib: 'lib-001');
       expect(out.ok, isFalse);
-      expect(out.error, contains('HTTP 500'));
+      expect(out.error, '服务端写入失败');
+    });
+
+    test('顶层 error 是非字符串时不当原因展示（不贴对象到界面）', () {
+      final out = parseReindexResponse(400, {'ok': false, 'error': {'code': 500}},
+          lib: 'lib-001');
+      expect(out.ok, isFalse);
+      expect(out.error, '请求格式不对');
     });
 
     test('多库响应里按 lib 取自己那一行', () {

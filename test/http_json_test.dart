@@ -127,6 +127,24 @@ void main() {
       expect(apiFailureText(500, {'ok': true}), '服务端写入失败');
       expect(apiFailureText(302, {'ok': true}), 'HTTP 302');
     });
+
+    test('没有 HTTP 状态码时不说「HTTP 0」', () {
+      // 内部错误码缺省（`postWorkDelete` 的 status 字段缺失）会走到这里：
+      // 说「HTTP 0」会让人去找一个不存在的响应。
+      expect(apiFailureText(0, {'ok': false}, requireOk: false), '服务端未确认');
+      expect(apiFailureText(-1, null, requireOk: false), '服务端未确认');
+    });
+
+    test('serverErrorText：只认非空字符串，对象/数字/null 一律 null', () {
+      expect(serverErrorText({'error': ' 缺少 lib '}), '缺少 lib');
+      expect(serverErrorText({'error': ''}), isNull);
+      expect(serverErrorText({'error': '   '}), isNull);
+      expect(serverErrorText({'error': {'code': 500}}), isNull);
+      expect(serverErrorText({'error': 500}), isNull);
+      expect(serverErrorText({'ok': false}), isNull);
+      expect(serverErrorText(null), isNull);
+      expect(serverErrorText('plain'), isNull);
+    });
   });
 
   group('requireOk:false —— 读接口的老契约（只认「没显式说失败」）', () {

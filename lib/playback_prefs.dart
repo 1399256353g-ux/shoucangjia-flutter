@@ -44,7 +44,9 @@ class PlaybackPrefs {
       );
 
   Map<String, dynamic> toJson() => {
-        'v': 1,
+        // 版本只写在**键名**（`playback_prefs_v1`）里。此前这里还多写一份
+        // `'v': 1`，但 `fromJson` 从不读它——两份版本号，改结构时改一处
+        // 就漂移。键名已经承担了迁移职责，payload 里不再重复。
         'speed': speed,
         'loopOne': link.loopOne,
         'autoplay': link.autoplay,

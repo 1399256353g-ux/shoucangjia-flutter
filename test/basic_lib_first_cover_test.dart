@@ -3,6 +3,8 @@
 // 背景：`fc` 原来只存在主页状态里的 `_fcByLib` 映射，单元库页的基础库卡片
 // 拿不到 → 索引里「有 thumb/cover 但无媒体」的库卡片一直空白。现在统一由
 // `BasicLib.firstCover` 携带，卡片解析链路（`basicCoverUrl`）直接使用。
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,16 +43,20 @@ void main() {
     final t = LibraryTree.parse(
       _treeJson(fc: '/media/lib-029/%40a/VID/cover.jpg'),
     )!;
-    final b = t.allBasics.single;
-    expect(b.firstCover, '/media/lib-029/%40a/VID/cover.jpg');
-    // 回写给本地快照时也要带上，否则重启后卡片又空白。
-    expect(b.toJson()['fc'], '/media/lib-029/%40a/VID/cover.jpg');
+    expect(t.allBasics.single.firstCover, '/media/lib-029/%40a/VID/cover.jpg');
   });
 
   test('解析：没有 fc 时为空串（不伪造地址）', () {
     final t = LibraryTree.parse(_treeJson())!;
     expect(t.allBasics.single.firstCover, isEmpty);
-    expect(t.allBasics.single.toJson().containsKey('fc'), isFalse);
+  });
+
+  test('库树不再有「写了没人读」的本地序列化', () {
+    // 此前 BasicLib.toJson 只被本文件断言：库树从不回写本地快照，
+    // 重启是重拉 /api/libraries.json。留着它会让人误以为存在缓存。
+    final src = File('lib/library_tree.dart').readAsStringSync();
+    expect(RegExp(r'Map<String, dynamic> toJson\(').hasMatch(src), isFalse,
+        reason: 'BasicLib.toJson 又回来了（没有产品调用方）');
   });
 
   test('卡片封面：无手动/爬虫/播放记录时用 fc；fc 是视频则判无图', () {

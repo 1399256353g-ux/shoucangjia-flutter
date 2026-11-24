@@ -1232,4 +1232,62 @@ void main() {
     });
   });
 
+  group('第二十五批：失败原因不再手拼 / 库树无幽灵序列化 / 扫描器判据', () {
+    String codeOf(String path) => File(path)
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('失败原因只有 serverErrorText / apiFailureText 两个出口', () {
+      // 0.9.229：sync_ledger 与 library_refresh 各自又拼了一遍
+      // `body['error'] != null ? '${...}' : 'HTTP $status'`——一个把
+      // `{code: 500}` 贴到界面，一个让同一个 400 两种说法。
+      final offenders = <String>[];
+      for (final f in libDartFiles()) {
+        if (f.path.endsWith('http_json.dart')) continue;
+        final src = codeOf(f.path);
+        if (RegExp(r"\$\{(?:j|body|map|row)\[\s*'error'\s*\]\}").hasMatch(src)) {
+          offenders.add(f.path);
+        }
+      }
+      expect(offenders, isEmpty, reason: '失败原因又手拼回去了：$offenders');
+      final src = libDartFiles().map((f) => codeOf(f.path)).join('\n');
+      expect(src.contains('String? serverErrorText(dynamic json)'), isTrue,
+          reason: 'serverErrorText 被删了');
+      final uses = RegExp(r'serverErrorText\(').allMatches(src).length;
+      expect(uses, greaterThanOrEqualTo(2),
+          reason: 'serverErrorText 只剩定义没有调用（$uses 处）');
+    });
+
+    test('状态码文案不得在 lib/ 里手拼 HTTP 串', () {
+      // 允许 `httpErrorText` 自己的 `HTTP $status` 与 usage 注释。
+      final offenders = <String>[];
+      for (final f in libDartFiles()) {
+        if (f.path.endsWith('http_error_text.dart')) continue;
+        final src = codeOf(f.path);
+        if (RegExp(r"'HTTP \$(?:status|st|r\.statusCode)'").hasMatch(src)) {
+          offenders.add(f.path);
+        }
+      }
+      expect(offenders, isEmpty, reason: '又有页面手拼了 HTTP 状态码：$offenders');
+    });
+
+    test('库树不得有「写了没人读」的本地序列化', () {
+      final tree = codeOf('lib/library_tree.dart');
+      expect(RegExp(r'Map<String, dynamic> toJson\(').hasMatch(tree), isFalse,
+          reason: 'BasicLib.toJson 又回来了（lib/ 无调用方）');
+      // 解析仍必须存在：重启重建库树完全靠它。
+      expect(tree.contains('static LibraryTree? parse('), isTrue);
+    });
+
+    test('playback_prefs 的版本号只在键名，payload 里不重复写', () {
+      final p = codeOf('lib/playback_prefs.dart');
+      expect(RegExp(r"'v'\s*:\s*1").hasMatch(p), isFalse,
+          reason: 'payload 里又写了一份从不被读的版本号');
+      expect(p.contains("playback_prefs_v1"), isTrue,
+          reason: '版本化键名被删了（迁移就全靠它）');
+    });
+  });
+
 }
