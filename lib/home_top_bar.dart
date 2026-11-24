@@ -63,17 +63,36 @@ TopBarLayout topBarLayout({
   if (actions.isEmpty) {
     return const TopBarLayout(<TopBarAction>[], <TopBarAction>[]);
   }
-  final slots = (width / kTopBarSlot).floor().clamp(2, kTopBarMaxVisible);
-  // 放不下全部动作时留一格给「⋯」。
-  final direct = slots >= actions.length ? actions.length : slots - 1;
-  final keep = direct.clamp(1, actions.length);
+  // owner 2026-11-24：设置永远直接可见（尾位），不参与溢出竞争。
+  final pinIndex = actions.indexWhere((a) => a.id == 'settings');
+  final pinned = pinIndex >= 0 ? actions[pinIndex] : null;
+  final rest = <TopBarAction>[
+    for (var i = 0; i < actions.length; i++)
+      if (i != pinIndex) actions[i],
+  ];
+  if (rest.isEmpty) {
+    return TopBarLayout(<TopBarAction>[if (pinned != null) pinned], const []);
+  }
+
+  // 给固定尾位预留一格。
+  final budget = pinned == null ? kTopBarMaxVisible : kTopBarMaxVisible - 1;
+  final slots = (width / kTopBarSlot).floor().clamp(2, budget);
+  final direct = slots >= rest.length ? rest.length : slots - 1;
+  final keep = direct.clamp(1, rest.length);
   return TopBarLayout(
-    actions.take(keep).toList(),
-    actions.skip(keep).toList(),
+    <TopBarAction>[...rest.take(keep), if (pinned != null) pinned],
+    rest.skip(keep).toList(),
   );
 }
 
 /// 主页顶部动作条：总刷新常驻，其余按宽度自动收进「⋯」。
+///
+/// owner 2026-11-24：「主页右上角设置点开没东西不好用」——
+/// 设置原本和文件结构/推荐/作者/排行榜一起被塞进「⋯」菜单，
+/// 用户点右上角看到的是菜单列表，容易以为「设置坏了」。
+///
+/// 现在把 `id == 'settings'` 视为**常驻尾位**：它永远直接可见、
+/// 固定在最右侧（「⋯」在它左边），与总刷新共同构成两端锚点。
 class HomeTopBar extends StatelessWidget {
   /// 动作列表：第一个必须是「总刷新」，第二个建议是「搜索」。
   final List<TopBarAction> actions;
@@ -98,10 +117,13 @@ class HomeTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final width = availableWidth ?? (MediaQuery.sizeOf(context).width - 150);
     final layout = topBarLayout(width: width, actions: actions);
+    // owner 2026-11-24：设置固定最右，「⋯」放它左边，不把设置再挤进菜单。
+    final pinned = layout.visible.where((a) => a.id == 'settings').toList();
+    final normal = layout.visible.where((a) => a.id != 'settings').toList();
     final children = <Widget>[];
-    for (final a in layout.visible) {
+    Widget buttonOf(TopBarAction a) {
       final busy = refreshing && a.id == 'refresh';
-      children.add(IconButton(
+      return IconButton(
         key: ValueKey('topbar-${a.id}'),
         tooltip: a.tooltip,
         iconSize: 24,
@@ -115,7 +137,11 @@ class HomeTopBar extends StatelessWidget {
                 height: 18,
                 child: CircularProgressIndicator(strokeWidth: 2))
             : Icon(a.icon),
-      ));
+      );
+    }
+
+    for (final a in normal) {
+      children.add(buttonOf(a));
     }
     if (layout.hasOverflow) {
       children.add(PopupMenuButton<TopBarAction>(
@@ -137,6 +163,10 @@ class HomeTopBar extends StatelessWidget {
             ),
         ],
       ));
+    }
+    // 设置固定尾位。
+    for (final a in pinned) {
+      children.add(buttonOf(a));
     }
     return Row(mainAxisSize: MainAxisSize.min, children: children);
   }

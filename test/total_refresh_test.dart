@@ -47,6 +47,64 @@ void main() {
     });
   });
 
+  // owner 2026-11-24：「主页右上角设置点开没东西不好用」——
+  // 设置曾被挤进「⋯」，用户点右上角看到的是菜单列表，以为设置坏了。
+  // 现在 settings 是常驻尾位，不参与溢出竞争。
+  group('设置固定尾位', () {
+    test('窄屏溢出时设置仍然直接可见', () {
+      final l = topBarLayout(width: 300, actions: [
+        act('refresh'),
+        act('search'),
+        act('folders'),
+        act('recommend'),
+        act('authors'),
+        act('rank'),
+        act('settings'),
+      ]);
+      expect(l.hasOverflow, isTrue);
+      expect(l.visible.map((a) => a.id), contains('settings'));
+      expect(l.overflow.map((a) => a.id), isNot(contains('settings')));
+    });
+
+    test('设置永远排在可见项最后一位', () {
+      final l = topBarLayout(width: 300, actions: [
+        act('settings'),
+        act('refresh'),
+        act('search'),
+        act('folders'),
+        act('rank'),
+      ]);
+      expect(l.visible.last.id, 'settings');
+    });
+
+    test('没有设置项时行为与旧版一致（不收尾位）', () {
+      final ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+      final l = topBarLayout(
+          width: 300, actions: [for (final id in ids) act(id)]);
+      expect(l.visible.map((a) => a.id).toList(),
+          ids.take(l.visible.length).toList());
+      expect(l.visible.length + l.overflow.length, ids.length);
+    });
+
+    test('只有设置一项时直接可见且无「⋯」', () {
+      final l = topBarLayout(width: 60, actions: [act('settings')]);
+      expect(l.visible.map((a) => a.id).toList(), ['settings']);
+      expect(l.hasOverflow, isFalse);
+    });
+
+    test('设置占一格预算：可见总数仍不超过上限', () {
+      final l = topBarLayout(width: 600, actions: [
+        act('refresh'),
+        act('search'),
+        act('folders'),
+        act('recommend'),
+        act('rank'),
+        act('settings'),
+      ]);
+      expect(l.visible.length, lessThanOrEqualTo(kTopBarMaxVisible));
+    });
+  });
+
   group('TotalRefresh 编排', () {
     test('全部成功：在线数、库数正确，无错误', () async {
       var cleared = 0;

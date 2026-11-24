@@ -657,4 +657,57 @@ void main() {
           reason: '拼接调用点从 13 处掉到 $joins 处，说明有路径绕开了 api_url');
     });
   });
+
+  // owner 2026-11-24：「简化播放界面任务栏，你就保留个集成设置按钮就行了,
+  // 重复把设置里有的按钮放外面干嘛呢」+「主页右上角设置点开没东西不好用」。
+  // 两条需求同一个根：入口只能有一个，且必须真的能点开。
+  group('第十五批：入口唯一且可见', () {
+    String codeOf(File f) => f
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+
+    test('播放任务栏不再有独立的连播/循环/乱序槽位', () {
+      // 这三个开关都在「播放设置」弹窗里；任务栏再多摆一份就是重复入口。
+      final enums = codeOf(File('lib/taskbar_layout.dart'));
+      expect(enums.contains('autoplay,'), isFalse,
+          reason: '任务栏又长出一个 autoplay 槽位');
+      expect(enums.contains('shuffle,'), isFalse,
+          reason: '任务栏又长出一个 shuffle 槽位');
+      expect(RegExp(r'^\s*loop,', multiLine: true).hasMatch(enums), isFalse,
+          reason: '任务栏又长出一个 loop 槽位');
+      // 设置入口必须还在（删了就真的没有播放设置了）。
+      expect(enums.contains('settings,'), isTrue);
+    });
+
+    test('三个播放开关只在播放设置弹窗里出现一次', () {
+      final main = codeOf(File('lib/main.dart'));
+      // key 是弹窗内的唯一锚点，每个只能有一个处置点。
+      for (final k in ['setting-autoplay', 'setting-loop', 'setting-shuffle']) {
+        final n = RegExp("'$k'").allMatches(main).length;
+        expect(n, 1, reason: '$k 出现 $n 次，播放开关被写了多份 UI');
+      }
+    });
+
+    test('播放设置弹窗里的三个开关都落到持久化入口', () {
+      final main = codeOf(File('lib/main.dart'));
+      // 四个会改变播放设置的地方：乱序、循环、连播、倍速。漏一处就变成
+      // 「这次改了，重进没记住」。
+      final persists = RegExp(r'_persistPlaybackPrefs\(\);')
+          .allMatches(main)
+          .length;
+      expect(persists, greaterThanOrEqualTo(4),
+          reason: '落盘点只有 $persists 处（应为乱序/循环/连播/倍速至少 4 处）');
+      expect(main.contains('loadPlaybackPrefs()'), isTrue,
+          reason: '进播放页没有读回上次设置');
+    });
+
+    test('主页设置是常驻尾位，不参与「⋯」溢出', () {
+      final bar = codeOf(File('lib/home_top_bar.dart'));
+      expect(bar.contains("id == 'settings'"), isTrue,
+          reason: '设置固定尾位逻辑被删，设置会重新被挤进「⋯」');
+      expect(bar.contains('pinned'), isTrue);
+    });
+  });
 }

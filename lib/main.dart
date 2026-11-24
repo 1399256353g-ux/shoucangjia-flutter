@@ -74,6 +74,7 @@ import 'refresh_all.dart';
 import 'library_rank.dart';
 import 'lib_cover.dart';
 import 'loop_link.dart';
+import 'playback_prefs.dart';
 import 'json_isolate.dart';
 import 'library_tree.dart';
 import 'unit_crawler.dart';
@@ -8361,6 +8362,7 @@ class _PlayerPageState extends State<PlayerPage>
         _shuffleOrder = const <int>[];
       }
     });
+    _persistPlaybackPrefs();
   }
 
   /// 乱序模式下的目标下标；按当前作品在乱序序列里的位置前后移动。
@@ -8488,7 +8490,10 @@ class _PlayerPageState extends State<PlayerPage>
     PerfDiagnostics.instance.beginSpan('page:player');
     _fromAuthor = widget.fromAuthor;
     cur = widget.start;
+    // owner 2026-11-24：沿用上次的播放设置（倍速/连播/循环/乱序）。
+    // 先给默认值保证首帧可用，随后异步读回持久化覆盖。
     speed = AppSettings.defaultSpeed;
+    unawaited(_restorePlaybackPrefs());
     _ensureMetaFor(_curLib);
     _bindPlayer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -8501,6 +8506,42 @@ class _PlayerPageState extends State<PlayerPage>
       // P2：进入非全屏播放页即开始沉浸计时。
       _scheduleImmersive();
     });
+  }
+
+  /// owner 2026-11-24：进播放页时读回上次的播放设置。
+  ///
+  /// 只覆盖用户可调的三个量（倍速/连播循环/乱序），不碰当前播放位置、
+  /// 不解码任何媒体；读失败就保持默认值，不阻塞进页。
+  ///
+  /// 恢复后必须让预载与「连播是否开启」重新对齐：`open()` 是按当时的默认值
+  /// 安排预载的，若上次记住的是「单条循环开（连播关）」，还留着预载就是白占
+  /// 两个解码器槽位。反过来若回过连播开启，则要补一次预载。
+  Future<void> _restorePlaybackPrefs() async {
+    final p = await loadPlaybackPrefs();
+    if (!mounted) return;
+    setState(() {
+      speed = p.speed;
+      _link = p.link;
+      shuffle = p.shuffle;
+    });
+    // 倍速要在播放器就绪后生效；未就绪时 open() 会带上当前 speed。
+    try {
+      player.setRate(speed);
+    } catch (_) {}
+    if (_link.nextEnabled) {
+      _schedulePreload();
+    } else {
+      _cancelPreload();
+    }
+  }
+
+  /// 把当前播放设置落盘（用户每次改动后调用）。
+  void _persistPlaybackPrefs() {
+    unawaited(savePlaybackPrefs(PlaybackPrefs(
+      speed: speed,
+      link: _link,
+      shuffle: shuffle,
+    )));
   }
 
   Future<void> _ensureMetaFor(String lib) async {
@@ -11109,6 +11150,7 @@ class _PlayerPageState extends State<PlayerPage>
     // 不使用 media_kit 原生 PlaylistMode.single（原生 loop-file 会吞掉
     // completed 事件），统一由 completed 回调在 Dart 层重播。
     setState(() => _link = _link.toggleLoop());
+    _persistPlaybackPrefs();
     if (_link.nextEnabled) {
       _schedulePreload();
     } else {
@@ -11119,6 +11161,7 @@ class _PlayerPageState extends State<PlayerPage>
   void toggleAutoplay() {
     // L6：循环开启期间也允许手动切连播，但退出循环仍回到记忆值。
     setState(() => _link = _link.toggleAutoplay());
+    _persistPlaybackPrefs();
     if (_link.nextEnabled) {
       _schedulePreload();
     } else {
@@ -11131,6 +11174,7 @@ class _PlayerPageState extends State<PlayerPage>
     final next = value.clamp(0.5, 3.0).toDouble();
     setState(() => speed = next);
     player.setRate(next);
+    _persistPlaybackPrefs();
   }
 
   /// owner 2026-11-23：播放设置——倍速/自动连播/单条循环/乱序合并到一个菜单，
@@ -12641,39 +12685,12 @@ class _PlayerPageState extends State<PlayerPage>
           onPressed: _showChapters,
         );
       case TaskbarSlot.settings:
-        // owner 2026-11-23：倍速/循环/连播/乱序合并为一个「播放设置」入口。
+        // owner 2026-11-24：只保留一个集成设置入口。自动连播/单条循环/乱序
+        // 都在这个菜单里，任务栏不再重复摆按钮（重复入口只增加误触）。
         return TaskbarSettingsButton(
           speed: speed,
           width: fs ? 46 : tbBtnW,
           onPressed: _showPlaybackSettings,
-        );
-      // owner 2026-11-24：三个开关直接摆在任务栏，不再只藏在菜单里。
-      case TaskbarSlot.autoplay:
-        // 自动连播：用「列表+播放」的实心图标，与循环/乱序明显区分。
-        return TaskbarToggleButton(
-          icon: Icons.skip_next_rounded,
-          label: '自动连播',
-          active: autoplay && !loopOne,
-          width: fs ? 46 : tbBtnW,
-          onPressed: loopOne ? () {} : toggleAutoplay,
-        );
-      case TaskbarSlot.loop:
-        // 单条循环：带「1」的环形箭头，一眼可辨。
-        return TaskbarToggleButton(
-          icon: Icons.repeat_one_rounded,
-          label: '单条循环',
-          active: loopOne,
-          width: fs ? 46 : tbBtnW,
-          onPressed: toggleLoop,
-        );
-      case TaskbarSlot.shuffle:
-        // 乱序：交叉箭头。
-        return TaskbarToggleButton(
-          icon: Icons.shuffle_rounded,
-          label: '乱序播放',
-          active: shuffle,
-          width: fs ? 46 : tbBtnW,
-          onPressed: toggleShuffle,
         );
       case TaskbarSlot.sound:
         // H14：点击=静音切换；长按/左右拖动调音量（不弹模块）。
@@ -12790,9 +12807,6 @@ class _PlayerPageState extends State<PlayerPage>
         TaskbarSlot.play => '播放/暂停',
         TaskbarSlot.episodes => '选集',
         TaskbarSlot.settings => '播放设置 ${speedLabel(speed)}',
-        TaskbarSlot.autoplay => '自动连播',
-        TaskbarSlot.loop => '单条循环',
-        TaskbarSlot.shuffle => '乱序播放',
         TaskbarSlot.sound => '声音',
         TaskbarSlot.volume => '音量',
         TaskbarSlot.drop => '送一颗小水滴',
@@ -12808,12 +12822,6 @@ class _PlayerPageState extends State<PlayerPage>
         _showChapters();
       case TaskbarSlot.settings:
         _showPlaybackSettings();
-      case TaskbarSlot.autoplay:
-        if (!loopOne) toggleAutoplay();
-      case TaskbarSlot.loop:
-        toggleLoop();
-      case TaskbarSlot.shuffle:
-        toggleShuffle();
       case TaskbarSlot.sound:
         toggleMute();
       case TaskbarSlot.volume:
@@ -13539,11 +13547,9 @@ class _PlayerPageState extends State<PlayerPage>
     final tbSlots = <TaskbarSlot>[
       if (taskbar.showPlayPause) TaskbarSlot.play,
       if (workChapterCount(w) > 1) TaskbarSlot.episodes,
+      // owner 2026-11-24：只保留一个集成设置入口。自动连播/单条循环/乱序
+      // 都在这个菜单里，不重复摆到任务栏上——重复入口只增加误触。
       TaskbarSlot.settings,
-      // owner 2026-11-24：三个播放开关直接上栏，不再只藏在弹窗里。
-      TaskbarSlot.autoplay,
-      TaskbarSlot.loop,
-      TaskbarSlot.shuffle,
       if (_volumeUi) TaskbarSlot.sound,
       if (_volumeUi) TaskbarSlot.volume,
       TaskbarSlot.drop,
@@ -13553,9 +13559,6 @@ class _PlayerPageState extends State<PlayerPage>
       TaskbarSlot.play: 48,
       TaskbarSlot.episodes: fs ? 46.0 : tbBtnW,
       TaskbarSlot.settings: fs ? 46.0 : tbBtnW,
-      TaskbarSlot.autoplay: fs ? 46.0 : tbBtnW,
-      TaskbarSlot.loop: fs ? 46.0 : tbBtnW,
-      TaskbarSlot.shuffle: fs ? 46.0 : tbBtnW,
       TaskbarSlot.sound: fs ? 48.0 : tbBtnW,
       // 桌面端音量模块固定 104dp，明显比其他按钮宽，必须按真实宽度算。
       TaskbarSlot.volume: 104,

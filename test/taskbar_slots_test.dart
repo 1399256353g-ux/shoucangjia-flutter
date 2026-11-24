@@ -11,14 +11,27 @@ void main() {
         TaskbarSlot.play => 48,
         TaskbarSlot.episodes => 44,
         TaskbarSlot.settings => 44,
-        TaskbarSlot.autoplay => 44,
-        TaskbarSlot.loop => 44,
-        TaskbarSlot.shuffle => 44,
         TaskbarSlot.sound => 44,
         TaskbarSlot.volume => 104,
         TaskbarSlot.drop => 44,
         TaskbarSlot.display => 44,
       };
+
+  group('槽位集合（owner 2026-11-24：任务栏只留一个集成设置入口）', () {
+    test('没有独立的连播/循环/乱序槽位', () {
+      final names = TaskbarSlot.values.map((s) => s.name).toSet();
+      expect(names, isNot(contains('autoplay')));
+      expect(names, isNot(contains('loop')));
+      expect(names, isNot(contains('shuffle')));
+    });
+
+    test('设置槽位唯一，不会出现第二个设置类入口', () {
+      final settingsLike = TaskbarSlot.values
+          .where((s) => s.name.contains('setting') || s.name.contains('option'))
+          .toList();
+      expect(settingsLike, [TaskbarSlot.settings]);
+    });
+  });
 
   group('放得下', () {
     test('全部可见时顺序不变、无溢出', () {
