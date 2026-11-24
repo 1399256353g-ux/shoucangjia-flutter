@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_tree.dart';
 import 'package:shoucangjia/unit_library.dart';
@@ -121,6 +123,46 @@ void main() {
       final nodes = nodesFromMarks(const ['(1) A']);
       expect(nodes.first.serverId, '');
       expect(nodes.first.serverLabel, '');
+    });
+  });
+
+  group('首页真实取数路径（源码级契约）', () {
+    /// owner 2026-11-24：首页渲染的是 `_LibraryPageState.unitTree`，它由
+    /// `_loadTree` 里的**内联节点**构建，而不是 `LibMeta.load`。
+    ///
+    /// 第一版修复改错了地方（改了 `LibMeta.load`），首页毫无变化。
+    /// 这条测试直接盯源码：`_loadTree` 造 `LibNode` 时必须传连接标识，
+    /// 否则 `buildUnitTree` 会退回「第一层目录当卡片」并把它们标成「媒体库」。
+    test('_loadTree 造节点时必须带 serverId/serverLabel', () {
+      final src = File('lib/main.dart').readAsStringSync();
+      final start = src.indexOf('Future<void> _loadTree()');
+      expect(start, greaterThan(0), reason: '找不到 _loadTree，测试需同步更新');
+      // 截到该函数之后的合理范围（下一个顶层方法定义前）。
+      final end = src.indexOf('Future<void> _toggleUnitStar(', start);
+      expect(end, greaterThan(start), reason: '_loadTree 的下一个方法名变了');
+      final body = src.substring(start, end);
+
+      expect(body.contains('LibNode('), isTrue,
+          reason: '_loadTree 里应当有内联 LibNode 构造');
+      expect(body.contains('serverId:'), isTrue,
+          reason: '_loadTree 的节点丢了 serverId：首页会退回旧形态、'
+              '把下级单元库错标成「媒体库」');
+      expect(body.contains('serverLabel:'), isTrue,
+          reason: '缺 serverLabel 时媒体库卡片标题会回落到根目录名');
+    });
+
+    test('两条建树路径都带连接标识（防止只修好其中一条）', () {
+      final src = File('lib/main.dart').readAsStringSync();
+      // 路径一：首页 _loadTree 内联构造
+      final loadTree = src.substring(
+          src.indexOf('Future<void> _loadTree()'),
+          src.indexOf('Future<void> _toggleUnitStar('));
+      // 路径二：LibMeta.load 里调 nodesFromMarks
+      final loadMeta = src.substring(src.indexOf('static Future<LibMeta> load('));
+      expect(loadTree.contains('serverId:'), isTrue,
+          reason: '_loadTree 缺 serverId');
+      expect(loadMeta.contains('serverId:'), isTrue,
+          reason: 'LibMeta.load 缺 serverId');
     });
   });
 }

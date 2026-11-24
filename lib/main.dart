@@ -5054,11 +5054,20 @@ class _LibraryPageState extends State<LibraryPage> {
       final t = LibraryTree.parse(merged, stars: saved);
       // 节点文件夹由 owner 在「文件结构」里指定；默认为空 = 只有顶级 SECRET。
       final marked = await _fetchMarkedNodes();
+      // owner 2026-11-24：这里原来内联造节点、不带连接标识，于是 buildUnitTree
+      // 走进「无连接信息」回退分支，把第一层目录当卡片却标成「媒体库」——
+      // 首页层级错位的真正根因就在这一处（不是 LibMeta.load）。
+      // 标记节点来自 servers.first（_fetchMarkedNodes 的取数口径），
+      // 因此连接标识也必须取同一条连接，不能留空。
+      final firstServer = servers.isEmpty ? null : servers.first;
       final nodes = marked
           .map((rel) => LibNode(
                 id: 'node:$rel',
                 rel: rel,
                 name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
+                serverId: firstServer?.id ?? '',
+                serverBase: firstServer?.base ?? '',
+                serverLabel: firstServer?.title ?? '',
               ))
           .toList(growable: false);
       final units = buildUnitTree(
