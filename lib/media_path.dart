@@ -18,8 +18,23 @@
 library;
 
 /// 绝对 `http(s)` 地址？是则调用方不应再补服务器前缀。
+///
+/// 协议**忽略大小写**：连接地址那条规则（`multi_server.normalizeBase`）早已
+/// 认 `HTTP://NAS:8090`（owner 从浏览器地址栏复制的结果），媒体地址这一条却
+/// 只认小写。于是同一条「绝对地址」判定在配置层为真、在媒体层为假：
+///
+/// ```
+/// normalizeBase('HTTP://nas:8090')                     -> 'http://nas:8090'
+/// isAbsoluteMediaUrl('HTTP://nas/x.jpg')               -> false  ← 实测
+/// libraryMediaPath('lib', 'HTTP://nas/x.jpg')          -> '/media/lib/HTTP://nas/x.jpg'  ← 实测
+/// absoluteMediaUrl('http://nas:8090', ...)             -> 'http://nas:8090/media/lib/HTTP://nas/x.jpg'
+/// ```
+///
+/// 服务端把 `HTTP:` 当库内子目录，那张封面/头像永远 404，而地址本身完全可用。
+/// 判定只写这一份，`media_resize.withImageWidth` 与
+/// `author_avatar_store._validAvatarValue` 都转发到这里。
 bool isAbsoluteMediaUrl(String path) {
-  final p = path.trim();
+  final p = path.trim().toLowerCase();
   return p.startsWith('http://') || p.startsWith('https://');
 }
 

@@ -9,6 +9,7 @@
 import 'api_url.dart';
 import 'json_num.dart';
 import 'media_path.dart' show stripMediaSuffix;
+import 'rel_path.dart' show lastRelName;
 import 'text_clip.dart';
 
 import 'interval_label.dart';
@@ -143,9 +144,12 @@ class UnitCrawlerScript {
     return out;
   }
 
-  bool get looksRunnable =>
-      name.endsWith('.sh') || name.endsWith('.py') || name.endsWith('.js');
+  bool get looksRunnable => _kRunnableScriptExts
+      .any((e) => lastRelName(stripMediaSuffix(name)).toLowerCase().endsWith(e));
 }
+
+/// 可运行的脚本扩展名（`unit_crawler_page` 的下拉列表与卡片按钮都靠它）。
+const List<String> _kRunnableScriptExts = <String>['.sh', '.py', '.js'];
 
 /// 备注：去首尾空白，最多 200 字。
 ///
@@ -189,9 +193,15 @@ int normalizeCooldown(dynamic raw) {
 /// 「运行」按钮打到一个不存在的脚本上。实测
 /// `normalizeScriptName('run.py?x=1')` 返回 `'sync.sh'`。
 String normalizeScriptName(String raw) {
-  var s = stripMediaSuffix(raw).replaceAll('\\', '/');
-  final slash = s.lastIndexOf('/');
-  if (slash >= 0) s = s.substring(slash + 1);
+  var s = stripMediaSuffix(raw);
+  // 以分隔符结尾的是**目录**，不是脚本文件。必须先拦：`lastRelName` 会
+  // 把空段吃掉（`relSegments('crawler/') == ['crawler']`），`crawler/` 于是
+  // 被当成一个叫 `crawler` 的脚本——现在只是不可运行，但名字已不对。
+  if (s.endsWith('/') || s.endsWith('\\')) return 'sync.sh';
+  // 取末段走 `rel_path.lastRelName`（`\` 与 `/` 等价，唯一实现）。
+  // 旧写法先 `replaceAll('\\', '/')` 再 `lastIndexOf('/')`，是同一规则的
+  // 第二份，且与 `looksRunnable` 的可运行判定脱节（后者根本没剥后缀）。
+  s = lastRelName(s);
   if (s.isEmpty || s == '.' || s == '..' || s.startsWith('.')) {
     return 'sync.sh';
   }

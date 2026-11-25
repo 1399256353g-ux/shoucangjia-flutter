@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'volume_control.dart';
+import 'media_path.dart' show stripMediaSuffix;
+import 'rel_path.dart' show lastRelName;
 
 /// 屏幕方向（只区分竖屏/横屏，横屏两向都接受）。
 enum ScreenMode { portrait, landscape }
@@ -681,12 +683,17 @@ bool mediaDownloadSupported({required bool android, required bool ios}) =>
 /// `http://h/media/lib-1/2026.11/x` → `.11/x`，落盘文件名里出现分隔符，
 /// 保存直接失败或写到别的目录里。
 ///
-/// 所以先把路径截到最后一个 `/` 之后，再要求扩展名只含字母数字——
+/// 所以先把地址截到最后一个 `/` 之后，再要求扩展名只含字母数字——
 /// 不满足就当作没扩展名，回落到按媒体类型给的 `.mp4`/`.jpg`。
+///
+/// 取末段走 `rel_path.lastRelName`、剥后缀走 `media_path.stripMediaSuffix`
+/// （两个已有公共出口）。旧写法先用 `Uri.tryParse(url)?.path`，**解析失败时回落
+/// 到整串 URL**：`http://[::1/a.png#t=3`、`http://nas:port/a.webp` 这类地址
+/// 的最后一截带着 `#t=3`，扩展名判成 `png#t=3` → 不在白名单 → 一张 png 被
+/// 存成 `.jpg`（实测 `saveExt('<不合法 URL>/a.png#t=3')` 返回 `.jpg`）。
+/// 保存文件名出错不报错，只是双击打不开。
 String mediaSaveExtension({required String url, bool video = true}) {
-  final path = Uri.tryParse(url)?.path ?? url;
-  final slash = path.lastIndexOf('/');
-  final name = slash >= 0 ? path.substring(slash + 1) : path;
+  final name = lastRelName(stripMediaSuffix(url));
   final dot = name.lastIndexOf('.');
   if (dot > 0 && dot < name.length - 1) {
     final ext = name.substring(dot).toLowerCase();

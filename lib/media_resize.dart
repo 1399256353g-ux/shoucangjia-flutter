@@ -7,6 +7,8 @@
 /// `w=`，播放页等大图场景不带，保持原画质。
 library;
 
+import 'media_path.dart' show isAbsoluteMediaUrl;
+
 /// 库/单元库卡片封面宽度（卡片约 150–180dp，2x 屏 360px 足够）。
 const int kCardImageWidth = 480;
 
@@ -109,6 +111,10 @@ int? requestedImageWidth(String raw) {
 
 /// 只给「图片静态路径」加 `w=`：
 ///  - 绝对/根相对地址才处理，`asset:`/`data:`/空串原样返回；
+///    绝对地址判定走 [isAbsoluteMediaUrl]（忽略大小写协议）——旧写法自己又写了
+///    一遍 `startsWith('http://')`，于是 `HTTP://nas/x.jpg` 被判成「既不是绝对、
+///    也不是根相对」，一张大图即使带参不成也不进缩图通道：`withImageWidth(
+///    'HTTP://nas/x.jpg', 480)` 原样返回一个没加 `w=` 的地址。
 ///  - 路径必须以 jpg/jpeg/png/webp 结尾（视频、`/api/thumb/...` 这类接口
 ///    没有扩展名的地址不加，避免给抽帧接口塞无用参数）；
 ///  - 已有 `w=` 时不重复添加；
@@ -116,11 +122,7 @@ int? requestedImageWidth(String raw) {
 String withImageWidth(String raw, int width) {
   final url = raw.trim();
   if (url.isEmpty || width <= 0) return raw;
-  if (!(url.startsWith('http://') ||
-      url.startsWith('https://') ||
-      url.startsWith('/'))) {
-    return raw;
-  }
+  if (!(isAbsoluteMediaUrl(url) || url.startsWith('/'))) return raw;
   var body = url;
   var fragment = '';
   final hash = url.indexOf('#');

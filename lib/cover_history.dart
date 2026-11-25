@@ -12,9 +12,9 @@ import 'package:http/http.dart' as http;
 
 import 'media_path.dart';
 import 'http_json.dart';
+import 'lib_cover.dart' show normalizeCoverVersionName, normalizeCoverExt;
 
 import 'http_error_text.dart';
-import 'cover_ext.dart';
 
 /// `_cover/` 里的一个历史版本。
 class CoverVersion {
@@ -45,17 +45,22 @@ class CoverVersion {
   String get fileName => '$version.$ext';
 }
 
-/// 服务端返回的版本名只允许 `[A-Za-z0-9_-]`，避免路径穿越。
-final RegExp _kCoverVersionName = RegExp(r'^[A-Za-z0-9_-]{1,40}$');
-
 /// 单条版本 JSON → [CoverVersion]；非法条目返回 null。
+///
+/// 版本名与扩展名都走 `lib_cover` 的同一份规则：
+///  - 版本名：`normalizeCoverVersionName(clip: false)`——读取侧**不截断**。
+///    旧写法 `^[A-Za-z0-9_-]{1,40}$` 是本文件的第二份白名单，与写入侧
+///    `normalizeCoverVersion` 只差「超长」这一种输入（45 字的版本名在这里
+///    被拒、在写入侧被截断成另一个文件名）。
+///  - 扩展名：`cover_ext.normalizeCoverExt`——旧写法又写了一遍
+///    `startsWith('.')` 截点 + 白名单，`'png?w=1'` 同样回落 `jpg`。
 CoverVersion? coverVersionFromJson(dynamic raw) {
   if (raw is! Map) return null;
-  final v = '${raw['v'] ?? raw['version'] ?? ''}'.trim();
-  if (!_kCoverVersionName.hasMatch(v)) return null;
-  var e = '${raw['e'] ?? raw['ext'] ?? 'jpg'}'.trim().toLowerCase();
-  if (e.startsWith('.')) e = e.substring(1);
-  if (!kCoverExts.contains(e)) e = 'jpg';
+  final v = normalizeCoverVersionName(
+      '${raw['v'] ?? raw['version'] ?? ''}',
+      clip: false);
+  if (v.isEmpty) return null;
+  final e = normalizeCoverExt('${raw['e'] ?? raw['ext'] ?? 'jpg'}');
   final u = '${raw['u'] ?? raw['url'] ?? ''}'.trim();
   final at = intOf(raw['at']);
   return CoverVersion(

@@ -21,7 +21,11 @@ import 'text_clip.dart';
 // `kCoverExts` / `kCoverImageExts` / `isCoverImagePath` 的唯一定义在
 // `cover_ext.dart`（第十二批收口）；本文件继续 re-export，
 // 使既有 import 点不必改。
-export 'cover_ext.dart' show kCoverExts, kCoverImageExts, isCoverImagePath;
+export 'cover_ext.dart'
+    show kCoverExts, kCoverImageExts, isCoverImagePath, normalizeCoverExt;
+
+// 扩展名归一（`normalizeCoverExt`）同样在 `cover_ext.dart`，经上面的
+// re-export 暴露；本文件不再写转发函数（同名再定义会让调用方歧义）。
 
 // 后缀剥除（`?` / `#` 段）走 `media_path.dart`（已在上方 import），
 // 取末段走 `rel_path.lastRelName`（连 `\` 一起认）。
@@ -32,7 +36,12 @@ const String kCoverDir = '_cover';
 
 /// 版本号合法化：只允许 `[A-Za-z0-9_-]`，拒绝路径分隔符与 `..`。
 /// 返回空串表示非法（调用方应回退到下一种封面来源）。
-String normalizeCoverVersion(String raw) {
+///
+/// [clip] 区分两种来源：用户输入按 40 截断（写入侧，截断后仍是用户自己的名字）；
+/// 服务端已落盘的版本名超长时返回空串（读取侧，截断会指向一个不存在的文件、
+/// 请求 404）。**判定规则只有这一份**：`cover_history.coverVersionFromJson`
+/// 此前自己写了一遍 `^[A-Za-z0-9_-]{1,40}$`，两处只差「超长」这一种输入。
+String normalizeCoverVersionName(String raw, {bool clip = true}) {
   // 先剥 `?query` / `#fragment` 再取文件名。
   //
   // 封面指针可以来自服务端下发的地址（`_cover/v1.png?w=480`）、也可以来自
@@ -56,17 +65,22 @@ String normalizeCoverVersion(String raw) {
   }
   if (s.isEmpty || s == '.') return '';
   if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(s)) return '';
-  // 上面的白名单只放 ASCII，所以这里切到 40 不会切到代理对；
-  // 仍走公共入口，让“按长度截断”在整个 lib/ 里只有一处实现。
-  return clipToUnits(s, 40);
+  if (!clip && s.length > 40) return '';
+  if (s.length > 40) {
+    // 上面的白名单只放 ASCII，所以这里切到 40 不会切到代理对；
+    // 仍走公共入口，让“按长度截断”在整个 lib/ 里只有一处实现。
+    return clipToUnits(s, 40);
+  }
+  return s;
 }
 
-/// 扩展名合法化：不在白名单内一律回落 `jpg`。
-String normalizeCoverExt(String raw) {
-  final e = raw.trim().toLowerCase().replaceFirst('.', '');
-  if (e == 'jpeg') return 'jpeg';
-  return kCoverExts.contains(e) ? e : 'jpg';
-}
+/// 写入侧的口径（用户可输入的名字一律截断）。
+String normalizeCoverVersion(String raw) => normalizeCoverVersionName(raw);
+
+// 扩展名归一（`normalizeCoverExt`）的唯一实现在 `cover_ext.dart`，由上面的
+// re-export 暴露。这里**不再**写一个同名转发：同名再定义一次会让同时
+// import 两个文件的调用方变成歧义引用（实测 `test` 直接报
+// `'normalizeCoverExt' is imported from both`）。
 
 /// 拼接相对路径（去掉多余分隔符）。
 String joinRel(String a, String b) {
@@ -173,13 +187,31 @@ String absoluteMediaUrl(
   final b = baseForJoin(base);
   final p = libraryMediaPath(lib, path);
   if (b.isEmpty || p.isEmpty) return '';
-  // 绝对地址自带前缀（不补服务器）但**仍然要转义**：`encodeMediaPath` 对
-  // 绝对地址一律原样返回是为了避免重复编码，所以这里只把路径部分交给它，
+  // 绝对地址自带前缀（不补服务器）但**路径部分仍然要转义**：`encodeMediaPath`
+  // 对绝对地址一律原样返回是为了避免重复编码，所以这里只把路径段交给它，
   // 再拼回前缀——直接传 `'$b$p'` 会让转义整个跳过。
+  //
+  // 查询串与片段必须留在路径段之外：外链封面（CDN）的 `?w=480` 是真正的
+  // 查询、`#poster` 是真正的片段，整串丢给 `encodeMediaPath` 会被转成
+  // `%3Fw=480` /  `%23poster`——服务端收到一个不存在的路径，封面 404。
+  // 切分走 `stripMediaSuffix` 的同一条顺序（先 `?` 后 `#`），但不丢尾巴。
   if (isAbsoluteMediaUrl(p)) {
-    final slash = p.indexOf('/', p.indexOf('//') + 2);
-    if (slash < 0) return p;
-    return '${p.substring(0, slash)}${encodeMediaPath(p.substring(slash))}';
+    final authorityEnd = p.indexOf('/', p.indexOf('//') + 2);
+    if (authorityEnd < 0) return p;
+    final head = p.substring(0, authorityEnd);
+    var tail = p.substring(authorityEnd);
+    var suffix = '';
+    final hash = tail.indexOf('#');
+    if (hash >= 0) {
+      suffix = tail.substring(hash) + suffix;
+      tail = tail.substring(0, hash);
+    }
+    final q = tail.indexOf('?');
+    if (q >= 0) {
+      suffix = tail.substring(q) + suffix;
+      tail = tail.substring(0, q);
+    }
+    return '$head${encodeMediaPath(tail)}$suffix';
   }
   return '$b${encodeMediaPath(p)}';
 }

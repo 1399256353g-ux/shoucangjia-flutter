@@ -32,15 +32,20 @@ const String kAuthorAvatarPrefsKey = 'author_avatar_overrides_v1';
 String authorAvatarKey(String name) => name.trim();
 
 /// 只接受能作为媒体地址的相对/绝对图片路径，避免把任意字符串写进偏好。
+///
+/// 绝对地址判定转发 `media_path.isAbsoluteMediaUrl`（忽略大小写协议）。旧写法
+/// 自己写了 `startsWith('http://')`，于是 `HTTP://nas/x.jpg`（从浏览器地址栏
+/// 复制、大小写不归一）被当成非法值**静默丢弃**：
+///
+/// ```
+/// encodeAuthorAvatarOverrides({'a': 'HTTP://nas/x.jpg'})  -> {}   ← 实测
+/// ```
+///
+/// 用户点完「设为头像」以为存上了，重启就回原头像。
 bool _validAvatarValue(String v) {
   final s = v.trim();
   if (s.isEmpty || s.length > 600) return false;
-  if (!(s.startsWith('/') ||
-      s.startsWith('http://') ||
-      s.startsWith('https://'))) {
-    return false;
-  }
-  return true;
+  return s.startsWith('/') || isAbsoluteMediaUrl(s);
 }
 
 /// 解析偏好里的覆盖表；坏数据按空表处理（不抛异常、不影响启动）。

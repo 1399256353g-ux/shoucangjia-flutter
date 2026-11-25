@@ -7,14 +7,19 @@
 /// 原先是 `lib_cover.kCoverImageExts` 与 `media_priority._coverImageExts`
 /// **两份逐字相同**的实现。
 ///
-/// 规则 B「能作为封面版本存下来吗」（`kCoverExts`）——服务端只落这四种。
-/// 原先是 `lib_cover.kCoverExts` 与 `cover_history._kCoverExts` 两份相同集合。
+/// 规则 B「能作为封面版本存下来吗」（`kCoverExts` / `normalizeCoverExt`）——
+/// 服务端只落这四种。原先是 `lib_cover.kCoverExts` 与
+/// `cover_history._kCoverExts` 两份相同集合，**归一函数**又各写一份：
+/// `lib_cover.normalizeCoverExt` 只 `replaceFirst('.', '')`、
+/// `cover_history.coverVersionFromJson` 只 `startsWith('.')` 截点，
+/// 两者都不剥 `?query` / `#fragment`，也都不取末段。
 ///
 /// 之所以不从 `lib_cover` 直接引，是因为 `media_priority` 是最底层（零 import），
 /// 让它反过来依赖 `lib_cover` 会形成环。两条规则单独放这里，谁都可以引。
 library;
 
 import 'media_path.dart' show stripMediaSuffix;
+import 'rel_path.dart' show lastRelName;
 
 /// 规则 A：可以当作封面**渲染**的扩展名（含服务端索引里出现的图片格式）。
 const List<String> kCoverImageExts = <String>[
@@ -23,6 +28,29 @@ const List<String> kCoverImageExts = <String>[
 
 /// 规则 B：可以作为封面**版本文件**保存的扩展名（服务端只落这四种）。
 const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
+
+/// 扩展名归一（**唯一定义**）：剥 `?query`/`#fragment` → 取末段 → 去空白 →
+/// 去前导点 → 小写；不在 [kCoverExts] 内一律回落 `jpg`。
+///
+/// ```
+/// lib_cover.normalizeCoverExt('png?w=1')                 -> 'jpg'   ← 同一张 png 存成 jpg
+/// coverVersionFromJson({'e': 'png?w=1'}).ext             -> 'jpg'   ← 同一个串第二种判法
+/// normalizeCoverExt('_cover/v1.PNG?w=480')               -> 'jpg'   ← 连末段都没取
+/// ```///
+/// 扩展名判错的后果不是「显示错」，是**请求另一个文件**：`coverImageRel`
+/// 用 `v1.jpg` 拼地址、磁盘上是 `v1.png`，封面 404，退回默认图。
+///
+/// 取末段走 `rel_path.lastRelName`（连 `\` 一起认），后缀剥除走
+/// `media_path.stripMediaSuffix`——两件已有公共出口的事不再各写一份。
+String normalizeCoverExt(String raw) {
+  // 先剥 `?query`/`#fragment`，再取末段（`_cover/v3.PNG` 也能到 `PNG`）。
+  var e = lastRelName(stripMediaSuffix(raw)).trim().toLowerCase();
+  // 传进来的可能是「扩展名」本身（`png` / `.webp`），也可能是带扩展名的
+  // 文件名（`v3.PNG`）——两种都归一到点后那一段。
+  final dot = e.lastIndexOf('.');
+  if (dot >= 0) e = e.substring(dot + 1);
+  return kCoverExts.contains(e) ? e : 'jpg';
+}
 
 /// 路径是否是可显示的封面图片（视频路径一律不是）。
 ///

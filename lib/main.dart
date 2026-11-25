@@ -300,7 +300,7 @@ class Cfg {
     final l = lib ?? this.lib;
     final path = p.trim();
     if (path.isEmpty) return path;
-    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    if (isAbsoluteMediaUrl(path)) return path;
     // 服务端接口地址（`/api/thumb/<lib>/<id>` 等）不是媒体文件：
     // 扫描器会把这类地址直接写进作品的 `th`，若再套 `/media/<lib>/` 就变成
     // `/media/<lib>/api/thumb/...` —— 服务端把 `api` 当库内子目录 → 必然 404。
