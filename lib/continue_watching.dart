@@ -9,6 +9,7 @@ library;
 
 import 'dart:async';
 import 'json_num.dart';
+import 'unit_fraction.dart';
 import 'stable_order.dart';
 import 'dart:convert';
 
@@ -63,7 +64,7 @@ class ContinueItem {
   /// 0–1 的观看进度；时长未知时按 0 处理。
   double get fraction {
     if (durationMs <= 0) return 0;
-    return (positionMs / durationMs).clamp(0.0, 1.0);
+    return unitFraction(positionMs / durationMs);
   }
 
   /// 列表里展示的标题：优先作品标题，其次作者，最后「未命名作品」。

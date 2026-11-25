@@ -6,6 +6,7 @@
 
 import 'package:http/http.dart' as http;
 import 'json_num.dart';
+import 'unit_fraction.dart';
 
 import 'byte_size.dart';
 import 'http_json.dart';
@@ -72,7 +73,7 @@ class ResizeCacheStats {
     final m = miss <= 0 ? 0.0 : miss.toDouble();
     final total = h + m;
     if (!total.isFinite || total <= 0) return 0;
-    return (h / total).clamp(0.0, 1.0);
+    return unitFraction(h / total);
   }
 
   /// 解析失败（非对象）返回 null，调用方显示「读取失败」而不是 0。

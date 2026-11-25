@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'unit_fraction.dart';
 
 /// I2：抖音式翻页手感。
 ///
@@ -68,7 +69,7 @@ double dampedDragOffset(
   // 实测返回 **1.0**（clamp 对 NaN 走上界），等于悄悄关掉阻尼。
   if (!offset.isFinite) return 0;
   if (!overscrollFactor.isFinite) return offset;
-  final f = overscrollFactor.clamp(0.0, 1.0);
+  final f = unitFraction(overscrollFactor);
   return offset * f;
 }
 
@@ -165,7 +166,9 @@ class FastSettleSimulation extends Simulation {
 
   @override
   double x(double time) {
-    final t = (time / _seconds).clamp(0.0, 1.0);
+    // 时长退化（`_seconds == 0`）时 `time / 0` 是 Infinity，语义上是
+    // 「动画已经到头」——fallback 取 1（终点），不是 0（起点）。
+    final t = unitFraction(time / _seconds, fallback: 1);
     return from + (to - from) * Curves.easeOutCubic.transform(t);
   }
 

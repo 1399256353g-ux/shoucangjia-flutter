@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'volume_control.dart';
 import 'media_path.dart' show stripMediaSuffix;
 import 'rel_path.dart' show lastRelName;
+import 'unit_fraction.dart';
 
 /// 屏幕方向（只区分竖屏/横屏，横屏两向都接受）。
 enum ScreenMode { portrait, landscape }
@@ -637,9 +638,10 @@ double commentPanelSnap({
   // `_commentFraction` 被非有限值写脏时，松手会把面板吸到全屏而不是原来的档位。
   // 与 [commentPanelHeight]（非有限 → 0，视为关闭）口径保持一致：这里把
   // 非有限比例按「关闭」处理，非有限初值按默认档。
-  final f = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+  final f = unitFraction(fraction);
+  // 初值退化时用默认档（0 是「关闭」，不是「未知」）。
   final initialTarget =
-      initial.isFinite ? initial.clamp(0.0, 1.0) : kCommentPanelInitialFraction;
+      unitFraction(initial, fallback: kCommentPanelInitialFraction);
   // 速度非有限时不能进方向判定：`velocity <= -x` 与 `>= x` 对 NaN 都是
   // false（会走到下面的纯比例分支），对 ±Infinity 恒真（一路判成上甩/下甩）。
   // 按「没有速度」处理，只用比例决定档位。
@@ -668,7 +670,7 @@ double commentPanelHeight({
   // `SizedBox(height:)` / `Positioned(bottom:)`，NaN 在布局阶段断言失败。
   // 返回 0 表示「面板没有高度」，由调用方按关闭态渲染。
   if (!screenHeight.isFinite || screenHeight <= 0) return 0;
-  final f = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+  final f = unitFraction(fraction);
   return f * screenHeight;
 }
 
@@ -754,7 +756,7 @@ const Color kScrubPlayedColor = Color(0xFFFFFFFF);
 /// 无法区分「用户指在片头」与「这次输入不可用」。不可用就该什么都不做。
 double? scrubFractionOf(double dx, double width) {
   if (!width.isFinite || width <= 0 || !dx.isFinite) return null;
-  return (dx / width).clamp(0.0, 1.0);
+  return unitFraction(dx / width);
 }
 
 /// 滑块中心 x：按比例落在轨道内，并夹住半径，避免半个圆出界。
@@ -769,7 +771,7 @@ double scrubKnobX({
   // `Positioned(left:)` 就是布局断言失败（整页灰屏）。非有限值按「没有
   // 轨道」处理，与 `<= 0` 走同一条出口。
   if (!trackWidth.isFinite || trackWidth <= 0) return 0;
-  final f = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+  final f = unitFraction(fraction);
   // 半径同样可能是 NaN（外部直接传布局值）：先归零，再夹到半轨道内。
   final rawR = (knobRadius.isFinite && knobRadius > 0) ? knobRadius : 0.0;
   final half = trackWidth / 2;

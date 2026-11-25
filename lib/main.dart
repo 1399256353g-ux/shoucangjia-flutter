@@ -137,6 +137,7 @@ import 'http_json.dart';
 import 'http_error_text.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
+import 'unit_fraction.dart';
 
 /// `encodeMediaPath` 的唯一实现在 `media_path.dart`；main.dart 继续转发，
 /// 免得既有 import 点（含测试）全部改路径。
@@ -10926,7 +10927,7 @@ class _PlayerPageState extends State<PlayerPage>
     _commentAnim.stop();
     setState(() {
       _commentFraction =
-          (_commentFractionNow - d.delta.dy / screenH).clamp(0.0, 1.0);
+          unitFraction(_commentFractionNow - d.delta.dy / screenH);
     });
   }
 
@@ -10973,7 +10974,7 @@ class _PlayerPageState extends State<PlayerPage>
       child: AnimatedBuilder(
         animation: _menuAnim,
         builder: (_, __) {
-          final t = Curves.easeOut.transform(_menuAnim.value.clamp(0.0, 1.0));
+          final t = Curves.easeOut.transform(unitFraction(_menuAnim.value));
           return Stack(fit: StackFit.expand, children: [
             GestureDetector(
               key: const Key('stage-menu-scrim'),
@@ -11051,7 +11052,7 @@ class _PlayerPageState extends State<PlayerPage>
           final h =
               commentPanelHeight(fraction: frac, screenHeight: viewSize.height);
           if (h <= 0.5) return const SizedBox.shrink();
-          final scrim = (frac / kCommentPanelInitialFraction).clamp(0.0, 1.0);
+          final scrim = unitFraction(frac / kCommentPanelInitialFraction);
           return Stack(fit: StackFit.expand, children: [
             GestureDetector(
               key: const Key('comment-scrim'),
@@ -13973,7 +13974,7 @@ class _PlayerPageState extends State<PlayerPage>
         setState(() {
           dragging = true;
           dragPic = k;
-          dragFrac = ((k + 0.5) / pics.length).clamp(0.0, 1.0);
+          dragFrac = unitFraction((k + 0.5) / pics.length);
         });
       },
       onHorizontalDragUpdate: (d) {
@@ -14059,7 +14060,7 @@ class _PlayerPageState extends State<PlayerPage>
     final pics = isV ? <String>[] : workMediaPaths(w);
     final idx = pics.isEmpty ? 0 : img.clamp(0, pics.length - 1);
     final progress = (isV && dur.inMilliseconds > 0)
-        ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0)
+        ? unitFraction(pos.inMilliseconds / dur.inMilliseconds)
         : (pics.isEmpty ? 0.0 : (idx + 1) / pics.length);
     // H2：iOS 刘海/灵动岛与横屏左右安全区。视频/图片仍全屏出血，
     // 但返回键、图文圆点、作者/标题信息、音量面板与底部控制栏都要避开安全区。

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'unit_fraction.dart';
 
 /// M9：作者页「抖音式跟手拖拽」。
 ///
@@ -130,14 +131,16 @@ class AuthorDragController extends ChangeNotifier {
 
   set progress(double v) {
     _c.stop();
-    _c.value = v.isNaN ? 0 : v.clamp(0.0, 1.0);
+    // 手写 `isNaN ? 0 : clamp` 只挡了 NaN，没挡 ±Infinity
+    // （`∞` 会被夹成 1.0，表现为「一拖就到底」）。
+    _c.value = unitFraction(v);
   }
 
   /// 松手后吸附到 0（关闭）或 1（进入）。
   Future<void> settleTo(double target, {required bool opening}) {
     final ms = opening ? AuthorDrag.openMs : AuthorDrag.closeMs;
     return _c.animateTo(
-      target.clamp(0.0, 1.0),
+      unitFraction(target),
       duration: Duration(milliseconds: ms),
       curve: Curves.easeOutCubic,
     );

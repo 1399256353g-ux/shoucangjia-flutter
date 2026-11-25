@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'unit_fraction.dart';
 
 /// 播放进度 = pos / dur（0..1）。时长未知（0/负数）时视为 0。
 ///
@@ -8,7 +9,7 @@ double playbackFraction(Duration position, Duration duration) {
   final d = duration.inMilliseconds;
   if (d <= 0) return 0;
   final p = position.inMilliseconds;
-  return (p / d).clamp(0.0, 1.0);
+  return unitFraction(p / d);
 }
 
 /// 由 [position] / [duration] 派生出的进度 [ValueListenable]。

@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 import 'json_num.dart';
+import 'unit_fraction.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -48,7 +49,7 @@ class WatchProgress {
   /// 0–1 的观看进度；时长为 0 时返回 0。
   double get fraction {
     if (durationMs <= 0) return 0;
-    return (positionMs / durationMs).clamp(0.0, 1.0);
+    return unitFraction(positionMs / durationMs);
   }
 
   Map<String, dynamic> toJson() => {

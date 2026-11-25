@@ -23,6 +23,7 @@ import 'package:flutter/material.dart'
 import 'app_settings.dart';
 import 'color_codec.dart';
 import 'index_prefix.dart';
+import 'unit_fraction.dart';
 import 'json_num.dart';
 import 'lib_id.dart';
 import 'prefs_json.dart';
@@ -67,8 +68,13 @@ class EntryStyle {
     required this.fillAlpha,
   });
 
-  static double clampW(double v) => v.clamp(0.0, 3.0).toDouble();
-  static double clampA(double v) => v.clamp(0.0, 1.0).toDouble();
+  /// 边框粗细（0–3）。非有限值归 0——`NaN.clamp(0,3)` 实测返回 **3.0**，
+  /// 会把「值损坏」画成最粗边框。
+  static double clampW(double v) =>
+      v.isFinite ? v.clamp(0.0, 3.0).toDouble() : 0.0;
+
+  /// 不透明度（0–1），统一走 [unitFraction]。
+  static double clampA(double v) => unitFraction(v);
 
   EntryStyle copyWith({double? borderWidth, double? borderAlpha, double? fillAlpha}) =>
       EntryStyle(

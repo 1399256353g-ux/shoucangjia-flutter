@@ -5,6 +5,8 @@
 ///   不会切到下一条（无音频的图文同样循环）。
 /// - 未开循环时，视频播完按自动连播决定是否下一条。
 /// - 未开循环的图文：有背景音乐时图片循环到歌曲结束，否则一轮放完切下一条。
+import 'unit_fraction.dart';
+
 enum SlideshowAction { nextImage, restartImages, nextWork, stop }
 
 enum VideoEndAction { replay, nextWork, stop }
@@ -47,12 +49,13 @@ bool shouldAutoPlay({required bool paused, required bool opening}) =>
 /// 按下/拖动时使用（floor），松手直接采用该下标，实现「拖动快速选图」。
 int picIndexAtFraction(double fraction, int count) {
   if (count <= 1) return 0;
-  // `NaN.clamp(0, 1)` **返回 NaN**（clamp 不消 NaN），随后 `NaN.floor()`
-  // 抛 `Unsupported operation: Infinity or NaN toInt`。调用方算的是
-  // `dx / width`，宽度来自 `LayoutBuilder`——零约束中间态下就是 NaN，
-  // 而这里在 `onHorizontalDragStart` 里，异常会把整页手势链打断。
-  if (!fraction.isFinite) return 0;
-  final f = fraction.clamp(0.0, 1.0);
+  // 比例归一走 [unitFraction]（唯一实现）。
+  //
+  // 这里原先的注释是**错的**：写着「`NaN.clamp(0,1)` 返回 NaN，随后
+  // `NaN.floor()` 抛异常」。实测 `NaN.clamp(0.0,1.0) == 1.0`——clamp 用
+  // `compareTo` 判界，而 `NaN.compareTo(1.0) == 1`，NaN 被当成最大值落到
+  // 上界。真实后果不是抛异常，而是「比例未知」被静默当成「拖到最后一页」。
+  final f = unitFraction(fraction);
   final i = (f * count).floor();
   if (i < 0) return 0;
   return i > count - 1 ? count - 1 : i;
