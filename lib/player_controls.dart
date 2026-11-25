@@ -620,13 +620,23 @@ double commentPanelSnap({
   required double velocity,
   double initial = kCommentPanelInitialFraction,
 }) {
-  final f = fraction.clamp(0.0, 1.0);
-  final initialTarget = initial.clamp(0.0, 1.0);
-  if (velocity <= -kCommentPanelFlingVelocity) {
+  // `NaN.clamp(0,1)` **返回 1.0**（clamp 不消 NaN，NaN 落不进区间就走上界）。
+  // 于是「面板比例未知」被判成「已展开到 100%」：手势在第一帧上报、或
+  // `_commentFraction` 被非有限值写脏时，松手会把面板吸到全屏而不是原来的档位。
+  // 与 [commentPanelHeight]（非有限 → 0，视为关闭）口径保持一致：这里把
+  // 非有限比例按「关闭」处理，非有限初值按默认档。
+  final f = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+  final initialTarget =
+      initial.isFinite ? initial.clamp(0.0, 1.0) : kCommentPanelInitialFraction;
+  // 速度非有限时不能进方向判定：`velocity <= -x` 与 `>= x` 对 NaN 都是
+  // false（会走到下面的纯比例分支），对 ±Infinity 恒真（一路判成上甩/下甩）。
+  // 按「没有速度」处理，只用比例决定档位。
+  final v = velocity.isFinite ? velocity : 0.0;
+  if (v <= -kCommentPanelFlingVelocity) {
     // 上滑：从 60% 继续上甩直接到全屏；几乎不可见时才回到初始档。
     return f > 0.3 ? kCommentPanelFullFraction : initialTarget;
   }
-  if (velocity >= kCommentPanelFlingVelocity) {
+  if (v >= kCommentPanelFlingVelocity) {
     if (f < 0.5) return kCommentPanelClosedFraction;
     return f > 0.85 ? initialTarget : kCommentPanelClosedFraction;
   }

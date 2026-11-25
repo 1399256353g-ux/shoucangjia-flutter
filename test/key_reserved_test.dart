@@ -79,9 +79,14 @@ void main() {
     expect(AppSettings.keyBindings[PlayerAction.prev]!.keyId,
         isNot(LogicalKeyboardKey.arrowDown.keyId));
     // 被丢弃的动作回到默认值，而不是变成「未绑定」。
-    expect(AppSettings.keyBindings[PlayerAction.fullscreen]!.keyId, 70,
-        reason: '默认 F');
-    expect(AppSettings.keyBindings[PlayerAction.prev]!.keyId, 107,
+    // 默认值必须按**真实键码**断言：历史版本这里写死了 70/76/72/77（大写
+    // ASCII），而 Flutter 的字母键是小写码，于是这四个默认快捷键从来没生效过。
+    // 现在改成引用 LogicalKeyboardKey，等于同时钉住「别再用数字字面量」。
+    expect(AppSettings.keyBindings[PlayerAction.fullscreen]!.keyId,
+        LogicalKeyboardKey.keyF.keyId,
+        reason: '默认 F（小写码 102，不再是 70）');
+    expect(AppSettings.keyBindings[PlayerAction.prev]!.keyId,
+        LogicalKeyboardKey.keyK.keyId,
         reason: '默认 K');
     expect(AppSettings.actionForCombo(LogicalKeyboardKey.keyQ.keyId,
         KeyCombo.modAlt), PlayerAction.mute);

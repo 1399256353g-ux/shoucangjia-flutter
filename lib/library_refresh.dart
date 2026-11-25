@@ -88,20 +88,33 @@ LibRefreshOutcome parseReindexResponse(
   }
   final okRow = row != null && row['ok'] == true;
   final works = row?['works'] == null ? null : intOf(row!['works']);
-  var err = serverErrorText(row) ?? '';
-  if (err.isEmpty && !okRow) {
-    // 顶层 error 与状态码文案都走唯一出口：`'${map['error']}'` 会把
-    // `{code: 500}` 这样的对象插值贴到界面，`'HTTP $status'` 又与本文件
-    // 其它地方（httpErrorText）同一个 400 两种说法。
-    err = serverErrorText(map) ??
-        (status != 200 ? httpErrorText(status) : '服务端未返回结果');
+  // 成功判定只有一处，**不能**让「行说 ok」与「状态码说失败」各自成立。
+  //
+  // 旧实现分开算：`reindexed = okRow && status == 200`，而 `error` 只在
+  // `!okRow` 时才赋值。于是服务端返回 `201 + {libs:[{ok:true,works:3}]}`
+  // （或任何非 200 的 2xx/3xx）时得到一个**自相矛盾**的结果：
+  // `ok == false` 却 `error == ''`，而 `message` 走的是 `works != null` 分支 →
+  // 界面提示「已刷新 · 3 个作品」，`runLibRefresh` 却在第一步就 `return`，
+  // 库快照、封面缓存、列表刷新三件事一件都没做。用户看到的是「刷新成功了但
+  // 什么都没变」，下次再看还是旧数据。
+  final success = okRow && status >= 200 && status < 300;
+  String err = '';
+  if (!success) {
+    err = serverErrorText(row) ?? '';
+    if (err.isEmpty) {
+      // 顶层 error 与状态码文案都走唯一出口：`'${map['error']}'` 会把
+      // `{code: 500}` 这样的对象插值贴到界面，`'HTTP $status'` 又与本文件
+      // 其它地方（httpErrorText）同一个 400 两种说法。
+      err = serverErrorText(map) ??
+          (status != 200 ? httpErrorText(status) : '服务端未返回结果');
+    }
   }
   return LibRefreshOutcome(
     lib: lib,
     server: server,
-    works: okRow ? works : null,
-    reindexed: okRow && status == 200,
-    error: okRow ? '' : err,
+    works: success ? works : null,
+    reindexed: success,
+    error: err,
   );
 }
 

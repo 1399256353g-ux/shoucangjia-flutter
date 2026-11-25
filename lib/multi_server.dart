@@ -143,9 +143,22 @@ String normalizeBase(String raw) {
   }
   rest = rest.replaceAll(RegExp(r'/+$'), '');
   if (rest.isEmpty) return '';
-  final url = '$scheme://$rest';
+  // 主机段里的空白一律去掉再校验：`Uri.tryParse('http:// nas:8090')` **不报错**，
+  // 它把空格编进主机名（`host == '%20nas'`），产出一个「语法合法、永远连不上」
+  // 的地址。这类输入几乎全是手输/复制时的多余空格（`http:// nas`、
+  // `nas :8090`），去掉空白正是用户本意；真正的空格文件名只可能出现在路径里，
+  // 而连接地址不带路径。校验仍然在下面照常做（去掉后可能变成空主机）。
+  final cut = rest.indexOf('/');
+  final authority = cut < 0 ? rest : rest.substring(0, cut);
+  final tail = cut < 0 ? '' : rest.substring(cut);
+  final cleanAuthority = authority.replaceAll(RegExp(r'\s+'), '');
+  if (cleanAuthority.isEmpty) return '';
+  final url = '$scheme://$cleanAuthority$tail';
   final uri = Uri.tryParse(url);
   if (uri == null || uri.host.isEmpty) return '';
+  // 端口越界同样只是「看起来是地址」：`Uri` 接受 `:0` 与 `:65536`，但
+  // 一个用不出站连接、一个超出 16 位范围，请求只会失败且看不出原因。
+  if (uri.hasPort && (uri.port < 1 || uri.port > 65535)) return '';
   return url;
 }
 

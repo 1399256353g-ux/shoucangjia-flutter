@@ -22,15 +22,32 @@ const Map<PlayerAction, String> actionLabels = {
   PlayerAction.back: '图文上一张',
 };
 
-const Map<PlayerAction, int> _defaultKeyIds = {
-  PlayerAction.next: 106, // J
-  PlayerAction.prev: 107, // K
-  PlayerAction.playPause: 32, // Space
-  PlayerAction.mute: 77, // M
-  PlayerAction.fullscreen: 70, // F
-  PlayerAction.forward: 76, // L
-  PlayerAction.back: 72, // H
-};
+/// 默认键位（**只能**由 `LogicalKeyboardKey` 推导，不写数字字面量）。
+///
+/// 历史缺陷（本批修掉）：这里原先手写了 ASCII 码，而且**一半写成了大写**。
+/// Flutter 给字母键分配的 keyId 是 **小写** ASCII 码
+/// （`keyJ.keyId == 106`、`keyF.keyId == 102`、`keyM.keyId == 109`、
+/// `keyL.keyId == 108`、`keyH.keyId == 104`），而表里写的是
+/// `mute: 77`（`'M'`）、`fullscreen: 70`（`'F'`）、`forward: 76`（`'L'`）、
+/// `back: 72`（`'H'`）。
+///
+/// 后果是四个默认快捷键**从来没生效过**：
+///  - 播放页 `actionForCombo(102, 0)` 匹配不到 70，按键落到固定键位分支后
+///    什么也不做（不是「没绑」，是「绑了一个不存在的键」）；
+///  - 按键设置页把这几项显示成「未绑定」（`keyLabelById(70)` 查不到键）。
+/// `J`/`K` 看起来正常，只因为那两个数恰好写成了小写码——同一张表里两种口径，
+/// 正说明「手写数字」这件事本身就是错的。
+///
+/// 现在一律从 [LogicalKeyboardKey] 取，键位改了也不会再漂。
+Map<PlayerAction, int> defaultKeyIds() => <PlayerAction, int>{
+      PlayerAction.next: LogicalKeyboardKey.keyJ.keyId,
+      PlayerAction.prev: LogicalKeyboardKey.keyK.keyId,
+      PlayerAction.playPause: LogicalKeyboardKey.space.keyId,
+      PlayerAction.mute: LogicalKeyboardKey.keyM.keyId,
+      PlayerAction.fullscreen: LogicalKeyboardKey.keyF.keyId,
+      PlayerAction.forward: LogicalKeyboardKey.keyL.keyId,
+      PlayerAction.back: LogicalKeyboardKey.keyH.keyId,
+    };
 
 /// 一个按键组合：修饰键位掩码 + 主键。
 ///
@@ -111,7 +128,7 @@ class AppSettings {
 
   /// 动作 → 按键组合（修饰键 + 主键）。单键就是 `mods == 0` 的组合。
   static final Map<PlayerAction, KeyCombo> keyBindings = {
-    for (final e in _defaultKeyIds.entries) e.key: KeyCombo(e.value),
+    for (final e in defaultKeyIds().entries) e.key: KeyCombo(e.value),
   };
 
   static Map<String, dynamic> toJson() => {
@@ -187,7 +204,7 @@ class AppSettings {
     keyBindings
       ..clear()
       ..addAll({
-        for (final e in _defaultKeyIds.entries) e.key: KeyCombo(e.value),
+        for (final e in defaultKeyIds().entries) e.key: KeyCombo(e.value),
       });
   }
 
@@ -239,6 +256,17 @@ class AppSettings {
   /// 所以「保留」必须是一条准入规则，而不是读取顺序里的补丁。
   static String? bindComboError(KeyCombo combo) {
     if (!combo.isBound) return '请按下一个主键';
+    // 主键必须是真实存在的键码。
+    //
+    // 这条不是防御性冗余：历史版本把默认键写成了大写 ASCII 码
+    // （`'F' == 70`），而 Flutter 的字母键是小写码（`keyF == 102`），于是
+    // 落盘里存着一批**任何键盘都发不出来**的 keyId。读取层若只判「非 0」，
+    // 这些条目会一直占用绑定（既显示不出来、也永远触发不了），用户还得
+    // 手动逐条重绑。所以「键码真实存在」必须是准入规则的一部分：读盘时
+    // 走同一条判定，坏条目自动回落默认值。
+    if (LogicalKeyboardKey.findKeyByKeyId(combo.keyId) == null) {
+      return '这个键码无法识别，请重新按下按键';
+    }
     if (isModifierKeyId(combo.keyId)) return '修饰键不能单独绑定，请再按一个主键';
     if (isReservedKeyId(combo.keyId)) return '方向键与 Esc 是固定键位，不能绑定';
     return null;
@@ -315,7 +343,9 @@ class AppSettings {
     if (id == LogicalKeyboardKey.arrowRight.keyId) return '→';
     final k = LogicalKeyboardKey.findKeyByKeyId(id);
     final label = k?.keyLabel ?? '';
-    if (label.isEmpty || label == 'Unidentified') return '未绑定';
+    // 能绑但叫不出名字（媒体键/厂商自定义键）时给出键码，而不是回「未绑定」——
+    // 「未绑定」会让用户以为这一项没设置，进而反复重按。
+    if (label.isEmpty || label == 'Unidentified') return '按键#$id';
     return label.length == 1 ? label.toUpperCase() : label;
   }
 
