@@ -184,7 +184,7 @@ SyncRun _runOf(Map m) {
     total: _intOf(m['total']),
     ms: _intOf(m['ms']),
     exit: m['exit'] == null ? null : _intOf(m['exit']),
-    running: m['running'] == true,
+    running: boolOf(m['running']),
     error: '${m['error'] ?? ''}',
     retryOf: '${m['retryOf'] ?? ''}',
     items: items,

@@ -11,6 +11,8 @@
 
 import 'dart:convert';
 
+import 'json_num.dart';
+
 class ServerConn {
   final String id;
   final String label;
@@ -75,9 +77,10 @@ class ServerConn {
     var id = '${raw['id'] ?? ''}'.trim();
     if (id.isEmpty) id = 'srv-${base.hashCode.abs()}';
     // 新格式 `enabled`；旧格式只有 `visible`，按同一语义读入。
-    final enabled = raw.containsKey('enabled')
-        ? raw['enabled'] != false
-        : raw['visible'] != false;
+    // 不能写 `!= false`：`0` / `"false"` / `"0"` 都不是布尔 false，
+    // 于是被断连的旧记录读回来又变成「已连接」，且密码重新保留。
+    final enabled = boolOf(
+        raw.containsKey('enabled') ? raw['enabled'] : raw['visible'], true);
     return ServerConn(
       id: id,
       label: '${raw['label'] ?? ''}'.trim(),

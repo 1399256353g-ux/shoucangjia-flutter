@@ -64,10 +64,12 @@ class PlaybackPrefs {
     if (speedNum != null) {
       speed = speedNum.clamp(0.5, 3.0).toDouble();
     }
-    bool boolOf(dynamic v, bool d) => v is bool ? v : d;
-    final loopOne = boolOf(raw['loopOne'], false);
-    final autoplay = boolOf(raw['autoplay'], true);
-    final restore = boolOf(raw['restoreAutoplay'], autoplay);
+    // 本地 prefs 与「服务端字段」是两件事：prefs 是本机自己写的（永远是
+    // bool），严格只认 bool 才是对的；`"yes"` 这种服务端形态不进 prefs。
+    // 服务端字段一律走 `json_num.boolOf`，不在这里做兼容。
+    final loopOne = _boolPref(raw['loopOne'], false);
+    final autoplay = _boolPref(raw['autoplay'], true);
+    final restore = _boolPref(raw['restoreAutoplay'], autoplay);
     return PlaybackPrefs(
       speed: speed,
       link: LoopLink(
@@ -75,9 +77,12 @@ class PlaybackPrefs {
         autoplay: autoplay,
         restoreAutoplay: restore,
       ),
-      shuffle: boolOf(raw['shuffle'], false),
+      shuffle: _boolPref(raw['shuffle'], false),
     );
   }
+
+  /// 本机 prefs 只认 bool：类型不对就用默认值（不把服务端兼容规则带进来）。
+  static bool _boolPref(dynamic v, bool d) => v is bool ? v : d;
 
   @override
   bool operator ==(Object other) =>

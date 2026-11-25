@@ -89,7 +89,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         path = '${j['path'] ?? ''}';
         config = UnitCrawlerConfig.fromJson(mapOrNull(j['crawler']));
         scripts = UnitCrawlerScript.listFrom(j['scripts']);
-        running = mapOrNull(j['running'])?['running'] == true;
+        // 两次 mapOrNull + 一次 `== true`：`1` / `"true"` 会显得未运行，
+        // 按钮回到「运行」而服务端其实还在跑。布尔解析统一走 json_num。
+        running = boolOf(mapOrNull(j['running'])?['running']);
         schedule = mapOrNull(j['schedule']) ?? const <String, dynamic>{};
       });
     } catch (e) {

@@ -34,10 +34,14 @@ class CollectionSyncInfo {
       idx: intOf(j['idx']),
       name: rawName.isEmpty ? '同步源' : rawName,
       count: intOf(j['count']),
-      sync: j['sync'] != false,
-      inIndex: j['inIndex'] == true,
-      account: j['account'] == true,
-      customName: j['customName'] == true,
+      // 布尔字段全部走 json_num：服务端同一字段可能发 `true` / `1` / `"true"`。
+      // 此前 `sync: j['sync'] != false`（`0` / `"false"` 都算参与同步）
+      // 与 `inIndex: j['inIndex'] == true`（`1` / `"true"` 都算无索引）
+      // 两种写法并存，同一个同步源在设置页与作品列表里说法不一致。
+      sync: boolOf(j['sync'], true),
+      inIndex: boolOf(j['inIndex']),
+      account: boolOf(j['account']),
+      customName: boolOf(j['customName']),
     );
   }
 
@@ -74,7 +78,7 @@ List<CollectionSyncInfo> parseCollectionSettings(Map<String, dynamic> j) {
     if (e is! Map) continue;
     final info = CollectionSyncInfo.fromJson(Map<String, dynamic>.from(e));
     if (info.idx <= 0 || info.name.isEmpty || seen.contains(info.idx)) continue;
-    if (Map<String, dynamic>.from(e)['deleted'] == true) continue;
+    if (boolOf(Map<String, dynamic>.from(e)['deleted'])) continue;
     seen.add(info.idx);
     out.add(info);
   }

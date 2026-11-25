@@ -12,6 +12,7 @@
 //  - 按所选指标降序，同分按库名、id 稳定排序
 library;
 
+import 'http_json.dart';
 import 'json_num.dart';
 
 class LibraryRankRow {
@@ -46,10 +47,9 @@ int _num(dynamic v) => intOf(v);
 
 /// 从一份 author_stats 响应中取出 authors 映射。
 Map<String, dynamic> statsAuthors(dynamic raw) {
-  if (raw is Map && raw['authors'] is Map) {
-    return Map<String, dynamic>.from(raw['authors'] as Map);
-  }
-  return const {};
+  final m = mapOrNull(raw);
+  if (m == null) return const {};
+  return mapOrNull(m['authors']) ?? const {};
 }
 
 /// 汇总单个库的播放/水滴。

@@ -7824,9 +7824,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   String _fmtDate(int sec) {
     if (sec <= 0) return '未访问';
-    final d = DateTime.fromMillisecondsSinceEpoch(sec * 1000).toLocal();
-    String p(int v) => v.toString().padLeft(2, '0');
-    return '${d.year}-${p(d.month)}-${p(d.day)}';
+    // 日期格式化唯一实现在 time_labels：这里以前自己 padLeft 了一份，
+    // 且直接 `DateTime.fromMillisecondsSinceEpoch(sec * 1000)`——一个坏的
+    // `lv`（服务端写错成毫秒/超大值）会在 build 阶段抛 RangeError。
+    final d = yearMonthDayOfSec(sec);
+    return d.isEmpty ? '未访问' : d;
   }
 
   /// 首屏渲染条数：桌面端直接全量。

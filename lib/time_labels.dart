@@ -13,15 +13,40 @@ library;
 /// 两位补零。
 String _two(int n) => n.toString().padLeft(2, '0');
 
+/// 毫秒时间戳能否构造出 `DateTime`：`DateTime` 只接受
+/// ±8640000000000000 毫秒（约 ±273790 年），越界构造**抛 RangeError**。
+///
+/// 服务端时间字段是普通 JSON 数字，一个写坏的值（`1e30`）经 `intOf` 会
+/// 落到 int 上限 9223372036854775807，`DateTime.fromMillisecondsSinceEpoch`
+/// 当场抛异常——同步日志页/删除监测页会在 build 阶段崩成灰屏。
+const int kMaxEpochMs = 8640000000000000;
+
+bool isValidEpochMs(int ms) =>
+    ms >= -kMaxEpochMs && ms <= kMaxEpochMs;
+
+/// 安全的毫秒→DateTime；越界返回 null（不抛）。
+DateTime? dateTimeOfMs(int ms) =>
+    isValidEpochMs(ms) ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
+
+/// 安全的秒→DateTime；先判范围再乘 1000——`sec * 1000` 在 int64 上会
+/// **静默回绕**，1e19 秒会变成 1969 年而不是报错。
+DateTime? dateTimeOfSec(int sec) {
+  if (sec > kMaxEpochMs ~/ 1000 || sec < -(kMaxEpochMs ~/ 1000)) return null;
+  return dateTimeOfMs(sec * 1000);
+}
+
 /// `11-23 17:05`（本地时区）；无效时间返回 `—`。
 String monthDayTime(DateTime at) {
   final l = at.toLocal();
   return '${_two(l.month)}-${_two(l.day)} ${_two(l.hour)}:${_two(l.minute)}';
 }
 
-/// 毫秒时间戳版；`<= 0` 视为无有效时间返回 `—`。
-String monthDayTimeOfMs(int ms) =>
-    ms <= 0 ? '—' : monthDayTime(DateTime.fromMillisecondsSinceEpoch(ms));
+/// 毫秒时间戳版；`<= 0` 或超出可表示范围视为无有效时间返回 `—`。
+String monthDayTimeOfMs(int ms) {
+  if (ms <= 0) return '—';
+  final t = dateTimeOfMs(ms);
+  return t == null ? '—' : monthDayTime(t);
+}
 
 /// ISO 字符串版；解析失败返回 [fallback]（默认空串，由调用方决定显示什么）。
 String monthDayTimeOfIso(String at, {String fallback = ''}) {
@@ -46,9 +71,21 @@ String yearMonthDayTimeUtc(DateTime at) {
   return '${u.year}-${_two(u.month)}-${_two(u.day)}T${_two(u.hour)}:${_two(u.minute)}';
 }
 
-/// 秒级时间戳版；`<= 0` 视为无有效时间返回 `—`。
-String yearMonthDayTimeOfSec(int sec) =>
-    sec <= 0 ? '—' : yearMonthDayTime(DateTime.fromMillisecondsSinceEpoch(sec * 1000));
+/// 秒级时间戳版；`<= 0` 或超出可表示范围视为无有效时间返回 `—`。
+String yearMonthDayTimeOfSec(int sec) {
+  if (sec <= 0) return '—';
+  final t = dateTimeOfSec(sec);
+  return t == null ? '—' : yearMonthDayTime(t);
+}
+
+/// `2026-11-23`（本地时区，只要日期）；无效返回空串。
+String yearMonthDayOfSec(int sec) {
+  if (sec <= 0) return '';
+  final t = dateTimeOfSec(sec);
+  if (t == null) return '';
+  final l = t.toLocal();
+  return '${l.year}-${_two(l.month)}-${_two(l.day)}';
+}
 
 /// `2026-11-23T17:05:09.123`（本地时区，带毫秒）——诊断日志对齐卡顿时间点用。
 String isoLikeLocalMs(DateTime at) {

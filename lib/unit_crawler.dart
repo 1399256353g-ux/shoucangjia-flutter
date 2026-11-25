@@ -201,7 +201,10 @@ Map<String, bool> unitCrawlerFlags(dynamic json) {
   for (final e in raw.entries) {
     final rel = '${e.key}'.trim();
     if (rel.isEmpty) continue;
-    out[rel] = e.value == true;
+    // 走 json_num：服务端同一字段可能发 `true` / `1` / `"true"`。
+    // 此前写的是 `e.value == true`，`1` 与 `"true"` 都算未启用——
+    // 设置页说已启用、单元库页置灰不能点，同一条配置两种说法。
+    out[rel] = boolOf(e.value);
   }
   return out;
 }

@@ -121,6 +121,9 @@ void main() {
         {'(1) A': true, '(2) B': false});
     expect(unitCrawlerFlags({'nodes': ['x']}), isEmpty);
     expect(unitCrawlerFlags(null), isEmpty);
-    expect(unitCrawlerFlags({'crawler': {'x': 1}}), {'x': false});
+    // 0.9.235：`1` / `"true"` 也算已配置（此前 `== true` 把它们当未启用，
+    // 与设置页的显示相反）。真正的脏数据（对象/任意串）仍按无脚本。
+    expect(unitCrawlerFlags({'crawler': {'x': 1}}), {'x': true});
+    expect(unitCrawlerFlags({'crawler': {'y': 'oops'}}), {'y': false});
   });
 }
