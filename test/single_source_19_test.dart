@@ -223,7 +223,7 @@ void main() {
           final t = lines[i].trim();
           if (t.startsWith('//')) continue;
           if (_statusLiteral.hasMatch(t)) {
-            offenders.add('${f.path}:${i + 1}: $t');
+            offenders.add('${f.path.replaceAll('\\', '/')}:${i + 1}: $t');
           }
         }
       }

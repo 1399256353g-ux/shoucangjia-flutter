@@ -235,7 +235,7 @@ void main() {
         for (final line in src.split('\n')) {
           if (line.trimLeft().startsWith('//')) continue;
           if (RegExp(r'DateTime\(\s*int\.parse').hasMatch(line)) {
-            offenders.add('${f.path}: ${line.trim()}');
+            offenders.add('${f.path.replaceAll('\\', '/')}: ${line.trim()}');
           }
         }
       }
@@ -253,7 +253,7 @@ void main() {
           final t = line.trim();
           if (t.startsWith('//')) continue;
           if (RegExp(r'\bsec\s*\*\s*1000\b').hasMatch(t)) {
-            offenders.add('${f.path}: $t');
+            offenders.add('${f.path.replaceAll('\\', '/')}: $t');
           }
         }
       }
