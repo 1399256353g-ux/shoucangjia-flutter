@@ -87,6 +87,7 @@ import 'library_tree.dart';
 import 'unit_crawler.dart';
 import 'unit_crawler_page.dart';
 import 'unit_author_mount_page.dart';
+import 'stable_order.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
 import 'header_collapse.dart';
@@ -7006,9 +7007,16 @@ class _RankPageState extends State<RankPage> {
     try {
       final meta = await LibMeta.load(cfg.lib);
       if (!mounted) return;
-      final list = [
-        for (final e in meta.bigNames.entries) {'id': e.key, 'name': e.value}
-      ]..sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
+      // 同名媒体库（两台服务端各自的库根重名、或名称被改成一样）之间没有
+      // 次序依据；`List.sort` 不稳定 → 排行榜的库下拉刷新一次换一次顺序，
+      // 选中项还跟着跳。同分保持 `bigNames` 的注册顺序（稳定排序），
+      // 与首页卡片下发的顺序一致。
+      final list = stableSort(
+          [
+            for (final e in meta.bigNames.entries)
+              {'id': e.key, 'name': e.value}
+          ],
+          (a, b) => '${a['name']}'.compareTo('${b['name']}'));
       setState(() {
         libs = list;
         metas[cfg.lib] = meta;

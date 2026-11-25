@@ -29,6 +29,23 @@ export 'byte_size.dart' show formatBytes;
 /// Windows 缓存根目录（E 盘；严禁 C 盘）。
 const String kWindowsCacheDir = r'E:\Dizi\cache\covers';
 
+/// 超容量淘汰顺序（**唯一定义**）：最久未使用（mtime 最早）的排在前面。
+///
+/// **同一毫秒必须按路径兜底**。首次打开网格、批量预取时几十张封面会在同一
+/// 毫秒内落盘，`List.sort` 又不保证稳定——只按时间比较等于「淘汰哪几张
+/// 取决于排序内部结果」：同一个缓存目录清两次，留下的文件不一样，命中率
+/// 读数也跟着抖，而用户看到的只是「有些封面又变糊了」。同时间按路径升序，
+/// 结果与目录遍历顺序无关，清两次留下的是同一批。
+List<MapEntry<File, DateTime>> coverSweepOrder(
+    List<MapEntry<File, DateTime>> entries) {
+  final out = List<MapEntry<File, DateTime>>.of(entries);
+  out.sort((a, b) {
+    final c = a.value.compareTo(b.value);
+    return c != 0 ? c : a.key.path.compareTo(b.key.path);
+  });
+  return out;
+}
+
 /// 缓存占用统计。
 class CacheUsage {
   final int bytes;
@@ -347,10 +364,10 @@ class DiziCache {
         }
       }
       if (total > maxBytes) {
-        final rest = [
+        final rest = coverSweepOrder([
           for (final en in entries)
             if (!removed.contains(en.key)) en
-        ]..sort((a, b) => a.value.compareTo(b.value));
+        ]);
         for (final en in rest) {
           if (total <= maxBytes) break;
           try {

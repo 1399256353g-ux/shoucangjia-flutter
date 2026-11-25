@@ -208,8 +208,13 @@ UnitLibrary? buildUnitTree({
   // 参与「最深命中」不限连接；它归属到哪个节点就随那个节点走同一连接。
   // 只有**明确写了** serverId 的基础库才受连接约束——否则单连接场景会因为
   // 节点带连接、基础库不带而全部落进孤儿组，首页一行都显示不出来。
-  final ordered = byKey.values.toList()
-    ..sort((a, b) => b.segments.length.compareTo(a.segments.length));
+  // 深度降序；同深度按输入顺序（稳定）。同深度节点之间本来没有次序依据，
+  // 而 `List.sort` 不稳定：一台服务端上多一个节点就能让「基础库归到哪一层」
+  // 里的同深度候选顺序变化，未声明连接的旧格式基础库于是可能改挂到另一台
+  // 服务端的同名目录上（词条/封面随之换源）。稳定排序消除这一层偶然性。
+  final ordered = stableSort(
+      byKey.values.toList(),
+      (a, b) => b.segments.length.compareTo(a.segments.length));
 
   final owned = <String, List<BasicLib>>{};
   final orphanGroups = <String, List<BasicLib>>{};
@@ -236,8 +241,9 @@ UnitLibrary? buildUnitTree({
 
   // 3. 建立节点树（父子按前缀关系）。
   final childrenOf = <String, List<LibNode>>{};
-  final sortedNodes = byKey.values.toList()
-    ..sort((a, b) => a.segments.length.compareTo(b.segments.length));
+  final sortedNodes = stableSort(
+      byKey.values.toList(),
+      (a, b) => a.segments.length.compareTo(b.segments.length));
   final present = <String, LibNode>{};
   for (final n in sortedNodes) {
     final key = _nodeKeyOf(n.serverId, n.segments.join('/'));

@@ -60,3 +60,36 @@ String _scaledCount(int n, int unit, String suffix) {
   final frac = (n % unit) * 10 ~/ unit; // 0–9，余数 < unit 所以不会溢出
   return frac == 0 ? '$whole$suffix' : '$whole.$frac$suffix';
 }
+
+/// 作品计数行（**唯一出口**）：底部那一行「共 N 件」。
+///
+/// 这里原先直接插 `shown.length`——那是**已经拉到内存里的条数**，而作品列表
+/// 是 60 条一页的增量加载。于是同一次进入基础库，顶部 tab 写「作品 300」、
+/// 底部写「共 60 件」；往下滚两屏变成「共 180 件」。同一屏两个总数，而且
+/// 越大越错（`共` 是总数，却在滚动中一直变大）。
+///
+/// 规则：
+///  - 全部加载完（`loaded >= total`）或服务端没给 total → 「共 N 件」；
+///  - 还有未加载的页 → 「已载入 X / 共 Y 件」（两个数都写清，任何时刻都自洽）；
+///  - 叠加类型筛选时前缀换成「符合 N 件」——那是筛选后的条数，不是总数。
+/// 计数一律走 [formatCount]，与卡片/设置页同一套单位。
+String worksCountLabel({
+  required int shown,
+  required int loaded,
+  int total = 0,
+  bool filtered = false,
+}) {
+  final s = shown > 0 ? shown : 0;
+  final l = loaded > 0 ? loaded : 0;
+  final t = total > 0 ? total : 0;
+  final head = filtered ? '符合 ${formatCount(s)} 件' : '';
+  // total 不可信（服务端没给/给了负数/比已载入还小）时以已载入为准：
+  // 「共 60 件」下面却摆着 120 张卡片，是比缺总数更难解释的读数。
+  final full = t > 0 ? (t > l ? t : l) : l;
+  if (l >= full) {
+    if (filtered) return head;
+    return '共 ${formatCount(full)} 件';
+  }
+  final loadedPart = '已载入 ${formatCount(l)} / 共 ${formatCount(full)} 件';
+  return filtered ? '$head · $loadedPart' : loadedPart;
+}

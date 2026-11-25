@@ -18,6 +18,7 @@ import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_revision.dart';
 import 'library_tree.dart';
+import 'stable_order.dart';
 import 'media_priority.dart';
 import 'media_resize.dart';
 import 'scroll_decode.dart';
@@ -187,7 +188,12 @@ class _BasicLibPageState extends State<BasicLibPage>
       }
       // 有首字母索引条后，列表必须按名称分组排列，否则「跳到某字母」
       // 会落在列表中间、上下都还有该字母的作者。作品数只作为同组内的次序。
-      list.sort((x, y) {
+      // 首字母分组只按名称分；同组内按作品数降序。两者都相等时（跨库同名
+      // 作者合并后很常见，比如两个库各有一位「@小林」且作品数相同）没有
+      // 任何次序依据——`List.sort` 不稳定，于是「刷新一下两位作者换位置」。
+      // 用稳定排序保持服务端下发顺序：结果可复现，且不会因为多一条无关
+      // 作者而把整段顺序重排。
+      stableSort(list, (x, y) {
         final c = compareAuthorNames(
             '${x['name'] ?? x['name_raw'] ?? ''}', '${y['name'] ?? y['name_raw'] ?? ''}');
         if (c != 0) return c;
@@ -396,10 +402,11 @@ class _BasicLibPageState extends State<BasicLibPage>
           tabs: [
             Tab(
                 key: const ValueKey('basic-tab-works'),
-                text: '作品 ${total > 0 ? total : b.works}'),
+                text: '作品 ${formatCount(total > 0 ? total : b.works)}'),
             Tab(
                 key: const ValueKey('basic-tab-authors'),
-                text: '作者 ${loadingAuthors ? '' : authors.length}'),
+                text:
+                    '作者 ${loadingAuthors ? '' : formatCount(authors.length)}'),
           ],
         ),
       ),
@@ -875,7 +882,10 @@ class _BasicLibPageState extends State<BasicLibPage>
                       : Icons.check_box_outline_blank,
                   size: 16,
                 ),
-                child: Text('全部 ${works.length}',
+                // 「全部」是**该基础库的作品总数**，不是当前内存里的条数：
+                // 旧写法插 `works.length`，分页只拉到 60 条时这里写「全部 60」，
+                // 与上面 tab 的「作品 300」自相矛盾。total 不可用时退回已载入数。
+                child: Text('全部 ${formatCount(total > 0 ? total : works.length)}',
                     style: const TextStyle(fontSize: 12)),
               ),
               for (final type in _typeOrder)
@@ -943,7 +953,13 @@ class _BasicLibPageState extends State<BasicLibPage>
             ),
           ),
           const Spacer(),
-          Text('共 ${shown.length} 件',
+          Text(
+              worksCountLabel(
+                shown: shown.length,
+                loaded: works.length,
+                total: total,
+                filtered: _typeFilter.isNotEmpty,
+              ),
               key: const ValueKey('basic-works-count'),
               style: const TextStyle(fontSize: 11, color: Colors.grey)),
         ]),

@@ -1,6 +1,7 @@
 import 'disk_name.dart';
 import 'index_prefix.dart';
 import 'media_path.dart';
+import 'stable_order.dart';
 
 /// 作者来源词条（J9）的纯逻辑：
 /// 从作品/头像的媒体路径反查所属「基础库」，词条显示基础库名称而不是大库名。
@@ -106,7 +107,11 @@ List<BasicLibRef> basicsUnderBase(
         serverBase: '${e['_serverBase'] ?? ''}'.trim(),
         serverLabel: '${e['_serverLabel'] ?? ''}'.trim()));
   }
-  out.sort((a, b) => a.rel.compareTo(b.rel));
+  // 同一个 rel 下可能有两条基础库记录（服务端重复注册、或两台服务端都
+  // 下发了同一个 rel 且都没带连接标识）。同名之间没有次序依据，`List.sort`
+  // 不稳定 → 首页卡片与作者词条偶尔换位置，而数据一个都没变。稳定排序保持
+  // 服务端下发顺序。
+  stableSort(out, (a, b) => a.rel.compareTo(b.rel));
   return out;
 }
 

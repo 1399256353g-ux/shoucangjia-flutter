@@ -11,6 +11,7 @@ import 'json_num.dart';
 import 'text_clip.dart';
 
 import 'interval_label.dart';
+import 'stable_order.dart';
 
 /// 单元库爬虫配置。
 class UnitCrawlerConfig {
@@ -133,7 +134,11 @@ class UnitCrawlerScript {
         mtimeMs: intOf(e['mtime']),
       ));
     }
-    out.sort((a, b) => a.name.compareTo(b.name));
+    // 同名脚本（同一个 `crawler/` 目录被重复挂载、或服务端把同一个文件
+    // 用两种相对路径各报一次）之间没有次序依据；`List.sort` 不稳定，同一次
+    // 拉取刷新两遍就可能换位置，下拉选中的脚本也跟着跳。这里保持服务端
+    // 下发顺序（稳定排序），与 `unit_library` / `category_tree` 同一条规则。
+    stableSort(out, (a, b) => a.name.compareTo(b.name));
     return out;
   }
 
