@@ -290,11 +290,14 @@ void main() {
 
     test('窗口变化期间点全屏不丢弃意图，而是记进 _fsPending', () {
       final src = _mainSrc();
+      // owner 2026-11-25：原断言把整段代码含缩进写死在字符串里，
+      // 代码缩进一变就红（Windows runner 上还叠加了换行差异）。
+      // 改为「去空白后按顺序出现」，语义不变、不再依赖排版。
+      String flat(String t) => t.replaceAll(RegExp(r'\s+'), '');
+      final f = flat(src);
       expect(
-          src.contains("""if (Platform.isWindows && _winResizing) {
-      _fsPending = next;
-      return;
-    }"""),
+          f.contains(flat(
+              'if (Platform.isWindows && _winResizing) { _fsPending = next; return; }')),
           isTrue,
           reason: '直接 return 会让点击静默失效');
       // 尺寸稳定后必须补执行。

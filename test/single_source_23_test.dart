@@ -270,7 +270,7 @@ void main() {
         .listSync()
         .whereType<File>()
         .where((f) => f.path.endsWith('.dart'))
-        .map((f) => (f.path.split('/').last, f.readAsStringSync()))
+        .map((f) => (f.path.split(RegExp(r'[\\/]')).last, f.readAsStringSync()))
         .toList();
 
     String srcOf(String name) =>
