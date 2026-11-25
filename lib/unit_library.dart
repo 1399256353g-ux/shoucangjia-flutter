@@ -26,6 +26,11 @@ import 'media_path.dart';
 import 'stable_order.dart';
 import 'rel_path.dart';
 import 'top_node.dart';
+// 计数文案的**唯一定义**在 `count_label.dart`（它不只服务单元库：基础库卡片、
+// 设置页、文件结构页、作者挂载面板都在用）。这里 re-export，既有
+// `import 'unit_library.dart'` 的调用点与测试不必改。
+export 'count_label.dart' show formatCount;
+
 
 /// 一个节点文件夹（单元库候选）。
 class LibNode {
@@ -443,38 +448,6 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     add(x);
   }
   return out;
-}
-
-/// 计数显示：1234 → 1.2k，12345 → 1.2万，1.2e8 → 1.2亿。
-///
-/// 三处缺口：
-///  - 没有「亿」档，`1.23e8` 显示成 `12345.7万`（五个数字，比原文还长）；
-///  - 负计数直接输出 `-5`（服务端出错时会把 `-1` 当计数发下来，
-///    在卡片上读成「负数个作品」）；
-///  - **四舍五入会把计数说大**：`999949` 先切万再 `toStringAsFixed(1)`
-///    得到 `100.0` → `100万`，实际还不满 100 万。计数一律**向下截断**
-///    到一位小数（宁可少报也不能虚假跨档）。
-String formatCount(int n) {
-  if (n <= 0) return '0';
-  if (n < 1000) return '$n';
-  if (n < 10000) return _scaledCount(n, 1000, 'k');
-  if (n < 100000000) return _scaledCount(n, 10000, '万');
-  return _scaledCount(n, 100000000, '亿');
-}
-
-/// `n / unit` 保留一位小数（**截断**，不进位），去掉末尾 `.0`。
-///
-/// 截断而不是四舍五入：`999949` 向上会变成 `100万`（凭空跨档），
-/// 而计数类文案一旦多说就不能再用；末尾一整位小数也省下来（`3万` 而非 `3.0万`）。
-///
-/// **不能用 `n * 10 ~/ unit`**：int64 上 `n * 10` 在 `n > 9.2e17` 时会静默
-/// 回绕成负数，服务端把计数写成 `9223372036854775807`（int 上限，坏数据常见
-/// 形态）时显示成 `0亿`——看起来像「这个库没有作品」。先取整、再用余数求
-/// 小数位，中间值都不会超 `unit * 10`，任何计数都不会溢出。
-String _scaledCount(int n, int unit, String suffix) {
-  final whole = n ~/ unit;
-  final frac = (n % unit) * 10 ~/ unit; // 0–9，余数 < unit 所以不会溢出
-  return frac == 0 ? '$whole$suffix' : '$whole.$frac$suffix';
 }
 
 /// `/api/nodes` 载荷的解析结果（唯一实现）。

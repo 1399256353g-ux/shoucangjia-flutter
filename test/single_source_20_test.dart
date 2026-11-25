@@ -208,9 +208,19 @@ void main() {
   });
 
   group('formatCount：int64 边界不再回绕', () {
-    test('int 上限不再显示 0亿', () {
-      // 旧实现 `n * 10 ~/ unit` 在上限处回绕成负数 → `0亿`。
-      expect(formatCount(9223372036854775807), '92233720368.5亿');
+    test('int 上限不再显示 0亿，也不再撑出十一位数字', () {
+      // 旧实现 `n * 10 ~/ unit` 在上限处回绕成负数 → `0亿`；
+      // 只补回绕仍会输出 `92233720368.5亿`（十一位数字，卡片直接撑破）。
+      // 单位链补到「万亿 / 亿亿」后是 `922.3亿亿`（第四十九批）。
+      expect(formatCount(9223372036854775807), '922.3亿亿');
+    });
+
+    test('亿以上继续换单位，不输出长数字', () {
+      expect(formatCount(1000000000000), '1万亿');
+      expect(formatCount(1234567890123), '1.2万亿');
+      expect(formatCount(9999999999999999), '9999.9万亿');
+      expect(formatCount(10000000000000000), '1亿亿');
+      expect(formatCount(12000000000000000), '1.2亿亿');
     });
 
     test('各档位结论与既有契约一致', () {
@@ -225,9 +235,12 @@ void main() {
     });
 
     test('_scaledCount 里不得再出现 n * 10（回绕源）', () {
-      final src = _codeOf('lib/unit_library.dart');
+      // 第五十批把定义搬到 `count_label.dart`；契约跟着走，否则扫描会变成
+      // 「扫一个已经没有实现的文件」——恒绿但不守任何东西。
+      final src = _codeOf('lib/count_label.dart');
       expect(RegExp(r'n \* 10').hasMatch(src), isFalse,
           reason: '`n * 10` 在 int64 上限回绕，必须改成先取整再求余数');
+      expect(src.contains('String _scaledCount('), isTrue);
     });
   });
 

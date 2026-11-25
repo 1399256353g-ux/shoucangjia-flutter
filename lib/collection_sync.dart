@@ -1,5 +1,6 @@
 import 'emoji_text.dart';
 import 'http_json.dart';
+import 'count_label.dart';
 import 'json_num.dart';
 import 'index_prefix.dart';
 
@@ -59,7 +60,7 @@ class CollectionSyncInfo {
   /// 同一个同步源在设置页与单元库页有两种说法，且面板那版根本没有
   /// `account` 分支。现在两处都走这里。
   String subtitleWith({bool isDefault = false}) {
-    final parts = <String>['$count 个作品'];
+    final parts = <String>['${formatCount(count)} 个作品'];
     if (!inIndex) parts.add(account ? '账号中 · 未下载' : '暂无索引');
     parts.add(sync ? '参与同步' : '不参与同步 · 主页不显示');
     if (isDefault) parts.add('默认同步源');

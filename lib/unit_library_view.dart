@@ -1632,7 +1632,8 @@ class _BasicLibCardState extends State<BasicLibCard> {
               badge: _badge(),
               title: basic.name,
               unitId: widget.unitKey,
-              stats: '${basic.authors} 作者 · ${basic.works} 作品',
+              stats: '${formatCount(basic.authors)} 作者 · '
+                  '${formatCount(basic.works)} 作品',
               server: basic.serverLabel,
               dense: true,
             ),

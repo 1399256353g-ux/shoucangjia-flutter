@@ -2260,7 +2260,8 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             unitId: unitId,
             kind: LibEntryKind.basic),
       ]),
-      subtitle: Text('${b.authors} 作者 · ${b.works} 作品 · ${b.id}',
+      subtitle: Text(
+          '${formatCount(b.authors)} 作者 · ${formatCount(b.works)} 作品 · ${b.id}',
           style: const TextStyle(fontSize: 11)),
       trailing: Text(sourceLabel,
           style: TextStyle(
@@ -7532,7 +7533,7 @@ class AuthorGridCard extends StatelessWidget {
                   ),
                   SizedBox(
                     height: 12,
-                    child: Text('$works 作品',
+                    child: Text('${formatCount(works)} 作品',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -7630,6 +7631,9 @@ class AuthorRankTile extends StatelessWidget {
           works: works,
         ),
         const SizedBox(height: 2),
+        // 排行榜明细行**故意保留精确数字**：这一行是用来互相比较的
+        // （同一屏里几个作者的播放量谁多谁少），缩写会把 1.2万 和 1.3万
+        // 压成同一个读数。它不是「同一读数两处写法」，是另一个用途。
         Text('播放 $plays · 水滴 $drops · $works 作品',
             style: TextStyle(
                 fontSize: 10,
@@ -8061,7 +8065,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       case 'visited':
         return '最近 ${_fmtDate(_num(s['lv']))}';
       case 'works':
-        return '${_num(e.value['n'])} 个作品';
+        return '${formatCount(_num(e.value['n']))} 个作品';
       case 'drops':
         return '水滴 ${_num(s['dr'])}';
       default:
@@ -13185,7 +13189,7 @@ class _PlayerPageState extends State<PlayerPage>
                 thumbColor: Colors.white,
               ),
               child: Slider(
-                value: (muted ? 0.0 : volume).clamp(0.0, 100.0),
+                value: volumeSliderValue(volume, muted: muted),
                 max: 100,
                 onChanged: _setVolume,
               ),
@@ -13193,7 +13197,7 @@ class _PlayerPageState extends State<PlayerPage>
           ),
           SizedBox(
             width: 30,
-            child: Text('${volume.round()}',
+            child: Text(volumePercentShown(volume, muted: muted).toString(),
                 textAlign: TextAlign.right,
                 style: const TextStyle(fontSize: 10, color: Colors.white54)),
           ),
@@ -14635,8 +14639,8 @@ class _PlayerPageState extends State<PlayerPage>
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(2),
                             child: LinearProgressIndicator(
-                              value: (muted ? 0.0 : volume.clamp(0.0, 100.0)) /
-                                  100.0,
+                              value:
+                                  volumeSliderValue(volume, muted: muted) / 100.0,
                               backgroundColor: Colors.white24,
                               valueColor:
                                   const AlwaysStoppedAnimation(Colors.white),
@@ -14648,7 +14652,7 @@ class _PlayerPageState extends State<PlayerPage>
                         SizedBox(
                           width: 30,
                           child: Text(
-                            '${(muted ? 0 : volume).round()}%',
+                            '${volumePercentShown(volume, muted: muted)}%',
                             textAlign: TextAlign.right,
                             style: const TextStyle(
                                 fontSize: 11, color: Colors.white70),

@@ -22,6 +22,7 @@ import 'error_text.dart';
 import 'http_error_text.dart';
 import 'http_json.dart';
 import 'json_num.dart';
+import 'count_label.dart';
 import 'unit_author_groups.dart';
 
 /// 打开作者挂载面板。
@@ -340,7 +341,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
                   ),
                 ),
                 if (i.works > 0)
-                  Text('${i.works} 作品',
+                  Text('${formatCount(i.works)} 作品',
                       style:
                           const TextStyle(fontSize: 10.5, color: Colors.grey)),
               ]),

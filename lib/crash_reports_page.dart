@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'crash_guard.dart';
+import 'byte_size.dart';
+import 'count_label.dart';
 import 'resize_cache_api.dart';
 import 'thumb_prefetch.dart';
 
@@ -158,10 +160,18 @@ class CrashReportsPage extends StatelessWidget {
       );
 
   /// 首屏缩略图预热 + 图片缓存现状（0.9.26）。
+  ///
+  /// 字节与张数一律走 [formatBytes] / [formatCount]：这里原先自己算了
+  /// `(bytes / 1048576).toStringAsFixed(1)` 拼成 `3.5 MB`，而同一页下面的
+  /// 「缩图缓存」行用的是 [formatBytes]（`31.5 MB` / `1.50 GB`）。
+  /// 两个读数并排显示时，一个到 GB 就换单位、一个永远停在 MB：
+  /// 上限 2 GB 的图片缓存写成 `2048 MB`，而旁边一行写着 `2.00 GB`——
+  /// 同一个 App、同一屏、同一个量纲两种写法。
   Widget _prefetchTile() {
     final p = ThumbPrefetch.instance;
     final cache = PaintingBinding.instance.imageCache;
-    final mb = (cache.currentSizeBytes / (1024 * 1024)).toStringAsFixed(1);
+    final used = formatBytes(cache.currentSizeBytes);
+    final cap = formatBytes(cache.maximumSizeBytes);
     final pending = p.stats.pending;
     return AnimatedBuilder(
       animation: p,
@@ -182,8 +192,8 @@ class CrashReportsPage extends StatelessWidget {
             '失败 ${s.failed} · 跳过 ${s.skipped}'
             '${pending > 0 ? ' · 进行中 $pending' : ''}'
             ' · 最近 ${s.lastRunText}\n'
-            '图片缓存 ${cache.currentSize} 张 / $mb MB'
-            '（上限 ${(cache.maximumSizeBytes / (1024 * 1024)).round()} MB）',
+            '图片缓存 ${formatCount(cache.currentSize)} 张 / $used'
+            '（上限 $cap）',
             style: const TextStyle(fontSize: 11, height: 1.35),
           ),
         );

@@ -26,6 +26,7 @@
 library;
 
 import 'api_url.dart';
+import 'count_label.dart';
 import 'json_num.dart';
 
 /// 一个被挂载的作者文件夹：基础库 id + 库内作者目录名。
@@ -469,7 +470,7 @@ String authorMergeSummary({
   parts.add(merged ? '合并 $fileCount 个文件夹' : '$fileCount 个文件夹');
   // 合并组可能由多个不同名的作者目录组成，`names` 比成员数更能说明"并了几个作者"。
   if (names > 1) parts.add('含 $names 个作者名');
-  if (works > 0) parts.add('$works 作品');
+  if (works > 0) parts.add('${formatCount(works)} 作品');
   if (split) parts.add('已拆分');
   if (auto) parts.add('自动');
   return parts.join(' · ');

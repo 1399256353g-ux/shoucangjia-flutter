@@ -30,7 +30,16 @@ String formatBadgeDuration(num? seconds) {
   final total = seconds.toDouble();
   if (total.isNaN || total.isInfinite || total < 1) return '';
   if (total > kBadgeMaxSeconds) return '';
-  final s = total.round();
+  // 秒数**截断**，不四舍五入。
+  //
+  // 旧写法 `total.round()` 会把读数推到下一个刻度：59.5s 显示 `1:00`
+  // （读作整整一分钟）、3599.5s 显示 `1:00:00`（读作正好一小时，其实还差
+  // 半秒）。同一个时长在播放页进度行是**截断**的（`formatClockMs` →
+  // `ms ~/ 1000`），于是同一部片子角标说 1:00:00、进度行说 59:59——
+  // 两条路径口径相反，且角标那条说的是大的那个。与 `formatBytes`
+  // （1023.9 KB 而非 1024.0 KB）、`formatCount`（99.9万 而非 100万）
+  // 同一条规则：宁可少报半秒，也不虚假跨档。
+  final s = total.floor();
   final h = s ~/ 3600;
   final m = (s % 3600) ~/ 60;
   final sec = s % 60;

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'json_num.dart';
+import 'count_label.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -508,7 +509,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                                 : FontWeight.w500,
                             color: isBasic ? Colors.grey : null)),
                     if (r.authors > 0)
-                      Text('${r.authors} 位作者',
+                      Text('${formatCount(r.authors)} 位作者',
                           style: const TextStyle(
                               fontSize: 10, color: Colors.grey)),
                   ],

@@ -11,6 +11,7 @@
 library;
 
 import 'error_text.dart';
+import 'count_label.dart';
 import 'json_num.dart';
 import 'http_error_text.dart';
 import 'http_json.dart';
@@ -45,7 +46,7 @@ class LibRefreshOutcome {
   /// 完成提示：成功报作品数，失败报服务端给的原因（不吞错）。
   String get message {
     if (error.isNotEmpty) return '刷新失败：$error';
-    if (works != null) return '已刷新 · $works 个作品';
+    if (works != null) return '已刷新 · ${formatCount(works!)} 个作品';
     return '已刷新';
   }
 }

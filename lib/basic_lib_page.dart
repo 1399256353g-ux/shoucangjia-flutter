@@ -1,5 +1,6 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'count_label.dart';
 import 'json_num.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -543,7 +544,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                               fontSize: 12, fontWeight: FontWeight.w600)),
                     ),
                   ),
-                  Text('${_int(a['works'])} 作品',
+                  Text('${formatCount(_int(a['works']))} 作品',
                       style: const TextStyle(fontSize: 9.5, color: Colors.grey)),
                   if (sub.isNotEmpty)
                     Text(sub,

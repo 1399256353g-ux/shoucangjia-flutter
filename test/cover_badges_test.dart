@@ -8,7 +8,18 @@ void main() {
       expect(formatBadgeDuration(65), '1:05');
       expect(formatBadgeDuration(600), '10:00');
       expect(formatBadgeDuration(3725), '1:02:05');
-      expect(formatBadgeDuration(12.6), '0:13');
+      // 小数秒**截断**，不四舍五入：12.6s 的片子角标写 `0:12`，
+      // 与播放页进度行（`formatClockMs(12600)` → `00:12`）同一个读数。
+      // 旧写法 round 给 `0:13`，同一部片子两处差一秒。
+      expect(formatBadgeDuration(12.6), '0:12');
+    });
+
+    test('不四舍五入跨档：59.5s 不是 `1:00`，3599.5s 不是 `1:00:00`', () {
+      expect(formatBadgeDuration(59.5), '0:59');
+      expect(formatBadgeDuration(59.9), '0:59');
+      // 不满 1 小时仍走 `mm:ss`），所以 3599.5s → `59:59`。
+      expect(formatBadgeDuration(3599.5), '59:59');
+      expect(formatBadgeDuration(3599.9), '59:59');
     });
 
     test('非法或过短时返回空串', () {
