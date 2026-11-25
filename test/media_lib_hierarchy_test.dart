@@ -133,4 +133,77 @@ void main() {
       expect(media.children.map((e) => e.name).toSet(), {'(1) A', '(1) X'});
     });
   });
+
+  _hierarchyRegressionTests();
+}
+
+/// owner 2026-11-25：「叫你不要把单元库拆散掉放在 secret 下面，原来的层级
+/// 关系呢，文件结构是放屁的吗」。
+///
+/// 上一版 `_collectServerBasics` 按「根节点自己有没有挂基础库」分叉：
+/// 纯容器的第一层节点被拆掉，只把 children 塞给媒体库，于是
+/// `(1) A` 这一层凭空消失、`(2) B` 直接挂到媒体库下面。
+/// 实测复现（修复前）：Secret → NAS → (2) B。
+void _hierarchyRegressionTests() {
+  group('第一层容器节点不得被拆掉（2026-11-25 回归）', () {
+    test('纯容器第一层节点必须保留：A 无基础库、基础库在 A/B 里', () {
+      final nodes = nodesFromMarks(
+        const ['(1) A', '(1) A/(2) B'],
+        serverId: 'srv-1',
+        serverLabel: 'NAS',
+      );
+      final tree = buildUnitTree(
+        nodes: nodes,
+        basics: [
+          BasicLib(
+              id: 'b1',
+              name: 'B',
+              rel: '(1) A/(2) B',
+              bigId: '',
+              authors: 1,
+              works: 1),
+        ],
+        topName: 'Secret',
+      );
+      final media = tree!.children.first;
+      // 媒体库下面必须是 (1) A，而不是直接是 (2) B。
+      expect(media.children.length, 1, reason: '(1) A 这一层不能消失');
+      expect(media.children.first.name, '(1) A');
+      expect(media.children.first.basics, isEmpty, reason: 'A 自身不挂基础库');
+      // (2) B 必须在 A 之下。
+      expect(media.children.first.children.length, 1);
+      expect(media.children.first.children.first.name, '(2) B');
+      expect(media.children.first.children.first.basics.length, 1);
+    });
+
+    test('三层链完整：A → B → C 一层都不能少', () {
+      final nodes = nodesFromMarks(
+        const ['(1) A', '(1) A/(2) B', '(1) A/(2) B/(3) C'],
+        serverId: 'srv-1',
+        serverLabel: 'NAS',
+      );
+      final tree = buildUnitTree(
+        nodes: nodes,
+        basics: [
+          BasicLib(
+              id: 'b1',
+              name: 'C',
+              rel: '(1) A/(2) B/(3) C',
+              bigId: '',
+              authors: 1,
+              works: 1),
+        ],
+        topName: 'Secret',
+      );
+      final media = tree!.children.first;
+      expect(media.children.length, 1, reason: 'A 不能消消失');
+      final a = media.children.first;
+      expect(a.name, '(1) A');
+      expect(a.children.length, 1, reason: 'B 不能消失');
+      final b = a.children.first;
+      expect(b.name, '(2) B');
+      expect(b.children.length, 1, reason: 'C 不能消失');
+      expect(b.children.first.name, '(3) C');
+    });
+  });
 }

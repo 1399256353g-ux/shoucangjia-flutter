@@ -317,15 +317,14 @@ UnitLibrary? buildUnitTree({
 /// - 根节点自己挂了基础库（节点就是库根）→ 它本身作为下级，**连同其子树**；
 /// - 根节点没挂基础库（纯容器）→ 它的 children 按原父子关系保留，不拆平。
 void _collectServerBasics(UnitLibrary root, List<UnitLibrary> out) {
-  if (root.basics.isNotEmpty) {
-    // 节点就是库根：整个子树照原样保留，不能只取直接子节点。
-    out.add(root);
-    return;
-  }
-  // 纯容器节点：children 原样输出（各自带着自己的 children），层级不丢。
-  for (final c in root.children) {
-    out.add(c);
-  }
+  // owner 2026-11-25：「叫你不要把单元库拆散掉放在 secret 下面，原来的
+  // 层级关系呢」。根节点必须**整个保留**，不管它自己有没有挂基础库。
+  //
+  // 上一版按「有没有 basics」分叉：纯容器的第一层节点（examples：(1) A
+  // 自身没有基础库、基础库在 (2) B 里）被拆掉，只把它的 children 塞给
+  // 媒体库，于是 (2) B 直接挂到了媒体库下面，(1) A 这一层凭空消失。
+  // 实测复现：Secret → NAS → (2) B，而正确应为 Secret → NAS → (1) A → (2) B。
+  out.add(root);
 }
 
 /// 从 v2 的 bigLibraries / groups 提取节点。
