@@ -222,7 +222,17 @@ class LibraryBadge {
     if (src != BadgeColorSource.fixedCustom) {
       // 来源不是「自定义」时清掉本层自定义色：否则会出现「来源写着自动、
       // 实际还在用残留自定义色」——这正是 owner 说的「恢复自动没反应」。
-      removeByLibId(basic ? basicCustom : custom, unitId);
+      //
+      // 顶级与普通单元库的自定义色分属两张表；这里两张都清。
+      // 不按 [isTopSelf] 分支：结构表没加载时它判不出顶级，旧色就会留着
+      // （实测顶级切自动后 child 仍是 `0xFFFF0000`）。多清一次不存在的键
+      // 是空操作（[removeByLibId] 只删命中的键）。
+      if (basic) {
+        removeByLibId(basicCustom, unitId);
+      } else {
+        removeByLibId(custom, unitId);
+        removeByLibId(topCustom, unitId);
+      }
     }
     _bump();
     await _saveSources();
@@ -370,38 +380,71 @@ class LibraryBadge {
   /// 形式不同，这里统一归一，保证作者词条与基础库卡颜色一致。
   /// [allowCustom] 为 false 时忽略本层自定义色（供「非末梢不下发」的基础库
   /// 落色使用），继承链其余部分不变。
-  /// 自动配色：按注册顺序取色，顺序里没有就按 id 哈希——同一个库任何时候
+  /// 自动配色：按注册顺序取色，顺序里没有就按 id 稳定散列——同一个库任何时候
   /// 都得到同一个色（不用随机，避免每次重建换个颜色）。
-  static int _autoColorOf(String unitId, List<String> order) {
+  ///
+  /// **绝不读用户自定义表**。0.9.265 修：上一版末尾 `return colorFor(relOf(...))`，
+  /// 而 [colorFor] 第一步就是查 `custom`，于是「来源=自动分配」仍可能返回残留
+  /// 自定义色（实测 `basicSource=auto` + 单元库 `custom` 有值 → 直接返回旧色）。
+  /// 自动色能等于自定义色时，「来源」这个选项就名存实亡：用户选了自动、看到
+  /// 的还是自己以前挑的颜色，只会认为开关又没生效。
+  static int autoColorOf(String unitId, {List<String> order = const []}) {
     for (final f in idFormsOf(unitId)) {
       final i = order.indexOf(f);
       if (i >= 0) return autoColorAt(i);
     }
-    return colorFor(relOf(unitId), order: order);
+    final rel = relOf(unitId);
+    var h = 0;
+    for (final u in rel.codeUnits) {
+      h = (h * 31 + u) & 0x7fffffff;
+    }
+    return autoColorAt(h);
   }
 
   static int colorForUnit(String unitId,
       {List<String> order = const [], bool allowCustom = true}) {
     if (unitId.isEmpty) return gray;
+    // 「secret」（无归属的库根词条）是固定灰，不参与自动配色：
+    // 它有 topCustom 覆盖时用覆盖色，否则恒为 gray。
     if (unitId == 'secret') return topColorFor('secret') ?? gray;
     // owner 2026-11-25：按「颜色来源」决定走哪条链，不再写死「先继承顶级」。
     final src = sourceFor(unitId);
     if (src == BadgeColorSource.autoAssign) {
-      return _autoColorOf(unitId, order);
+      return autoColorOf(unitId, order: order);
     }
     if (allowCustom) {
-      final c = lookupByLibId(custom, unitId);
-      if (c != null) return c;
+      // 本层生效中的自定义色。普通单元库存在 [custom]，顶级单元库存在
+      // [topCustom]——此前这里只查 `custom`，于是「顶级选了自定义色」在
+      // 卡片上要靠调用方再写一遍 `topColorFor(id) ?? …` 才显示得出来：
+      // 两处口径，第二处一定会漏（实测顶级切「自动分配」后仍显示旧色）。
+      // 两张表都查不会串色：[topCustom] 只由 [setTopColor] 写入顶级 id。
+      final own = lookupByLibId(custom, unitId) ?? topColorFor(unitId);
+      if (own != null) return own;
     }
     if (src == BadgeColorSource.fixedCustom) {
       // 声明了自定义但没有值（被清过）：回落到自动配色，不留一个空壳状态。
-      return _autoColorOf(unitId, order);
+      return autoColorOf(unitId, order: order);
     }
-    // 默认：继承所属顶级单元库的词条色（顶级设过才有）。
+    // 默认：继承所属顶级单元库的词条色（顶级设过、且它自己没有选「自动分配」）。
+    // 自己就是顶级时不存在「继承自己」，直接走自动配色。
     final topId = lookupByLibId(topOfUnit, unitId);
-    final inherited = topId == null ? null : topColorFor(topId);
-    if (inherited != null) return inherited;
-    return _autoColorOf(unitId, order);
+    if (topId != null && relOf(topId) != relOf(unitId)) {
+      final inherited = topEntryColor(topId, order: order);
+      if (inherited != null) return inherited;
+    }
+    return autoColorOf(unitId, order: order);
+  }
+
+  /// 顶级单元库**实际生效**的词条色；没有可继承色时返回 null。
+  ///
+  /// 与 [topColorFor] 的区别：后者只读存储，用于设置页判断「设没设过」。
+  /// 顶级自己选了「自动分配」时，`topCustom` 里可能还残留旧色（手工改过的
+  /// 配置、或从别的入口写的），继承链不能再拿它去染下级——否则用户给顶级
+  /// 选了自动、下级却仍是一片旧色，选项形同虚设。
+  static int? topEntryColor(String topId, {List<String> order = const []}) {
+    if (topId.isEmpty) return null;
+    if (sourceFor(topId) == BadgeColorSource.autoAssign) return null;
+    return topColorFor(topId);
   }
 
   /// P1：词条外观。四种层级共用同一圆角与内边距，只改边框与底纹强度，
@@ -430,15 +473,24 @@ class LibraryBadge {
   ///
   /// 判定只看 [topOfUnit] 这张结构表：一个单元库自己就是顶级单元库时，
   /// 表里会有 `unitId → unitId`；否则它是下级单元库。
+  /// 该单元库自己就是「连接的库根」（顶级单元库）。
+  ///
+  /// 只有这一种情形下，本层自定义色存在 [topCustom] 而不是 [custom]：
+  /// 顶级色的读写走的是另一张表。判定必须只有一处——[entryKindOfUnit]、
+  /// [colorForUnit]、[setSource] 三处各写一遍之后，必有一处忘记 `rel` 归一，
+  /// 于是「顶级切自动」清的是空的 `custom` 表，`topCustom` 里的旧色原样留着。
+  static bool isTopSelf(String unitId) {
+    if (unitId.isEmpty || unitId == 'secret') return false;
+    final top = lookupByLibId(topOfUnit, unitId);
+    if (top == null) return false;
+    final rel = relOf(unitId);
+    return top == unitId || top == rel || relOf(top) == rel;
+  }
+
   static LibEntryKind entryKindOfUnit(String unitId) {
     if (unitId.isEmpty || unitId == 'secret') return LibEntryKind.other;
-    final rel = relOf(unitId);
-    final top = lookupByLibId(topOfUnit, unitId);
-    if (top == null) return LibEntryKind.other;
-    final topRel = relOf(top);
-    return (top == unitId || top == rel || topRel == rel)
-        ? LibEntryKind.top
-        : LibEntryKind.unit;
+    if (lookupByLibId(topOfUnit, unitId) == null) return LibEntryKind.other;
+    return isTopSelf(unitId) ? LibEntryKind.top : LibEntryKind.unit;
   }
 
   /// 顶级单元库自定义色；没设过返回 null（调用方继续走自动配色/继承链）。
@@ -453,24 +505,75 @@ class LibraryBadge {
       {List<String> order = const []}) {
     final src = sourceForBasic(basicId);
     if (src == BadgeColorSource.autoAssign && basicId.isNotEmpty) {
-      return _autoColorOf(basicId, order);
+      return autoColorOf(basicId, order: order);
     }
     if (basicId.isNotEmpty) {
       final c = basicCustom[basicId];
       if (c != null) return c;
     }
     if (src == BadgeColorSource.fixedCustom) {
-      return _autoColorOf(basicId.isEmpty ? unitId : basicId, order);
+      return autoColorOf(basicId.isEmpty ? unitId : basicId, order: order);
     }
     // P1 分发规则：上级单元库自定义色只有它是末梢时才分发到这里；
     // 非末梢单元库只影响自己那层，基础库继续继承顶级单元库色。
     if (unitId.isNotEmpty && !canDistribute(unitId)) {
       final topId = lookupByLibId(topOfUnit, unitId);
-      final inherited = topId == null ? null : topColorFor(topId);
+      final inherited = topId == null ? null : topEntryColor(topId, order: order);
       if (inherited != null) return inherited;
       return colorForUnit(unitId, order: order, allowCustom: false);
     }
     return colorForUnit(unitId, order: order);
+  }
+
+  /// 本层是否真有「生效中的」自定义色。
+  ///
+  /// 判定必须同时看来源：来源是自动分配时，表里即便还留着旧自定义色
+  /// （手工改过的配置）也不生效，界面不能报「自定义」。
+  /// 顶级单元库的颜色存在另一张表（[topCustom]），这里一并收口，
+  /// 调用方不要再各写 `topColorFor(...) ?? ...` / `customColorFor(...)`。
+  static bool hasOwnColor(String unitId) {
+    if (unitId.isEmpty) return false;
+    if (sourceFor(unitId) == BadgeColorSource.autoAssign) return false;
+    // 与 [colorForUnit] 同一条读法：两张表都查，不依赖 [topOfUnit] 是否
+    // 已由注册表填好（冷启动阶段结构表还是空的）。
+    return lookupByLibId(custom, unitId) != null ||
+        topColorFor(unitId) != null;
+  }
+
+  /// 基础库是否真有生效中的自定义色（来源=自动时不算）。
+  static bool hasOwnBasicColor(String basicId) {
+    if (basicId.isEmpty) return false;
+    if (sourceForBasic(basicId) == BadgeColorSource.autoAssign) return false;
+    return basicCustom[basicId] != null;
+  }
+
+  /// 本层此刻是否正在继承顶级色（没有本层色，且顶级有可继承色）。
+  static bool inheritsTopColor(String unitId, {List<String> order = const []}) {
+    if (unitId.isEmpty || hasOwnColor(unitId)) return false;
+    final topId = lookupByLibId(topOfUnit, unitId);
+    if (topId == null) return false;
+    if (relOf(topId) == relOf(unitId)) return false;
+    return topEntryColor(topId, order: order) != null;
+  }
+
+  /// 设置页「来源」文案的**唯一**出口。
+  ///
+  /// 三处各写一遍 switch 之后必然分叉：基础库那行写成
+  /// `own ? '自定义' : '继承'`，于是「来源=自动分配」被显示成「继承」，
+  /// 用户改完看到文案没变，会以为开关没生效。
+  /// [hasOwn] 本层真有自定义色；[inherits] 本层当前从顶级继承到了色。
+  static String sourceLabelOf(BadgeColorSource src,
+      {required bool hasOwn, required bool inherits}) {
+    if (hasOwn) return '自定义';
+    switch (src) {
+      case BadgeColorSource.autoAssign:
+        return '自动分配';
+      case BadgeColorSource.fixedCustom:
+        // 声明自定义但色被清掉：真实生效的是自动配色，文案不得说「自定义」。
+        return '自动分配';
+      case BadgeColorSource.inheritTop:
+        return inherits ? '继承顶级' : '自动分配';
+    }
   }
 
   /// 设置/清除基础库词条色。

@@ -2152,31 +2152,20 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   Widget _libTile(UnitLibrary u, {bool isTop = false, bool indent = false}) {
     final id = u.id;
     final name = u.name.isEmpty ? id : u.name;
-    // D1：自定义色可能以 rel / node:rel 任一形式落盘，统一用归一化查询，
-    // 避免状态显示「自定义」但色块仍是自动色。
-    final color = isTop
-        ? (LibraryBadge.topColorFor(id) ??
-            LibraryBadge.colorForUnit(id, order: _order))
-        : LibraryBadge.colorForUnit(id, order: _order);
+    // D1：自定义色可能以 rel / node:rel 任一形式落盘，统一走归一化查询。
+    // 顶级与下级各写一遍 `topColorFor(...) ?? …` 是两处口径：顶级换了来源
+    // 之后其中一处必然漏（实测顶级选「自动分配」仍显示旧自定义色）。
+    // 现在一律由 colorForUnit 给出**实际生效**的颜色。
+    final color = LibraryBadge.colorForUnit(id, order: _order);
     final emoji = LibraryBadge.emojiFor(id);
-    final overridden =
-        isTop ? LibraryBadge.topColorFor(id) != null : LibraryBadge.customColorFor(id) != null;
-    // owner 2026-11-25：来源显式化了，状态文字也跟着说清楚是哪一种，
-    // 不再把「继承顶级」笼统显示成「自动」。
-    final src = LibraryBadge.sourceFor(id);
-    final inheritedOnly = !isTop &&
-        src != BadgeColorSource.autoAssign &&
-        LibraryBadge.customColorFor(id) == null &&
-        LibraryBadge.topColorFor(lookupByLibId(LibraryBadge.topOfUnit, id) ?? '') !=
-            null;
-    final sourceLabel = overridden
-        ? '自定义'
-        : switch (src) {
-            BadgeColorSource.autoAssign => '自动分配',
-            BadgeColorSource.fixedCustom => '自动分配',
-            BadgeColorSource.inheritTop =>
-              inheritedOnly ? '继承顶级' : '自动分配',
-          };
+    // 文案与颜色同源：本层有没有生效中的自定义色 / 是否正在继承顶级。
+    final ownColor = LibraryBadge.hasOwnColor(id);
+    final inheritingTop = LibraryBadge.inheritsTopColor(id, order: _order);
+    final sourceLabel = LibraryBadge.sourceLabelOf(
+      LibraryBadge.sourceFor(id),
+      hasOwn: ownColor,
+      inherits: inheritingTop,
+    );
     // P1：只有末梢单元库能向下分发；非末梢的自定义色只作用于本层。
     // 查表走 lookupByLibId：`node:rel` / `rel` 两种 id 形式都是同一份数据。
     final leaf = lookupByLibId(LibraryBadge.leafUnits, id) ?? true;
@@ -2202,7 +2191,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         // A2：非末梢单元库设了色也不向下一层分发。此前只有 subtitle 一句话，
         // 用户设完仍以为下级会变——这里在名字后面直接挂一个可见标记，
         // 只在「已自定义且不分发」时出现，不占常态一行。
-        if (!isTop && !leaf && overridden)
+        if (!isTop && !leaf && ownColor)
           const Padding(
             padding: EdgeInsets.only(left: 6),
             child: _NoDistributeMark(),
@@ -2222,9 +2211,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             sourceLabel,
             style: TextStyle(
                 fontSize: 12,
-                color: overridden
+                color: ownColor
                     ? Colors.lightBlueAccent
-                    : (inheritedOnly ? Colors.amber : Colors.grey)),
+                    : (inheritingTop ? Colors.amber : Colors.grey)),
           ),
         ],
       ),
@@ -2264,7 +2253,15 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   Widget _basicTile(BasicLib b, {bool indent = false}) {
     final unitId = meta?.basicToUnit[b.id] ?? '';
     final color = LibraryBadge.basicColorFor(b.id, unitId, order: _order);
-    final own = LibraryBadge.basicCustom[b.id] != null;
+    // 文案与颜色同源：以前这行写 `own ? '自定义' : '继承'`，
+    // 于是「来源=自动分配」被显示成「继承」，改了来源看不出变化。
+    final own = LibraryBadge.hasOwnBasicColor(b.id);
+    final sourceLabel = LibraryBadge.sourceLabelOf(
+      LibraryBadge.sourceForBasic(b.id),
+      hasOwn: own,
+      inherits: unitId.isNotEmpty &&
+          LibraryBadge.inheritsTopColor(unitId, order: _order),
+    );
     final name = LibraryBadge.stripIndex(b.name);
     return ListTile(
       dense: true,
@@ -2286,7 +2283,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       ]),
       subtitle: Text('${b.authors} 作者 · ${b.works} 作品 · ${b.id}',
           style: const TextStyle(fontSize: 11)),
-      trailing: Text(own ? '自定义' : '继承',
+      trailing: Text(sourceLabel,
           style: TextStyle(
               fontSize: 12,
               color: own ? Colors.lightBlueAccent : Colors.grey)),
@@ -2350,7 +2347,11 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       {LibEntryKind kind = LibEntryKind.unit,
       bool topLevelOnly = false,
       String note = ''}) async {
-    var current = LibraryBadge.customColorFor(id) ?? autoColor;
+    // 初始色直接用调用方算好的**生效色**：再查一次 `customColorFor(id)`
+    // 是第三处读法——基础库的色存在 `basicCustom`、顶级存在 `topCustom`，
+    // 这里都查不到，于是弹窗预览与背后卡片不同色（`?? autoColor` 恰好盖住
+    // 了后者，前者要靠调用方另写一遍才不露）。
+    var current = autoColor;
     var hsv = HSVColor.fromColor(Color(current));
     var currentEmoji = LibraryBadge.emojiFor(id);
     // D1：点「恢复自动」后必须真的清掉自定义色，而不是把当前自动色存成自定义。

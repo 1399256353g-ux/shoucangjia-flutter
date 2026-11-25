@@ -500,9 +500,11 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
                   u.allBasics.isNotEmpty ? u.allBasics.first.id : '';
               // P3：首页卡片＝顶级单元库卡片。只用 owner 设过的封面，
               // 未设则用该顶级单元库的词条色块占位，不再拿作品图冒充库封面。
-              final tint = LibraryBadge.topColorFor(u.id) ??
-                  LibraryBadge.colorForUnit(u.id,
-                      order: UnitBadgeRegistry.order);
+              // 顶级卡片色块：与设置页/词条同一条链（colorForUnit 已内含
+              // 顶级自定义色）。这里再写 `topColorFor(...) ??` 是第二处口径，
+              // 顶级选「自动分配」时会继续拿到残留 topCustom 旧色。
+              final tint = LibraryBadge.colorForUnit(u.id,
+                  order: UnitBadgeRegistry.order);
               return UnitLibraryCard(
                 unit: u,
                 topCard: true,
@@ -881,8 +883,8 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
   }
 
   Widget _paintTopEntrySwatch(UnitLibrary unit) {
-    final argb = LibraryBadge.topColorFor(unit.id) ??
-        LibraryBadge.colorForUnit(unit.id, order: UnitBadgeRegistry.order);
+    final argb = LibraryBadge.colorForUnit(unit.id,
+        order: UnitBadgeRegistry.order);
     final deco = LibraryBadge.decorationFor(LibEntryKind.top, argb);
     final fg = Color(LibraryBadge.textColorOn(argb));
     return Align(
