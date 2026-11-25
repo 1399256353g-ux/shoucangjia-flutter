@@ -64,12 +64,20 @@ Map<String, dynamic> statsAuthors(dynamic raw) {
 /// 用饱和加法（[addSat]）：服务端把某个作者的计数写成 int 上限时，
 /// 两个库条目相加就能让总播放量变成负数（实测 `max + max = -2`），
 /// 排行榜把该库排到最后并显示负值。
+///
+/// **负值不参与累加**：服务端下发 `p: -100` 这类条目时（计数器重置出错、
+/// 占位值），旧实现直接相加，一个 `-100` 就能把整库的总播放量拉成
+/// 负数（实测 `{'p': -100} + {'p': 50}` → `-50`），排行榜那行读作
+/// 「-50 播放」，看起来像「播放量被扣掉了」。计数单价不存在负数，
+/// 负条目按 0 计，与 `json_num.sumSat` / `AuthorGrade.score` 同一条口径。
 ({int plays, int drops}) libraryTotals(Map<String, dynamic> stats) {
   var plays = 0, drops = 0;
   for (final v in stats.values) {
     if (v is! Map) continue;
-    plays = addSat(plays, _num(v['p']));
-    drops = addSat(drops, _num(v['dr']));
+    final p = _num(v['p']);
+    final d = _num(v['dr']);
+    if (p > 0) plays = addSat(plays, p);
+    if (d > 0) drops = addSat(drops, d);
   }
   return (plays: plays, drops: drops);
 }

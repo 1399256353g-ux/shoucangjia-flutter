@@ -48,7 +48,13 @@ class WorkPlay {
   bool get isImage => kind == 'p';
 
   WorkPlay bump({String? thumb, String? kind, int? at}) => WorkPlay(
-        count: count + 1,
+        // 饱和自增：`9223372036854775807 + 1` 在 int64 上回绕成
+        // **-9223372036854775808**（实测）。本地播放量是可以被改的
+        // （prefs 是普通 JSON），一条写成 int 上限的记录再播一次就会变成
+        // 负值：`pruneWorkPlays` 按 count 降序时它沉到最后，`topPlayed`
+        // 永远选不到它，自动封面偷偷退回默认图——而界面不报任何错。
+        // 计数的正确上限就是「不再增长」，用 addSat 停在 int 上限。
+        count: addSat(count < 0 ? 0 : count, 1),
         thumb: (thumb ?? '').trim().isNotEmpty ? thumb!.trim() : this.thumb,
         kind: (kind ?? '').trim().isNotEmpty ? kind!.trim() : this.kind,
         at: (at != null && at > 0) ? at : this.at,

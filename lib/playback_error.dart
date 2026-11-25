@@ -91,6 +91,141 @@ PlaybackFailure withTransportStatus(PlaybackFailure f, int? status) {
   return exact;
 }
 
+/// 媒体扩展名：判断「这一段词是不是文件名的末尾」。
+///
+/// 不用「第一个空格」当终点，就是因为媒体文件名里带空格是常态；也不用
+/// 「整行都是路径」——那会把冒号后面的错误措辞（`Protocol not supported`）
+/// 一起吃掉，导致失败原因丢失。
+const List<String> _kRedactExts = <String>[
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic', 'avif',
+  'mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'ts',
+  'm4a', 'mp3', 'aac', 'flac', 'wav',
+];
+
+bool _looksLikeMediaFile(String token) {
+  final base = token.split(RegExp(r'[?&#]')).first.toLowerCase();
+  for (final e in _kRedactExts) {
+    if (base.endsWith('.$e')) return true;
+  }
+  return false;
+}
+
+bool _redactBoundaryOk(String s, int at) {
+  if (at == 0) return true;
+  final p = s[at - 1];
+  return p == ' ' ||
+      p == '\t' ||
+      p == '"' ||
+      p == "'" ||
+      p == '(' ||
+      p == '[' ||
+      p == '=';
+}
+
+/// 把一处地址/路径整段换成 `<path>`，返回消耗到的下标。
+///
+/// 起始标记已经在标记串之后（`http(s)://` 或 `/media/`、`/api/`）。终点候选按
+/// 优先级：带媒体扩展名的词 → 闭合引号 / 换行 / `: ` 详情分隔符 → 串尾。
+///
+/// 这样 `open /media/我的 作品库/文件名 带空格.jpg failed` 会吃到 `.jpg` 为止
+/// （`failed` 是错误措辞，保留），而 `cannot open "/media/lib/我的 作品.mp4"`
+/// 会在闭合引号处停下并保留引号。
+int _redactOneSpan(String s, int start) {
+  var end = s.length;
+  var closing = '';
+  for (var k = start; k < s.length; k++) {
+    final c = s[k];
+    if (c == '"' || c == "'") {
+      end = k;
+      closing = c;
+      break;
+    }
+    if (c == '\n' || c == '\r') {
+      end = k;
+      break;
+    }
+    if (c == ':' && k + 1 < s.length && s[k + 1] == ' ') {
+      end = k;
+      break;
+    }
+  }
+  // 在区间里找「带媒体扩展名」的词作为真实终点。
+  var stop = -1;
+  var k = start;
+  while (k < end) {
+    while (k < end && s[k] == ' ') {
+      k++;
+    }
+    if (k >= end) break;
+    final t = RegExp(r'[^ \t]+').matchAsPrefix(s.substring(0, end), k);
+    if (t == null) break;
+    if (_looksLikeMediaFile(t.group(0)!)) {
+      stop = t.end;
+      break;
+    }
+    k = t.end;
+  }
+  // 找不到扩展名：非 ASCII/百分号编码说明这一段就是文件名，整段吃掉；
+  // 否则只吃到第一个空白，留出后面的错误措辞。
+  if (stop < 0) {
+    final region = s.substring(start, end);
+    final looksPathy =
+        region.contains('%') || region.codeUnits.any((u) => u > 0x7f);
+    if (looksPathy) {
+      stop = end;
+    } else {
+      final t = RegExp(r'\S+').matchAsPrefix(s, start);
+      stop = t == null ? start : t.end;
+    }
+  }
+  if (closing.isNotEmpty) stop = end;
+  return stop;
+}
+
+/// 把所有 `http(s)://…` 与 `/media/…`、`/api/…` 换成 `<path>`。
+///
+/// **不能写成「`/media/` 后面的非空白字符」这种朴素正则**：那会匹配到
+/// **第一个空格**就停，而媒体路径里带空格是常态（`/media/库/我的 作品.mp4`、
+/// `stream error at /media/lib-1/a b c.webm`）。旧实现只吃掉第一个空格之前
+/// 那一段，剩下的 `作品.mp4` / `b c.webm` 原样留在日志里——文件名属于内容，
+/// 正是 AGENTS.md 明令禁止进日志的东西，而截断后的日志看起来「已经脱敏」。
+///
+/// 起始位置必须是边界（行首、空白、引号、括号、`=`）：`x/media/not-a-path`
+/// 里的 `/media/` 只是某个词的一部分，不是路径起点，不动它。
+String _redactMediaPaths(String s) {
+  final marker = RegExp(r'https?://|/(?:media|api)/');
+  final out = StringBuffer();
+  var i = 0;
+  while (i < s.length) {
+    final m = marker.firstMatch(s.substring(i));
+    if (m == null) {
+      out.write(s.substring(i));
+      break;
+    }
+    final at = i + m.start;
+    final after = i + m.end;
+    if (!_redactBoundaryOk(s, at)) {
+      // 不是路径起点（粘在前一个词里）：原样跳过这段标记，不误删内容。
+      out.write(s.substring(i, after));
+      i = after;
+      continue;
+    }
+    out.write(s.substring(i, at));
+    var closing = '';
+    final stop = _redactOneSpan(s, after);
+    if (stop < s.length && (s[stop] == '"' || s[stop] == "'")) {
+      closing = s[stop];
+    }
+    out.write('<path>');
+    i = stop;
+    if (closing.isNotEmpty) {
+      out.write(closing);
+      i = stop + 1;
+    }
+  }
+  return out.toString();
+}
+
 /// G20：单条作品数据异常，重试无意义，直接提示上/下滑切换。
 const PlaybackFailure workDataFailure = PlaybackFailure(
     PlaybackFailureKind.data,
@@ -195,13 +330,12 @@ PlaybackFailure classifyPlaybackError(Object? error) {
 /// `decoder` / `unsupported` / `timeout` 这类非内容措辞必须留下，
 /// 否则失败只能记成 `failure:network` 三个字，无法定位。
 ///
-/// 规则：剥 `http(s)://…` → 剥 `/media/…`、`/api/…`（含查询串）→
+/// 规则：把 `http(s)://…` 与 `/media/…`、`/api/…` 整段换成 `<path>` →
 /// 空白折叠 → 截断 160 字符。空输入返回 `no-detail`。
 String sanitizePlaybackErrorForLog(Object? raw) {
   final s0 = '${raw ?? ''}'.trim();
   if (s0.isEmpty) return 'no-detail';
-  var s = s0.replaceAll(RegExp(r'https?://\S+'), '<url>');
-  s = s.replaceAll(RegExp(r'/(?:media|api)/\S*'), '<path>');
+  var s = _redactMediaPaths(s0);
   s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (s.isEmpty) return 'no-detail';
   // 截断走 text_clip：播放器错误原文可能含 emoji / 增补平面字符，

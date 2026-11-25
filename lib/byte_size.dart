@@ -10,6 +10,8 @@
 /// 负数与 0 一律 `0 B`，四级固定 B / KB(1 位) / MB(1 位) / GB(2 位)。
 library;
 
+import 'dart:math' as math;
+
 /// 人类可读字节：`0 B` / `512 B` / `2.0 KB` / `5.0 MB` / `3.00 GB` / `1.50 TB`。
 ///
 /// 加上 TB 档不是为了好看：服务端把 `bytes` 写成 int 上限（坏数据占位值）
@@ -19,11 +21,33 @@ library;
 String formatBytes(int n) {
   if (n <= 0) return '0 B';
   if (n < 1024) return '$n B';
+  // 每一档先看「**按下限精度截断**后是否还小于 1024」，不是看原始比值。
+  //
+  // 旧写法 `final kb = n / 1024; if (kb < 1024) …` 的边界是错的：
+  // 1048575 字节（1 MB − 1）算出 `kb = 1023.999…`，确实 < 1024，于是走 KB
+  // 档，而 `toStringAsFixed(1)` 会**四舍五入**成 **`1024.0 KB`**（实测）。
+  // 1024 KB 就是 1 MB，这行字读起来是一个不可能存在的读数。MB→GB、
+  // GB→TB 同理（`1073741823` → `1024.0 MB`、`1099511627775` → `1024.00 GB`），
+  // 所以每一档的末尾都有一个窗口会跨档显示。
+  //
+  // 修法用**截断**而不是四舍五入：与 `unit_library.formatCount` 同一条口径
+  // （「宁可少报也不能虚假跨档」）。1048575 → `1023.9 KB`，是一个诚实的
+  // 读数；显示精度本身只有 0.1 KB，说成 `1024.0 KB` 就是多报了。
   final kb = n / 1024;
-  if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+  if (_cutValue(kb, 1) < 1024) return '${_truncated(kb, 1)} KB';
   final mb = kb / 1024;
-  if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
+  if (_cutValue(mb, 1) < 1024) return '${_truncated(mb, 1)} MB';
   final gb = mb / 1024;
-  if (gb < 1024) return '${gb.toStringAsFixed(2)} GB';
-  return '${(gb / 1024).toStringAsFixed(2)} TB';
+  if (_cutValue(gb, 2) < 1024) return '${_truncated(gb, 2)} GB';
+  return '${_truncated(gb / 1024, 2)} TB';
+}
+
+/// 保留 [digits] 位小数的**截断值**（不进位，转定点文本）。
+String _truncated(double v, int digits) =>
+    _cutValue(v, digits).toStringAsFixed(digits);
+
+/// 截断到 [digits] 位小数的数值（比较跨档用）。
+double _cutValue(double v, int digits) {
+  final scale = math.pow(10, digits).toDouble();
+  return (v * scale).floorToDouble() / scale;
 }
