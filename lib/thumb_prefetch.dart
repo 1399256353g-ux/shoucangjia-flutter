@@ -13,6 +13,7 @@ import 'dart:collection';
 import 'package:flutter/widgets.dart';
 
 import 'decode_plan.dart';
+import 'grid_geometry.dart';
 import 'perf_diagnostics.dart';
 import 'time_labels.dart';
 
@@ -36,11 +37,26 @@ int firstScreenThumbCount({
   final usableW = viewportWidth - padding * 2;
   final usableH = viewportHeight - padding * 2;
   if (usableW <= 0 || usableH <= 0) return 0;
-  final tileStride = maxCrossAxisExtent + crossSpacing;
-  var cols = ((usableW + crossSpacing) / tileStride).ceil();
-  if (cols < 1) cols = 1;
-  final tileW = (usableW - (cols - 1) * crossSpacing) / cols;
-  final tileH = tileW / (aspectRatio <= 0 ? 0.72 : aspectRatio);
+  // 列数/列宽与 Flutter delegate 同一规则（grid_geometry 唯一实现）。
+  // 旧写法 `ceil((usableW + crossSpacing) / stride)` 分子多加了一个间距，
+  // 宽 400、max 150、间距 8 时算出 3 列（正确也是 3），但宽 376 左右会多算一列
+  // ——首屏会多预热一整列看不见的封面。
+  final cols = gridColumnCount(
+    crossAxisExtent: usableW,
+    maxCrossAxisExtent: maxCrossAxisExtent,
+    spacing: crossSpacing,
+  );
+  final tileW = gridTileWidth(
+    crossAxisExtent: usableW,
+    columns: cols,
+    spacing: crossSpacing,
+  );
+  if (tileW <= 0) return 0;
+  final tileH = gridTileHeight(
+    tileWidth: tileW,
+    aspectRatio: aspectRatio <= 0 ? 0.72 : aspectRatio,
+  );
+  if (tileH <= 0) return 0;
   final rowStride = tileH + mainSpacing;
   var rows = ((usableH * (screens < 1 ? 1 : screens)) / rowStride).ceil();
   if (rows < 1) rows = 1;

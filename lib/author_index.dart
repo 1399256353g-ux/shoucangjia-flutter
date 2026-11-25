@@ -14,6 +14,8 @@ library;
 
 import 'package:pinyin/pinyin.dart';
 
+import 'grid_geometry.dart';
+
 /// 名称 → 索引字母（`A`–`Z` 或 `#`）。
 String authorIndexLetter(String name) {
   final s = name.trim().replaceFirst(RegExp(r'^@+'), '');
@@ -161,14 +163,16 @@ const double kAuthorIndexBarWidth = 28;
 const double kAuthorIndexBarGap = 6;
 
 /// 作者网格右侧内边距：[hasIndexBar] 时给字母条让位。
-double authorGridPadRight({required bool hasIndexBar}) =>
-    hasIndexBar ? kAuthorIndexBarWidth + kAuthorIndexBarGap : kAuthorGridPadRight;
+double authorGridPadRight({required bool hasIndexBar}) => hasIndexBar
+    ? kAuthorIndexBarWidth + kAuthorIndexBarGap
+    : kAuthorGridPadRight;
 
 /// 作者网格中第 [index] 项对应的滚动偏移。
 ///
-/// 与 `SliverGridDelegateWithMaxCrossAxisExtent` 的算法一致：
-/// 列数 = ceil((可用宽 + 间距) / (最大列宽 + 间距))，
-/// 列宽 = (可用宽 - 间距 × (列数-1)) / 列数，行高 = 列宽 / 宽高比。
+/// 列数/列宽/行高全部走 `grid_geometry.dart`（与 Flutter delegate 同一规则：
+/// `ceil(可用宽 / (最大列宽 + 间距))`）。此前这里写的是
+/// `ceil((可用宽 + 间距) / (最大列宽 + 间距))`——分子多算了一个间距，
+/// 宽 400 时算出 3 列，网格实际只排 2 列（见 grid_geometry 文件头）。
 /// 结果夹在 [0, maxScrollExtent]，避免索引条把列表拖到超界再回弹。
 ///
 /// **左右内边距必须分别传入**：字母索引条只占右边缘，网格的右内边距因此
@@ -192,11 +196,22 @@ double authorGridOffsetForIndex({
   final avail = viewportWidth - left - right;
   if (avail <= 0 || maxCrossAxisExtent <= 0 || aspectRatio <= 0) return 0;
   final gap = spacing < 0 ? 0.0 : spacing;
-  var columns = ((avail + gap) / (maxCrossAxisExtent + gap)).ceil();
-  if (columns < 1) columns = 1;
-  final childWidth = (avail - gap * (columns - 1)) / columns;
+  final columns = gridColumnCount(
+    crossAxisExtent: avail,
+    maxCrossAxisExtent: maxCrossAxisExtent,
+    spacing: gap,
+  );
+  final childWidth = gridTileWidth(
+    crossAxisExtent: avail,
+    columns: columns,
+    spacing: gap,
+  );
   if (childWidth <= 0) return 0;
-  final childHeight = childWidth / aspectRatio;
+  final childHeight = gridTileHeight(
+    tileWidth: childWidth,
+    aspectRatio: aspectRatio,
+  );
+  if (childHeight <= 0) return 0;
   final row = index ~/ columns;
   final offset = left + row * (childHeight + gap);
   if (maxScrollExtent > 0 && offset > maxScrollExtent) {

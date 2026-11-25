@@ -37,9 +37,16 @@ class LibraryRankRow {
   int score(String metric) => metric == 'drop' ? drops : plays;
 }
 
+/// 库在线判定：`baseOk` / `indexOk` 任一为假即离线。
+///
+/// 不能写 `== false`：服务端把这两个字段发成 `0` / `"false"` / `"no"` 时
+/// 裸比较一个都不认，离线库会被当成在线去请求 author_stats，排行榜里显示
+/// 0 播放（看起来像「数据丢了」）。三态解析只有 `json_num.boolOrNull` 一份。
 bool libraryOnline(Map<String, dynamic> lib) {
-  if (lib['baseOk'] == false) return false;
-  if (lib['indexOk'] == false) return false;
+  final base = boolOrNull(lib['baseOk']);
+  if (base != null && !base) return false;
+  final index = boolOrNull(lib['indexOk']);
+  if (index != null && !index) return false;
   return true;
 }
 

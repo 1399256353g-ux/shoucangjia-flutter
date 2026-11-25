@@ -55,8 +55,8 @@ void main() {
     });
 
     test('索引条只含存在的分组，顺序固定', () {
-      expect(authorIndexLetters(['bob', 'Alice', '海安', 'Bob']),
-          ['A', 'B', 'H']);
+      expect(
+          authorIndexLetters(['bob', 'Alice', '海安', 'Bob']), ['A', 'B', 'H']);
       expect(authorIndexLetters(['海安']), ['H']);
       expect(authorIndexLetters([]), isEmpty);
     });
@@ -96,12 +96,14 @@ void main() {
           0);
     });
 
-    test('按列数折算行高（宽 400 → 3 列）', () {
-      // avail = 400-24 = 376; columns = ceil((376+10)/190) = 3
-      // childWidth = (376-20)/3 = 118.667; height ≈ 137.98; row = 3 ~/ 3 = 1
+    test('按列数折算行高（宽 400 → 2 列，与 Flutter delegate 一致）', () {
+      // avail = 400-24 = 376; columns = ceil(376/190) = 2（旧写法
+      // ceil((376+10)/190) = 3 多算一列，真机上整行错位）
+      // childWidth = (376-10)/2 = 183; height = 183/0.86 ≈ 212.79
+      // index 3 → row 1 → offset = 12 + (212.79 + 10) = 234.79
       final off = authorGridOffsetForIndex(
           index: 3, viewportWidth: 400, maxScrollExtent: 9999);
-      expect(off, closeTo(159.984, 0.01));
+      expect(off, closeTo(234.791, 0.01));
     });
 
     test('夹在 maxScrollExtent 内', () {
@@ -132,29 +134,33 @@ void main() {
       expect(off, closeTo(222, 0.01));
     });
 
-    test('没有索引条时两侧 12 → 宽 400 排 3 列', () {
+    test('没有索引条时两侧 12 → 宽 400 排 2 列', () {
       final off = authorGridOffsetForIndex(
         index: 3,
         viewportWidth: 400,
         maxScrollExtent: 9999,
       );
-      expect(off, closeTo(159.984, 0.01));
+      expect(off, closeTo(234.791, 0.01));
     });
 
-    test('两侧不同内边距时列数按实际可用宽度算', () {
-      // 同样的下标，右侧多让 22dp 会把该条目推到更靠下的行。
-      final narrow = authorGridOffsetForIndex(
-        index: 2,
-        viewportWidth: 400,
-        maxScrollExtent: 99999,
-        paddingRight: 34,
-      );
-      final wide = authorGridOffsetForIndex(
-        index: 2,
-        viewportWidth: 400,
+    test('两侧不同内边距会改变列数：宽 600 时 4 列 vs 3 列', () {
+      // 可用宽 600-12-12=576 → ceil(576/190)=4 列（第 3 项在第 0 行）；
+      // 让出索引条 600-12-34=554 → ceil(554/190)=3 列（第 3 项落到第 1 行）。
+      // 这条钉的是「列数按实际可用宽算」，不再用「右侧让位必更靠下」的
+      // 旧假设——宽 400 时两者都是 2 列，行号相同，只有行高不同。
+      final noBar = authorGridOffsetForIndex(
+        index: 3,
+        viewportWidth: 600,
         maxScrollExtent: 99999,
       );
-      expect(narrow, greaterThan(wide));
+      final withBar = authorGridOffsetForIndex(
+        index: 3,
+        viewportWidth: 600,
+        maxScrollExtent: 99999,
+        paddingRight: authorGridPadRight(hasIndexBar: true),
+      );
+      expect(noBar, 12); // 4 列：第 3 项仍在首行
+      expect(withBar, greaterThan(noBar)); // 3 列：第 3 项在第 1 行
     });
 
     test('authorGridPadRight：索引条 28 + 间隙 6，否则 12', () {

@@ -149,8 +149,11 @@ class AppSettings {
     if (j['preloadMemory'] != null) {
       preloadMemoryMb = clampPreloadMemoryMb(intOf(j['preloadMemory'], preloadMemoryMb));
     }
-    final si = j['stripIndex'];
-    if (si is bool) stripLibIndex = si;
+    // 布尔字段同样走 json_num 的三态解析：落盘里写成 `"false"` / `0`
+    // 时裸 `is bool` 判定会静默保留默认值（true），用户关掉的「省略序号」
+    // 重启后又自己打开。`boolOrNull` 无法判断（字段缺失/写坏）才留默认。
+    final si = boolOrNull(j['stripIndex']);
+    if (si != null) stripLibIndex = si;
     final vf = j['videoFit'];
     if (vf is String) {
       for (final m in VideoFit.values) {

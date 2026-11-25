@@ -31,7 +31,8 @@ void main() {
     });
 
     test('高度刚好等于预留高度也不抛', () {
-      expect(() => recommendVisibleCount(const Size(360, 110)), returnsNormally);
+      expect(
+          () => recommendVisibleCount(const Size(360, 110)), returnsNormally);
       expect(recommendVisibleCount(const Size(360, 110)), 40);
     });
 
@@ -52,8 +53,8 @@ void main() {
       // 1e30 经 num.toInt() 落在 int 上限，FromMillisecondsSinceEpoch 抛
       // RangeError: 9223372036854775807。
       final huge = 1e30.toInt();
-      expect(() => DateTime.fromMillisecondsSinceEpoch(huge),
-          throwsRangeError, reason: '缺口是真的：坏值会抛');
+      expect(() => DateTime.fromMillisecondsSinceEpoch(huge), throwsRangeError,
+          reason: '缺口是真的：坏值会抛');
       expect(isValidEpochMs(huge), isFalse);
       expect(dateTimeOfMs(huge), isNull);
       expect(monthDayTimeOfMs(huge), '—');
@@ -153,8 +154,7 @@ void main() {
               .single
               .enabled,
           isTrue);
-      expect(
-          decodeServers('[{"id":"e","base":"http://e:1"}]').single.enabled,
+      expect(decodeServers('[{"id":"e","base":"http://e:1"}]').single.enabled,
           isTrue);
     });
 
@@ -205,7 +205,11 @@ void main() {
       expect(statsAuthors({'authors': 3}), isEmpty);
       expect(statsAuthors({'authors': null}), isEmpty);
       expect(statsAuthors('oops'), isEmpty);
-      expect(statsAuthors({'authors': {'a': 1}}), {'a': 1});
+      expect(
+          statsAuthors({
+            'authors': {'a': 1}
+          }),
+          {'a': 1});
     });
   });
 
@@ -258,6 +262,26 @@ void main() {
         }
       }
       expect(offenders, isEmpty, reason: '布尔字段又各写一遍 == true：$offenders');
+    });
+
+    test('布尔字段不再写 == false（"false"/0 会被当成在线）', () {
+      final offenders = <String>[];
+      for (final f in Directory('lib')
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.dart'))) {
+        if (f.path.endsWith('json_num.dart') ||
+            f.path.endsWith('http_json.dart')) {
+          continue;
+        }
+        for (final line in codeOf(f.path).split('\n')) {
+          if (!RegExp(r"==\s*false").hasMatch(line)) continue;
+          if (!line.contains("['")) continue;
+          if (line.contains("'ok'")) continue;
+          offenders.add('${f.path}: ${line.trim()}');
+        }
+      }
+      expect(offenders, isEmpty, reason: '又出现 == false 的布尔判定：$offenders');
     });
 
     test('时间戳构造只有 time_labels 的安全入口', () {

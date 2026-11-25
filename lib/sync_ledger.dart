@@ -212,13 +212,27 @@ SyncLog parseSyncLog(dynamic raw) {
 String syncTimeLabel(int ms) => monthDayTimeOfMs(ms);
 
 /// `820ms` / `2.4s` / `1m 05s`。
+///
+/// **先归一到秒再拆分**：此前先 `~/60` 取整分、再对余数 `round()`，
+/// 119600ms（119.6s）得出 `1m 60s`。和第十二批修掉的「65:03」是同一个缺口
+/// （先截断再拆分），只是单位不同。秒级分支（<60s）保留原行为：<10s 一位
+/// 小数，10s 以上向下取整——59.9s 显示 `59s`，不写成一个假的 `60s`。
 String syncDurationLabel(int ms) {
   if (ms <= 0) return '—';
   if (ms < 1000) return '${ms}ms';
-  final sec = ms / 1000.0;
-  if (sec < 60) return '${sec.toStringAsFixed(sec < 10 ? 1 : 0)}s';
-  final m = sec ~/ 60;
-  final s = (sec % 60).round();
+  // 秒级展示按**原始毫秒**判断（59.9s 就是 59.9s，不因为四舍五入成 60
+  // 就跳进分钟分支）；进入分钟分支后才四舍五入到秒，余数不会再出现 60。
+  if (ms < 60000) {
+    final sec = ms / 1000.0;
+    // <10s 保留一位小数（2.4s）；10s 以上取整**向下**——59.9s 不能显示成
+    // `60s`（读起来就是一分钟，与 1m 00s 撞车）。
+    return sec < 10
+        ? '${sec.toStringAsFixed(1)}s'
+        : '${ms ~/ 1000}s';
+  }
+  final totalSec = (ms / 1000).round();
+  final m = totalSec ~/ 60;
+  final s = totalSec % 60;
   return '${m}m ${s.toString().padLeft(2, '0')}s';
 }
 
@@ -234,7 +248,8 @@ Uri syncLogsUri(String base, {String lib = '', int limit = 20}) {
 Uri syncRetryUri(String base) => Uri.parse(joinApiUrl(base, '/api/sync/retry'));
 
 /// `POST /api/sync/retry` 的请求体：{runId, ids}。
-Map<String, dynamic> syncRetryBody({String runId = '', required List<String> ids}) {
+Map<String, dynamic> syncRetryBody(
+    {String runId = '', required List<String> ids}) {
   final clean = <String>[];
   final seen = <String>{};
   for (final id in ids) {
