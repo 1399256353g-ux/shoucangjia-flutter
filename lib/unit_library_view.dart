@@ -48,6 +48,10 @@ const double kLibCardRadius = 12;
 const EdgeInsets kLibGridPadding = EdgeInsets.symmetric(horizontal: 12);
 const double kLibGridSpacing = 10;
 
+/// 卡片底部在线/离线圆点色（owner 2026-11-25：绿点在线、红点离线，简约）。
+const Color kCardOnlineColor = Color(0xFF4CAF50);
+const Color kCardOfflineColor = Color(0xFFE53935);
+
 /// 库卡片底部信息层的统一渐变。
 const LinearGradient kLibCardGradient = LinearGradient(
   begin: Alignment.topCenter,
@@ -105,6 +109,10 @@ class LibCardInfo extends StatelessWidget {
   final String server;
   final bool dense;
 
+  /// owner 2026-11-25：连接状态改成绿/红圆点，不再写字。
+  /// null = 不显示圆点（非媒体库卡片）。
+  final bool? online;
+
   /// 所属单元库 id（`rel` 或 `node:rel`）；给出时标题追加该库 emoji 后缀。
   /// 与作者词条共用同一套 emoji 规则，保证「词条看到什么，卡片标题就是什么」。
   final String unitId;
@@ -117,6 +125,7 @@ class LibCardInfo extends StatelessWidget {
     this.server = '',
     this.dense = false,
     this.unitId = '',
+    this.online,
   });
 
   @override
@@ -151,11 +160,28 @@ class LibCardInfo extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 10.5, color: Colors.white70)),
-          if (server.isNotEmpty)
-            Text(server,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 10, color: Colors.white54)),
+          if (server.isNotEmpty || online != null)
+            Row(children: [
+              // owner 2026-11-25：在线绿点 / 离线红点，简约不占字。
+              if (online != null) ...[
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: online! ? kCardOnlineColor : kCardOfflineColor,
+                  ),
+                ),
+                const SizedBox(width: 5),
+              ],
+              Expanded(
+                child: Text(server,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(fontSize: 10, color: Colors.white54)),
+              ),
+            ]),
         ],
       ),
     );
@@ -178,6 +204,24 @@ class LibCardInfo extends StatelessWidget {
     }
   }
   return best;
+}
+
+/// 从服务端 base 里取出可读的主机标注（`192.168.2.4:8090`）。
+///
+/// owner 2026-11-25：「媒体库卡片最下面补上 ip 地址标注，在线标识搞个
+/// 绿色原点就可以了，不在线就变红色就行，简约一点」。
+/// 卡片底部不再写「已连接」这类文字，只留一个圆点 + 地址。
+/// 解析失败时返回原串（不清空，至少能看到配了什么）。
+String hostLabelOf(String serverBase) {
+  final raw = serverBase.trim();
+  if (raw.isEmpty) return '';
+  try {
+    final u = Uri.parse(raw.contains('://') ? raw : 'http://$raw');
+    if (u.host.isEmpty) return raw;
+    return u.hasPort ? '${u.host}:${u.port}' : u.host;
+  } catch (_) {
+    return raw;
+  }
 }
 
 /// 单元库封面 URL（优先级高 → 低）：
@@ -854,7 +898,7 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
   Widget _buildCard(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final unit = widget.unit;
-    final server = unit.node.serverLabel;
+    // owner 2026-11-25：卡片底部改为「圆点 + IP 地址」，不再用 serverLabel。
     final showCrawler =
         widget.onConfigure != null && UnitLibraryCard.canConfigure(unit);
     return Material(
@@ -912,9 +956,14 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                 unitId: unit.id,
                 stats: '${formatCount(unit.authors)} 作者 · '
                     '${formatCount(unit.works)} 作品',
-                server: [widget.connectionStatus, server]
-                    .where((e) => e.isNotEmpty)
-                    .join(' · '),
+                // owner 2026-11-25：底部只留「绿/红圆点 + IP 地址」，
+                // 不再写「已连接」这类文字（简约）。
+                server: hostLabelOf(unit.node.serverBase),
+                online: widget.topCard
+                    ? (widget.connectionStatus.isEmpty
+                        ? null
+                        : widget.connectionStatus == '已连接')
+                    : null,
               ),
             ),
             // P4：左上角种类角标（形状尺寸统一，仅图案不同）。

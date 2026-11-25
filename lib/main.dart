@@ -4506,7 +4506,10 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
                   ),
                 ),
                 child: Column(children: [
-                  LibCornerBadge(kind: kind),
+                  // owner 2026-11-25：候选格必须预览**自己那个图案**。
+                  // 原来这里没传 pattern，八格全都画当前选中图案，
+                  // 看上去「图标都是一样的」。
+                  LibCornerBadge(kind: kind, pattern: i),
                   const SizedBox(height: 4),
                   Text(kCornerPatternNames[i],
                       style:

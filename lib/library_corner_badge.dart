@@ -188,7 +188,15 @@ class LibraryCornerBadge {
 class LibCornerBadge extends StatelessWidget {
   final LibBadgeKind kind;
 
-  const LibCornerBadge({super.key, required this.kind});
+  /// 图案覆盖：非空时画这个图案，而不是当前为该层级选中的那个。
+  ///
+  /// owner 2026-11-25：「角标自定义设置里的图标都是一样的」。
+  /// 设置页每个候选格子原来都渲染成 `LibCornerBadge(kind: kind)`，
+  /// 也就是永远画「当前选中图案」，八个候选自然长得一模一样。
+  /// 传 `pattern` 才能在候选格里预览各自的图案。
+  final int? pattern;
+
+  const LibCornerBadge({super.key, required this.kind, this.pattern});
 
   @override
   Widget build(BuildContext context) {
@@ -202,8 +210,13 @@ class LibCornerBadge extends StatelessWidget {
   Widget _paint() {
     final argb = LibraryCornerBadge.colorFor(kind);
     final fg = foregroundArgbOn(argb);
+    final shownPattern = pattern ?? LibraryCornerBadge.patternFor(kind);
     return Container(
-      key: ValueKey('lib-corner-badge-${kind.name}'),
+      // 未指定 pattern 时键保持原样（既有调用点/测试依赖这个键）；
+      // 设置页的候选预览才带上图案编号，避免多格同键。
+      key: ValueKey(pattern == null
+          ? 'lib-corner-badge-${kind.name}'
+          : 'lib-corner-badge-${kind.name}-$shownPattern'),
       width: kCornerBadgeSize,
       height: kCornerBadgeSize,
       decoration: BoxDecoration(
@@ -216,7 +229,7 @@ class LibCornerBadge extends StatelessWidget {
       padding: const EdgeInsets.all(kCornerBadgePadding),
       child: CustomPaint(
         painter: _CornerGlyphPainter(
-          pattern: LibraryCornerBadge.patternFor(kind),
+          pattern: shownPattern,
           color: Color(fg),
         ),
       ),

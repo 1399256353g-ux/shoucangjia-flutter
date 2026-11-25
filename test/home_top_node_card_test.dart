@@ -127,18 +127,49 @@ void main() {
     expect(find.byKey(ValueKey('unit-top-entry-$id')), findsNothing);
   });
 
-  testWidgets('顶级单元库卡片显示连接状态', (t) async {
-    await t.pumpWidget(host(UnitLibraryHomeView(
-      tree: tree,
-      stars: const {},
-      onOpenUnit: (_) {},
-      onToggleUnitStar: (_) {},
-      onTapBasic: (_) {},
-      onOpenStars: () {},
-      topCoverOf: (_) => '',
-      statusOf: (_) => '已断连',
-    )));
+  // owner 2026-11-25：「在线标识搞个绿色原点就可以了，不在线就变红色就行，
+  // 简约一点」。卡片底部不再写「已连接/已断连」文字，改成圆点 + IP 地址。
+  testWidgets('顶级单元库卡片用红/绿圆点表示连接状态，不写文字', (t) async {
+    Future<void> pumpWith(String status) async {
+      await t.pumpWidget(host(UnitLibraryHomeView(
+        tree: tree,
+        stars: const {},
+        onOpenUnit: (_) {},
+        onToggleUnitStar: (_) {},
+        onTapBasic: (_) {},
+        onOpenStars: () {},
+        topCoverOf: (_) => '',
+        statusOf: (_) => status,
+      )));
+      await t.pumpAndSettle();
+    }
 
-    expect(find.text('已断连'), findsOneWidget);
+    // 断连 → 红点
+    await pumpWith('已断连');
+    expect(find.text('已断连'), findsNothing, reason: '不应再写文字');
+    expect(_dotColors(t, kCardOfflineColor), isTrue, reason: '断连应为红点');
+
+    // 已连接 → 绿点
+    await pumpWith('已连接');
+    expect(find.text('已连接'), findsNothing, reason: '不应再写文字');
+    expect(_dotColors(t, kCardOnlineColor), isTrue, reason: '在线应为绿点');
+
+    // 状态未知 → 不画圆点
+    await pumpWith('');
+    expect(_dotColors(t, kCardOnlineColor), isFalse);
+    expect(_dotColors(t, kCardOfflineColor), isFalse);
   });
+}
+
+/// 卡片底部是否存在指定颜色的状态圆点（7x7 圆形 Container）。
+bool _dotColors(WidgetTester t, Color want) {
+  final hit = find.byWidgetPredicate((w) {
+    if (w is! Container) return false;
+    final d = w.decoration;
+    if (d is! BoxDecoration) return false;
+    if (d.shape != BoxShape.circle) return false;
+    if (d.color != want) return false;
+    return true;
+  });
+  return hit.evaluate().isNotEmpty;
 }
