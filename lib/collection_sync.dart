@@ -102,13 +102,12 @@ List<CollectionSyncInfo> setAllSync(List<CollectionSyncInfo> rows, bool value) {
 }
 
 /// 同步源/单元库匹配用的归一化名：去掉序号、`@`、首尾空白与大小写差异。
-String syncUnitKey(String raw) {
-  var s = raw.trim();
-  while (s.startsWith('@')) {
-    s = s.substring(1).trim();
-  }
-  return stripIndexPrefix(s).toLowerCase();
-}
+///
+/// 折叠、剥 `@`、剥序号三者交错交给 [bareNameOf]（唯一实现）：任何固定顺序
+/// 都有漏项——「先剥 @」漏 `@(1)名字`，「先剥序号」漏 `＠（１）名字`。中文输入法
+/// 打出的全角 `＠` 此前完全剥不掉，同步源「＠作者」与目录「@作者」被当成两个
+/// 不同名字，表现为「有同步记录但匹配不上」。
+String syncUnitKey(String raw) => bareNameOf(raw).toLowerCase();
 
 List<String> _unitKeys(String unitName, String unitRel) {
   final keys = <String>[];

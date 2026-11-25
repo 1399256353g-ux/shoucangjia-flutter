@@ -13,6 +13,7 @@
 import 'http_json.dart';
 import 'rel_path.dart';
 import 'stable_order.dart';
+import 'text_fold.dart';
 
 /// 一个分类节点（对应磁盘上的一个真实目录）。
 class CategoryNode {
@@ -202,21 +203,25 @@ CategoryNode _mapSubtree(CategoryNode n, String from, String to,
 
 /// 按名称筛选：保留命中节点及其祖先；命中节点的整棵子树保留。
 /// 查询为空时原样返回。
+///
+/// 命名匹配走 [foldForMatch]（全角折叠 + 小写）：中文输入法打出的全角字母/
+/// 数字与半角是同一个字，此前分类树用裸 `toLowerCase`，搜「ＡＢ」搜不到「AB」
+/// 节点——同一个搜索框在作者页能命中、在这里不能。只用于比较，节点名不改写。
 CategoryNode filterCategoryTree(CategoryNode node, String query) {
-  final q = query.trim().toLowerCase();
+  final q = foldForMatch(query.trim());
   if (q.isEmpty) return node;
-  final hit = node.name.toLowerCase().contains(q);
+  final hit = foldForMatch(node.name).contains(q);
   final kids = <CategoryNode>[];
   for (final c in node.children) {
     final kept = filterCategoryTree(c, q);
     if (kept.children.isNotEmpty ||
-        kept.name.toLowerCase().contains(q) ||
+        foldForMatch(kept.name).contains(q) ||
         kept.authors.isNotEmpty) {
       kids.add(kept);
     }
   }
   final authors = node.authors
-      .where((a) => a.toLowerCase().contains(q))
+      .where((a) => foldForMatch(a).contains(q))
       .toList(growable: false);
   return CategoryNode(
     name: node.name,
@@ -228,15 +233,15 @@ CategoryNode filterCategoryTree(CategoryNode node, String query) {
 
 /// 筛选后需要展开的节点路径集合（命中节点的祖先）。
 Set<String> expandedForQuery(CategoryNode node, String query) {
-  final q = query.trim().toLowerCase();
+  final q = foldForMatch(query.trim());
   final out = <String>{};
   if (q.isEmpty) return out;
   bool walk(CategoryNode n) {
-    var any = n.name.toLowerCase().contains(q);
+    var any = foldForMatch(n.name).contains(q);
     for (final c in n.children) {
       if (walk(c)) any = true;
     }
-    if (n.authors.any((a) => a.toLowerCase().contains(q))) any = true;
+    if (n.authors.any((a) => foldForMatch(a).contains(q))) any = true;
     if (any && n.rel.isNotEmpty) out.add(n.rel);
     return any;
   }

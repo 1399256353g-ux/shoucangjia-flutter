@@ -195,5 +195,59 @@ void main() {
       final size = tester.getSize(find.byKey(const Key('taskbar-more')));
       expect(size.width, greaterThanOrEqualTo(44));
     });
+
+    // owner 2026-11-25：主页「⋯」点开不显示。根因是 `PopupMenuButton.constraints`
+    // 被 Flutter 转发给 `showMenu(constraints:)`，作用在**菜单**上——整个菜单被压成
+    // 按钮宽度，菜单项文字挤成 20×20。主页 0.9.248 修了，播放页任务栏这里漏了；
+    // 本轮补上，并用真实尺寸钉住，防止约束被「顺手」加回去。
+    testWidgets('菜单项不被按钮宽度压扁（尺寸只能包在按钮外层）', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: TaskbarMoreButton(
+              items: const [TaskbarSlot.settings, TaskbarSlot.sound],
+              labelOf: (s) => s == TaskbarSlot.settings ? '播放设置' : '声音',
+              onSelected: (_) {},
+              width: 44,
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.byKey(const Key('taskbar-more')));
+      await tester.pumpAndSettle();
+
+      final items = find.byType(PopupMenuItem<TaskbarSlot>);
+      expect(items.evaluate().length, 2, reason: '菜单没有弹出');
+      for (var i = 0; i < items.evaluate().length; i++) {
+        final sz = tester.getSize(items.at(i));
+        expect(sz.width, greaterThan(100),
+            reason: '菜单项被压成 ${sz.width}dp，文字会看不见');
+        expect(sz.height, greaterThan(32));
+      }
+      final txt = tester.getSize(find.text('播放设置'));
+      expect(txt.width, greaterThan(30), reason: '文字被挤扁：${txt.width}dp');
+    });
+
+    testWidgets('窄屏时按钮本身仍是 44dp，但菜单不受影响', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: TaskbarMoreButton(
+              items: const [TaskbarSlot.settings],
+              labelOf: (s) => '播放设置',
+              onSelected: (_) {},
+              width: 10,
+            ),
+          ),
+        ),
+      ));
+      expect(tester.getSize(find.byKey(const Key('taskbar-more'))).width,
+          greaterThanOrEqualTo(44));
+      await tester.tap(find.byKey(const Key('taskbar-more')));
+      await tester.pumpAndSettle();
+      expect(
+          tester.getSize(find.byType(PopupMenuItem<TaskbarSlot>)).width,
+          greaterThan(100));
+    });
   });
 }

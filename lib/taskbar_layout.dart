@@ -166,21 +166,30 @@ class TaskbarMoreButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final w = width < 44 ? 44.0 : width;
-    return PopupMenuButton<TaskbarSlot>(
-      key: const Key('taskbar-more'),
-      tooltip: '更多',
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(width: w, height: 48),
-      icon: const Icon(Icons.more_horiz, size: 24, color: Colors.white70),
-      onSelected: onSelected,
-      itemBuilder: (_) => <PopupMenuEntry<TaskbarSlot>>[
-        for (final s in items)
-          PopupMenuItem<TaskbarSlot>(
-            key: ValueKey('taskbar-more-${s.name}'),
-            value: s,
-            child: Text(labelOf(s), overflow: TextOverflow.ellipsis),
-          ),
-      ],
+    // 尺寸包在**按钮外层**，绝不能传给 PopupMenuButton.constraints：
+    // 那个参数会被原样转发给 `showMenu(constraints: ...)`，作用于**菜单**，
+    // 菜单被压成 44dp 宽 → 菜单项文字挤成 20×20（实测
+    // ITEM SIZE Size(44.0, 48.0) / TEXT SIZE Size(20.0, 20.0)）。
+    // 与主页「⋯」0.9.248 修的是同一个坑，播放页这里当时漏了。
+    return SizedBox(
+      width: w,
+      height: 48,
+      child: PopupMenuButton<TaskbarSlot>(
+        key: const Key('taskbar-more'),
+        tooltip: '更多',
+        padding: EdgeInsets.zero,
+        iconSize: 24,
+        icon: const Icon(Icons.more_horiz, size: 24, color: Colors.white70),
+        onSelected: onSelected,
+        itemBuilder: (_) => <PopupMenuEntry<TaskbarSlot>>[
+          for (final s in items)
+            PopupMenuItem<TaskbarSlot>(
+              key: ValueKey('taskbar-more-${s.name}'),
+              value: s,
+              child: Text(labelOf(s), overflow: TextOverflow.ellipsis),
+            ),
+        ],
+      ),
     );
   }
 }

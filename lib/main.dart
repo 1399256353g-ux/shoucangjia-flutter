@@ -58,6 +58,7 @@ import 'author_grid.dart';
 import 'author_grade.dart';
 import 'basic_lib_page.dart';
 import 'folder_structure_page.dart';
+import 'text_fold.dart';
 import 'background_pause.dart';
 import 'collection_sync.dart';
 import 'connection_status.dart';
@@ -15349,11 +15350,17 @@ class _SearchPageState extends State<SearchPage> {
     final base = authorFilter.value.isActive
         ? all.where((e) => _matchesFilter(e, authorFilter.value)).toList()
         : all;
-    final res = kw.isEmpty
+    // 搜索词与被搜字段都走 [foldForMatch]（全角折叠 + 小写）：
+    // 中文输入法下打出的全角字母/数字/括号与半角是同一个字，此前这里用裸
+    // `contains`——搜「ＡＢ」搜不到标题里的「AB」，同一个搜索框在作者页能命中、
+    // 在这里不能。只用于比较，标题与作者名本身不改写。
+    final k = foldForMatch(kw);
+    final res = k.isEmpty
         ? const []
         : base.where((e) {
             final w = e['w'];
-            return '${w['ti']}'.contains(kw) || '${w['a']}'.contains(kw);
+            return foldForMatch('${w['ti']}').contains(k) ||
+                foldForMatch('${w['a']}').contains(k);
           }).toList();
     return Scaffold(
       appBar: AppBar(title: const Text('搜索'), actions: const [HomeAction()]),

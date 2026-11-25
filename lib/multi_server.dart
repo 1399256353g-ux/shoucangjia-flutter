@@ -12,6 +12,7 @@
 import 'dart:convert';
 
 import 'json_num.dart';
+import 'text_fold.dart';
 
 class ServerConn {
   final String id;
@@ -131,26 +132,46 @@ int disconnectedCount(List<ServerConn> all) =>
 String normalizeBase(String raw) {
   final input = raw.trim();
   if (input.isEmpty) return '';
-  final m = RegExp(r'^(https?):/*', caseSensitive: false).firstMatch(input);
+  // 全角折叠只用于**识别**：折叠是严格一对一的（长度不变），所以折叠串上的
+  // 下标可以直接拿去切原串——路径段保持用户输入的原样，不被改写。
+  //
+  // 中文输入法打出的 `nas：8090`（全角冒号）此前会被 `Uri` 编成
+  // `host = nas%EF%BC%9A8090`，是「语法合法、永远连不上」的地址；
+  // `http://nas:８０９０`（全角数字）则直接落到「地址不能为空」。
+  final folded = foldFullWidthAscii(input);
+  final m = RegExp(r'^(https?):/*', caseSensitive: false).firstMatch(folded);
   var scheme = 'http';
-  var rest = input;
+  var start = 0;
   if (m != null) {
     scheme = m.group(1)!.toLowerCase();
-    rest = input.substring(m.end);
-  } else if (input.contains('://')) {
+    start = m.end;
+  } else if (folded.contains('://')) {
     // 非 http(s) 协议（ftp/file/...）：本 App 只说 http(s)，不猜着改。
     return '';
   }
-  rest = rest.replaceAll(RegExp(r'/+$'), '');
-  if (rest.isEmpty) return '';
+  final tailOrig = input.substring(start);
+  final tailFold = folded.substring(start);
+  // 去尾部所有 `/`：在折叠串上定位长度，再按同一长度切原串。
+  var end = tailFold.length;
+  while (end > 0 && tailFold.codeUnitAt(end - 1) == 0x2F) {
+    end--;
+  }
+  if (end == 0) return '';
+  final bodyOrig = tailOrig.substring(0, end);
+  final bodyFold = tailFold.substring(0, end);
   // 主机段里的空白一律去掉再校验：`Uri.tryParse('http:// nas:8090')` **不报错**，
   // 它把空格编进主机名（`host == '%20nas'`），产出一个「语法合法、永远连不上」
   // 的地址。这类输入几乎全是手输/复制时的多余空格（`http:// nas`、
   // `nas :8090`），去掉空白正是用户本意；真正的空格文件名只可能出现在路径里，
   // 而连接地址不带路径。校验仍然在下面照常做（去掉后可能变成空主机）。
-  final cut = rest.indexOf('/');
-  final authority = cut < 0 ? rest : rest.substring(0, cut);
-  final tail = cut < 0 ? '' : rest.substring(cut);
+  final cut = bodyFold.indexOf('/');
+  final authority = cut < 0 ? bodyFold : bodyFold.substring(0, cut);
+  // 分隔符本身也归一成半角 `/`：中文输入法里 `／`（U+FF0F）就是斜杠。
+  // 漏掉这一步时 `http://nas／8090` 会把 `／8090` 当成路径粘在主机上
+  // （host 变成 `nas%EF%BC%8F8090`），`http://nas：8090／path` 更直接
+  // 得到一个解析失败的串 → 用户看到「地址不能为空」。
+  // 分隔符之后的字符仍保留原样：那是路径内容，不是用户写错的分隔符。
+  final tail = cut < 0 ? '' : '/${bodyOrig.substring(cut + 1)}';
   final cleanAuthority = authority.replaceAll(RegExp(r'\s+'), '');
   if (cleanAuthority.isEmpty) return '';
   final url = '$scheme://$cleanAuthority$tail';

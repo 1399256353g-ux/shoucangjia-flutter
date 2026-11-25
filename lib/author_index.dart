@@ -15,10 +15,30 @@ library;
 import 'package:pinyin/pinyin.dart';
 
 import 'grid_geometry.dart';
+import 'text_fold.dart';
 
 /// 名称 → 索引字母（`A`–`Z` 或 `#`）。
+///
+/// 全角字母（`ＡＢ`）先折叠再判断：中文输入法下打出的全角字母是**同一个
+/// 字母**，此前 `codeUnitAt` 拿到 0xFF21 落不进 A–Z，整个作者被归到 `#`
+/// ——在 A 组里永远找不到。折叠只用于分类，返回值恒为半角。
+///
+/// 折叠**必须先于**剥 `@`：全角 `＠张三` 在折叠前不匹配 `^@+`，剥不掉前缀，
+/// 首字符就成了 `＠`（0xFF20），既不是字母也不是汉字 → 归 `#`。同一份目录里
+/// `@张三` 在 Z 组、`＠张三` 在 `#` 组，看起来像「作者漏了」。
+String stripAuthorAt(String s) {
+  var t = foldFullWidthAscii(s.trim());
+  while (t.startsWith('@')) {
+    t = t.substring(1).trim();
+  }
+  return t;
+}
+
+/// 比较键：折叠全角 + 小写（**不改原串**，只用于「是不是同一个名字」）。
+String authorMatchKey(String s) => stripAuthorAt(s).toLowerCase();
+
 String authorIndexLetter(String name) {
-  final s = name.trim().replaceFirst(RegExp(r'^@+'), '');
+  final s = stripAuthorAt(name);
   if (s.isEmpty) return '#';
   final c = s[0];
   final u = c.toUpperCase();
@@ -110,9 +130,11 @@ int compareAuthorNames(String a, String b) {
 
 /// 过滤：本地即时过滤（大小写不敏感，忽略首部 `@`）。
 bool authorMatchesQuery(String name, String query) {
-  final q = query.trim().toLowerCase().replaceFirst(RegExp(r'^@+'), '');
+  // 双侧都做全角折叠：用全角字母/括号搜索半角名称（或反过来）应当命中。
+  // 折叠在剥 `@` 之前（见 [stripAuthorAt]），否则全角 `＠` 前缀剥不掉。
+  final q = authorMatchKey(query);
   if (q.isEmpty) return true;
-  final n = name.trim().toLowerCase().replaceFirst(RegExp(r'^@+'), '');
+  final n = authorMatchKey(name);
   return n.contains(q);
 }
 
