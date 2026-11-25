@@ -16,6 +16,7 @@ import 'api_url.dart';
 import 'media_priority.dart';
 import 'cover_ext.dart';
 import 'media_path.dart';
+import 'text_clip.dart';
 
 // `kCoverExts` / `kCoverImageExts` / `isCoverImagePath` 的唯一定义在
 // `cover_ext.dart`（第十二批收口）；本文件继续 re-export，
@@ -42,7 +43,9 @@ String normalizeCoverVersion(String raw) {
   }
   if (s.isEmpty || s == '.') return '';
   if (!RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(s)) return '';
-  return s.length > 40 ? s.substring(0, 40) : s;
+  // 上面的白名单只放 ASCII，所以这里切到 40 不会切到代理对；
+  // 仍走公共入口，让“按长度截断”在整个 lib/ 里只有一处实现。
+  return clipToUnits(s, 40);
 }
 
 /// 扩展名合法化：不在白名单内一律回落 `jpg`。

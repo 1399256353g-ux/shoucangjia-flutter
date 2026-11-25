@@ -22,6 +22,7 @@ import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'media_path.dart';
+import 'stable_order.dart';
 import 'rel_path.dart';
 import 'top_node.dart';
 
@@ -226,7 +227,9 @@ UnitLibrary? buildUnitTree({
     }
     final own = owned[key] ?? const <BasicLib>[];
     if (own.isEmpty && kids.isEmpty) return null;
-    kids.sort((a, b) => a.name.compareTo(b.name));
+    // 同名单元库（不同 rel）之间没有次序依据；普通 sort 不稳定，
+    // 同一层每次重建都可能换位置 → 走 stableSort 保持输入顺序。
+    stableSortByName(kids, (u) => u.name);
     return UnitLibrary(node: n, basics: own, children: kids);
   }
 
@@ -250,7 +253,7 @@ UnitLibrary? buildUnitTree({
     ));
   }
   if (rootUnits.isEmpty) return null;
-  rootUnits.sort((a, b) => a.name.compareTo(b.name));
+  stableSortByName(rootUnits, (u) => u.name);
 
   // 首页要显示的是「媒体库」本身（顶级单元库），而不是库下的第一层目录。
   // 第一次序：按连接（serverId）归组，每个连接一个顶级单元库；
@@ -293,7 +296,7 @@ UnitLibrary? buildUnitTree({
       children: rootUnits,
     );
   }
-  mediaLibraries.sort((a, b) => a.name.compareTo(b.name));
+  stableSortByName(mediaLibraries, (u) => u.name);
   return UnitLibrary(
     node: LibNode(id: topId, rel: '', name: top),
     basics: const [],

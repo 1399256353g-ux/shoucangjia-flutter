@@ -36,12 +36,21 @@ int? intOrNull(dynamic v) {
 }
 
 /// 数值/数字字符串 → double；无法解析或非有限值时返回 **null**。
+///
+/// 字符串分支同样要过 [isFinite]：`double.tryParse('NaN')` / `'Infinity'` /
+/// `'1e999'` 都是**合法解析但非有限**的值，而 JSON 里写成字符串形式时
+/// （`{"w": "NaN"}`、手工改过的配置文件）根本走不到 `is num` 那条守卫。
+/// 放进 UI 的后果比“显示错”重：`NaN.clamp(0,3)` 返回 `NaN`，
+/// `Border.all(width: NaN)` 在绘制阶段断言失败——医疗词条/角标一挂就灰屏。
 double? doubleOrNull(dynamic v) {
   if (v is num) {
     final d = v.toDouble();
     return d.isFinite ? d : null;
   }
-  if (v is String) return double.tryParse(v.trim());
+  if (v is String) {
+    final d = double.tryParse(v.trim());
+    return (d != null && d.isFinite) ? d : null;
+  }
   return null;
 }
 
@@ -61,7 +70,14 @@ num? numOrNull(dynamic v) {
     if (v is double && !v.isFinite) return null;
     return v;
   }
-  if (v is String) return num.tryParse(v.trim());
+  if (v is String) {
+    // 与 [doubleOrNull] 同一条守卫：字符串形式的 `NaN`/`Infinity`/`1e999`
+    // 会被 tryParse 如实解析成非有限值，不加判断就会往下游传 NaN。
+    final n = num.tryParse(v.trim());
+    if (n == null) return null;
+    if (n is double && !n.isFinite) return null;
+    return n;
+  }
   return null;
 }
 

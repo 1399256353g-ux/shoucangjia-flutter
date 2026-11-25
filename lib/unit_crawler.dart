@@ -8,6 +8,7 @@
 
 import 'api_url.dart';
 import 'json_num.dart';
+import 'text_clip.dart';
 
 import 'interval_label.dart';
 
@@ -141,9 +142,12 @@ class UnitCrawlerScript {
 }
 
 /// 备注：去首尾空白，最多 200 字。
+///
+/// 用 [clipToUnits] 而不是 `substring(0, 200)`：备注里可能有 emoji，
+/// 硬切会切在代理对中间，存到服务端后回到界面上是一个替换方块。
 String clipNote(String raw) {
   final s = raw.trim();
-  return s.length <= 200 ? s : s.substring(0, 200);
+  return clipToUnits(s, 200);
 }
 
 const List<int> kQuickMinOptions = <int>[1, 5, 10, 15, 30];

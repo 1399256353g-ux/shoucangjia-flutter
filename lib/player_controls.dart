@@ -673,7 +673,12 @@ String mediaSaveFileName({
   }
   var name = buf.toString().trim();
   if (name.isEmpty) name = 'dizi_${DateTime.now().millisecondsSinceEpoch}';
-  if (name.length > 80) name = name.substring(0, 80);
+  // runes 循环已经保证这里是完整码点，不会切开代理对；
+  // 但 80 上限仍按 runes 切（不是 code unit），否则 emoji 文件名会被截成
+  // 半个字符，落盘后文件名显示为方块。
+  if (name.runes.length > 80) {
+    name = String.fromCharCodes(name.runes.take(80));
+  }
   return name + mediaSaveExtension(url: url, video: video);
 }
 

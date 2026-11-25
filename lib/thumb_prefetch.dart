@@ -27,15 +27,32 @@ int firstScreenThumbCount({
   required double viewportHeight,
   double maxCrossAxisExtent = 150,
   double padding = 10,
+
+  /// 左右内边距与纵向内边距分开（不给则都用 [padding]）。
+  ///
+  /// `GridView` 的 padding 本来是四边各自的：作者页是
+  /// `fromLTRB(12, 4, 12, 16)`（上 4 下 16），主页卡片区是 `all(10)`。
+  /// 只给一个对称值时，宽高两头的可用尺寸都会被算偏：宽多算 4、高少算 8，
+  /// 首屏预热的张数就跟着偏。
+  double? paddingX,
+  double? paddingY,
   double crossSpacing = 8,
   double mainSpacing = 8,
   double aspectRatio = 0.72,
+
+  /// 与 delegate 的 `mainAxisExtent` 同义：给了固定行高时**不再**按
+  /// `列宽 / aspectRatio` 推算。作者页网格就是这种（`mainAxisExtent:
+  /// AuthorGridCard.extent`），高度与宽度无关；旧写法按比例估算行高，
+  /// 每屏多算行，预热的是屏幕外的封面。
+  double? mainAxisExtent,
   int screens = 2,
   int maxItems = 24,
 }) {
   if (maxItems <= 0) return 0;
-  final usableW = viewportWidth - padding * 2;
-  final usableH = viewportHeight - padding * 2;
+  final px = (paddingX ?? padding) * 2;
+  final py = (paddingY ?? padding) * 2;
+  final usableW = viewportWidth - px;
+  final usableH = viewportHeight - py;
   if (usableW <= 0 || usableH <= 0) return 0;
   // 列数/列宽与 Flutter delegate 同一规则（grid_geometry 唯一实现）。
   // 旧写法 `ceil((usableW + crossSpacing) / stride)` 分子多加了一个间距，
@@ -52,10 +69,14 @@ int firstScreenThumbCount({
     spacing: crossSpacing,
   );
   if (tileW <= 0) return 0;
-  final tileH = gridTileHeight(
-    tileWidth: tileW,
-    aspectRatio: aspectRatio <= 0 ? 0.72 : aspectRatio,
-  );
+  // delegate 的真实行高：`mainAxisExtent ?? 列宽 / childAspectRatio`。
+  final fixed = mainAxisExtent;
+  final tileH = (fixed != null && fixed.isFinite && fixed > 0)
+      ? fixed
+      : gridTileHeight(
+          tileWidth: tileW,
+          aspectRatio: aspectRatio <= 0 ? 0.72 : aspectRatio,
+        );
   if (tileH <= 0) return 0;
   final rowStride = tileH + mainSpacing;
   var rows = ((usableH * (screens < 1 ? 1 : screens)) / rowStride).ceil();

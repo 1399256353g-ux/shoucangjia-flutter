@@ -780,6 +780,11 @@ class _BasicLibPageState extends State<BasicLibPage>
       viewportWidth: mq.size.width,
       viewportHeight: mq.size.height,
       maxCrossAxisExtent: 150,
+      // 与 `_worksGrid` 的 `EdgeInsets.all(10)` 逐项同源（间距 8）。
+      paddingX: 10,
+      paddingY: 10,
+      crossSpacing: 8,
+      mainSpacing: 8,
       aspectRatio: 0.72,
     );
     if (n <= 0) return;

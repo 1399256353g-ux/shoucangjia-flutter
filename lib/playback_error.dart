@@ -1,3 +1,5 @@
+import 'text_clip.dart';
+
 /// G12：播放失败分类与提示文案。
 ///
 /// 弱网、超时、解码失败在界面上给出不同标题/说明，并统一提供重试入口。
@@ -202,6 +204,7 @@ String sanitizePlaybackErrorForLog(Object? raw) {
   s = s.replaceAll(RegExp(r'/(?:media|api)/\S*'), '<path>');
   s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
   if (s.isEmpty) return 'no-detail';
-  if (s.length > 160) s = s.substring(0, 160);
-  return s;
+  // 截断走 text_clip：播放器错误原文可能含 emoji / 增补平面字符，
+  // 硬切会把代理对切开，日志里出现半个字符。
+  return clipToUnits(s, 160);
 }

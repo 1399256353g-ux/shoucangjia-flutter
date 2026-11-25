@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'byte_size.dart';
+import 'text_clip.dart';
 import 'time_labels.dart';
 
 /// 一条错误记录（内存态，最多保留 [CrashLog.maxEntries] 条）。
@@ -216,8 +217,9 @@ Future<String?> crashLogFileInfo({String? path}) async {
 String describeError(Object error) {
   var s = error.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
   if (s.isEmpty) s = '未知错误';
-  if (s.length > 600) s = '${s.substring(0, 600)}…';
-  return s;
+  // 截断走 text_clip：按 code unit 硬切会切开代理对（emoji / 增补平面汉字），
+  // 剖到界面上的就是半个字符。
+  return clipWithEllipsis(s, 600);
 }
 
 bool _installed = false;

@@ -46,6 +46,7 @@ import 'cache_settings.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_filter.dart';
+import 'author_big_nodes.dart';
 import 'author_drag.dart';
 import 'author_merge.dart';
 import 'author_avatar.dart';
@@ -7792,7 +7793,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       viewportWidth: mq.size.width,
       viewportHeight: mq.size.height,
       maxCrossAxisExtent: 150,
-      aspectRatio: 150 / 170,
+      // 与页面里的 delegate 逐项同源（此前一律用默认值，三项都不对）：
+      // padding `fromLTRB(12, 4, 12, 16)`、间距 10（默认 8）、
+      // 行高固定 `mainAxisExtent: AuthorGridCard.extent`。
+      // 旧写法按 `150 / 170` 估行高且宽高各只扣 10×2，首屏会多预热一行。
+      paddingX: 12,
+      paddingY: 10, // (4 + 16) / 2，上下之和与页面一致
+      crossSpacing: 10,
+      mainSpacing: 10,
+      mainAxisExtent: AuthorGridCard.extent,
     );
     if (n <= 0) return;
     final px = avatarDecodeWidth(
@@ -14789,18 +14798,10 @@ class _RecommendPageState extends State<RecommendPage> {
     return authorLibNodes(out);
   }
 
-  List<AuthorBigNode> get _filterBigs {
-    final out = <AuthorBigNode>[];
-    for (final b in _filterBasics) {
-      if (b.bigId.isEmpty) continue;
-      out.add(
-          AuthorBigNode(id: b.bigId, name: meta?.bigNames[b.bigId] ?? b.bigId));
-    }
-    final seen = <String>{};
-    out.removeWhere((e) => !seen.add(e.id));
-    out.sort((a, b) => a.name.compareTo(b.name));
-    return out;
-  }
+  List<AuthorBigNode> get _filterBigs =>
+      // 去重/回落/排序全部在 author_big_nodes.dart（与搜索页同一实现）。
+      authorBigNodes(_filterBasics,
+          nameOf: (id) => meta?.bigNames[id] ?? id);
 
   Map<String, String> get _filterLibNames =>
       {for (final b in _filterBasics) b.id: b.name};
@@ -15175,24 +15176,17 @@ class _SearchPageState extends State<SearchPage> {
     return authorLibNodes(out);
   }
 
-  List<AuthorBigNode> get _filterBigs {
-    final out = <AuthorBigNode>[];
-    final seen = <String>{};
-    for (final b in _filterBasics) {
-      if (b.bigId.isEmpty || !seen.add(b.bigId)) continue;
-      var name = b.bigId;
-      for (final m in metas.values) {
-        final n = m.bigNames[b.bigId];
-        if (n != null && n.isNotEmpty) {
-          name = n;
-          break;
+  List<AuthorBigNode> get _filterBigs =>
+      // 去重/回落/排序全部在 author_big_nodes.dart（与推荐页同一实现）：
+      // 此前这里手写 `seen.add` 与 `metas.values` 找名字，和推荐页的
+      // `removeWhere` + 单份 meta 是两套写法，同一库在两个页面可能显示不同名。
+      authorBigNodes(_filterBasics, nameOf: (id) {
+        for (final m in metas.values) {
+          final n = m.bigNames[id];
+          if (n != null && n.isNotEmpty) return n;
         }
-      }
-      out.add(AuthorBigNode(id: b.bigId, name: name));
-    }
-    out.sort((a, b) => a.name.compareTo(b.name));
-    return out;
-  }
+        return id;
+      });
 
   Map<String, String> get _filterLibNames =>
       {for (final b in _filterBasics) b.id: b.name};

@@ -43,6 +43,68 @@ void main() {
       expect(n, greaterThanOrEqualTo(1));
       expect(n, lessThanOrEqualTo(24));
     });
+
+    test('固定行高（mainAxisExtent）优于按宽高比估算', () {
+      // 作者页：delegate 给了 mainAxisExtent=170，行高与列宽无关。
+      final fixed = firstScreenThumbCount(
+        viewportWidth: 400,
+        viewportHeight: 800,
+        maxCrossAxisExtent: 150,
+        paddingX: 12,
+        paddingY: 10,
+        crossSpacing: 10,
+        mainSpacing: 10,
+        mainAxisExtent: 170,
+        screens: 1,
+      );
+      // 可用 376 宽 → 3 列；可用 780 高 → ceil(780/180)=5 行。
+      expect(fixed, 15);
+      // 不传固定行高时按 150/170 比例算（列宽 118.67/0.88 ≈ 134），行更多。
+      final byRatio = firstScreenThumbCount(
+        viewportWidth: 400,
+        viewportHeight: 800,
+        maxCrossAxisExtent: 150,
+        paddingX: 12,
+        paddingY: 10,
+        crossSpacing: 10,
+        mainSpacing: 10,
+        aspectRatio: 150 / 170,
+        screens: 1,
+      );
+      expect(byRatio, greaterThan(fixed),
+          reason: '旧口径按比例估行高，会把屏幕外的封面也算进去');
+    });
+
+    test('横纵内边距可以分开（fromLTRB 那类四边不等）', () {
+      final symmetric = firstScreenThumbCount(
+        viewportWidth: 400,
+        viewportHeight: 800,
+        padding: 12,
+        crossSpacing: 10,
+        mainSpacing: 10,
+        aspectRatio: 1.0,
+        screens: 1,
+      );
+      final split = firstScreenThumbCount(
+        viewportWidth: 400,
+        viewportHeight: 800,
+        paddingX: 12,
+        paddingY: 18,
+        crossSpacing: 10,
+        mainSpacing: 10,
+        aspectRatio: 1.0,
+        screens: 1,
+      );
+      // 纵向内边距更大 → 可用高度更小 → 行数不多于对称值。
+      expect(split, lessThanOrEqualTo(symmetric));
+      // 负数/非有限 padding 不得算出比 0 还大的可用尺寸后崩。
+      expect(
+          firstScreenThumbCount(
+              viewportWidth: 400,
+              viewportHeight: 800,
+              paddingX: double.infinity),
+          0);
+    });
   });
 
   group('firstScreenRowCount', () {

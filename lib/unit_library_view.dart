@@ -17,6 +17,7 @@ import 'scroll_decode.dart';
 import 'star_store.dart';
 import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
+import 'text_clip.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
 
@@ -585,7 +586,9 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
       viewportWidth: mq.size.width,
       viewportHeight: mq.size.height,
       maxCrossAxisExtent: 260,
-      padding: 12,
+      // 与网格真实 padding `fromLTRB(12, 12, 12, 24)` 同源：上下合计 36。
+      paddingX: 12,
+      paddingY: 18,
       crossSpacing: kLibGridSpacing,
       mainSpacing: kLibGridSpacing,
       aspectRatio: 1.02,
@@ -1519,7 +1522,10 @@ class _BasicLibCardState extends State<BasicLibCard> {
     final color = Color(LibraryBadge.basicColorFor(widget.basic.id, unitId,
         order: UnitBadgeRegistry.order));
     return LibBadgeChip(
-      label: text.length > 10 ? '${text.substring(0, 10)}…' : text,
+      // 截断走 text_clip：按 UTF-16 单元数切会切开 emoji 代理对，
+      // 词条本身带库 emoji 后缀（labelWithEmoji），切点正好落在 emoji 上时
+      // 卡片上就是一个替换方块。
+      label: clipWithEllipsis(text, 10),
       color: color.toARGB32(),
       unitId: '',
       kind: LibEntryKind.basic,

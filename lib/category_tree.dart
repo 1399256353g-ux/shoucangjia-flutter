@@ -12,6 +12,7 @@
 
 import 'http_json.dart';
 import 'rel_path.dart';
+import 'stable_order.dart';
 
 /// 一个分类节点（对应磁盘上的一个真实目录）。
 class CategoryNode {
@@ -108,7 +109,9 @@ List<CategoryNode> _parseNodes(List raw, String parentRel) {
       authors: _stringList(item['authors']),
     ));
   }
-  out.sort((a, b) => a.name.compareTo(b.name));
+  // 同名分类（不同父目录下）之间没有次序依据：普通 sort 不稳定，
+  // 每次重新解析都可能换位置 → 走 stableSortByName。
+  stableSortByName(out, (n) => n.name);
   return out;
 }
 
