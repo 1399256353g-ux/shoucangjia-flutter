@@ -70,13 +70,29 @@ const List<String> kVideoExts = <String>[
   '.avi',
 ];
 
+/// 去掉地址里的 `?query` 与 `#fragment`，只保留路径本体（**唯一实现**）。
+///
+/// 同一件事此前在两处各写一遍，而且**只剥了一半**：
+///  - `isVideoMediaPath` 两段都剥（`\n` 与 `#`）；
+///  - `cover_ext.isCoverImagePath` 只写 `split('?').first`。
+///
+/// 实测后果：`isCoverImagePath('/a.jpg#poster')` 返回 **false**
+/// （`'a.jpg#poster'.endsWith('.jpg')` 为 false）——`pickCoverPath` 于是把
+/// 这一张唯一的候选剔除，卡片渲染成一块空白底色，而地址本身完全能加载。
+/// 扫器/服务端把 `#poster`、`#t=1` 这类片段写进 `cv`/`fc` 并不罕见。
+String stripMediaSuffix(String p) {
+  var s = p.trim();
+  if (s.isEmpty) return s;
+  final q = s.indexOf('?');
+  if (q >= 0) s = s.substring(0, q);
+  final h = s.indexOf('#');
+  if (h >= 0) s = s.substring(0, h);
+  return s;
+}
+
 bool isVideoMediaPath(String p) {
-  var l = p.trim().toLowerCase();
+  final l = stripMediaSuffix(p).toLowerCase();
   if (l.isEmpty) return false;
-  final q = l.indexOf('?');
-  if (q >= 0) l = l.substring(0, q);
-  final h = l.indexOf('#');
-  if (h >= 0) l = l.substring(0, h);
   for (final ext in kVideoExts) {
     if (l.endsWith(ext)) return true;
   }

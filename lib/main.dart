@@ -41,6 +41,7 @@ import 'layout_metric.dart';
 import 'work_cover.dart';
 import 'media_path.dart';
 import 'media_resize.dart';
+import 'rel_path.dart';
 import 'recommend_grid.dart';
 import 'horizontal_chip_bar.dart';
 import 'cache_settings.dart';
@@ -1188,11 +1189,14 @@ String authorPrefixOfMedia(String path) {
     final at = p.indexOf('/');
     if (at > 0) p = p.substring(at + 1);
   }
-  final segs = p.split('/').where((e) => e.isNotEmpty).toList();
+  // 拆分走 `rel_path.dart` 唯一实现：`A\\B` 与 `A/B` 必须是同一组段，
+  // 否则「移动到文件夹」的作者前缀算不出候选，跟同一作者在别的库里的
+  // 表现对不上。
+  final segs = relSegments(p);
   final i = segs
       .indexWhere((s) => s == 'VID' || s == 'PIC' || s == 'vid' || s == 'pic');
-  if (i > 0) return segs.sublist(0, i).join('/');
-  return segs.length > 1 ? segs.sublist(0, segs.length - 1).join('/') : '';
+  if (i > 0) return relJoin(segs.sublist(0, i));
+  return segs.length > 1 ? relJoin(segs.sublist(0, segs.length - 1)) : '';
 }
 
 /// K2：目标文件夹候选列表（`/api/cat/tree` 的 dirs 拍平），
@@ -1203,7 +1207,9 @@ List<String> moveTargetCandidates(dynamic catTree, String authorPrefix) {
   void walk(List dirs) {
     for (final d in dirs) {
       if (d is! Map) continue;
-      final rel = '${d['rel'] ?? ''}'.trim();
+      // rel 先归一：服务端下发的 `A\\B` 与这里缓存的 `A/B` 是同一目录，
+      // 不归一就会漏掉整棵子树（目录在对话框里少一层，用户以为不能移）。
+      final rel = normalizeRelPath('${d['rel'] ?? ''}');
       if (rel.isEmpty) continue;
       if (prefix.isEmpty || rel == prefix || rel.startsWith('$prefix/')) {
         out.add(rel);
@@ -3744,17 +3750,36 @@ const int kRecommendMaxCount = 500;
 const String kRecommendCountPrefsKey = 'recommend_n_v1';
 
 /// 容错解析用户输入：空/非数字 → 默认 40；数字夹紧到 0..500。
+///
+/// 数字与字符串**必须同一条解析**：旧实现分两支——`num` 走 `round()`、
+/// 字符串走「剔除非数字字符再 `int.tryParse`」。于是同一个 `1.5`：
+/// 传数字得 **2**，传字符串 `"1.5"` 却得 **15**（小数点被剔掉，1.5 变成 15）
+/// ——推荐页一批拉了十倍的作品，而设置里看着还是 1.5 那个意思。
+/// `"20条"` 与 `"２０"`（全角）也同样需要归一。
+///
+/// 现在先走 [numOrNull]（带全角折叠），解析不了再退到「剔除非数字」。
 int parseRecommendCount(dynamic raw) {
   if (raw == null) return kRecommendDefaultCount;
+  int clampCount(num v) => v.round().clamp(0, kRecommendMaxCount);
   if (raw is num) {
-    if (raw.isNaN || raw.isInfinite) return kRecommendDefaultCount;
-    return raw.round().clamp(0, kRecommendMaxCount);
+    if (raw is double && !raw.isFinite) return kRecommendDefaultCount;
+    return clampCount(raw);
   }
-  final s = '$raw'.trim();
+  final s = foldFullWidthAscii('$raw').trim();
   if (s.isEmpty) return kRecommendDefaultCount;
-  final v = int.tryParse(s.replaceAll(RegExp(r'[^0-9-]'), ''));
+  // 千分位先去掉：`1,000` 不能变成 1（用户输入 1000，期望是上限 500）。
+  final t = s.replaceAll(RegExp(r'[,，]'), '');
+  // 第一种：整个串就是一个数（含小数）——与 num 分支完全同一结果。
+  final n = numOrNull(t);
+  if (n != null) return clampCount(n);
+  // 第二种：带单位/其它字符（`20条`、`1.5 倍`）。取**串里第一个数字片段**
+  // 再交给同一条 clamp。不能写「剔除非数字字符」：那样 `1.5 倍` 会变成
+  // 15（小数点被剔掉），而 `1.5` 是 2——同一串小数两种结果。
+  final m = RegExp(r'-?\d+(?:\.\d+)?').firstMatch(t);
+  if (m == null) return kRecommendDefaultCount;
+  final v = numOrNull(m.group(0));
   if (v == null) return kRecommendDefaultCount;
-  return v.clamp(0, kRecommendMaxCount);
+  return clampCount(v);
 }
 
 /// 实际请求数量：0（用户设为「默认」）或空时用 40。

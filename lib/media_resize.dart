@@ -76,6 +76,37 @@ String _queryWithWidth(String query, int width) {
   return out.join('&');
 }
 
+/// 从地址里读「已要求的图片宽度」；没有/不可用则 null。
+///
+/// 必须与 [_queryWithWidth] 同一条规则（键名忽略大小写、值需正整数），
+/// 但那边是**写**路径。旧读路径（`cover_cache.oversizedResizeResponse`）
+/// 自己写了一个 `RegExp(r'[?&]w=(\d{2,4})(?:&|$)')`，三个真实输入都漏：
+///
+/// | 地址 | 旧读 | 后果 |
+/// |---|---|---|
+/// | `/a.jpg?W=480` | null | 判定不到目标宽 → 误当成「正常尺寸」缓存原图 |
+/// | `/a.jpg?w=480#x` | null | 同上（片段粘在末尾，`(&|$)` 不匹配） |
+/// | `/a.jpg?w=12000` | null | 同上（四位上限） |
+///
+/// 同一个 `w=` 在写的时候认大小写、读的时候不认，于是「加了宽度参数」的
+/// 请求被同一条规则的另一半判成「没加」。现在读写同一份。
+int? requestedImageWidth(String raw) {
+  final url = raw.trim();
+  if (url.isEmpty) return null;
+  final hash = url.indexOf('#');
+  final body = hash >= 0 ? url.substring(0, hash) : url;
+  final q = body.indexOf('?');
+  if (q < 0) return null;
+  for (final t in body.substring(q + 1).split('&')) {
+    final eq = t.indexOf('=');
+    if (eq < 0) continue;
+    if (t.substring(0, eq).trim().toLowerCase() != 'w') continue;
+    final n = int.tryParse(t.substring(eq + 1).trim());
+    if (n != null && n > 0) return n;
+  }
+  return null;
+}
+
 /// 只给「图片静态路径」加 `w=`：
 ///  - 绝对/根相对地址才处理，`asset:`/`data:`/空串原样返回；
 ///  - 路径必须以 jpg/jpeg/png/webp 结尾（视频、`/api/thumb/...` 这类接口

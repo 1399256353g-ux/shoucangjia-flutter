@@ -21,6 +21,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'byte_size.dart';
+import 'json_num.dart';
+import 'media_resize.dart';
 
 // `formatBytes` 的唯一定义在 `byte_size.dart`（第十二批收口）；
 // 这里 re-export，使既有 import 'cover_cache.dart' 的调用点与测试不必改。
@@ -91,11 +93,14 @@ class DiziCacheFileSystem implements FileSystem {
 /// 判定阈值按目标宽度给足余量：正常缩图远小于 `w * 1200` 字节。
 bool oversizedResizeResponse(String url, int? contentLength) {
   if (contentLength == null || contentLength <= 0) return false;
-  final m = RegExp(r'[?&]w=(\d{2,4})(?:&|$)').firstMatch(url);
-  if (m == null) return false;
-  final w = int.tryParse(m.group(1)!);
-  if (w == null || w <= 0) return false;
-  final limit = w * 1200;
+  // 读 `w=` 走 [requestedImageWidth]（与 `withImageWidth` 写侧同一规则）：
+  // 旧实现在这里又写了一个 `RegExp(r'[?&]w=(\d{2,4})(?:&|$)')`，
+  // 只认半角小写 `w=` + 2–4 位数字 + `&`/结尾。实测 `?W=480`、
+  // `?w=480#x`、`?w=12000` 三种真实地址都读不到宽度，于是一张**超大原图**
+  // 被当成正常响应缓存 14 天 —— 那几张卡在缓存过期前永远拉原图。
+  final w = requestedImageWidth(url);
+  if (w == null) return false;
+  final limit = mulSat(w, 1200);
   return contentLength > (limit < 150 * 1024 ? 150 * 1024 : limit);
 }
 

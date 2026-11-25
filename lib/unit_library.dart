@@ -439,7 +439,8 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     var used = false;
     for (final x in rawNodes) {
       if (x is! Map) continue;
-      final rel = '${x['rel'] ?? ''}'.trim().replaceAll('\\', '/');
+      // 归一走 `rel_path.dart` 唯一实现：此前这里是手写链条的第五份拷贝。
+      final rel = normalizeRelPath('${x['rel'] ?? ''}');
       if (rel.isEmpty) continue;
       add(x);
       used = true;

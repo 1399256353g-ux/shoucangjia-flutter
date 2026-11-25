@@ -3,6 +3,7 @@ import 'http_json.dart';
 import 'count_label.dart';
 import 'json_num.dart';
 import 'index_prefix.dart';
+import 'rel_path.dart';
 
 /// H11：同步源选择的纯逻辑。
 ///
@@ -118,12 +119,9 @@ List<String> _unitKeys(String unitName, String unitRel) {
   }
 
   add(unitName);
-  final segs = unitRel
-      .replaceAll('\\', '/')
-      .split('/')
-      .map((e) => e.trim())
-      .where((e) => e.isNotEmpty)
-      .toList();
+  // 拆分走 `rel_path.dart` 唯一实现：原先这里与 [syncCollectionsForUnit]
+  // 各写了一份 `replaceAll('\\','/').split('/')` 链（逐字相同两份）。
+  final segs = relSegments(unitRel);
   if (segs.isNotEmpty) add(segs.last);
   // 有些单元库是多级目录（分类/子分类），用全部段做包含匹配。
   for (final s in segs) {
@@ -151,12 +149,7 @@ List<CollectionSyncInfo> syncCollectionsForUnit(
       if (keys.contains(syncUnitKey(r.name))) r,
   ];
   if (exact.isNotEmpty) return exact;
-  final segs = unitRel
-      .replaceAll('\\', '/')
-      .split('/')
-      .map((e) => e.trim())
-      .where((e) => e.isNotEmpty)
-      .toList();
+  final segs = relSegments(unitRel);
   // 只有抖音库根这种「本身就是同步源容器」的顶级单元库才展示全部；
   // 其它无关库根不应把账号全部同步源塞进来。
   final unitKey = syncUnitKey(unitName);

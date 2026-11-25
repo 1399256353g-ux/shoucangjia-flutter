@@ -8,6 +8,7 @@ library;
 
 import 'api_url.dart';
 import 'json_num.dart';
+import 'rel_path.dart';
 import 'time_labels.dart';
 import 'http_json.dart';
 
@@ -117,9 +118,15 @@ class SyncRun {
   String get unitLabel {
     final u = unit.trim();
     if (u.isEmpty) return lib.trim().isEmpty ? '默认库' : lib.trim();
-    // 只显示单元库最后一段，避免长路径撑爆一行
-    final seg = u.split('/').where((e) => e.isNotEmpty).toList();
-    return seg.isEmpty ? u : seg.last;
+    // 只显示单元库最后一段，避免长路径撑爆一行。
+    //
+    // 拆分走 [lastRelName]（`rel_path.dart` 唯一实现）：旧写法
+    // `u.split('/')` 只认半角 `/`，服务端下发 Windows 风格的 `A\B` 时
+    // 整条路径原样显示（实测 `SyncRun(unit: r'A\B').unitLabel == 'A\B'`），
+    // 而同一件事在作者挂载面板里也是 `split('/').last`——两处都不会报错，
+    // 只是那一行看起来像库名」。
+    final seg = lastRelName(u);
+    return seg.isEmpty ? u : seg;
   }
 
   /// `11-23 17:05 · 快检 · 成功 3 · 失败 1 · 2.4s`

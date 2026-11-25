@@ -14,6 +14,8 @@
 /// 让它反过来依赖 `lib_cover` 会形成环。两条规则单独放这里，谁都可以引。
 library;
 
+import 'media_path.dart' show stripMediaSuffix;
+
 /// 规则 A：可以当作封面**渲染**的扩展名（含服务端索引里出现的图片格式）。
 const List<String> kCoverImageExts = <String>[
   '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic'
@@ -24,13 +26,16 @@ const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
 
 /// 路径是否是可显示的封面图片（视频路径一律不是）。
 ///
-/// 只看扩展名，忽略查询串；空串与无扩展名都不是图片。
+/// 只看扩展名，忽略 `?query` 与 `#fragment`。**两个都要剥**：旧写法只写了
+/// `split('?').first`，实测 `isCoverImagePath('/a.jpg#poster')` 返回 **false**
+/// ——`pickCoverPath` 把这张唯一的候选剔除，卡片只剩一块空白，而地址本身
+/// 完全能加载。后缀剥除走 [stripMediaSuffix]（与 `isVideoMediaPath`
+/// 同一条规则，不再两份）。
 bool isCoverImagePath(String p) {
-  final l = p.trim().toLowerCase();
+  final l = stripMediaSuffix(p).toLowerCase();
   if (l.isEmpty) return false;
-  final q = l.split('?').first;
   for (final e in kCoverImageExts) {
-    if (q.endsWith(e)) return true;
+    if (l.endsWith(e)) return true;
   }
   return false;
 }

@@ -1,6 +1,7 @@
 import 'disk_name.dart';
 import 'index_prefix.dart';
 import 'media_path.dart';
+import 'rel_path.dart';
 import 'stable_order.dart';
 
 /// 作者来源词条（J9）的纯逻辑：
@@ -65,20 +66,15 @@ String decodeMediaRel(String mediaPath) {
 }
 
 /// 把基础库的绝对路径换算成相对注册库根目录的路径；不在此根下返回空串。
-String relUnderBase(String basePath, String basicPath) {
-  var b = basePath.trim();
-  var p = basicPath.trim();
-  if (b.isEmpty || p.isEmpty) return '';
-  while (b.endsWith('/')) {
-    b = b.substring(0, b.length - 1);
-  }
-  while (p.endsWith('/')) {
-    p = p.substring(0, p.length - 1);
-  }
-  if (p == b) return '';
-  if (!p.startsWith('$b/')) return '';
-  return p.substring(b.length + 1);
-}
+///
+/// 拆分/归一交给 [relUnder]（`rel_path.dart` 唯一实现）：此前这里手写
+/// 「掐尾斜杠 + `startsWith('$b/')`」，只认半角 `/`——实测
+/// `relUnderBase('/vol1/m', r'/vol1/m\A')` 返回 **空串**，那个基础库随后被
+/// `basicsUnderBase` 直接 `continue` 跳过，首页整条消失（不报错、不提示）。
+/// `'/vol1/m/./A'` → `'./A'`、`'/vol1/m//A'` → `'/A'` 同理：算出的 rel 带着
+/// 点段和多余分隔符，`basicLibForMedia` 永远匹配不上，封面/作者也一起错位。
+String relUnderBase(String basePath, String basicPath) =>
+    relUnder(basePath, basicPath);
 
 /// 解析 `/api/libraries.json` 的基础库列表，只保留注册库根下的基础库。
 List<BasicLibRef> basicsUnderBase(

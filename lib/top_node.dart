@@ -10,6 +10,8 @@
 ///   展示位使用（内部 id 仍保留 `secret`，那是标识不是文案）。
 library;
 
+import 'rel_path.dart';
+
 /// 完全拿不到根路径时的兜底文案（仅在服务端未下发 root 时出现）。
 const String kFallbackTopNodeName = 'SECRET';
 
@@ -20,22 +22,23 @@ class TopNodeName {
   static String get current => _current;
 
   /// 从库根路径解析顶级节点名称；空/无效返回空串，不猜名字。
-  ///
-  /// 兼容 `/vol1/名称`、`E:\media\名称`、`/vol1/名称/` 三种写法。
-  static String nameFromRoot(String? root) {
-    final raw = '${root ?? ''}'.trim();
-    if (raw.isEmpty) return '';
-    final parts = raw
-        .replaceAll('\\', '/')
-        .split('/')
-        .where((s) => s.trim().isNotEmpty)
-        .toList(growable: false);
-    if (parts.isEmpty) return '';
-    // Windows 盘符（`E:`）本身不是目录名。
-    final last = parts.last.trim();
-    if (last.length <= 2 && last.endsWith(':')) return '';
-    return last;
-  }
+///
+/// 兼容 `/vol1/名称`、`E:\media\名称`、`/vol1/名称/` 三种写法。
+///
+/// 拆分走 [lastRelName]（`rel_path.dart` 唯一实现）：旧实现自己写了一遍
+/// `replaceAll('\\','/').split('/')…`，而那条链**不过滤 `.`**——实测
+/// `nameFromRoot('/vol1/SECRET/.')` 返回 **`.`**，顶级节点词条上写的就是个
+/// 点号，看不出是哪个库。同一条规则分叉的后果在「换个根目录名」这种操作上
+/// 最明显：一个多余的 `.` 段就能让整个顶级节点名字变掉。
+static String nameFromRoot(String? root) {
+  final raw = '${root ?? ''}'.trim();
+  if (raw.isEmpty) return '';
+  final last = lastRelName(raw).trim();
+  if (last.isEmpty) return '';
+  // Windows 盘符（`E:`）本身不是目录名。
+  if (last.length <= 2 && last.endsWith(':')) return '';
+  return last;
+}
 
   /// 用库根路径更新名称；解析不出时保持上一个已知值（不清成空）。
   static bool setFromRoot(String? root) {

@@ -23,6 +23,7 @@ import 'http_error_text.dart';
 import 'http_json.dart';
 import 'json_num.dart';
 import 'count_label.dart';
+import 'rel_path.dart';
 import 'unit_author_groups.dart';
 
 /// 打开作者挂载面板。
@@ -298,7 +299,12 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
         break;
       }
     }
-    final unitLabel = unit.isEmpty ? '无归属' : unit.split('/').last;
+    // 拆分走 `rel_path.dart` 唯一实现（连 `\` 一起认）：旧写法 `split('/').last`
+    // 遇到服务端下发的 `A\B` 会把整条路径当名字贴在分组标题上。
+    final unitTail = lastRelName(unit);
+    final unitLabel = unit.isEmpty
+        ? '无归属'
+        : (unitTail.isEmpty ? unit : unitTail);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(

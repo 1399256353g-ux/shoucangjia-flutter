@@ -9,6 +9,7 @@ import 'http_json.dart';
 import 'http_error_text.dart';
 
 import 'home_action.dart';
+import 'rel_path.dart';
 import 'top_node.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
@@ -113,15 +114,11 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   ];
 
   /// 统一 rel：去掉首尾 `/`，压缩重复 `/`。
-  static String normalizeRel(String rel) {
-    final parts = rel
-        .trim()
-        .replaceAll('\\', '/')
-        .split('/')
-        .where((s) => s.isNotEmpty)
-        .toList(growable: false);
-    return parts.join('/');
-  }
+  ///
+  /// 转调 [normalizeRelPath]（`rel_path.dart` 唯一实现）：这里原先自己写了一遍
+  /// `replaceAll('\\','/').split('/')` 链，与 `unit_library.splitRel` /
+  /// `category_tree.splitCatRel` / `diskNameOf` 是**第四份**同样规则的拷贝。
+  static String normalizeRel(String rel) => normalizeRelPath(rel);
 
   /// 父链中是否有「@作者」这一级目录（接口未标记基础库时的兜底判断）。
   static bool hasAuthorMarkerInParents(String rel) {
