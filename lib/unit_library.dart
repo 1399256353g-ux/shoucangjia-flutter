@@ -153,6 +153,16 @@ bool isPrefixOf(List<String> a, List<String> b) {
   return true;
 }
 
+/// 节点在「去重/父子/归属」三张表里的键：**连接 + rel**。
+///
+/// 只写 rel 会让两台服务端的同名目录互相顶掉（见 [buildUnitTree] 步骤 1 的
+/// 实测），只写连接更不行。分隔符用 `\u0001`：rel 里可能出现 `|`、`:`、`/`，
+/// 但不会是控制字符，拼接后不会被两个不同 (连接, rel) 组合撞成同一个键。
+String _nodeKeyOf(String serverId, String rel) => '${serverId.trim()}\u0001$rel';
+
+/// 节点所属连接（trim 后）；空串表示旧格式/离线快照。
+String _sidOf(LibNode n) => n.serverId.trim();
+
 /// 构造单元库树。
 ///
 /// [nodes] 节点文件夹（可以是 bigLibraries + groups 的合集）。
@@ -170,52 +180,66 @@ UnitLibrary? buildUnitTree({
       : topName;
   if (basics.isEmpty) return null;
 
-  // 1. 节点去重：同一 rel 只保留一个（多连接聚合时取最先出现者，保留其来源）。
-  final byRel = <String, LibNode>{};
+  // 1. 节点去重：同一**连接内**的同一 rel 只保留一个。
+  //
+  // 键必须带连接标识。此前只用 rel：两台服务端都有 `A` 时后者被整条丢掉，
+  // 而 B 服务端的 `A/y` 基础库会命中 A(s1) 的节点——A 卡片里出现 B 的库，
+  // 封面/鉴权按 A 的连接去请求，必然 404。实测：
+  //   nodes[A@s1] + nodes[A@s2] + basics[a1@s1, b1@s2(rel=A/y)]
+  //   → media:s1 → A 的 basics = [a1, b1]（b1 来自另一台机器）
+  //   → media:s2 整组消失
+  final byKey = <String, LibNode>{};
   for (final n in nodes) {
-    final key = splitRel(n.rel).join('/');
-    if (key.isEmpty) continue;
-    byRel.putIfAbsent(key, () => n);
+    final rel = splitRel(n.rel).join('/');
+    if (rel.isEmpty) continue;
+    byKey.putIfAbsent(_nodeKeyOf(n.serverId, rel), () => n);
   }
 
-  // 2. 从深到浅分配基础库：每个基础库只归最深命中的节点（收敛规则 1）。
-  final ordered = byRel.values.toList()
+  // 2. 从深到浅分配基础库：每个基础库只归**本连接**最深命中的节点（收敛规则 1）。
+  //
+  // 跨连接归属不存在「更深优先」的余地：不同服务端的同名目录是两份独立数据。
+  //
+  // `serverId` 为空的基础库＝来源未知（旧格式、单连接、测试构造），按旧行为
+  // 参与「最深命中」不限连接；它归属到哪个节点就随那个节点走同一连接。
+  // 只有**明确写了** serverId 的基础库才受连接约束——否则单连接场景会因为
+  // 节点带连接、基础库不带而全部落进孤儿组，首页一行都显示不出来。
+  final ordered = byKey.values.toList()
     ..sort((a, b) => b.segments.length.compareTo(a.segments.length));
 
   final owned = <String, List<BasicLib>>{};
-  final orphans = <BasicLib>[];
+  final orphanGroups = <String, List<BasicLib>>{};
   for (final b in basics) {
     final segs = splitRel(b.rel);
+    final sid = b.serverId.trim();
     LibNode? hit;
     for (final n in ordered) {
-      if (isPrefixOf(n.segments, segs) && n.segments.length < segs.length) {
-        hit = n;
-        break;
-      }
+      if (sid.isNotEmpty && _sidOf(n) != sid) continue;
       // 基础库目录本身与节点同路径时也算直属（基础库就是节点）。
-      if (isPrefixOf(n.segments, segs) && n.segments.length == segs.length) {
+      if (isPrefixOf(n.segments, segs) && n.segments.length <= segs.length) {
         hit = n;
         break;
       }
     }
     if (hit == null) {
-      orphans.add(b);
+      // 孤儿按**自己声明的**连接归组；没声明就进「未知来源」那组。
+      orphanGroups.putIfAbsent(sid, () => <BasicLib>[]).add(b);
     } else {
-      owned.putIfAbsent(splitRel(hit.rel).join('/'), () => []).add(b);
+      owned.putIfAbsent(_nodeKeyOf(hit.serverId, splitRel(hit.rel).join('/')),
+          () => <BasicLib>[]).add(b);
     }
   }
 
   // 3. 建立节点树（父子按前缀关系）。
   final childrenOf = <String, List<LibNode>>{};
-  final sortedNodes = byRel.values.toList()
+  final sortedNodes = byKey.values.toList()
     ..sort((a, b) => a.segments.length.compareTo(b.segments.length));
   final present = <String, LibNode>{};
   for (final n in sortedNodes) {
-    final key = n.segments.join('/');
+    final key = _nodeKeyOf(n.serverId, n.segments.join('/'));
     LibNode? parent;
     for (var i = n.segments.length - 1; i > 0; i--) {
       final pk = n.segments.take(i).join('/');
-      final cand = present[pk];
+      final cand = present[_nodeKeyOf(n.serverId, pk)];
       if (cand != null) {
         parent = cand;
         break;
@@ -223,13 +247,16 @@ UnitLibrary? buildUnitTree({
     }
     present[key] = n;
     if (parent != null) {
-      childrenOf.putIfAbsent(parent.segments.join('/'), () => []).add(n);
+      childrenOf
+          .putIfAbsent(
+              _nodeKeyOf(parent.serverId, parent.segments.join('/')), () => [])
+          .add(n);
     }
   }
 
   // 4. 递归装配，并按收敛规则 2 剪掉空子树。
   UnitLibrary? build(LibNode n, {int depth = 0}) {
-    final key = n.segments.join('/');
+    final key = _nodeKeyOf(n.serverId, n.segments.join('/'));
     final kids = <UnitLibrary>[];
     for (final k in childrenOf[key] ?? const <LibNode>[]) {
       final sub = build(k, depth: depth + 1);
@@ -254,42 +281,73 @@ UnitLibrary? buildUnitTree({
     if (u != null) rootUnits.add(u);
   }
 
-  // 6. 没有归属的基础库 → 默认顶级单元库（收敛规则 3）。
-  if (orphans.isNotEmpty) {
+  // 6. 没有归属的基础库 → 默认顶级单元库（收敛规则 3），**按连接分组**。
+  //
+  // 此前所有孤儿（不分连接）塞进同一个根，而且那个根的 `serverId` 为空：
+  // 只要有一台服务端存在节点，首页就走「每连接一个媒体库」分支，这个空
+  // serverId 的根被丢进 `noServer` 后再也没被用到——孤儿库整批消失。
+  // 实测：nodes[A@s1] + basics[a1@s1, orphan@s1] → 只有 a1 能上屏。
+  //
+  // 现在每个连接各得一个根：名称取该连接标签，取不到用库根名。
+  // id 不能再用 [topId]——那与树根同 id，`flattenUnits` 会出现两个 `secret`，
+  // 星标/词条按 id 索引时互相顶掉。改成 `top:<连接>`。
+  final groupKeys = orphanGroups.keys.toList()..sort();
+  for (final sid in groupKeys) {
+    final group = orphanGroups[sid] ?? const <BasicLib>[];
+    if (group.isEmpty) continue;
+    final label = group.first.serverLabel.trim();
     rootUnits.add(UnitLibrary(
-      node: LibNode(id: topId, rel: '', name: top),
-      basics: orphans,
+      node: LibNode(
+        id: 'top:${sid.isEmpty ? 'local' : sid}',
+        rel: '',
+        name: label.isEmpty ? top : label,
+        serverId: sid,
+        serverBase: group.first.serverBase,
+        serverLabel: label,
+      ),
+      basics: group,
       children: const [],
     ));
   }
   if (rootUnits.isEmpty) return null;
   stableSortByName(rootUnits, (u) => u.name);
 
+  // 单连接 / 无连接信息（旧格式、离线快照）→ 保持旧形态：根即容器，
+  // children 就是第一层单元库。此时不存在「哪个媒体库连不连得上」的问题，
+  // 多插一层 `media:local` 只会让首页平白多一张没有连接信息的卡片。
+  final anyServer =
+      rootUnits.any((u) => u.node.serverId.trim().isNotEmpty);
+  if (!anyServer) {
+    return UnitLibrary(
+      node: LibNode(id: topId, rel: '', name: top),
+      basics: const [],
+      children: rootUnits,
+    );
+  }
+
   // 首页要显示的是「媒体库」本身（顶级单元库），而不是库下的第一层目录。
   // 第一次序：按连接（serverId）归组，每个连接一个顶级单元库；
-  // 没有 serverId 的树（单连接/离线）保持原样，把第一层目录视为下级。
+  // 少量没有 serverId 的根（旧格式混进多连接）单独成一张卡片，不丢弃。
   final byServer = <String, List<UnitLibrary>>{};
-  final noServer = <UnitLibrary>[];
   for (final u in rootUnits) {
     final sid = u.node.serverId.trim();
-    if (sid.isEmpty) {
-      noServer.add(u);
-    } else {
-      _collectServerBasics(u, byServer.putIfAbsent(sid, () => <UnitLibrary>[]));
-    }
+    // 空 sid 也保留：它是一条真实存在的库（旧格式/离线快照），
+    // 只要有别的连接存在就整组消失，等于「换个网络库就不见了」。
+    byServer.putIfAbsent(sid, () => <UnitLibrary>[]).add(u);
   }
 
   List<UnitLibrary> mediaLibraries = <UnitLibrary>[];
-  for (final e in byServer.entries) {
-    final subs = e.value;
+  final mediaKeys = byServer.keys.toList()..sort();
+  for (final sid in mediaKeys) {
+    final subs = byServer[sid] ?? const <UnitLibrary>[];
     if (subs.isEmpty) continue;
     final label = subs.first.node.serverLabel.trim();
     mediaLibraries.add(UnitLibrary(
       node: LibNode(
-        id: 'media:${e.key}',
+        id: 'media:${sid.isEmpty ? 'local' : sid}',
         rel: '',
         name: label.isEmpty ? top : label,
-        serverId: e.key,
+        serverId: sid,
         serverBase: subs.first.node.serverBase,
         serverLabel: label,
       ),
@@ -312,29 +370,6 @@ UnitLibrary? buildUnitTree({
     basics: const [],
     children: mediaLibraries,
   );
-}
-
-/// 把一个连接下的根单元库整理成「该媒体库的下级单元库」列表。
-///
-/// owner 2026-11-24：「媒体库下面的单元库都拆散开了，没有按照文件结构
-/// 设置里的层级」。
-///
-/// 原实现把根节点和它的直接子节点**平铺**成同一层（`root.children` 逐个
-/// 塞进 `out`），于是 `/api/nodes` 下发的三层结构（深度 1:5 / 2:24 / 3:2）
-/// 在首页被压成一层，层级关系丢失。
-///
-/// 现在：
-/// - 根节点自己挂了基础库（节点就是库根）→ 它本身作为下级，**连同其子树**；
-/// - 根节点没挂基础库（纯容器）→ 它的 children 按原父子关系保留，不拆平。
-void _collectServerBasics(UnitLibrary root, List<UnitLibrary> out) {
-  // owner 2026-11-25：「叫你不要把单元库拆散掉放在 secret 下面，原来的
-  // 层级关系呢」。根节点必须**整个保留**，不管它自己有没有挂基础库。
-  //
-  // 上一版按「有没有 basics」分叉：纯容器的第一层节点（examples：(1) A
-  // 自身没有基础库、基础库在 (2) B 里）被拆掉，只把它的 children 塞给
-  // 媒体库，于是 (2) B 直接挂到了媒体库下面，(1) A 这一层凭空消失。
-  // 实测复现：Secret → NAS → (2) B，而正确应为 Secret → NAS → (1) A → (2) B。
-  out.add(root);
 }
 
 /// 从 v2 的 bigLibraries / groups 提取节点。
