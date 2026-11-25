@@ -330,8 +330,15 @@ class UnitLibraryHomeView extends StatefulWidget {
   /// 为空时回退到只有「本地选图」的旧入口。
   final CoverMenuOf? coverMenuOf;
 
-  /// P3：顶级单元库卡片的连接状态文案（如「已连接」「已断连」）；空串不显示。
-  final String Function(UnitLibrary unit)? statusOf;
+  /// P3：顶级单元库卡片的连接状态（三态）。
+  ///
+  /// 返回 `null` = 未知（不画圆点）、`true` = 在线（绿点）、
+  /// `false` = 已断连（红点）。
+  ///
+  /// 这里以前传的是文案串「已连接/已断连」，卡片再拿 `== '已连接'` 反推
+  /// 布尔——文案一改（本地化、加粗、加空格）圆点就永远是红的，而两条
+  /// 「同一个事实」的写法还会各自漂移。现在只传布尔，判定只有一处。
+  final bool? Function(UnitLibrary unit)? statusOf;
 
   /// P3：顶级单元库卡片只用 owner 设过的封面（自定义 `_cover/` 或服务端
   /// `cover.u`）；空串表示未设封面 → 卡片用词条色块占位，**不取自动封面**。
@@ -499,7 +506,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
                 unit: u,
                 topCard: true,
                 fallbackTint: tint,
-                connectionStatus: widget.statusOf?.call(u) ?? '',
+                online: widget.statusOf?.call(u),
                 coverUrl: (widget.topCoverOf ?? widget.unitCoverOf)?.call(u) ?? '',
                 coverUrlOf: widget.topCoverOf ?? widget.unitCoverOf,
                 headers: unitHeadersOf(u, widget.headersOf),
@@ -776,8 +783,8 @@ class UnitLibraryCard extends StatefulWidget {
   /// 无封面时的占位底色（顶级单元库＝词条色）；为空则回退通用灰。
   final int? fallbackTint;
 
-  /// 连接状态文案（如「已连接」「已断连」）；空串不显示。
-  final String connectionStatus;
+  /// 连接状态（三态）：`null` 不画圆点，`true` 绿点，`false` 红点。
+  final bool? online;
 
   /// 快速刷新（该单元库子树里第一个基础库 id 由调用方关入）；
   /// 为空时不显示刷新按钮。
@@ -797,7 +804,7 @@ class UnitLibraryCard extends StatefulWidget {
     this.coverMenu,
     this.topCard = false,
     this.fallbackTint,
-    this.connectionStatus = '',
+    this.online,
     this.onQuickRefresh,
   });
 
@@ -959,11 +966,9 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                 // owner 2026-11-25：底部只留「绿/红圆点 + IP 地址」，
                 // 不再写「已连接」这类文字（简约）。
                 server: hostLabelOf(unit.node.serverBase),
-                online: widget.topCard
-                    ? (widget.connectionStatus.isEmpty
-                        ? null
-                        : widget.connectionStatus == '已连接')
-                    : null,
+                // 只有顶级卡片表达「这个媒体库连不连得上」；下级卡片
+                // 与连接表无关，一律不画。
+                online: widget.topCard ? widget.online : null,
               ),
             ),
             // P4：左上角种类角标（形状尺寸统一，仅图案不同）。

@@ -5331,14 +5331,17 @@ class _LibraryPageState extends State<LibraryPage> {
 
   /// P3：顶级单元库卡片的连接状态。只按节点自带的连接标识查当前连接表，
   /// 不看任何目录名文本；查不到就不显示（不猜）。
-  String _topNodeStatus(UnitLibrary u) {
+  ///
+  /// 返回三态布尔而不是文案：卡片只画一个绿/红圆点，中间不再有
+  /// 「字符串 → 再比回布尔」这一层往返。
+  bool? _topNodeStatus(UnitLibrary u) {
     final id = u.node.serverId.trim();
-    if (id.isEmpty) return '';
+    if (id.isEmpty) return null;
     for (final s in shownServers) {
       if (s.id != id) continue;
-      return s.enabled ? '已连接' : '已断连';
+      return s.enabled;
     }
-    return '';
+    return null;
   }
 
   /// P3：首页顶级单元库卡片专用封面——**只认 owner 设过的封面**。
@@ -8453,8 +8456,15 @@ class _PlayerPageState extends State<PlayerPage>
   // 最近两次测量值，用于识别全屏切换期间的来回震荡。
   double _taskbarSwingA = 0;
   double _taskbarSwingB = 0;
-  // Windows：窗口缩放/最大化期间先摘掉视频纹理，避免 media_kit 在尺寸
-  // 变化中重排纹理导致原生崩溃；尺寸稳定后重建 Video 元素。
+  // Windows：窗口缩放/最大化期间先拒绝切换全屏，避免 media_kit 在尺寸
+  // 变化中重排纹理导致原生崩溃。
+  //
+  // owner 2026-11-25：「win 版第一次全屏还是会卡一下，不退回去感觉都要
+  // 崩溃了」。原因就在下面 `didChangeMetrics`：它只为了让这个标志生效
+  // 而调了两次 `setState`，而这个标志**从来没有参与过 build**——每次
+  // 窗口尺寸变化（进/出全屏本身就是一次）都白白重建整个播放页，包括
+  // 视频舞台与全部浮层。现在它只是 [toggleFs] 读的一个普通字段：写入不
+  // 触发重建，语义不变，重建次数为 0。
   bool _winResizing = false;
   Timer? _winResizeTimer;
 
@@ -9345,13 +9355,22 @@ class _PlayerPageState extends State<PlayerPage>
   void didChangeMetrics() {
     super.didChangeMetrics();
     if (!Platform.isWindows) return;
-    if (!_winResizing) setState(() => _winResizing = true);
+    // 只记录「窗口正在变化」，**不 setState**：这个标志不参与 build，
+    // 重建整棵播放页（含视频舞台）纯属无谓开销，正是第一次切全屏卡顿
+    // 的直接来源。`_winResizing` 唯一的读者是 [toggleFs] 的早退判断。
+    _winResizing = true;
     _winResizeTimer?.cancel();
     _winResizeTimer = Timer(const Duration(milliseconds: 320), () {
       if (!mounted) return;
-      // 只恢复视频层，不换 key、不重建 Video：重建会把纹理重新挂载一次，
-      // 在切全屏/进新页面的瞬间最容易触发原生崩溃。纹理本身会跟随尺寸自适应。
-      setState(() => _winResizing = false);
+      _winResizing = false;
+      // 尺寸稳定后补执行「变化期间点过的全屏切换」。此前 toggleFs 在这段
+      // 窗口里直接 return，点击被静默吞掉（用户看到的是「按了没反应」）。
+      // 已经等于当前状态（例如窗口自己已变成目标态）就把意图清掉，不空转。
+      final want = _fsPending;
+      if (!_fsBusy && want != null) {
+        _fsPending = null;
+        if (want != fs) scheduleMicrotask(toggleFs);
+      }
     });
   }
 
@@ -11490,7 +11509,12 @@ class _PlayerPageState extends State<PlayerPage>
       _fsPending = next;
       return;
     }
-    if (Platform.isWindows && _winResizing) return;
+    // 窗口正在变化（含刚进/出过全屏的 320ms）：记下意图、等稳定后补执行，
+    // 而不是丢弃——丢弃会让人以为按钮坏了，还会让界面状态与真实窗口错位。
+    if (Platform.isWindows && _winResizing) {
+      _fsPending = next;
+      return;
+    }
     _fsBusy = true;
     Breadcrumb.mark('fs:toggle', next ? 'enter' : 'exit');
     try {
