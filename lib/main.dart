@@ -6017,6 +6017,10 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   List<UnitLibrary> units = const [];
   Map<String, bool> unitFlags = const {};
 
+  /// owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库的设置就归到
+  /// 对应的下面去」。这里存树上的媒体库（顶级单元库），用于把单元库按归属分组。
+  List<UnitLibrary> tops = const [];
+
   @override
   void initState() {
     super.initState();
@@ -6053,6 +6057,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       }
       // H：同步源适配单元库——列出所有节点文件夹，并标记是否有爬虫脚本。
       var unitList = const <UnitLibrary>[];
+      var topList = const <UnitLibrary>[];
       var flags = const <String, bool>{};
       try {
         final m = await LibMeta.load(cfg.lib);
@@ -6060,6 +6065,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
           for (final u in m.units)
             if (u.id != 'secret') u
         ];
+        topList = m.tops;
       } catch (_) {}
       try {
         final nr = await http
@@ -6073,6 +6079,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       setState(() {
         libs = list;
         units = unitList;
+        tops = topList;
         unitFlags = flags;
         loading = false;
       });
@@ -6096,6 +6103,87 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     final iv = intOf(_cfgOf(j)['intervalMin']);
     if (iv <= 0) return '不自动抓取';
     return everyMinutesLabel(iv);
+  }
+
+  /// owner 2026-11-25：把单元库按「所属媒体库」分节展示。
+  ///
+  /// 原来是一条平铺长列表，40 多个库混在一起看不出归属。现在按顶级单元库
+  /// （＝每个连接的媒体库根）分节；不属于任何媒体库的归到「其它」。
+  /// 分组只按树结构算（topIdFor），不看任何目录名文本。
+  List<Widget> _unitSections() {
+    if (units.isEmpty) return const <Widget>[];
+    final byTop = <String, List<UnitLibrary>>{};
+    final order = <String>[];
+    final other = <UnitLibrary>[];
+    for (final u in units) {
+      final t = u.node.serverId.isNotEmpty ? _topIdOfUnit(u) : '';
+      if (t.isEmpty) {
+        other.add(u);
+        continue;
+      }
+      if (!byTop.containsKey(t)) order.add(t);
+      (byTop[t] ??= <UnitLibrary>[]).add(u);
+    }
+
+    final out = <Widget>[];
+    for (final topId in order) {
+      final list = byTop[topId] ?? const <UnitLibrary>[];
+      if (list.isEmpty) continue;
+      out.add(Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Row(children: [
+          Icon(Icons.layers_outlined, size: 14, color: Colors.grey.shade600),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+                LibraryBadge.stripIndex(_topNameOf(topId)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 12.5, fontWeight: FontWeight.w700)),
+          ),
+          Text('${list.length} 个单元库',
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+        ]),
+      ));
+      for (final u in list) out.add(_unitTile(u));
+    }
+    if (other.isNotEmpty) {
+      out.add(const Padding(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Text('其它（不属于任何媒体库）',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      ));
+      for (final u in other) out.add(_unitTile(u));
+    }
+    return out;
+  }
+
+  /// 单元库 → 所属媒体库（顶级单元库）id；拿不到返回空串（不猜、不硬塞）。
+  String _topIdOfUnit(UnitLibrary u) {
+    for (final t in tops) {
+      if (t.id == u.id) return t.id;
+      for (final c in _walk(t)) {
+        if (c.id == u.id) return t.id;
+      }
+    }
+    return '';
+  }
+
+  /// 深度优先遍历一棵单元库子树（含自身）。
+  Iterable<UnitLibrary> _walk(UnitLibrary u) sync* {
+    yield u;
+    for (final c in u.children) {
+      yield* _walk(c);
+    }
+  }
+
+  /// 媒体库显示名：取树上的名字，拿不到就用 id。
+  String _topNameOf(String id) {
+    for (final t in tops) {
+      if (t.id == id) return t.name.isEmpty ? id : t.name;
+    }
+    return id;
   }
 
   /// H：单个单元库的配置入口；没有脚本时置灰并写明 J17 原因。
@@ -6173,15 +6261,14 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                         style:
                             const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
-                  if (units.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-                      child: Text('单元库（节点文件夹）',
-                          style: TextStyle(
-                              fontSize: 12, fontWeight: FontWeight.w600)),
-                    ),
-                    for (final u in units) _unitTile(u),
-                  ],
+                  // owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库
+                  // 的设置就归到对应的下面去」。
+                  //
+                  // 原来是一条平铺的「单元库（节点文件夹）」长列表，40 多个库混在
+                  // 一起，看不出哪个属于哪个媒体库。改为按顶级单元库（＝媒体库根）
+                  // 分节：每节先是媒体库名，再列它下面的单元库；不属于任何媒体库的
+                  // 归到「其它」。
+                  ..._unitSections(),
                   for (final l in libs)
                     ListTile(
                       leading: const Icon(Icons.library_books_outlined),
