@@ -2161,9 +2161,22 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     final emoji = LibraryBadge.emojiFor(id);
     final overridden =
         isTop ? LibraryBadge.topColorFor(id) != null : LibraryBadge.customColorFor(id) != null;
-    final inheritedOnly = !isTop && LibraryBadge.customColorFor(id) == null &&
+    // owner 2026-11-25：来源显式化了，状态文字也跟着说清楚是哪一种，
+    // 不再把「继承顶级」笼统显示成「自动」。
+    final src = LibraryBadge.sourceFor(id);
+    final inheritedOnly = !isTop &&
+        src != BadgeColorSource.autoAssign &&
+        LibraryBadge.customColorFor(id) == null &&
         LibraryBadge.topColorFor(lookupByLibId(LibraryBadge.topOfUnit, id) ?? '') !=
             null;
+    final sourceLabel = overridden
+        ? '自定义'
+        : switch (src) {
+            BadgeColorSource.autoAssign => '自动分配',
+            BadgeColorSource.fixedCustom => '自动分配',
+            BadgeColorSource.inheritTop =>
+              inheritedOnly ? '继承顶级' : '自动分配',
+          };
     // P1：只有末梢单元库能向下分发；非末梢的自定义色只作用于本层。
     // 查表走 lookupByLibId：`node:rel` / `rel` 两种 id 形式都是同一份数据。
     final leaf = lookupByLibId(LibraryBadge.leafUnits, id) ?? true;
@@ -2206,7 +2219,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
           if (emoji.isNotEmpty)
             Text(emoji, style: const TextStyle(fontSize: 16, height: 1.1)),
           Text(
-            overridden ? '自定义' : (inheritedOnly ? '继承顶级' : '自动'),
+            sourceLabel,
             style: TextStyle(
                 fontSize: 12,
                 color: overridden
@@ -2225,21 +2238,23 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                     : '非末梢单元库：该色只作用于本层单元库，'
                         '不会分发给下级（下级作品归更深的单元库）。'));
         if (chosen == null) return;
-        if (chosen.reset) {
-          if (isTop) {
-            await LibraryBadge.setTopColor(id, null);
-          } else {
-            await LibraryBadge.setColor(id, null);
-          }
-          await LibraryBadge.setEmoji(id, null);
-        } else {
+        // 先写来源：setSource 在非「自定义」时会清掉本层自定义色，
+        // 顺序反了会把刚设的色删掉。
+        await LibraryBadge.setSource(id, chosen.source);
+        if (chosen.source == BadgeColorSource.fixedCustom) {
           if (isTop) {
             await LibraryBadge.setTopColor(id, chosen.color);
           } else {
             await LibraryBadge.setColor(id, chosen.color);
           }
-          await LibraryBadge.setEmoji(id, chosen.emoji);
+        } else {
+          if (isTop) {
+            await LibraryBadge.setTopColor(id, null);
+          } else {
+            await LibraryBadge.setColor(id, null);
+          }
         }
+        await LibraryBadge.setEmoji(id, chosen.reset ? null : chosen.emoji);
         if (mounted) setState(() {});
       },
     );
@@ -2279,7 +2294,12 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         final chosen = await _showBadgeDialog(name, b.id, color,
             kind: LibEntryKind.basic, topLevelOnly: true);
         if (chosen == null) return;
-        await LibraryBadge.setBasicColor(b.id, chosen.reset ? null : chosen.color);
+        await LibraryBadge.setSource(b.id, chosen.source, basic: true);
+        await LibraryBadge.setBasicColor(
+            b.id,
+            chosen.source == BadgeColorSource.fixedCustom && !chosen.reset
+                ? chosen.color
+                : null);
         if (mounted) setState(() {});
       },
     );
@@ -2335,6 +2355,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     var currentEmoji = LibraryBadge.emojiFor(id);
     // D1：点「恢复自动」后必须真的清掉自定义色，而不是把当前自动色存成自定义。
     var reset = false;
+    // owner 2026-11-25：颜色来源可选，不再把「继承顶级」写死成唯一出路。
+    var source = topLevelOnly
+        ? LibraryBadge.sourceForBasic(id)
+        : (LibraryBadge.sourceFor(id));
     final emojiEdit = TextEditingController(text: currentEmoji);
     return showDialog<_BadgeDraft>(
       context: context,
@@ -2357,6 +2381,37 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                           const TextStyle(fontSize: 11, color: Colors.grey)),
                 ],
                 const SizedBox(height: 14),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('颜色来源',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                ),
+                const SizedBox(height: 6),
+                SegmentedButton<BadgeColorSource>(
+                  segments: const [
+                    ButtonSegment(
+                        value: BadgeColorSource.inheritTop,
+                        label: Text('继承顶级', style: TextStyle(fontSize: 11))),
+                    ButtonSegment(
+                        value: BadgeColorSource.autoAssign,
+                        label: Text('自动分配', style: TextStyle(fontSize: 11))),
+                    ButtonSegment(
+                        value: BadgeColorSource.fixedCustom,
+                        label: Text('自定义', style: TextStyle(fontSize: 11))),
+                  ],
+                  selected: <BadgeColorSource>{source},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (v) => setLocal(() {
+                    source = v.first;
+                    // 选「自定义」才用当前色；选自动则预览立刻换成本库自动色。
+                    if (source == BadgeColorSource.fixedCustom) {
+                      current = Color(current).toARGB32();
+                    } else {
+                      reset = false;
+                    }
+                  }),
+                ),
+                const SizedBox(height: 14),
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text('颜色',
@@ -2368,6 +2423,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                     GestureDetector(
                       onTap: () => setLocal(() {
                         current = LibraryBadge.palette[i];
+                        source = BadgeColorSource.fixedCustom;
                         reset = false;
                       }),
                       child: Container(
@@ -2496,6 +2552,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       hsv = HSVColor.fromColor(Color(autoColor));
                       currentEmoji = '';
                       emojiEdit.text = '';
+                      source = BadgeColorSource.inheritTop;
                       reset = true;
                     }),
                     icon: const Icon(Icons.restart_alt, size: 18),
@@ -2513,7 +2570,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 child: const Text('取消')),
             FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(_BadgeDraft(
-                    color: current, emoji: currentEmoji, reset: reset)),
+                    color: current,
+                    emoji: currentEmoji,
+                    reset: reset,
+                    source: source)),
                 child: const Text('保存')),
           ],
         ),
@@ -2527,8 +2587,14 @@ class _BadgeDraft {
   final int color;
   final String emoji;
   final bool reset;
+
+  /// 保存时写入的颜色来源（继承顶级 / 自动分配 / 自定义）。
+  final BadgeColorSource source;
   const _BadgeDraft(
-      {required this.color, required this.emoji, this.reset = false});
+      {required this.color,
+      required this.emoji,
+      this.reset = false,
+      this.source = BadgeColorSource.inheritTop});
 }
 
 class LibBadges extends StatelessWidget {

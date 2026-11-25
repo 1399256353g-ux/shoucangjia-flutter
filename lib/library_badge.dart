@@ -119,6 +119,17 @@ const Map<LibEntryKind, EntryStyle> kDefaultEntryStyle =
 
 /// 库词条（作者卡片左上角）的配色与标签逻辑。
 /// 纯函数部分不依赖 UI，便于单元测试；颜色统一用 ARGB int 表示。
+/// 词条颜色来源（owner 2026-11-25）。
+///
+/// 原来「自己没设色」时只有一条路：先继承所属顶级单元库色，顶级设过色就永远
+/// 落回同一个颜色——看起来就是「默认被锁死在继承顶级」。
+///
+/// 现在给出显式选择：
+///  - [inheritTop]：继承所属顶级单元库色（旧行为，默认）
+///  - [autoAssign]：自动配色，按注册顺序在调色板里依次分配
+///  - [fixedCustom]：本层自定义色
+enum BadgeColorSource { inheritTop, autoAssign, fixedCustom }
+
 class LibraryBadge {
   static const String prefsKey = 'lib_colors_v1';
 
@@ -138,6 +149,84 @@ class LibraryBadge {
   /// 词条 emoji 后缀（owner 2026-11-17）：每个单元库可选一个 emoji 追加在
   /// 词条名称后，作者卡/排行榜/基础库卡一眼区分。
   static const String emojiPrefsKey = 'lib_badge_emoji_v1';
+
+  /// owner 2026-11-25：「还有默认为什么是继承顶级锁死，好歹给几个选项吧，
+  /// 比如自动分配颜色」。
+  ///
+  /// 原来「自己没设色」时**只有一条路**：先继承所属顶级单元库的色，顶级设过色
+  /// 就永远落回同一个颜色——看起来就是「默认被锁死在继承顶级」。
+  ///
+  /// 现在给出显式来源选择（per-unit，缺省仍是继承顶级以保持既有观感）：
+  ///  - [inheritTop]：继承所属顶级单元库色（旧行为，默认）
+  ///  - [autoAssign]：自动配色——按注册顺序在调色板里依次分配，同屏易区分
+  ///  - [fixedCustom]：自定义色（存在 [custom] 里，等价于以前「设过色」）
+  /// 颜色来源偏好：unitId -> 来源。没记录的按 [BadgeColorSource.inheritTop]。
+  static final Map<String, String> colorSource = <String, String>{};
+  static const String colorSourcePrefsKey = 'lib_badge_color_source_v1';
+
+  /// 基础库的颜色来源单独存：同一个字符串在单元库/基础库两种语境下都可能
+  /// 出现，共用一张表会串色（与 [basicCustom] 分开的理由相同）。
+  static final Map<String, String> basicSource = <String, String>{};
+  static const String basicSourcePrefsKey = 'lib_badge_basic_source_v1';
+
+  static BadgeColorSource _sourceFromWire(String? raw) {
+    switch (raw) {
+      case 'auto':
+        return BadgeColorSource.autoAssign;
+      case 'custom':
+        return BadgeColorSource.fixedCustom;
+      default:
+        return BadgeColorSource.inheritTop;
+    }
+  }
+
+  static String _wireOf(BadgeColorSource src) => switch (src) {
+        BadgeColorSource.autoAssign => 'auto',
+        BadgeColorSource.fixedCustom => 'custom',
+        BadgeColorSource.inheritTop => 'inherit',
+      };
+
+  /// 基础库的颜色来源（缺省继承顶级）。
+  static BadgeColorSource sourceForBasic(String basicId) {
+    if (basicId.isEmpty) return BadgeColorSource.inheritTop;
+    return _sourceFromWire(basicSource[basicId]);
+  }
+
+  static Future<void> _saveSources() async {
+    await savePrefString(
+        colorSourcePrefsKey,
+        jsonEncode({
+          for (final e in colorSource.entries) e.key: e.value,
+        }));
+    await savePrefString(
+        basicSourcePrefsKey,
+        jsonEncode({
+          for (final e in basicSource.entries) e.key: e.value,
+        }));
+  }
+
+  /// 某单元库的颜色来源（缺省继承顶级）。
+  static BadgeColorSource sourceFor(String unitId) {
+    if (unitId.isEmpty) return BadgeColorSource.inheritTop;
+    return _sourceFromWire(lookupByLibId(colorSource, unitId));
+  }
+
+  /// 设置颜色来源。选 [BadgeColorSource.fixedCustom] 之前应已写入 [custom]；
+  /// 切到其它来源时清掉本层自定义色，避免「来源说自动、实际还有残留自定义」。
+  static Future<void> setSource(String unitId, BadgeColorSource src,
+      {bool basic = false}) async {
+    if (unitId.isEmpty) return;
+    final table = basic ? basicSource : colorSource;
+    removeByLibId(table, unitId);
+    table[unitId] = _wireOf(src);
+    if (src != BadgeColorSource.fixedCustom) {
+      // 来源不是「自定义」时清掉本层自定义色：否则会出现「来源写着自动、
+      // 实际还在用残留自定义色」——这正是 owner 说的「恢复自动没反应」。
+      removeByLibId(basic ? basicCustom : custom, unitId);
+    }
+    _bump();
+    await _saveSources();
+  }
 
   /// 顶级单元库（SECRET）与无归属词条的固定灰色。
   static const int gray = 0xFF6B7280;
@@ -281,27 +370,38 @@ class LibraryBadge {
   /// 形式不同，这里统一归一，保证作者词条与基础库卡颜色一致。
   /// [allowCustom] 为 false 时忽略本层自定义色（供「非末梢不下发」的基础库
   /// 落色使用），继承链其余部分不变。
+  /// 自动配色：按注册顺序取色，顺序里没有就按 id 哈希——同一个库任何时候
+  /// 都得到同一个色（不用随机，避免每次重建换个颜色）。
+  static int _autoColorOf(String unitId, List<String> order) {
+    for (final f in idFormsOf(unitId)) {
+      final i = order.indexOf(f);
+      if (i >= 0) return autoColorAt(i);
+    }
+    return colorFor(relOf(unitId), order: order);
+  }
+
   static int colorForUnit(String unitId,
       {List<String> order = const [], bool allowCustom = true}) {
     if (unitId.isEmpty) return gray;
     if (unitId == 'secret') return topColorFor('secret') ?? gray;
+    // owner 2026-11-25：按「颜色来源」决定走哪条链，不再写死「先继承顶级」。
+    final src = sourceFor(unitId);
+    if (src == BadgeColorSource.autoAssign) {
+      return _autoColorOf(unitId, order);
+    }
     if (allowCustom) {
       final c = lookupByLibId(custom, unitId);
       if (c != null) return c;
     }
-    // P1：自己没设色 → 继承所属顶级单元库的词条色（顶级设了才有）。
+    if (src == BadgeColorSource.fixedCustom) {
+      // 声明了自定义但没有值（被清过）：回落到自动配色，不留一个空壳状态。
+      return _autoColorOf(unitId, order);
+    }
+    // 默认：继承所属顶级单元库的词条色（顶级设过才有）。
     final topId = lookupByLibId(topOfUnit, unitId);
     final inherited = topId == null ? null : topColorFor(topId);
     if (inherited != null) return inherited;
-    // 注册顺序里也可能存着两种 id 形式；按同一份等价键列表找，
-    // 不再在调用点另写一套 indexOf 链。
-    var i = -1;
-    for (final f in idFormsOf(unitId)) {
-      i = order.indexOf(f);
-      if (i >= 0) break;
-    }
-    if (i >= 0) return autoColorAt(i);
-    return colorFor(relOf(unitId), order: order);
+    return _autoColorOf(unitId, order);
   }
 
   /// P1：词条外观。四种层级共用同一圆角与内边距，只改边框与底纹强度，
@@ -351,9 +451,16 @@ class LibraryBadge {
   /// 顶级单元库色，最后才是自动配色（顺序不可倒置：越具体越优先）。
   static int basicColorFor(String basicId, String unitId,
       {List<String> order = const []}) {
+    final src = sourceForBasic(basicId);
+    if (src == BadgeColorSource.autoAssign && basicId.isNotEmpty) {
+      return _autoColorOf(basicId, order);
+    }
     if (basicId.isNotEmpty) {
       final c = basicCustom[basicId];
       if (c != null) return c;
+    }
+    if (src == BadgeColorSource.fixedCustom) {
+      return _autoColorOf(basicId.isEmpty ? unitId : basicId, order);
     }
     // P1 分发规则：上级单元库自定义色只有它是末梢时才分发到这里；
     // 非末梢单元库只影响自己那层，基础库继续继承顶级单元库色。
@@ -522,6 +629,30 @@ class LibraryBadge {
       basicCustom
         ..clear()
         ..addAll(parse(sp.getString(basicPrefsKey)));
+      final rawSrc = sp.getString(colorSourcePrefsKey);
+      colorSource.clear();
+      if (rawSrc != null && rawSrc.isNotEmpty) {
+        try {
+          final m = jsonDecode(rawSrc);
+          if (m is Map) {
+            for (final e in m.entries) {
+              colorSource[e.key.toString()] = e.value.toString();
+            }
+          }
+        } catch (_) {}
+      }
+      final rawBasicSrc = sp.getString(basicSourcePrefsKey);
+      basicSource.clear();
+      if (rawBasicSrc != null && rawBasicSrc.isNotEmpty) {
+        try {
+          final m = jsonDecode(rawBasicSrc);
+          if (m is Map) {
+            for (final e in m.entries) {
+              basicSource[e.key.toString()] = e.value.toString();
+            }
+          }
+        } catch (_) {}
+      }
       emoji
         ..clear()
         ..addAll(parseEmoji(sp.getString(emojiPrefsKey)));
