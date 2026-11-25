@@ -219,11 +219,21 @@ double stageInfoBottom({
 ///  这个函数会立刻给出非 0 值。
 ///
 /// 返回值是**相对偏差**：0.02 表示偏差 2%（超出即视为拉伸）。
+///
+/// 框尺寸也必须是**有限**值：`Size(NaN, 100)` 走 `width <= 0` 为 false，
+/// 于是 `boxAspect = NaN`、偏差 = NaN。NaN 与阈值的比较恒为 false——
+/// 拉伸判据会**静默失效**（真的有拉伸也不再记日志），这比报错更难发现。
+/// 与本函数文档里的「框尺寸非法时返回 0」保持一致。
 double videoDistortion({required double? sourceAspect, required Size base}) {
   if (sourceAspect == null || !sourceAspect.isFinite || sourceAspect <= 0) {
     return 0;
   }
-  if (base.width <= 0 || base.height <= 0) return 0;
+  if (!base.width.isFinite ||
+      !base.height.isFinite ||
+      base.width <= 0 ||
+      base.height <= 0) {
+    return 0;
+  }
   final boxAspect = base.width / base.height;
   return ((boxAspect - sourceAspect) / sourceAspect).abs();
 }

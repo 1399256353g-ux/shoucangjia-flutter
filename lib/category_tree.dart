@@ -11,6 +11,7 @@
 // 本文件只做解析、校验、改名后的本地映射与筛选，不做 IO。
 
 import 'http_json.dart';
+import 'json_num.dart';
 import 'rel_path.dart';
 import 'stable_order.dart';
 import 'text_fold.dart';
@@ -43,12 +44,16 @@ class CategoryNode {
   bool get isLeaf => children.isEmpty;
 
   /// 整棵子树的分类数（不含自身）。
-  int get childCategoryCount =>
-      children.length + children.fold(0, (n, c) => n + c.childCategoryCount);
+  int get childCategoryCount => sumSat(<int>[
+        children.length,
+        for (final c in children) c.childCategoryCount,
+      ]);
 
   /// 整棵子树的作者数（含下级分类）。
-  int get authorCount =>
-      authors.length + children.fold(0, (n, c) => n + c.authorCount);
+  int get authorCount => sumSat(<int>[
+        authors.length,
+        for (final c in children) c.authorCount,
+      ]);
 
   /// 按 id（rel）查找子树里的分类节点。
   CategoryNode? findByRel(String target) {

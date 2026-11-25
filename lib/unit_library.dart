@@ -17,6 +17,7 @@
 
 import 'disk_name.dart';
 import 'http_json.dart';
+import 'json_num.dart';
 import 'lib_id.dart';
 import 'library_badge.dart';
 import 'library_tree.dart';
@@ -75,14 +76,23 @@ class UnitLibrary {
   String get rel => node.rel;
 
   /// 整棵子树的作品数（含下级单元库）。
-  int get works =>
-      basics.fold(0, (n, b) => n + b.works) +
-      children.fold(0, (n, c) => n + c.works);
+  ///
+  /// **饱和求和**（[sumSat]）：服务端把某个基础库的 `works` 写成 int 上限
+  /// 9223372036854775807（坏数据/占位值的常见形态）时，两个这样的基础库
+  /// 相加实测得 **-2**——单元库卡片走 `formatCount(n <= 0) → '0'`，于是
+  /// 一张有几千个作品的单元库显示成「0 作品」，是最难发现的那种错
+  /// （界面看起来只是「这个库是空的」）。等级（`AuthorGrade.score`）与
+  /// 排行（`libraryTotals`）早就是饱和求和，这里当时漏了。
+  int get works => sumSat(<int>[
+        for (final b in basics) b.works,
+        for (final c in children) c.works,
+      ]);
 
-  /// 整棵子树的作者数（基础库作者直接相加，不跨库去重）。
-  int get authors =>
-      basics.fold(0, (n, b) => n + b.authors) +
-      children.fold(0, (n, c) => n + c.authors);
+  /// 整棵子树的作者数（基础库作者直接相加，不跨库去重）。同上走饱和求和。
+  int get authors => sumSat(<int>[
+        for (final b in basics) b.authors,
+        for (final c in children) c.authors,
+      ]);
 
   /// 整棵子树的基础库数量。
   int get basicCount =>

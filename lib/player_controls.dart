@@ -92,10 +92,20 @@ bool showRotateButton({required bool isAndroid, required bool isIOS}) =>
 const double kTaskbarTouchTarget = 44;
 
 /// 倍速文案：`1.0x` / `1.25x` / `2.0x`（保留一位或两位小数，不显示末尾 0）。
+///
+/// 先用 `isFinite` 挡一道：`double.nan.toStringAsFixed(2)` 得到 **`"NaN"`**
+/// （不抛异常），界面上就是任务栏按钮写着 **`NaNx`**、无障碍标签也是
+/// 「播放设置（当前 NaNx）」。非有限值只可能来自坏配置或未初始化状态，
+/// 按正常倍速显示（`1.0x`），不把一个内部故障写进 UI。
 String speedLabel(double speed) {
-  var s = speed.toStringAsFixed(2);
-  if (s.endsWith('0')) s = s.substring(0, s.length - 1);
-  return '${s}x';
+  if (!speed.isFinite || speed <= 0) return '1.0x';
+  // 超出播放器支持范围的值同样是坏数据（`1e20` 之前显示成
+  // `100000000000000000000.0x`，把任务栏整条撜开）。夹到与
+  // `setSpeed` 同一区间。
+  final s = speed.clamp(0.5, 3.0).toDouble();
+  var text = s.toStringAsFixed(2);
+  if (text.endsWith('0')) text = text.substring(0, text.length - 1);
+  return '${text}x';
 }
 
 /// 任务栏剧集入口：`1/12`，点击弹出集数列表。

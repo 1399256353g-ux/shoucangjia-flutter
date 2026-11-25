@@ -116,6 +116,8 @@ class ResizeCacheStats {
   /// 先做除法再乘 100，中间值始终在 0–1。
   int? get usedPercent {
     if (maxBytes <= 0) return null;
+    // `bytes` 比 `maxBytes` 大时不是反常数据，而是「已超上限」（缓存清理还没
+    // 跑）。比例大于 1 时夹到 100%，不显示 `350%`。
     final b = bytes < 0 ? 0 : bytes;
     final ratio = b / maxBytes;
     if (!ratio.isFinite) return null;

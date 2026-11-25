@@ -12,8 +12,15 @@
 ///
 /// 逐字沿用历史行为：>= 60 分钟按小时显示并**向下取整**（90 → 每 1 小时）；
 /// 非正数表示不自动抓取，由调用方自己决定兜底文案，这里给「不自动」。
+///
+/// 上限 [kMaxIntervalMinutes] 不是防防御冗余：服务端旧字段 `intervalMin`
+/// 被写成 int 上限时，旧实现会输出「每 153722867280912930 小时」
+/// （实测）——数值没算错，但这不可能是真的抓取间隔，它只是把一个坏配置
+/// 写进了界面。与「无穷大不是间隔」一样，超限值当「不自动」。
+const int kMaxIntervalMinutes = 100 * 365 * 24 * 60; // 100 年，单位：分钟
+
 String everyMinutesLabel(int minutes) {
-  if (minutes <= 0) return '不自动';
+  if (minutes <= 0 || minutes > kMaxIntervalMinutes) return '不自动';
   if (minutes >= 60) return '每 ${minutes ~/ 60} 小时';
   return '每 $minutes 分钟';
 }

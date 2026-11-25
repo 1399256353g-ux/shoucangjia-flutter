@@ -122,7 +122,7 @@ class DeletedStats {
   const DeletedStats(
       {this.deleted = 0, this.failed = 0, this.landed = 0});
 
-  int get total => deleted + failed + landed;
+  int get total => addSat(addSat(deleted, failed), landed);
 
   static DeletedStats of(Iterable<DeletedEntry> items) {
     var d = 0, f = 0, l = 0;

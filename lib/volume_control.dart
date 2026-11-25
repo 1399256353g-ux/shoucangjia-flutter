@@ -42,8 +42,13 @@ double volumeAfterMuteToggle({
 enum VolumeIcon { mute, down, up }
 
 /// 静音或 0 → [VolumeIcon.mute]；<50 → [VolumeIcon.down]；其余 [VolumeIcon.up]。
+///
+/// 非有限值按**静音**显示：`NaN <= 0` 与 `NaN < 50` 都是 false，旧写法
+/// 直接把「音量未知」归到「大音量」档（实测），与同文件的 `volumeFromDrag`
+/// / `volumeAfterMuteToggle`（非有限一律当 0）恰恰相反——同一个 NaN 在图标
+/// 上是满音量、在数字上是 0，弹层里两个显示对不上。
 VolumeIcon volumeIconFor(double volume, {bool muted = false}) {
-  if (muted || volume <= 0) return VolumeIcon.mute;
+  if (muted || !volume.isFinite || volume <= 0) return VolumeIcon.mute;
   if (volume < 50) return VolumeIcon.down;
   return VolumeIcon.up;
 }

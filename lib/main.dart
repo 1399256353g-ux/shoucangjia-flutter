@@ -4996,9 +4996,11 @@ class _LibraryPageState extends State<LibraryPage> {
     BasicLib? best;
     var bestPlays = -1;
     for (final b in u.allBasics) {
-      final plays = WorkPlaysStore.countsFor(b.id)
-          .values
-          .fold<int>(0, (n, p) => n + p.count);
+      // 饱和求和：本机计数正常不会溢出，但 `WorkPlaysStore` 的表是从
+      // SharedPreferences 读回来的，手改/迁移坏数据写成 int 上限时
+      // `max + max = -2`（实测），该基础库会被当成「没播过」，
+      // 单元库封面会从「播放量最高作品」退化成首张图。
+      final plays = sumSat(WorkPlaysStore.countsFor(b.id).values.map((p) => p.count));
       if (plays > bestPlays) {
         bestPlays = plays;
         best = b;
