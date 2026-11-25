@@ -36,6 +36,13 @@ const double kTopBarTouchSize = 44;
 /// 每个按钮占用的横向格宽（44dp 触达 + 8dp 间距）。
 const double kTopBarSlot = 52;
 
+/// 「⋯」按钮实际占宽（触达区 44dp，与其它按钮同高）。
+///
+/// 排布必须把这一格算进去：旧公式只数按钮数、不算总宽，于是窄屏上
+/// 「保留的按钮 + ⋯ + 设置」三段加起来会超过可用宽度，Row 直接溢出
+/// （实测 170dp 宽需要 200dp）。
+const double kTopBarMoreWidth = kTopBarTouchSize;
+
 /// 屏幕上直接可见的按钮上限（含「⋯」）。
 const int kTopBarMaxVisible = 4;
 
@@ -78,7 +85,21 @@ TopBarLayout topBarLayout({
   final budget = pinned == null ? kTopBarMaxVisible : kTopBarMaxVisible - 1;
   final slots = (width / kTopBarSlot).floor().clamp(2, budget);
   final direct = slots >= rest.length ? rest.length : slots - 1;
-  final keep = direct.clamp(1, rest.length);
+  var keep = direct.clamp(1, rest.length);
+  // 宽度也要满足：`keep` 个按钮 + （有溢出时的）「⋯」+ 常驻尾位，
+  // 实际总宽不能超过 [width]，否则 Row 会溢出（而不是换行）。
+  // 逐个退让到放得下为止；至少保留一格常驻（没有主按钮的顶部栏不可用），
+  // 这一格的溢出交给外层（窄屏上「⋯」本身也会被裁，但不会再出现
+  // 越过边界的黑黄条纹）。
+  double needOf(int k) =>
+      k * kTopBarSlot +
+      (pinned == null ? 0 : kTopBarSlot) +
+      (k < rest.length ? kTopBarMoreWidth : 0);
+  if (width.isFinite && width > 0) {
+    while (keep > 1 && needOf(keep) > width) {
+      keep--;
+    }
+  }
   return TopBarLayout(
     <TopBarAction>[...rest.take(keep), if (pinned != null) pinned],
     rest.skip(keep).toList(),
@@ -148,8 +169,14 @@ class HomeTopBar extends StatelessWidget {
         key: const ValueKey('topbar-more'),
         tooltip: '更多',
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(
-            width: kTopBarTouchSize, height: kTopBarTouchSize),
+        // owner 2026-11-25：「主页的三点省略号点开还是 bug，不显示」。
+        //
+        // 根因：这里原来写了 `constraints: tightFor(44, 44)`。PopupMenuButton
+        // 的 constraints 作用于**按钮自身**，但 Flutter 会把它作为菜单的宽度
+        // 上限传给弹出的 menu——整个菜单被压成 44dp 宽，菜单项里的文字被挤到
+        // 20×20 几乎不可见。真机实测：点开后 UI 树里只剩一个 77×77 的遮罩，
+        // 没有任何菜单项。删掉这条约束，按钮尺寸由 IconButton 默认的 48dp
+        // 触达区保证，菜单恢复自适应文字宽度。
         icon: const Icon(Icons.more_horiz, size: 24),
         onSelected: (a) => a.onPressed?.call(),
         itemBuilder: (_) => <PopupMenuEntry<TopBarAction>>[

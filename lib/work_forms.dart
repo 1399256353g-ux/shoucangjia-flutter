@@ -10,6 +10,7 @@ library;
 import 'work_safety.dart';
 import 'json_num.dart';
 import 'media_path.dart';
+import 'time_labels.dart';
 
 /// 章节是否为图片（混合合集里图片章节排在最后）。
 bool chapterIsImage(dynamic chapter) {
@@ -206,12 +207,15 @@ String workSortLabel(WorkSort sort) {
 
 int _intOf(dynamic v) => intOf(v);
 
-/// 时间戳统一到毫秒：`srcAt` 是毫秒，旧数据可能是秒。
+/// 时间戳归一到毫秒；无法识别返回 0。
+///
+/// 秒级换算走 [msFromEpochSeconds]：`n * 1000` 在这里是**唯一**的换算点，
+/// 越界的大数会静默回绕成负数（排到最后、显示 1969 年）。
 int _msOf(dynamic v) {
-  final n = _intOf(v);
+  final n = intOf(v);
   if (n <= 0) return 0;
   if (n >= 100000000000) return n; // 毫秒级（约 1e12）
-  if (n >= 1000000000) return n * 1000; // 秒级（约 1e9）
+  if (n >= 1000000000) return msFromEpochSeconds(n); // 秒级（约 1e9）
   return 0;
 }
 
@@ -230,9 +234,11 @@ int workIngestMs(dynamic work) {
   if (d.isNotEmpty) {
     final m = RegExp(r'^(\d{4})[-/.]?(\d{2})[-/.]?(\d{2})').firstMatch(d);
     if (m != null) {
-      return DateTime(int.parse(m[1]!), int.parse(m[2]!),
-              int.parse(m[3]!))
-          .millisecondsSinceEpoch;
+      // 走 msFromDateParts：`2026-13-45` 会被 DateTime 静默滚成 2027-02-14，
+      // 而 `275761-01-01` 直接在比较函数里抛 ArgumentError（整张列表崩）。
+      final ms = msFromDateParts(
+          intOf(m[1]), intOf(m[2]), intOf(m[3]));
+      if (ms != null) return ms;
     }
   }
   return 0;

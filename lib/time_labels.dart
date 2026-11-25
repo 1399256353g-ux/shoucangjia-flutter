@@ -28,11 +28,42 @@ bool isValidEpochMs(int ms) =>
 DateTime? dateTimeOfMs(int ms) =>
     isValidEpochMs(ms) ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
 
+/// 年月日 → 当天 0 点毫秒；**月/日越界或年份不可表示时返回 null**。
+///
+/// `DateTime(2026, 13, 45)` 不报错，它会**静默滚动**成 2027-02-14；而
+/// `DateTime(275761, 1, 1)` 直接抛 `ArgumentError`。这两种行为都不能留在
+/// 排序/展示路径上：滚动的结果是一个看起来合法、其实错了一个多月的日期；
+/// 抛异常则发生在 `List.sort` 的比较函数里——整张作品列表在 build 阶段崩掉。
+///
+/// 所以先按「人类可表示范围」挡一道，再用回读校验拦住 2 月 31 日这类
+/// 会被 DateTime 滚到下个月的日期。非法一律返回 null，由调用方当作
+/// 「没有时间」处理（排序保持原序、显示 `—`）。
+int? msFromDateParts(int year, int month, int day) {
+  if (year < 1900 || year > 3000) return null;
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > 31) return null;
+  final dt = DateTime(year, month, day);
+  if (dt.year != year || dt.month != month || dt.day != day) return null;
+  return dt.millisecondsSinceEpoch;
+}
+
 /// 安全的秒→DateTime；先判范围再乘 1000——`sec * 1000` 在 int64 上会
 /// **静默回绕**，1e19 秒会变成 1969 年而不是报错。
 DateTime? dateTimeOfSec(int sec) {
   if (sec > kMaxEpochMs ~/ 1000 || sec < -(kMaxEpochMs ~/ 1000)) return null;
   return dateTimeOfMs(sec * 1000);
+}
+
+/// 秒级时间戳乘 1000 的**安全**版本：越界返回 0 而不是回绕成负数。
+///
+/// 爬虫索引里的 `srcAt` 偶尔是秒，个别条目会被写成离谱的大数；
+/// `sec * 1000` 在 int64 上静默回绕，得到一个**负**的毫秒值。负值在
+/// 排序里会沉到最后（看起来像「最新」），显示时又变成 1969 年。
+int msFromEpochSeconds(int sec) {
+  if (sec <= 0) return 0;
+  const maxSec = kMaxEpochMs ~/ 1000;
+  if (sec > maxSec) return 0;
+  return sec * 1000;
 }
 
 /// `11-23 17:05`（本地时区）；无效时间返回 `—`。
