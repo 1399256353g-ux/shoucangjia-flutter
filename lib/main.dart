@@ -50,6 +50,7 @@ import 'author_filter.dart';
 import 'author_big_nodes.dart';
 import 'author_drag.dart';
 import 'author_merge.dart';
+import 'author_mount_sheet.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
 import 'author_filter_bar.dart';
@@ -16264,6 +16265,27 @@ class _AuthorPageState extends State<AuthorPage> {
       ..showSnackBar(const SnackBar(content: Text('已恢复自动头像')));
   }
 
+  /// owner 2026-11-25：作者文件夹挂载入口（作者主页）。
+  ///
+  /// owner 原话：「这套机制怎么想挂载入口也应该在作者主页吧，单元库点进去
+  /// 再选哪个作者吗？搞笑」。挂载是**作者维度**的操作——打开某个人，才该
+  /// 看到他在哪些基础库/文件夹里、是否已合并。
+  ///
+  /// 鉴权头沿用主库连接（与作品、头像、简介同一口径）。
+  Future<void> _openAuthorMount() async {
+    final lib = primaryLib.isEmpty ? cfg.lib : primaryLib;
+    await showAuthorMountSheet(
+      context: context,
+      authorName: widget.name,
+      base: cfg.base,
+      headers: cfg.headersFor(lib),
+    );
+    // 面板里可能做过合并/拆分：关掉后一律重载，不依赖它是否回传结果
+    // （用户也可能中途按返回键关掉，那条路径不会有返回值）。
+    if (!mounted) return;
+    await load();
+  }
+
   /// J13：编辑简介（0–500 字，留空=清空），写回 authors.json。
   Future<void> _editBio() async {
     final ctrl = TextEditingController(text: bio);
@@ -16985,6 +17007,15 @@ class _AuthorPageState extends State<AuthorPage> {
     return Scaffold(
       appBar: AppBar(title: Text('@${widget.name}'), actions: [
         const HomeAction(),
+        // owner 2026-11-25：作者文件夹挂载入口放在作者主页（不是单元库页）。
+        // 挂载是作者维度的事：打开某人才看得到他分布在哪些库/文件夹。
+        // 单个库的作者也可能需要并入别处，所以不受 loading/多选状态限制。
+        IconButton(
+          key: const ValueKey('author-mount-btn'),
+          tooltip: '作者文件夹挂载（这个作者在哪些库/文件夹）',
+          icon: const Icon(Icons.folder_shared_outlined),
+          onPressed: _openAuthorMount,
+        ),
         if (loading)
           const SizedBox.shrink()
         else if (selectingWorks) ...[

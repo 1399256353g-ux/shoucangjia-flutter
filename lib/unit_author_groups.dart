@@ -484,3 +484,158 @@ String unitAuthorCardSummary(UnitAuthorCard c) => authorMergeSummary(
       auto: c.auto,
       names: c.names.length,
     );
+
+// ── 作者主页的挂载视图（owner 2026-11-25）─────────────────────────────
+//
+// owner：「这套机制怎么想挂载入口也应该在作者主页吧，单元库点进去再选哪个
+// 作者吗？搞笑」。挂载是**作者维度**的操作：打开某个作者，才该看到这个作者
+// 存在于哪些基础库/文件夹、是否已被合并。
+//
+// 服务端 `GET /api/author/mounts?name=` 返回：
+//   items  [{lib, libName, authorDir, works, av, unitRel}]
+//   groups [{unit, groupId, files:[{lib,authorDir}], split}]
+
+/// 作者在某一个基础库里的一个作者目录。
+class AuthorMountItem {
+  final String lib;
+  final String libName;
+  final String authorDir;
+  final int works;
+  final String avatar;
+
+  /// 该基础库所属的单元库 rel；空串表示没归属（不参与自动合并）。
+  final String unitRel;
+
+  const AuthorMountItem({
+    required this.lib,
+    this.libName = '',
+    required this.authorDir,
+    this.works = 0,
+    this.avatar = '',
+    this.unitRel = '',
+  });
+
+  static AuthorMountItem? fromJson(Object? v) {
+    if (v is! Map) return null;
+    final lib = '${v['lib'] ?? ''}'.trim();
+    final dir = '${v['authorDir'] ?? ''}'.trim();
+    if (lib.isEmpty || dir.isEmpty) return null;
+    return AuthorMountItem(
+      lib: lib,
+      libName: '${v['libName'] ?? ''}'.trim(),
+      authorDir: dir,
+      works: v['works'] is num ? (v['works'] as num).toInt() : 0,
+      avatar: '${v['av'] ?? ''}'.trim(),
+      unitRel: '${v['unitRel'] ?? ''}'.trim(),
+    );
+  }
+
+  String get displayLib => libName.isEmpty ? lib : libName;
+}
+
+/// 该作者所在的某个手动组（用于判断是否已被手动合并/拆分）。
+class AuthorMountGroup {
+  final String unit;
+  final String groupId;
+  final List<AuthorGroupFile> files;
+  final bool split;
+
+  const AuthorMountGroup({
+    required this.unit,
+    required this.groupId,
+    this.files = const <AuthorGroupFile>[],
+    this.split = false,
+  });
+
+  static AuthorMountGroup? fromJson(Object? v) {
+    if (v is! Map) return null;
+    final unit = '${v['unit'] ?? ''}'.trim();
+    final gid = '${v['groupId'] ?? ''}'.trim();
+    if (gid.isEmpty) return null;
+    final files = <AuthorGroupFile>[];
+    final raw = v['files'];
+    if (raw is List) {
+      for (final f in raw) {
+        final o = AuthorGroupFile.fromJson(f);
+        if (o != null) files.add(o);
+      }
+    }
+    return AuthorMountGroup(
+        unit: unit, groupId: gid, files: files, split: boolOf(v['split']));
+  }
+}
+
+/// 一个作者的完整挂载情况。
+class AuthorMounts {
+  final String name;
+  final List<AuthorMountItem> items;
+  final List<AuthorMountGroup> groups;
+
+  const AuthorMounts({
+    this.name = '',
+    this.items = const <AuthorMountItem>[],
+    this.groups = const <AuthorMountGroup>[],
+  });
+
+  static const empty = AuthorMounts();
+
+  static AuthorMounts fromJson(Object? v) {
+    if (v is! Map) return empty;
+    final items = <AuthorMountItem>[];
+    final raw = v['items'];
+    if (raw is List) {
+      for (final e in raw) {
+        final o = AuthorMountItem.fromJson(e);
+        if (o != null) items.add(o);
+      }
+    }
+    final groups = <AuthorMountGroup>[];
+    final rawG = v['groups'];
+    if (rawG is List) {
+      for (final e in rawG) {
+        final o = AuthorMountGroup.fromJson(e);
+        if (o != null) groups.add(o);
+      }
+    }
+    return AuthorMounts(
+        name: '${v['name'] ?? ''}'.trim(), items: items, groups: groups);
+  }
+
+  /// 该作者一共出现在几个基础库。
+  int get libCount => items.map((e) => e.lib).toSet().length;
+
+  /// 该作者一共出现在几个文件夹（同一个库里可能有多个目录）。
+  int get dirCount => items.length;
+
+  /// 需要展示「多库/多文件夹」信息：至少两处才有意义。
+  bool get isMulti => items.length >= 2;
+
+  /// 该作者所在的单元库（去重，按出现顺序）。
+  List<String> get units {
+    final out = <String>[];
+    for (final i in items) {
+      final u = i.unitRel;
+      if (u.isEmpty || out.contains(u)) continue;
+      out.add(u);
+    }
+    return out;
+  }
+
+  /// 是否全部分布在同一个单元库内（这样服务端才能自动/手动合并成一张卡）。
+  bool get sameUnitOnly => units.length <= 1;
+
+  /// 该作者已被哪个组覆盖（返回组 id；没有返回空串）。
+  String groupIdIn(String unit) {
+    for (final g in groups) {
+      if (g.unit == unit) return g.groupId;
+    }
+    return '';
+  }
+}
+
+/// `GET /api/author/mounts?name=` 地址。
+String authorMountsUrl(String base, String name) {
+  final n = name.trim().replaceFirst(RegExp(r'^@+'), '');
+  return joinApiUrl(base, '/api/author/mounts',
+      query: n.isEmpty ? null : {'name': n});
+}
