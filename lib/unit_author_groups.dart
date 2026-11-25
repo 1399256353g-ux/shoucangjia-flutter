@@ -524,7 +524,7 @@ class AuthorMountItem {
       lib: lib,
       libName: '${v['libName'] ?? ''}'.trim(),
       authorDir: dir,
-      works: v['works'] is num ? (v['works'] as num).toInt() : 0,
+      works: intOf(v['works']),
       avatar: '${v['av'] ?? ''}'.trim(),
       unitRel: '${v['unitRel'] ?? ''}'.trim(),
     );

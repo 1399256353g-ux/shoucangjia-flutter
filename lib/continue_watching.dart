@@ -205,8 +205,16 @@ List<ContinueItem> removeContinueItem(
 bool shouldSkipContinueRecord(ContinueItem prev, ContinueItem next) {
   if (prev.key != next.key) return false;
   if (prev.collection != next.collection) return false;
-  final delta = prev.positionMs - next.positionMs;
-  return (delta < 0 ? -delta : delta) < kContinueThrottleMs;
+  // 差值必须在**不会溢出**的空间里算：
+  //
+  // `prev.positionMs - next.positionMs` 在两个极端值之间会回绕——
+  // `9223372036854775807 - (-9223372036854775808)` 实测得 **-1**，
+  // abs 后是 1，小于节流窗口，于是这次「从片头跳到片尾」被当成
+  // 「位置没变，不写盘」。后果不是显示错，是**这次真实的进度变化整条丢掉**
+  // （下次续播回到旧位置）。回绕方向不可预测，abs 补救不了，
+  // 只能一开始就用双精度算——阈值是 3000ms，double 在这个量级上精确。
+  final mag = (prev.positionMs.toDouble() - next.positionMs.toDouble()).abs();
+  return mag < kContinueThrottleMs;
 }
 
 /// 本地「继续观看」仓库：内存缓存 + 直接落盘 + 变更通知。

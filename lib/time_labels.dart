@@ -159,6 +159,20 @@ String clockHmsMs(DateTime at) =>
 String monthDayHms(DateTime at) =>
     '${_two(at.month)}-${_two(at.day)} ${clockHms(at)}';
 
+/// 时长/位置文案的可信上限（秒）：100 小时。
+///
+/// 与封面角标的上限（`cover_badges.kBadgeMaxSeconds` = 100 小时）是同一个
+/// 数，但两处各自独立成常量并不算两份规则：那边是「角标放不下就不画」，
+/// 这边是「进度行怎么显示」。真正的规则只有一条——**输入不可能是真的
+/// 时长时，不输出荒唐读数**。
+const int kMaxClockSeconds = 100 * 60 * 60;
+
+/// 时长不可信（或未知）时显示的文字。
+///
+/// 与「没有时长」共用同一个出口：调用方不必先判断 `du` 是否可信，
+/// 直接把秒数交进来，拿到的要么是真实读数，要么是这一串占位。
+const String kUnknownClock = '--:--';
+
 /// 播放位置/时长：`mm:ss`，满 1 小时后为 `h:mm:ss`。
 ///
 /// 第十二批收口：播放页进度行与进度条原先用一份**只到分钟、不进位**的
@@ -167,7 +181,14 @@ String monthDayHms(DateTime at) =>
 String formatClockMs(int ms) => formatClockSeconds(ms < 0 ? 0 : ms ~/ 1000);
 
 /// 秒版：`mm:ss` / `h:mm:ss`（见 [formatClockMs]）。
+///
+/// 超过 [kMaxClockSeconds] 返回 [kUnknownClock]：服务端把 `du` 写成
+/// `1e18` 或 int 上限时，旧实现算出 `2562047788015215:30:07`（实测），
+/// 进度行被撑成一行二十几位数字，看着像「这条片子有宇宙那么长」。
+/// 数值没算错，是输入不可能是真的媒体时长——与 `formatBytes` /
+/// `everyMinutesLabel` / 封面角标同一条口径。
 String formatClockSeconds(int totalSeconds) {
+  if (totalSeconds > kMaxClockSeconds) return kUnknownClock;
   final t = totalSeconds < 0 ? 0 : totalSeconds;
   final h = t ~/ 3600;
   final m = (t % 3600) ~/ 60;

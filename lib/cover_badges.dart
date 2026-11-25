@@ -5,13 +5,17 @@
 library;
 
 import 'json_num.dart';
+import 'time_labels.dart';
 import 'work_forms.dart';
 import 'work_safety.dart';
 
 /// 封面角标时长上限（秒）：100 小时。
 ///
 /// 媒体时长不可能超过这个量级；超过它的 `du` 只有一种来源——坏数据。
-const int kBadgeMaxSeconds = 100 * 60 * 60;
+/// 数值本身与播放页时长文案的上限（`time_labels.kMaxClockSeconds`）相同，
+/// 但两者是**不同出口的不同决定**：角标放不下就不画（返回空串），
+/// 进度行要占位（`--:--`）。所以这里只引用同一个上限值，不复制一个数字。
+const int kBadgeMaxSeconds = kMaxClockSeconds;
 
 /// 把秒数格式化成 `m:ss`（超过 1 小时为 `h:mm:ss`）。
 /// 非法/非正数返回空串，调用方据此隐藏角标。

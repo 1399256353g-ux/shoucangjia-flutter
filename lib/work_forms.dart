@@ -84,12 +84,18 @@ String workTypeLabel(dynamic work) {
 }
 
 /// 章节显示名：优先索引里的标题，缺失时回退「第 N 集」。
+///
+/// [index] 越界（负数/超出章节数）时按 0 / 末项算：旧写法直接
+/// `index + 1`，索引为 -5 时界面渲染成「**第 -4 集**」（实测），
+/// 在章节菜单上是一行看起来像坏了的数据。调用方传进来的是「当前第几章」，
+/// 重算后可能落在列表外（列表刷新、切条与章节数变化跨帧），这不是脏数据，
+/// 只是需要一个合法的展示名。
 String chapterLabel(dynamic chapter, int index) {
   if (chapter is Map) {
     final t = '${chapter['ti'] ?? ''}'.trim();
     if (t.isNotEmpty) return t;
   }
-  return '第 ${index + 1} 集';
+  return '第 ${(index < 0 ? 0 : index) + 1} 集';
 }
 
 /// 合集内切到第 [index] 章时返回叠加后的作品 Map。
