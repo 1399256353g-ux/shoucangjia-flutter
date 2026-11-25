@@ -94,8 +94,20 @@ class PicZoom {
 
 /// 双指间距换算缩放倍率：startScale * (currentDistance / startDistance)。
 /// 间距过小（双指几乎重合）时保持原倍率，避免抖动放大。
+///
+/// **非有限输入一律保持原倍率**。旧实现只挡了 `distance`，`startScale` 与
+/// `startDistance` 可以是 NaN（手势第一帧、或上一轮状态被写坏）：
+/// `(NaN * d / s).clamp(1,4)` 实测得 **4.0**（clamp 把 NaN 当上界），于是
+/// 「缩放状态未知」被当成「用户一下子捏到最大」——图片瞬间放大四倍。
+/// Infinity 同理（`infinity.clamp` = 上界）；`startDistance` 为 NaN 时
+/// 上面的 `< 4` 判定是 false，NaN 一路传下去，结果同样是 4.0。
 double pinchScale(double startScale, double startDistance, double distance) {
-  if (startDistance < 4 || !distance.isFinite) return startScale;
-  return (startScale * distance / startDistance)
-      .clamp(kPicZoomMin, kPicZoomMax);
+  if (!startScale.isFinite || startScale <= 0) return kPicZoomMin;
+  final base = startScale.clamp(kPicZoomMin, kPicZoomMax);
+  if (!startDistance.isFinite || startDistance < 4 || !distance.isFinite) {
+    return base;
+  }
+  final next = base * distance / startDistance;
+  if (!next.isFinite) return base;
+  return next.clamp(kPicZoomMin, kPicZoomMax);
 }

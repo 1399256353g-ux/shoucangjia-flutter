@@ -251,6 +251,22 @@ Uri syncLogsUri(String base, {String lib = '', int limit = 20}) {
   }));
 }
 
+/// 同步日志保留天数设置地址（`GET` 读 / `POST {keepDays}` 写）。
+///
+/// owner 2026-11-25：天数可自己设置。服务端只改 `sync_log_settings.json`，
+/// 清理时也只裁 `sync_ledger.json`——**不碰 `_deleted.log`**（删除检测记录
+/// 是另一个文件，由 dy_prune.js 维护）。
+Uri syncLogSettingsUri(String base) =>
+    Uri.parse(joinApiUrl(base, '/api/sync/logs/settings'));
+
+/// 解析保留天数响应；坏数据回落 [fallback]。
+int parseKeepDays(dynamic raw, {int fallback = 7}) {
+  if (raw is! Map) return fallback;
+  final n = raw['keepDays'];
+  final v = intOf(n, fallback);
+  return v.clamp(1, 90);
+}
+
 /// 重试地址。base 为空时得到相对地址（不抛异常，由请求层报连接失败）。
 Uri syncRetryUri(String base) => Uri.parse(joinApiUrl(base, '/api/sync/retry'));
 

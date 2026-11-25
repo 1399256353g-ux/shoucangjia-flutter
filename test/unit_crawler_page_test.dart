@@ -61,7 +61,14 @@ void main() {
     final sw = t.widget<SwitchListTile>(
         find.byKey(const ValueKey('unit-crawler-enabled')));
     expect(sw.onChanged, isNull);
-    await t.drag(find.byType(ListView), const Offset(0, -400));
+    // owner 2026-11-25：页面在日志面板里加了「设置保留天数」一行，固定滚动
+    // -400 不再够用（运行按钮被推到折叠线以下）。改为滚动到可见，
+    // 不依赖具体像素——这类断言本来就不该绑定布局高度。
+    await t.scrollUntilVisible(
+      find.byKey(const ValueKey('unit-crawler-run')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await t.pumpAndSettle();
     final run = t.widget<FilledButton>(
         find.byKey(const ValueKey('unit-crawler-run')));

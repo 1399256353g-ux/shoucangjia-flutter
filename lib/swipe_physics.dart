@@ -62,6 +62,12 @@ double dampedDragOffset(
   double overscrollFactor = kOverscrollDamping,
 }) {
   if (!outOfRange) return offset;
+  // 非有限输入必须在这里收手：`offset` 来自滚动指标，在拖动第一帧/尺寸为零
+  // 的中间态可以是 NaN；`NaN * f` = NaN 会写进当前滚动物理，页面从此收不回来
+  // （表现为整页不再响应滑动）。`overscrollFactor` 同理：`NaN.clamp(0,1)`
+  // 实测返回 **1.0**（clamp 对 NaN 走上界），等于悄悄关掉阻尼。
+  if (!offset.isFinite) return 0;
+  if (!overscrollFactor.isFinite) return offset;
   final f = overscrollFactor.clamp(0.0, 1.0);
   return offset * f;
 }

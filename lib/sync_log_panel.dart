@@ -47,6 +47,14 @@ class SyncLogPanelState extends State<SyncLogPanel> {
   String? err;
   bool retrying = false;
 
+  /// owner 2026-11-25：「日志在设置页上限显示 10 条，剩下的点展开按键才显示」。
+  /// 默认只铺 10 条，其余收起来——日志是排查用的，不该占满整页。
+  bool expanded = false;
+  static const int kCollapsedRuns = 10;
+
+  /// 正在提交保留天数（避免连点）。
+  bool busy = false;
+
   http.Client get _client => widget.client ?? http.Client();
 
   @override
@@ -141,11 +149,26 @@ class SyncLogPanelState extends State<SyncLogPanel> {
         ]),
         Padding(
           padding: const EdgeInsets.only(left: 22, bottom: 4),
-          child: Text(
-            '保留 ${log.keptDays} 天 · 最近 ${log.runs.length} 次同步'
-            '${log.total > log.runs.length ? '（共 ${log.total}）' : ''}',
-            style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
-          ),
+          child: Row(children: [
+            Expanded(
+              child: Text(
+                '保留 ${log.keptDays} 天 · 最近 ${log.runs.length} 次同步'
+                '${log.total > log.runs.length ? '（共 ${log.total}）' : ''}',
+                style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
+              ),
+            ),
+            // owner 2026-11-25：保留天数可自己设置；过期的同步日志自动清除。
+            // 只改同步日志，删除检测记录（_deleted.log）不受影响。
+            TextButton(
+              key: const ValueKey('sync-log-keepdays'),
+              style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  minimumSize: const Size(0, 28)),
+              onPressed: busy ? null : _editKeepDays,
+              child: const Text('设置保留天数', style: TextStyle(fontSize: 10.5)),
+            ),
+          ]),
         ),
         if (loading)
           const Padding(
@@ -173,10 +196,113 @@ class SyncLogPanelState extends State<SyncLogPanel> {
                 style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
           )
         else
-          for (final r in log.runs) _runTile(r),
+          for (final r in (expanded
+              ? log.runs
+              : log.runs.take(kCollapsedRuns).toList()))
+            _runTile(r),
+          if (log.runs.length > kCollapsedRuns)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, top: 2, bottom: 2),
+              child: TextButton.icon(
+                key: const ValueKey('sync-log-expand'),
+                onPressed: () => setState(() => expanded = !expanded),
+                icon: Icon(
+                    expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 18),
+                label: Text(
+                  expanded
+                      ? '收起（只看最近 $kCollapsedRuns 条）'
+                      : '展开全部 ${log.runs.length} 条'
+                          '${log.total > log.runs.length ? '（服务端共 ${log.total}）' : ''}',
+                  style: const TextStyle(fontSize: 11.5),
+                ),
+              ),
+            ),
         const SizedBox(height: 4),
       ],
     );
+  }
+
+  /// owner 2026-11-25：「可自己设置保留日志的天数，过期的日志自动清除，
+  /// 但小心别把删除检测日志删了」。
+  ///
+  /// 这里只改**同步日志**的保留天数（1..90）。删除检测记录在
+  /// `_deleted.log`，由另一个服务端脚本维护，接口完全不碰它。
+  Future<void> _editKeepDays() async {
+    if (busy) return;
+    var days = log.keptDays > 0 ? log.keptDays : 7;
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setLocal) {
+          return AlertDialog(
+            title: const Text('同步日志保留天数'),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('超期记录会自动清除（范围 1–90 天）。\n'
+                  '只清理同步日志，删除监测记录不受影响。',
+                  style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 12),
+              Row(children: [
+                const Text('天数'),
+                Expanded(
+                  child: Slider(
+                    key: const ValueKey('sync-log-keepdays-slider'),
+                    value: days.toDouble(),
+                    min: 1,
+                    max: 90,
+                    divisions: 89,
+                    label: '$days',
+                    onChanged: (v) => setLocal(() => days = v.round()),
+                  ),
+                ),
+                SizedBox(
+                    width: 32,
+                    child: Text('$days', textAlign: TextAlign.end)),
+              ]),
+            ]),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('取消')),
+              FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(days),
+                  child: const Text('保存')),
+            ],
+          );
+        });
+      },
+    );
+    if (picked == null || !mounted) return;
+    setState(() => busy = true);
+    try {
+      final r = await _client
+          .post(
+            syncLogSettingsUri(widget.base),
+            headers: {...widget.headers, 'Content-Type': 'application/json'},
+            body: jsonEncode({'keepDays': picked}),
+          )
+          .timeout(const Duration(seconds: 12));
+      dynamic parsed;
+      try {
+        parsed = decodeSyncJson(r.bodyBytes);
+      } catch (_) {
+        parsed = null;
+      }
+      if (r.statusCode != 200) {
+        throw Exception(httpErrorText(r.statusCode));
+      }
+      final saved = parseKeepDays(parsed, fallback: picked);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('已设为保留 $saved 天')));
+      await load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('设置失败：${errorText(e)}')));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Widget _runTile(SyncRun r) {

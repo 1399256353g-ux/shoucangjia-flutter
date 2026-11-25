@@ -21,7 +21,60 @@ const int kAvatarImageWidth = 200;
 const int kPlayerImageWidth = 1080;
 
 final RegExp _imageExt = RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false);
-final RegExp _hasWidthParam = RegExp(r'(?:^|&)w=\d+(?:&|$)');
+/// 查询串 → 「带上本次宽度」的查询串（**唯一实现**）。
+///
+/// 旧写法是 `RegExp(r'(?:^|&)w=\d+(?:&|$)')`，只认「半角 `w=` + 至少一位数字」。
+/// 四种真实输入都会被判成「没有宽度」，于是在已有参数后面**再追加一个**：
+///
+/// | 输入 | 旧输出 | 后果 |
+/// |---|---|---|
+/// | `/a.jpg?w=` | `/a.jpg?w=&w=480` | 两个同名参数，服务端取到空串，缩图失效 |
+/// | `/a.jpg?w=0` | 原样保留 `w=0` | 宽度 0 = 不缩放，卡片又去拉原图 |
+/// | `/a.jpg?w=-5` | `/a.jpg?w=-5&w=480` | 同名参数冲突 |
+/// | `/a.jpg?W=100` | `/a.jpg?W=100&w=480` | 大小写不同 → 两个宽度 |
+///
+/// 判定只有一条规则：**按 `&` 切开、键名忽略大小写等于 `w`、值能解析成正整数**才算
+/// 「已经有了」。已经可用就原样返回；存在但不可用（空/0/负/非数字）就把那一个
+/// 换成新宽度，并且不再追加第二个。
+String _queryWithWidth(String query, int width) {
+  if (query.isEmpty) return 'w=$width';
+  final parts = query.split('&');
+  bool isWidthKey(String t) {
+    final eq = t.indexOf('=');
+    return (eq < 0 ? t : t.substring(0, eq)).trim().toLowerCase() == 'w';
+  }
+
+  bool usable(String t) {
+    final eq = t.indexOf('=');
+    if (eq < 0) return false;
+    final n = int.tryParse(t.substring(eq + 1).trim());
+    return n != null && n > 0;
+  }
+
+  final widthIdx = <int>[];
+  for (var i = 0; i < parts.length; i++) {
+    if (isWidthKey(parts[i])) widthIdx.add(i);
+  }
+  if (widthIdx.isEmpty) return '$query&w=$width';
+  // 恰好一个且可用：就是它，原样返回（不重排用户的查询串）。
+  if (widthIdx.length == 1 && usable(parts[widthIdx.first])) return query;
+
+  // 其余情况一律重建：**只保留一个** `w`，且必须是可用宽度。
+  // 有可用值就沿用第一个可用值（用户已经指定了宽度，不该被我们覆盖），
+  // 否则把第一个位置换成新宽度、其余同名参数丢弃。
+  final keepIdx =
+      widthIdx.firstWhere((i) => usable(parts[i]), orElse: () => -1);
+  final out = <String>[];
+  for (var i = 0; i < parts.length; i++) {
+    if (!isWidthKey(parts[i])) {
+      out.add(parts[i]);
+      continue;
+    }
+    if (i != (keepIdx >= 0 ? keepIdx : widthIdx.first)) continue;
+    out.add(keepIdx >= 0 ? parts[i] : 'w=$width');
+  }
+  return out.join('&');
+}
 
 /// 只给「图片静态路径」加 `w=`：
 ///  - 绝对/根相对地址才处理，`asset:`/`data:`/空串原样返回；
@@ -48,7 +101,8 @@ String withImageWidth(String raw, int width) {
   final pathPart = q >= 0 ? body.substring(0, q) : body;
   final query = q >= 0 ? body.substring(q + 1) : '';
   if (!_imageExt.hasMatch(pathPart)) return raw;
-  if (_hasWidthParam.hasMatch(query)) return raw;
-  final sep = q >= 0 ? '&' : '?';
-  return '$body${sep}w=$width$fragment';
+  final nextQuery = _queryWithWidth(query, width);
+  // 值没变（已经有了可用宽度）时原样返回，不重排用户的查询串。
+  if (nextQuery == query) return raw;
+  return '$pathPart?$nextQuery$fragment';
 }
