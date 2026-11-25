@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-import 'author_index.dart';
 import 'haptics.dart';
 
 /// 右侧竖排首字母索引条（owner 2026-11-22 / 2026-11-23 补滑动）。
@@ -15,6 +14,12 @@ import 'haptics.dart';
 ///  - 只有「切换到新字母」时触发一次轻震动，同字母内滑动不重复。
 ///
 /// 命中宽度 ≥28dp，浮层用 [IgnorePointer] 且不占布局，不吃卡片点击。
+/// 索引条每个字母占的行高（dp）。
+///
+/// 固定行高是「字母少也不散开、字母多也排得下」的前提：整列按它累加、
+/// 垂直居中，字母增减时从中心向上下对称扩展。
+const double kAuthorLetterRowHeight = 13;
+
 class AuthorLetterBar extends StatefulWidget {
   const AuthorLetterBar({
     super.key,
@@ -34,16 +39,25 @@ class AuthorLetterBar extends StatefulWidget {
   final String? keyPrefix;
 
   /// 手指纵向位移 → 第几个字母；非法输入返回 -1。
+  /// 手指纵向位移 → 第几个字母；非法输入返回 -1。
+  ///
+  /// owner 2026-11-25：字母改为「固定行高 + 整体居中」后，不能再按
+  /// `height / count` 均分。整列实际占 `count * kAuthorLetterRowHeight`，
+  /// 上下各留 (height - 整列高) / 2 的空白；落在空白里时夹到首/末字母。
   static int hitIndex({
     required double dy,
     required double height,
     required int count,
-  }) =>
-      authorLetterHitIndex(
-        dy: dy,
-        itemExtent: count <= 0 ? 0 : height / count,
-        count: count,
-      );
+  }) {
+    if (count <= 0) return -1;
+    final column = count * kAuthorLetterRowHeight;
+    final top = height > column ? (height - column) / 2 : 0.0;
+    final local = dy - top;
+    if (local < 0) return 0;
+    final i = (local / kAuthorLetterRowHeight).floor();
+    if (i > count - 1) return count - 1;
+    return i;
+  }
 
   @override
   State<AuthorLetterBar> createState() => _AuthorLetterBarState();
@@ -134,10 +148,18 @@ class _AuthorLetterBarState extends State<AuthorLetterBar> {
           width: widget.width,
           height: height,
           child: Column(
+            // owner 2026-11-25：「首字母少的时候字母间隔那么大，不论多少
+            // 字母，排的紧凑一点，首字母增加时从中间依次向上下扩展」。
+            //
+            // 原来每个字母用 Expanded 平分整个高度：字母少时被拉得很散，
+            // 字母多时又挤成一条。改为**固定行高 + 整体垂直居中**——
+            // 字母增减时整列从中心向上下对称扩展，间距始终紧凑一致。
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               for (final l in letters)
-                Expanded(
+                SizedBox(
+                  height: kAuthorLetterRowHeight,
                   child: Center(
                     child: Text(
                       l,

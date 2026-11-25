@@ -13171,7 +13171,20 @@ class _PlayerPageState extends State<PlayerPage>
     // 全屏保留旧进度条，避免破坏沉浸态已有的呼出/隐藏逻辑。
     if (isV) {
       // 全屏时任务栏是浮层，进度条贴它的上缘，而不是屏幕最底。
-      return _scrubOverlay(progress: progress, lift: fs ? _taskbarH : 0.0);
+      //
+      // owner 2026-11-25：「windows 非全屏时进度条不要侵占视频显示区域，
+      // 下移到任务栏上避开那几个像素宽度的画面」。
+      //
+      // 非全屏时舞台已经在任务栏上方内缩（stageInset），进度层原本贴
+      // 舞台底边 → 62dp 中向上覆盖 28dp 命中热区，把那一条画面盖住了。
+      // 现在把整层**往下压进任务栏区**：下移 kScrubHotZoneHeight，
+      // 让命中条带上缘刚好落在舞台底边（＝视频画面下沿），一点不占画面。
+      // 放大（悬停/拖动）时气泡仍可向上占用视频区——那是用户主动操作，
+      // 且只发生在指针已在条带内时，不影响画面可点区域。
+      return _scrubOverlay(
+        progress: progress,
+        lift: fs ? _taskbarH : -kScrubHotZoneHeight,
+      );
     }
     final pad = MediaQuery.paddingOf(context);
     final opacity = ChromeFade.opacity(

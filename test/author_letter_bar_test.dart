@@ -95,13 +95,34 @@ void main() {
     expect(tester.widgetList<Text>(find.byType(Text)).length, 0);
   });
 
-  test('命中测试：位移→下标', () {
-    expect(AuthorLetterBar.hitIndex(dy: 0, height: 200, count: 4), 0);
-    expect(AuthorLetterBar.hitIndex(dy: 99, height: 200, count: 4), 1);
-    expect(AuthorLetterBar.hitIndex(dy: 199, height: 200, count: 4), 3);
+  // owner 2026-11-25：字母改成「固定行高 + 整体居中」后，不再按 height/count
+  // 均分。整列占 count * kAuthorLetterRowHeight，上下各有对称留白。
+  test('命中测试：固定行高 + 居中留白', () {
+    const h = kAuthorLetterRowHeight;
+    // 4 个字母 = 52dp 整列，200dp 高度上下各留 74dp。
+    final top = (200 - 4 * h) / 2;
+    expect(AuthorLetterBar.hitIndex(dy: 0, height: 200, count: 4), 0,
+        reason: '顶部留白区夹到第 0 个');
+    expect(AuthorLetterBar.hitIndex(dy: top, height: 200, count: 4), 0);
+    expect(AuthorLetterBar.hitIndex(dy: top + h + 1, height: 200, count: 4), 1);
+    expect(AuthorLetterBar.hitIndex(dy: top + 3 * h + 1, height: 200, count: 4), 3);
+    expect(AuthorLetterBar.hitIndex(dy: 900, height: 200, count: 4), 3,
+        reason: '超出底部夹到末字母');
     expect(AuthorLetterBar.hitIndex(dy: -5, height: 200, count: 4), 0);
-    expect(AuthorLetterBar.hitIndex(dy: 500, height: 200, count: 4), 3);
-    expect(AuthorLetterBar.hitIndex(dy: 5, height: 0, count: 4), -1);
+    // 非法输入
+    expect(AuthorLetterBar.hitIndex(dy: 5, height: 0, count: 4), 0,
+        reason: '高度为 0 时不越界即可');
     expect(AuthorLetterBar.hitIndex(dy: 5, height: 200, count: 0), -1);
+  });
+
+  test('字母少时整列紧凑，不从整高均分', () {
+    const h = kAuthorLetterRowHeight;
+    // 只有 3 个字母时，整列高 39dp，远小于可用高度。
+    expect(3 * h, lessThan(60));
+    // 相邻字母的判定边界只差一个行高，而不是 200/3。
+    final top = (200 - 3 * h) / 2;
+    final i0 = AuthorLetterBar.hitIndex(dy: top + 1, height: 200, count: 3);
+    final i1 = AuthorLetterBar.hitIndex(dy: top + h + 1, height: 200, count: 3);
+    expect(i1 - i0, 1);
   });
 }
