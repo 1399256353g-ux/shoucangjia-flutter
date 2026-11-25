@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_json.dart';
 import 'watch_progress.dart';
+import 'work_key.dart';
 
 /// SharedPreferences 键：整个「继续观看」列表存在一个 JSON 字符串里。
 const String kContinuePrefsKey = 'continue_watching_v1';
@@ -133,7 +134,18 @@ class ContinueItem {
     );
   }
 
-  String get key => lib.isEmpty ? id : '$lib/$id';
+  /// 作品唯一键：`库/作品 id`。
+  ///
+  /// 必须与观看记录 / 播放量用**同一个**键口径（[workKey]）：那边两条都
+  /// `trim()`，而这里旧写法直接拼原串。后果不是显示错，而是**同一条作品在
+  /// 两张表里对不上**：库 id 带尾随空白（服务端拼接/手工配置的中间态）时，
+  /// 本表存的是 `A /1`，而 `watchProgressKey` / `workPlaysKey` 存的是 `A/1`；
+  /// 而 [fromJson] 自己又 `trim()` 了 lib——于是同一个键「写进去一个、读出来
+  /// 另一个」（实测：写入后重启，`remove(lib, id)` 算出的键与表里的不一致，
+  /// 看完的作品永远删不掉，继续观看里一直挂着）。
+  ///
+  /// id 为空时返回空串，与 [workKey] 一致（调用方应跳过）。
+  String get key => workKey(lib: lib, id: id);
 }
 
 /// 解析整表；非法 JSON / 非法条目直接丢弃。

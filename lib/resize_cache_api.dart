@@ -124,7 +124,24 @@ class ResizeCacheStats {
     return (ratio * 100).round().clamp(0, 100);
   }
 
-  String get hitRateText => '${(hitRate * 100).toStringAsFixed(1)}%';
+  /// 命中率文案：`90.0%`。
+  ///
+  /// 不能用 `toStringAsFixed(1)` 直接乘 100：它是**四舍五入**，于是
+  /// `0.99995` 显示成 **`100.0%`**（实测）——等于说「命中率已经满了」，
+  /// 而实际还有未命中。与字节文案的 `1024.0 KB`、同步耗时的 `10.0s`
+  /// 是同一条口径（「宁可少报也不能虚假跨档」）：先截断到 0.1%，再输出。
+  ///
+  /// 也不能写成 `round()`：`0.00004` 会被舍成 `0.0%`（看起来一次没命中），
+  /// 截断同样是 `0.0%`，两种写法在这里一致；但 `0.99996` 截断给 `99.9%`，
+  /// 四舍五入会给 `100.0%`。统一截断后「100.0%」只在真的是 1.0 时出现。
+  String get hitRateText => '${_truncTenths(hitRate * 100)}%';
+
+  /// 截断到 0.1（不进位），避免四舍五入把比值说大。
+  static String _truncTenths(double v) {
+    if (!v.isFinite || v <= 0) return '0.0';
+    final t = (v * 10).floorToDouble() / 10;
+    return t.toStringAsFixed(1);
+  }
 
   /// 诊断页副标题：命中/未命中/生成/失败 + 预热队列。
   String get countersText =>

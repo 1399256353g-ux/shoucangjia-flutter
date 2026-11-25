@@ -33,13 +33,23 @@ String formatBytes(int n) {
   // 修法用**截断**而不是四舍五入：与 `unit_library.formatCount` 同一条口径
   // （「宁可少报也不能虚假跨档」）。1048575 → `1023.9 KB`，是一个诚实的
   // 读数；显示精度本身只有 0.1 KB，说成 `1024.0 KB` 就是多报了。
-  final kb = n / 1024;
-  if (_cutValue(kb, 1) < 1024) return '${_truncated(kb, 1)} KB';
-  final mb = kb / 1024;
-  if (_cutValue(mb, 1) < 1024) return '${_truncated(mb, 1)} MB';
-  final gb = mb / 1024;
-  if (_cutValue(gb, 2) < 1024) return '${_truncated(gb, 2)} GB';
-  return '${_truncated(gb / 1024, 2)} TB';
+  //
+  // TB 也不能是最后一档：int64 上限 9.22e18 字节是 **8 EiB**，旧写法把它
+  // 算成 `8388608.00 TB`（实测）——一个七位数加两位小数的读数，那一行在
+  // 诊断页里直接撑破。单位用尽就用更大的单位，PB / EB 各留一档。
+  const units = <String>['KB', 'MB', 'GB', 'TB', 'PB', 'EB'];
+  // 各档显示精度：KB/MB 一位小数，其余两位（与既有四档行为一致）。
+  const digitsOf = <int>[1, 1, 2, 2, 2, 2];
+  var v = n / 1024;
+  for (var i = 0; i < units.length; i++) {
+    final d = digitsOf[i];
+    final last = i == units.length - 1;
+    if (last || _cutValue(v, d) < 1024) {
+      return '${_truncated(v, d)} ${units[i]}';
+    }
+    v /= 1024;
+  }
+  return '${_truncated(v, 2)} EB';
 }
 
 /// 保留 [digits] 位小数的**截断值**（不进位，转定点文本）。

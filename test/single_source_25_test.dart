@@ -107,10 +107,14 @@ void main() {
   });
 
   group('字节文案：单位用尽换更大单位，不输出荒唐数字', () {
-    test('int 上限不再是 `8589934592.00 GB`', () {
+    test('int 上限不再是 `8589934592.00 GB`，也不再是七位数 TB', () {
       final s = formatBytes(_maxInt);
       expect(s.contains('GB'), isFalse, reason: '实际：$s');
-      expect(s.endsWith('TB'), isTrue);
+      // 0.9.269：单位链又往上补了 PB/EB——int 上限是 8 EiB，写成
+      // `8388608.00 TB` 同样是一个会把那行撑破的读数（旧断言只钉到 TB，
+      // 因为当时 TB 就是最后一档）。规则不变：单位用尽继续往上。
+      expect(s.contains('TB'), isFalse, reason: '实际：$s');
+      expect(s.endsWith('EB'), isTrue, reason: '实际：$s');
     });
 
     test('既有四档未改', () {

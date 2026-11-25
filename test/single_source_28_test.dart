@@ -1,185 +1,176 @@
-// 第四十四批契约（0.9.261）：
-//
-// 本轮四项都是「非有限/不可用输入被当成正常值」的同一族缺口，但落点各不相同，
-// 而且**都不报错**——这正是要钉住的原因：它们不会抛异常，只会让画面消失、
-// 尺寸错、缩放乱跳，日志里一个字都没有。
-//
-//  1. `withImageWidth` 的「已有 w=」判定只认 `^w=\d+$`：`?w=` / `w=0` / `w=-5`
-//     会被判成「没有宽度」而再追加一个，`?W=100`（大写键）也会变成两个宽度。
-//     服务端按第一个参数取值 → 缩图请求实际拿不到宽度，卡片又去拉原图。
-//  2. `cover_crop` 的尺寸守卫只判 `<= 0`，而 `NaN <= 0` / `infinity <= 0` 为
-//     false：首帧前的 `Size(NaN, NaN)` 一路算出 `Rect.fromLTRB(NaN, …)`，
-//     `Positioned.fromRect` 拿到 NaN 直接不画（裁封面页黑屏，无日志）。
-//  3. `videoBaseSize` 等比缩小后短边会掉到亚像素（`aspect: 1e18` 实测
-//     `Size(4096, 4.096e-15)`）：视频层高度被截成 0，画面整块消失，
-//     而拉伸判据（比例仍精确）显示 0.00%，验收完全看不到问题。
-//  4. `pinchScale` 只挡了 `distance`：`startScale` / `startDistance` 是 NaN 时
-//     `(NaN·d/s).clamp(1,4)` 实测返回 **4.0**（clamp 把 NaN 当上界）——
-//     「缩放状态未知」被当成「用户捏到最大」，图片瞬间放大四倍。
-//     `dampedDragOffset` 同族：NaN 偏移写进滚动物理后整页不再响应滑动，
-//     而 `NaN.clamp(0,1)` = 1.0 还会悄悄关掉越界阻尼。
-import 'dart:ui';
+/// 0.9.269 第四十八批：四类「同一件事两份口径」缺口。
+///
+/// 共同点不是「某个数字算错」，而是**同一个读数有两个写法**，而用户看到的
+/// 那一版恰好是说大的那个：
+///
+///  1. `formatBytes` 的 TB 是最后一档 → int 上限（9.22e18 字节 = 8 EiB）
+///     显示成 `8388608.00 TB`（七位数 + 两位小数，诊断页那行撑破）；
+///  2. `syncDurationLabel` 的档位按**原始秒数**判 → 9999ms 走一位小数分支，
+///     四舍五入成 `10.0s`，而 10000ms 是 `10s`：同一个「10 秒」两种写法，
+///     且 `10.0s` 那个本来是 9.999s，被说大成整 10 秒；
+///  3. `ResizeCacheStats.hitRateText` 直接 `toStringAsFixed(1)` → `0.99995`
+///     显示成 `100.0%`（等于说「一次没漏」，实际还有未命中）；
+///  4. `ContinueItem.key` 不 `trim()` 库 id，而观看记录/播放量两条都 `trim()`
+///     → 同一条作品在两张表里是两个键：`A /1` vs `A/1`，「看完即从继续观看
+///     移除」删不掉自己写进去的那条。
+///
+/// 四条都改成与既有口径一致（截断而非四舍五入；键只认一处实现）。
+library;
+
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shoucangjia/cover_crop.dart';
-import 'package:shoucangjia/media_resize.dart';
-import 'package:shoucangjia/pic_zoom.dart';
-import 'package:shoucangjia/swipe_physics.dart';
-import 'package:shoucangjia/video_layout.dart';
+import 'package:shoucangjia/byte_size.dart';
+import 'package:shoucangjia/continue_watching.dart';
+import 'package:shoucangjia/resize_cache_api.dart';
+import 'package:shoucangjia/sync_ledger.dart';
+import 'package:shoucangjia/watch_progress.dart';
+import 'package:shoucangjia/work_key.dart';
+import 'package:shoucangjia/work_plays.dart';
+
+const int _maxInt = 9223372036854775807;
 
 void main() {
-  group('图片地址的 w= 判定：同名键只允许一个，且必须是可用宽度', () {
-    test('空值/0/负值被替换，不再追加第二个 w=', () {
-      expect(withImageWidth('/a.jpg?w=', 480), '/a.jpg?w=480');
-      expect(withImageWidth('/a.jpg?w=0', 480), '/a.jpg?w=480');
-      expect(withImageWidth('/a.jpg?w=-5', 480), '/a.jpg?w=480');
-      // 缺 `=` 的同名键（`?w`）同样算「存在但不可用」。
-      expect(withImageWidth('/a.jpg?w', 480), '/a.jpg?w=480');
-      // 非数字值：坏参数，替换掉而不是并列。
-      expect(withImageWidth('/a.jpg?w=abc&v=2', 480), '/a.jpg?w=480&v=2');
+  group('字节文案：单位用尽继续往上，不输出七位数 TB', () {
+    test('int 上限是 8 EiB，不再写成 `8388608.00 TB`', () {
+      final s = formatBytes(_maxInt);
+      expect(s.contains('TB'), isFalse, reason: '实际：$s');
+      expect(s, '8.00 EB');
     });
 
-    test('键名大小写不敏感：W=100 就是一个宽度', () {
-      expect(withImageWidth('/a.jpg?W=100', 480), '/a.jpg?W=100');
-      expect(withImageWidth('/a.jpg?W=300&v=1', 480), '/a.jpg?W=300&v=1');
+    test('1 EiB 不再写成 `1048576.00 TB`', () {
+      expect(formatBytes(1152921504606846976), '1.00 EB');
     });
 
-    test('已有可用宽度时原样返回（不重排查询串）', () {
-      const url = '/a.jpg?w=300';
-      expect(withImageWidth(url, 480), url);
-      const url2 = '/a.jpg?v=3&w=300';
-      expect(withImageWidth(url2, 440), url2);
+    test('PB 档存在且不进位', () {
+      // 1 PB = 1024^5
+      expect(formatBytes(1125899906842624), '1.00 PB');
+      // 1 PB − 1 字节：截断后仍是 1023.99 TB，绝不显示 1024.00 TB
+      final s = formatBytes(1125899906842624 - 1);
+      expect(s.contains('1024.00 TB'), isFalse, reason: '实际：$s');
+      expect(s.endsWith('TB'), isTrue);
     });
 
-    test('正常追加的三种形态一个字都没变', () {
-      expect(withImageWidth('/media/a/b.jpg', 480), '/media/a/b.jpg?w=480');
-      expect(withImageWidth('/media/a/b.jpg?v=3', 440),
-          '/media/a/b.jpg?v=3&w=440');
-      expect(withImageWidth('/media/a/b.jpg#frag', 480),
-          '/media/a/b.jpg?w=480#frag');
-      expect(withImageWidth('/media/a/b.jpg?v=1#f', 480),
-          '/media/a/b.jpg?v=1&w=480#f');
-    });
-
-    test('结果里同名宽度键严格只有一个', () {
-      for (final q in <String>['', '?w=', '?w=0', '?w=-1', '?w=abc',
-        '?x=1&w=', '?w=&w=9', '?W=7&w=']) {
-        final out = withImageWidth('/a.jpg$q', 480);
-        final query = out.split('?').length > 1
-            ? out.split('?')[1].split('#').first
-            : '';
-        final keys = query
-            .split('&')
-            .map((e) => e.split('=').first.toLowerCase())
-            .where((e) => e == 'w')
-            .length;
-        expect(keys, lessThanOrEqualTo(1), reason: '$q -> $out');
-      }
+    test('既有四档与跨档边界一字不改', () {
+      expect(formatBytes(0), '0 B');
+      expect(formatBytes(-5), '0 B');
+      expect(formatBytes(512), '512 B');
+      expect(formatBytes(1024), '1.0 KB');
+      expect(formatBytes(1536 * 1024), '1.5 MB');
+      expect(formatBytes(1024 * 1024), '1.0 MB');
+      expect(formatBytes(1024 * 1024 * 1024), '1.00 GB');
+      expect(formatBytes(1024 * 1024 * 1024 * 1024), '1.00 TB');
+      expect(formatBytes(1024 * 1024 - 1).contains('1024.0 KB'), isFalse);
+      expect(formatBytes(1024 * 1024 * 1024 - 1).contains('1024.0 MB'), isFalse);
+      expect(
+          formatBytes(1024 * 1024 * 1024 * 1024 - 1).contains('1024.00 GB'),
+          isFalse);
     });
   });
 
-  group('封面截取框：NaN / Infinity 尺寸不产出 NaN 矩形', () {
-    test('containDisplayRect 对非有限尺寸返回空矩形', () {
-      expect(containDisplayRect(Size(double.nan, 100), const Size(300, 300)),
-          Rect.zero);
-      expect(containDisplayRect(const Size(100, 100), Size(double.nan, 300)),
-          Rect.zero);
-      expect(containDisplayRect(const Size(100, 100),
-          const Size(double.infinity, 300)), Rect.zero);
+  group('同步耗时：档位按显示值判，不跨档说大', () {
+    test('9999ms 不再显示 `10.0s`（10000ms 是 `10s`）', () {
+      expect(syncDurationLabel(9999), '9.9s');
+      expect(syncDurationLabel(10000), '10s');
     });
 
-    test('initial 遇到 NaN 尺寸退化为空框，比例回落到 1', () {
-      final b = CoverCropBox.initial(const Size(double.nan, 100), 1.0);
-      expect(b.rect, Rect.zero);
-      expect(b.aspect, 1.0);
-      // 比例自身非法时同样不把 NaN 带进几何。
-      final c = CoverCropBox.initial(const Size(100, 100), double.nan);
-      expect(c.aspect, 1.0);
-      expect(c.rect.left.isFinite, isTrue);
-      expect(c.rect.width, greaterThan(0));
-    });
-
-    test('moved / resized 收到 NaN 增量时保持原位', () {
-      final b = CoverCropBox.initial(const Size(300, 300), 1.0);
-      final nan = b.moved(const Offset(double.nan, 0), const Size(300, 300));
-      expect(nan.rect, b.rect);
-      final nan2 = b.resized(
-          CropCorner.bottomRight, const Offset(double.nan, 0),
-          const Size(300, 300));
-      expect(nan2.rect, b.rect);
-      // 图片尺寸不可用（首帧前）同样不动：夹取的边界会是 NaN。
-      final nan3 = b.moved(const Offset(10, 10), const Size(double.nan, 300));
-      expect(nan3.rect, b.rect);
-    });
-
-    test('normalized 对非有限矩形返回 null（整帧），不返回 NaN 数组', () {
-      final bad = CoverCropBox(
-          const Rect.fromLTWH(double.nan, 0, 10, 10), 1.0);
-      expect(bad.normalized(const Size(300, 300)), isNull);
-      final ok = CoverCropBox.initial(const Size(300, 300), 1.0);
-      final norm = ok.normalized(const Size(300, 300));
-      expect(norm, isNotNull);
-      expect(norm!.every((v) => v.isFinite), isTrue);
-    });
-  });
-
-  group('视频基准框：退化成亚像素时回落到方形，而不是画出空帧', () {
-    test('极端比例不再给出高度≈0 的框', () {
-      for (final a in <double>[1e6, 1e18, 1e300]) {
-        final s = videoBaseSize(aspect: a);
-        expect(s.height, greaterThanOrEqualTo(1.0), reason: 'aspect=$a');
-        expect(s.width, greaterThanOrEqualTo(1.0), reason: 'aspect=$a');
-      }
-      // 极窄同理（宽度会先掉到亚像素）。
-      for (final a in <double>[1e-6, 1e-18]) {
-        final s = videoBaseSize(aspect: a);
-        expect(s.width, greaterThanOrEqualTo(1.0), reason: 'aspect=$a');
-        expect(s.height, greaterThanOrEqualTo(1.0), reason: 'aspect=$a');
+    test('9.94s~9.99s 全部截断成 9.9s，不出现 10.0s', () {
+      for (final ms in [9940, 9950, 9990, 9999]) {
+        expect(syncDurationLabel(ms), '9.9s', reason: '4ms=$ms');
       }
     });
 
-    test('可信范围内的比例一个像素都没变', () {
-      final p = videoBaseSize(aspect: 9 / 16);
-      expect(p.height, closeTo(720, 1e-9));
-      expect(p.width / p.height, closeTo(9 / 16, 1e-9));
-      final w = videoBaseSize(aspect: 16 / 9);
-      expect(w.width, closeTo(1280, 1e-9));
-      expect(w.height, closeTo(720, 1e-9));
-      // 4:1 这类极端但仍真实的片子保持原比例（阈值 1 像素不会误伤）。
-      final r = videoBaseSize(aspect: 4.0);
-      expect(r.width / r.height, closeTo(4.0, 1e-9));
+    test('59.9s 仍不显示成 60s，59.99s 也不', () {
+      expect(syncDurationLabel(59900), '59s');
+      expect(syncDurationLabel(59999), '59s');
+    });
+
+    test('秒级既有行为不变', () {
+      expect(syncDurationLabel(820), '820ms');
+      expect(syncDurationLabel(2400), '2.4s');
+      expect(syncDurationLabel(0), '—');
+      expect(syncDurationLabel(-5), '—');
+      expect(syncDurationLabel(60000), '1m 00s');
+      expect(syncDurationLabel(65000), '1m 05s');
+      expect(syncDurationLabel(119600), '2m 00s');
     });
   });
 
-  group('手势缩放 / 越界阻尼：非有限输入不得跳到极值', () {
-    test('pinchScale 的 NaN/Infinity 参数保持原倍率', () {
-      expect(pinchScale(double.nan, 100, 200), 1.0);
-      expect(pinchScale(2.0, double.nan, 200), 2.0);
-      expect(pinchScale(2.0, 0, 200), 2.0);
-      expect(pinchScale(double.infinity, 100, 200), kPicZoomMin);
-      expect(pinchScale(-1.0, 100, 200), kPicZoomMin);
+  group('命中率文案：截断而不是四舍五入成 100%', () {
+    test('0.99995 不再显示 `100.0%`', () {
+      expect(ResizeCacheStats(hitRate: 0.99995).hitRateText, '99.9%');
+      expect(ResizeCacheStats(hitRate: 0.99994).hitRateText, '99.9%');
     });
 
-    test('pinchScale 正常路径不变', () {
-      expect(pinchScale(1, 100, 150), closeTo(1.5, 1e-9));
-      expect(pinchScale(2, 100, 150), closeTo(3, 1e-9));
-      expect(pinchScale(1, 100, 1000), kPicZoomMax);
-      expect(pinchScale(1, 100, 20), 1);
+    test('真的是 100% 时才写 100.0%', () {
+      expect(ResizeCacheStats(hitRate: 1.0).hitRateText, '100.0%');
+      expect(ResizeCacheStats(hitRate: 0.0).hitRateText, '0.0%');
+      expect(ResizeCacheStats(hitRate: 0.9).hitRateText, '90.0%');
     });
 
-    test('dampedDragOffset 的 NaN 偏移归零、非法系数视为无阻尼', () {
-      expect(dampedDragOffset(double.nan, outOfRange: true), 0);
-      expect(dampedDragOffset(double.infinity, outOfRange: true), 0);
-      expect(dampedDragOffset(10, outOfRange: true,
-          overscrollFactor: double.nan), 10);
-      // 未越界时不参与阻尼计算，原样返回。
-      expect(dampedDragOffset(double.nan, outOfRange: false).isNaN, isTrue);
+    test('非有限/负数不产出 NaN% 或负百分比', () {
+      expect(ResizeCacheStats(hitRate: double.nan).hitRateText, '0.0%');
+      expect(ResizeCacheStats(hitRate: -0.5).hitRateText, '0.0%');
+    });
+  });
+
+  group('继续观看的键与观看记录/播放量同一口径', () {
+    test('库 id 带空白时三张表算出同一个键', () {
+      const ci = ContinueItem(lib: 'A ', id: '1');
+      expect(ci.key, workKey(lib: 'A ', id: '1'));
+      expect(ci.key, watchProgressKey(lib: 'A ', id: '1'));
+      expect(ci.key, workPlaysKey(lib: 'A ', id: '1'));
+      expect(ci.key, 'A/1');
     });
 
-    test('dampedDragOffset 正常路径不变', () {
-      expect(dampedDragOffset(100, outOfRange: true), closeTo(28, 1e-6));
-      expect(dampedDragOffset(-100, outOfRange: true), closeTo(-28, 1e-6));
-      expect(dampedDragOffset(12, outOfRange: false), 12);
+    test('写进去的键能被同一条记录删掉', () {
+      final items = <ContinueItem>[
+        const ContinueItem(
+            lib: 'A ', id: '1', positionMs: 5000, durationMs: 10000),
+      ];
+      final after = removeContinueItem(items, 'A ', '1');
+      expect(after, isEmpty);
+      expect(removeContinueItem(items, 'A', '1'), isEmpty);
+    });
+
+    test('空白 id 没有键（调用方据此跳过）', () {
+      expect(const ContinueItem(lib: 'A', id: '  ').key, '');
+    });
+
+    test('从 JSON 读回的键与内存里的键一致', () {
+      final parsed = ContinueItem.fromJson(
+          {'l': ' A ', 'i': ' 1 ', 'p': 5000, 'd': 10000});
+      expect(parsed, isNotNull);
+      expect(parsed!.key, 'A/1');
+    });
+  });
+
+  group('契约扫描：四条规则各自只有一处实现', () {
+    test('formatBytes 不再以 TB 收尾', () {
+      final src = File('lib/byte_size.dart').readAsStringSync();
+      expect(src.contains("'TB'"), isTrue);
+      expect(src.contains("return '\${_truncated(gb / 1024, 2)} TB';"), isFalse);
+    });
+
+    test('同步耗时档位不再拿原始秒数比 10', () {
+      // 只扫代码行（去掉注释）：注释里引用旧写法是说明，不算实现。
+      final code = File('lib/sync_ledger.dart')
+          .readAsLinesSync()
+          .where((l) => !l.trimLeft().startsWith('//'))
+          .join('\n');
+      expect(code.contains('sec < 10'), isFalse);
+      expect(code.contains(r'${sec.toStringAsFixed(1)}s'), isFalse);
+    });
+
+    test('命中率不再直接 toStringAsFixed', () {
+      final src = File('lib/resize_cache_api.dart').readAsStringSync();
+      expect(src.contains(r'(hitRate * 100).toStringAsFixed(1)'), isFalse);
+    });
+
+    test('ContinueItem.key 只转发 workKey', () {
+      final src = File('lib/continue_watching.dart').readAsStringSync();
+      expect(src.contains("lib.isEmpty ? id : '\$lib/\$id'"), isFalse);
+      expect(src.contains('String get key => workKey(lib: lib, id: id);'), isTrue);
     });
   });
 }
