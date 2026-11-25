@@ -48,7 +48,13 @@ class DiziCacheFileSystem implements FileSystem {
   static Future<pkgfile.Directory> _ensure(String path) async {
     const fs = LocalFileSystem();
     final dir = fs.directory(path);
-    if (!(await dir.exists())) await dir.create(recursive: true);
+    try {
+      if (!(await dir.exists())) await dir.create(recursive: true);
+    } catch (_) {
+      // 缓存是尽力而为：目标盘不存在/无权限（如 CI 的 Windows runner 没有 E 盘）
+      // 时不能把构造期的 Future 变成未捕获异常——那会让整个调用方判定失败。
+      // 后续真正写文件时再自然失败，由调用方静默跳过即可。
+    }
     return dir;
   }
 

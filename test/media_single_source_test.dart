@@ -70,7 +70,8 @@ void main() {
         final src = _code(f.path);
         if (RegExp(r'^String encodeMediaPath\(', multiLine: true)
             .hasMatch(src)) {
-          defs.add(f.path);
+          // Windows 上 listSync 返回 lib\\media_path.dart，断言要用统一分隔符。
+          defs.add(f.path.replaceAll('\\', '/'));
         }
       }
       expect(defs, ['lib/media_path.dart'],
@@ -117,7 +118,9 @@ void main() {
           .where((f) => f.path.endsWith('.dart'))) {
         if (f.path.endsWith('media_path.dart')) continue;
         final src = _code(f.path);
-        if (src.contains("startsWith('/media/')")) offenders.add(f.path);
+        if (src.contains("startsWith('/media/')")) {
+          offenders.add(f.path.replaceAll('\\', '/'));
+        }
       }
       expect(offenders, isEmpty,
           reason: '前缀判定又出现第二份（服务端改前缀时要改六处）：$offenders');
@@ -151,7 +154,7 @@ void main() {
               .allMatches(body)
               .length;
           if (hits >= 3) {
-            offenders.add('${f.path}: $body');
+            offenders.add('${f.path.replaceAll('\\', '/')}: $body');
           }
         }
       }
