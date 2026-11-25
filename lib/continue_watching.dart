@@ -9,6 +9,7 @@ library;
 
 import 'dart:async';
 import 'json_num.dart';
+import 'stable_order.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -186,6 +187,13 @@ bool isContinueCandidate(ContinueItem item) {
 }
 
 /// 插入/更新一条记录：同「库/作品」覆盖，按最近观看时间降序，截断到上限。
+///
+/// **同一时间戳时刚记录的那条在最前**。旧实现是「先 append 到末尾，再 `sort`」，
+/// 而 `List.sort` 不保证稳定：同一秒内连续滑过多条（更新时间粒度到毫秒但常常
+/// 相同）时，刚看的那条会被掎到最后一名（实测 20 条同时间戳，更新 `w3` 后
+/// 列表变成 `w0,w1,w2,w4…,w3`）——它接着又被上限截断掉，用户刚看过的作品从
+/// 「继续观看」里消失。现在新记录先插到首位，排序改走 [stableSort]：同时间戳
+/// 保持输入顺序（即「新的在前」），结果与输入顺序无关。
 List<ContinueItem> upsertContinueItems(
   List<ContinueItem> items,
   ContinueItem item, {
@@ -195,8 +203,8 @@ List<ContinueItem> upsertContinueItems(
     for (final e in items)
       if (e.key != item.key) e,
   ];
-  if (isContinueCandidate(item)) next.add(item);
-  next.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  if (isContinueCandidate(item)) next.insert(0, item);
+  stableSort<ContinueItem>(next, (a, b) => b.updatedAt.compareTo(a.updatedAt));
   if (limit > 0 && next.length > limit) return next.sublist(0, limit);
   return next;
 }

@@ -88,7 +88,9 @@ void main() {
     test('同步耗时超过 48 小时按「未知」处理', () {
       expect(syncDurationLabel(9223372036854775807), '—');
       expect(syncDurationLabel(1e18.toInt()), '—');
-      expect(syncDurationLabel(kSyncMaxDurationMs), '2880m 00s');
+      // 0.9.271 起分钟档不是末档：48 小时写成 `48h 00m`，
+      // 不再写成 `2880m 00s`（四位数分钟，与 48 小时上限自相矛盾）。
+      expect(syncDurationLabel(kSyncMaxDurationMs), '48h 00m');
       expect(syncDurationLabel(kSyncMaxDurationMs + 1), '—');
     });
 

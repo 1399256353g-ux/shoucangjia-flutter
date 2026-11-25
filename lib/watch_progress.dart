@@ -131,13 +131,26 @@ String encodeWatchProgress(Map<String, WatchProgress> items) {
 }
 
 /// 超出上限时淘汰最久未更新的条目。
+///
+/// **同秒记录必须按 key 确定次序**：旧实现只按 `updatedAt` 降序，而
+/// `List.sort` 不保证稳定——一大批记录落在同一毫秒（批量导入、时钟精度、
+/// 刚从另一个设备同步过来）时，「哪一条被淘汰」取决于内部排序的偶然结果，
+/// 实测同样的 40 条记录、不同的输入顺序，保留下来的集合完全不同
+/// （`k13,k1…k9` vs `k26,k38,…k30`）。后果是用户的播放记忆被无故删掉一条，
+/// 而且重跑一次删掉的可能又是另一条——`k13` 能留下来纯属排序巧合。
+///
+/// 这与 `work_plays.pruneWorkPlays` 是同一件事（那里早已按 key 兜底），
+/// 这里补齐同一规则：次数/时间相同时**按键名升序**，结果与输入顺序无关。
 Map<String, WatchProgress> pruneWatchProgress(
   Map<String, WatchProgress> items, {
   int limit = kWatchStoreLimit,
 }) {
   if (items.length <= limit || limit <= 0) return items;
   final entries = items.entries.toList()
-    ..sort((a, b) => b.value.updatedAt.compareTo(a.value.updatedAt));
+    ..sort((a, b) {
+      final c = b.value.updatedAt.compareTo(a.value.updatedAt);
+      return c != 0 ? c : a.key.compareTo(b.key);
+    });
   return {for (final e in entries.take(limit)) e.key: e.value};
 }
 

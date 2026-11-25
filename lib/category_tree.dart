@@ -10,6 +10,7 @@
 //   { root, name, dirs:[{name, rel, authors:[...], dirs:[...]}] }
 // 本文件只做解析、校验、改名后的本地映射与筛选，不做 IO。
 
+import 'count_label.dart';
 import 'http_json.dart';
 import 'json_num.dart';
 import 'rel_path.dart';
@@ -72,11 +73,16 @@ class CategoryNode {
       ];
 
   /// 摘要：`3 个分类 · 12 位作者`。
+  ///
+  /// 计数一律走 [formatCount]：这里原来直接插原始数字，于是同一个基础库在
+  /// 分类树里写 `12345 位作者`、在文件结构页写 `1.2万 位作者`、基础库卡片写
+  /// `1.2万 作品`——数字都对，但用户会以为两处不是同一份数据
+  /// （0.9.270 把其余 5 个页面收口到 `count_label.dart` 时漏了这一处）。
   String get subtitle {
     final c = childCategoryCount;
     final a = authorCount;
-    if (c == 0) return '$a 位作者';
-    return '$c 个分类 · $a 位作者';
+    if (c == 0) return '${formatCount(a)} 位作者';
+    return '${formatCount(c)} 个分类 · ${formatCount(a)} 位作者';
   }
 }
 

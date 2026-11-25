@@ -214,7 +214,7 @@ String syncTimeLabel(int ms) => monthDayTimeOfMs(ms);
 /// 同步耗时上限（48 小时）：超过它的 `ms` 只可能是坏数据。
 const int kSyncMaxDurationMs = 48 * 60 * 60 * 1000;
 
-/// `820ms` / `2.4s` / `1m 05s`。
+/// `820ms` / `2.4s` / `1m 05s` / `1h 02m`。
 ///
 /// **先归一到秒再拆分**：此前先 `~/60` 取整分、再对余数 `round()`，
 /// 119600ms（119.6s）得出 `1m 60s`。和第十二批修掉的「65:03」是同一个缺口
@@ -245,6 +245,16 @@ String syncDurationLabel(int ms) {
     return '${ms ~/ 1000}s';
   }
   final totalSec = (ms / 1000).round();
+  // 分钟档**不是末档**：48 小时上限内的同步可能跨小时，而旧实现到分钟就结束，
+  // `3599999`（59:59.999）四舍五入成 3600 秒后算出 **`60m 00s`**（实测），
+  // `3600000` 也是 `60m 00s`——一个在分钟档里不可能存在的读数，
+  // 与第十二批修的 `65:03`、第四十八批的 `1024.0 KB` 同一条口径（单位用尽
+  // 就换更大的单位）。超过 1 小时改用 `h:mm` 档，`119600` 仍是 `2m 00s`。
+  if (totalSec >= 3600) {
+    final h = totalSec ~/ 3600;
+    final m = (totalSec % 3600) ~/ 60;
+    return '${h}h ${m.toString().padLeft(2, '0')}m';
+  }
   final m = totalSec ~/ 60;
   final s = totalSec % 60;
   return '${m}m ${s.toString().padLeft(2, '0')}s';

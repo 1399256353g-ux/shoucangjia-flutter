@@ -11,6 +11,7 @@
 library;
 
 import 'decode_plan.dart';
+import 'stable_order.dart';
 
 /// 头像解码宽度：按显示尺寸 × 设备像素比，避免把大图整张解码进内存。
 ///
@@ -25,7 +26,21 @@ int avatarDecodeWidth({
     decodeWidthForDisplay(displaySize, devicePixelRatio,
         maxWidth: maxWidth <= 0 ? 1 : maxWidth);
 
-/// 按 [metric] 降序排序，同分时按 [works] 降序，再按 [name] 升序保证稳定。
+/// 按 [metric] 降序排序，同分时按 [works] 降序，再按 [name] 升序。
+///
+/// **同分同名必须保持输入顺序**（走 [stableSort]，原下标作次排序键）。
+///
+/// 旧实现只用 `list.sort(...)`：Dart 的 `List.sort` 是内省排序，**不保证稳定**。
+/// 实测 40 位「同名同分」作者（跨库同名合并后很常见）排出来是
+/// `13,1,2,…,12,0,14,…`——输入顺序被彻底打乱；更麻烦的是，数据里**增一位
+/// 无关作者**（例如别的基础库多了一位）后重新排序，原有作者的前后顺序也跟着变
+/// （`0` 从第 14 位换到第 15 位）。用户看到的是「刷新一下就有一批作者换位置」，
+/// 而播放/作品数一个都没变。
+///
+/// 这不是「需要一个更细的排序键」——同分同名本来就没有次序依据，
+/// 正确做法是让相等元素保持输入顺序（输入顺序来自服务端 JSON，是确定的）。
+/// 与 `unit_library` / `category_tree` / `author_big_nodes` 同一条规则
+/// （见 `stable_order.dart` 文件头），作者总览此前漏了这一个调用点。
 ///
 /// 页面只在数据/排序方式变化时调用一次，并把返回值缓存起来，
 /// 避免每次 build 都重新排序（I7 卡顿根因之一）。
@@ -36,7 +51,7 @@ List<T> sortAuthorEntries<T>(
   required String Function(T) name,
 }) {
   final list = List<T>.of(items);
-  list.sort((a, b) {
+  stableSort<T>(list, (a, b) {
     final c = metric(b).compareTo(metric(a));
     if (c != 0) return c;
     final w = works(b).compareTo(works(a));

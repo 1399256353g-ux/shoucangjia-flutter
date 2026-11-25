@@ -114,14 +114,23 @@ class ResizeCacheStats {
   /// 实测得 **-100**，服务端把一个坏值（或 int 上限的占位值）写进 `bytes`
   /// 时，缓存页会显示「已用 0%」——刚好是「看起来一切正常」的那种错。
   /// 先做除法再乘 100，中间值始终在 0–1。
+  ///
+  /// **取整必须截断，不能四舍五入**：旧写法 `round()` 让 `996 / 1000`
+  /// 显示成 **`占用上限的 100%`**（实测），而同一个页面上的命中率
+  /// （`hitRateText`）、字节（`formatBytes`）、计数（`formatCount`）三处
+  /// 全部是「宁可少报也不能虚假跨档」。四个读数并排时只有这一处说大，
+  /// 用户看到的是「缓存快满了」而实际还差 0.4%——与第十二批修的
+  /// `1024.0 KB`、第四十八批的 `100.0%` 命中率同一条口径。
   int? get usedPercent {
     if (maxBytes <= 0) return null;
     // `bytes` 比 `maxBytes` 大时不是反常数据，而是「已超上限」（缓存清理还没
-    // 跑）。比例大于 1 时夹到 100%，不显示 `350%`。
+    // 跑）。比例 ≥ 1 时才写 100%，不显示 `350%`，也不把 99.6% 说成 100%。
     final b = bytes < 0 ? 0 : bytes;
     final ratio = b / maxBytes;
     if (!ratio.isFinite) return null;
-    return (ratio * 100).round().clamp(0, 100);
+    if (ratio >= 1) return 100;
+    final pct = (ratio * 100).floor();
+    return pct < 0 ? 0 : pct;
   }
 
   /// 命中率文案：`90.0%`。
