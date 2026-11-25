@@ -57,6 +57,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
-          gh release create "v$VER" --title "Dizi $VER" --notes "auto build $VER" || true
-          gh release upload "v$VER" "Dizi-${VER}-windows.zip" --clobber
+          ASSET="Dizi-${VER}-windows.zip"
+          # owner 2026-11-25：三端各自发布自己的资产，互不阻塞。
+          # 旧逻辑用「release 是否存在」当闸门，导致 iOS/Windows 先建好
+          # release 后 Android 直接失败；而 `--clobber` 又会在重跑时
+          # 悄悄覆盖已发布资产。这里按**资产粒度**判断：
+          #   不存在 → 创建 release 并上传
+          #   已存在 → 跳过并说明（不覆盖、不失败）
+          gh release view "v$VER" >/dev/null 2>&1 || \
+            gh release create "v$VER" --title "Dizi $VER" --notes "auto build $VER"
+          if gh release view "v$VER" --json assets \
+               --jq ".assets[].name" | grep -qx "$ASSET"; then
+            echo "$ASSET 已存在，跳过（不覆盖已发布资产）"
+          else
+            gh release upload "v$VER" "$ASSET"
+            echo "uploaded $ASSET"
+          fi

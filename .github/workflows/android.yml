@@ -160,23 +160,25 @@ jobs:
           name: android-apk
           path: Dizi-*-android.apk
       - name: Publish release asset
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
           VER=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)
-          BUILD=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f2)
-          # 防回退（2026-11-24 事故）：一次并发跑分把 pubspec 从 0.9.200+202
-          # 覆盖成 0.9.186+188，CI 照着旧版本号去 `gh release create`（已存在则
-          # `|| true` 静默跳过）再用 `--clobber` 上传，把自己的 APK 覆盖到了
-          # 早已发布的 v0.9.186 资产上——同一个版本号下藏着两套完全不同的代码。
-          # 这里在建 release 前就比对已有 tag：若该版本已存在而本次构建码不同，
-          # 直接失败，宁可不发版也不覆盖历史。
-          if gh release view "v$VER" >/dev/null 2>&1; then
-            echo "::error::v$VER 已存在，拒绝用新构建覆盖已发布资产（pubspec 疑似回退）"
-            echo "本次 version=$VER+$BUILD，commit=${{ github.sha }}"
-            exit 1
+          ASSET="Dizi-${VER}-android.apk"
+          # owner 2026-11-25：三端各自发布自己的资产，互不阻塞。
+          # 旧逻辑用「release 是否存在」当闸门，导致 iOS/Windows 先建好
+          # release 后 Android 直接失败；而 `--clobber` 又会在重跑时
+          # 悄悄覆盖已发布资产。这里按**资产粒度**判断：
+          #   不存在 → 创建 release 并上传
+          #   已存在 → 跳过并说明（不覆盖、不失败）
+          gh release view "v$VER" >/dev/null 2>&1 || \
+            gh release create "v$VER" --title "Dizi $VER" --notes "auto build $VER"
+          if gh release view "v$VER" --json assets \
+               --jq ".assets[].name" | grep -qx "$ASSET"; then
+            echo "$ASSET 已存在，跳过（不覆盖已发布资产）"
+          else
+            gh release upload "v$VER" "$ASSET"
+            echo "uploaded $ASSET"
           fi
-          gh release create "v$VER" --title "Dizi $VER" --notes "auto build $VER"
-          gh release upload "v$VER" "Dizi-${VER}-android.apk"
-
