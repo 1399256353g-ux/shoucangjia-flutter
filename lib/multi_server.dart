@@ -112,14 +112,41 @@ List<ServerConn> liveServers(List<ServerConn> all) =>
 int disconnectedCount(List<ServerConn> all) =>
     all.where((s) => !s.enabled).length;
 
-/// 规范化地址：去空格、补协议、去尾部斜杠。
+/// 规范化地址：去空格、补协议、去尾部斜杠；**无法成为可用地址时返回空串**。
+///
+/// 旧实现有两处顺序/大小写缺口，实测都会产出「看起来像地址、其实打不通」的串：
+///
+/// ```
+/// 'http://'          -> 先剥尾斜杠变成 'http:'，再补协议 -> 'http://http:'（host=http）
+/// 'HTTP://NAS:8090'  -> startsWith('http://') 为 false（大小写敏感）
+///                        -> 'http://HTTP://NAS:8090'（host=http，端口无）
+/// ```
+///
+/// 前者是「用户只填了协议」的常见中间态，后者是 owner 从浏览器地址栏
+/// 复制大写协议的结果。两种都会让该连接的所有请求打到不存在的主机上，
+/// 界面只显示「连接失败」，看不出是地址被自己改坏了。
+///
+/// 所以这里先认协议（http/https，忽略大小写）、再剥尾斜杠、最后用
+/// `Uri` 校验 host 非空；不合法返回空串，由调用方按「地址不能为空」处理。
 String normalizeBase(String raw) {
-  var b = raw.trim().replaceAll(RegExp(r'/+$'), '');
-  if (b.isEmpty) return b;
-  if (!b.startsWith('http://') && !b.startsWith('https://')) {
-    b = 'http://$b';
+  final input = raw.trim();
+  if (input.isEmpty) return '';
+  final m = RegExp(r'^(https?):/*', caseSensitive: false).firstMatch(input);
+  var scheme = 'http';
+  var rest = input;
+  if (m != null) {
+    scheme = m.group(1)!.toLowerCase();
+    rest = input.substring(m.end);
+  } else if (input.contains('://')) {
+    // 非 http(s) 协议（ftp/file/...）：本 App 只说 http(s)，不猜着改。
+    return '';
   }
-  return b;
+  rest = rest.replaceAll(RegExp(r'/+$'), '');
+  if (rest.isEmpty) return '';
+  final url = '$scheme://$rest';
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.host.isEmpty) return '';
+  return url;
 }
 
 /// 解析连接列表；坏数据跳过，重复地址只保留第一条。

@@ -34,16 +34,25 @@ class PicZoom {
   String toString() => 'PicZoom(scale: $scale, offset: $offset)';
 
   /// 把平移量夹紧到「缩放后的播放区仍覆盖播放区」的范围。
+  ///
+  /// `viewport` 来自 `MediaQuery.sizeOf` / `LayoutBuilder`，窗口被拖到 0 高或
+  /// 尚未量出尺寸时可以是 NaN/Infinity。这里的 `math.max(0.0, NaN)` 返回
+  /// **NaN**，而 `x.clamp(-NaN, NaN)` 不抛异常、直接返回 NaN——
+  /// `Transform.translate` 拿到 NaN 偏移后整张图不画（真机上就是黑屏，
+  /// 日志里什么都没有）。非有限尺寸按「没有可平移空间」处理：偏移归零，
+  /// 缩放倍率保留。
   PicZoom clamped(Size viewport) {
     final s = _clampScale(scale);
     if (s <= kPicZoomMin + 0.001) return const PicZoom();
-    final maxX = math.max(0.0, viewport.width * (s - 1) / 2);
-    final maxY = math.max(0.0, viewport.height * (s - 1) / 2);
+    final w = _finiteOrZero(viewport.width);
+    final h = _finiteOrZero(viewport.height);
+    final maxX = math.max(0.0, w * (s - 1) / 2);
+    final maxY = math.max(0.0, h * (s - 1) / 2);
     return PicZoom(
       scale: s,
       offset: Offset(
-        offset.dx.clamp(-maxX, maxX),
-        offset.dy.clamp(-maxY, maxY),
+        _finiteOrZero(offset.dx).clamp(-maxX, maxX),
+        _finiteOrZero(offset.dy).clamp(-maxY, maxY),
       ),
     );
   }
@@ -57,9 +66,13 @@ class PicZoom {
       return PicZoom(scale: s1, offset: Offset.zero).clamped(viewport);
     }
     final ratio = s1 / scale;
+    // 锚点也可能是非有限值（手势在第一帧就上报、坐标为 NaN）：
+    // 按播放区中心（0,0）处理，否则 NaN 会经 ratio 传导到 offset。
+    final fx = _finiteOrZero(focal.dx);
+    final fy = _finiteOrZero(focal.dy);
     final next = Offset(
-      focal.dx - (focal.dx - offset.dx) * ratio,
-      focal.dy - (focal.dy - offset.dy) * ratio,
+      fx - (fx - _finiteOrZero(offset.dx)) * ratio,
+      fy - (fy - _finiteOrZero(offset.dy)) * ratio,
     );
     return PicZoom(scale: s1, offset: next).clamped(viewport);
   }
@@ -74,6 +87,9 @@ class PicZoom {
     if (v.isNaN) return kPicZoomMin;
     return v.clamp(kPicZoomMin, kPicZoomMax);
   }
+
+  /// 非有限值 → 0（尺寸/坐标在无约束中间态会给出 NaN/Infinity）。
+  static double _finiteOrZero(double v) => v.isFinite ? v : 0.0;
 }
 
 /// 双指间距换算缩放倍率：startScale * (currentDistance / startDistance)。

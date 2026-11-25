@@ -50,8 +50,8 @@ class DeletedEntry {
   /// 三态归一：旧服务端没有 `st` 字段时按「已删除」处理，保持原行为。
   DeletedState get state => deletedStateOf(stateRaw);
 
-  /// `at` 的毫秒时间戳；无法解析时为 0。
-  int get atMs => DateTime.tryParse(at)?.millisecondsSinceEpoch ?? 0;
+  /// `at` 的毫秒时间戳；无法解析或年份越界时为 0（不拿回绕值参与排序）。
+  int get atMs => msFromIso(at);
 
   /// `2026-11-17T01:06:37.489Z` → `11-17 09:06`（本地时区）；
   /// 解析失败时回显原始字符串（这里不能显示 `—`，否则丢线索）。
@@ -167,7 +167,7 @@ const String kDeletedNotLocalMessage = '仅在收藏列表出现过，未同步�
 
 /// 同步批次键（UTC 分钟，避免时区切换导致同一批拆开）。
 String syncKeyOf(String at) {
-  final t = DateTime.tryParse(at);
+  final t = dateTimeOfIso(at);
   if (t == null) return at;
   return yearMonthDayTimeUtc(t);
 }

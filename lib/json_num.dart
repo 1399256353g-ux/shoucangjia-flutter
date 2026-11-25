@@ -54,6 +54,43 @@ double? doubleOrNull(dynamic v) {
   return null;
 }
 
+/// 整数的饱和加法：溢出时停在 ±int 上限，不回绕。
+///
+/// `9223372036854775807 + 9223372036854775807` 在 int64 上得到 **-2**（实测），
+/// 而这类值真的会出现在服务端 JSON 里（坏数据/占位值常见写成 int 上限）。
+/// 用普通 `+` 累加计数时，两个坏条目就能把「总播放量」变成负数，
+/// 排行榜里显示成负值、排序也翻过来。
+int addSat(int a, int b) {
+  final r = a + b;
+  // 同号且结果反号 = 回绕。
+  if ((a >= 0) == (b >= 0) && (r >= 0) != (a >= 0)) {
+    return a >= 0 ? 9223372036854775807 : -9223372036854775808;
+  }
+  return r;
+}
+
+/// 一组整数的饱和求和（非负计数用；负值按 0 计）。
+int sumSat(Iterable<int> values) {
+  var total = 0;
+  for (final v in values) {
+    if (v <= 0) continue;
+    total = addSat(total, v);
+  }
+  return total;
+}
+
+/// 非负 × 非负 的饱和乘法：越界回绕时停在 int 上限。
+///
+/// `9223372036854775807 * 10` 实测得 **-10**。等级/排行里的加权分就是
+/// 「计数 × 权重」，一个写成 int 上限的计数乘上权重 10 就变成负分，
+/// 排序里等级直接从 S 掉到 D。
+int mulSat(int a, int b) {
+  if (a <= 0 || b <= 0) return 0;
+  const max = 9223372036854775807;
+  if (a > max ~/ b) return max;
+  return a * b;
+}
+
 /// 数值/数字字符串 → int；无法解析时返回 [fallback]（默认 0）。
 int intOf(dynamic v, [int fallback = 0]) => intOrNull(v) ?? fallback;
 

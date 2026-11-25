@@ -55,10 +55,17 @@ class ResizeCacheStats {
   /// 此前写成 `json['hitRate'] is num`：服务端把 `0.62` 序列化成字符串
   /// `"0.62"`（或换了类型）时这条分支直接跳过，看起来「用了自算值」其实是
   /// 把服务端给的准确值丢了。判定改成「能不能解析成有限 double」只有一个答案。
-  static double _rate(dynamic raw, int hit, int total) {
+  ///
+  /// 自算分支的除法用 **double**：`hit + miss` 在 int64 上会回绕（两个
+  /// 计数分别接近 int 上限时得到负数），命中率跟着变成负值或超过 100%。
+  static double _rate(dynamic raw, num hit, num miss) {
     final v = doubleOrNull(raw);
     if (v != null) return v;
-    return total > 0 ? hit / total : 0;
+    final h = hit <= 0 ? 0.0 : hit.toDouble();
+    final m = miss <= 0 ? 0.0 : miss.toDouble();
+    final total = h + m;
+    if (!total.isFinite || total <= 0) return 0;
+    return (h / total).clamp(0.0, 1.0);
   }
 
   /// 解析失败（非对象）返回 null，调用方显示「读取失败」而不是 0。
@@ -66,7 +73,7 @@ class ResizeCacheStats {
     if (json is! Map) return null;
     final prune = json['prune'];
     final hit = _int(json['hit']);
-    final total = hit + _int(json['miss']);
+    final miss = _int(json['miss']);
     return ResizeCacheStats(
       files: _int(json['files']),
       bytes: _int(json['bytes']),
@@ -79,7 +86,7 @@ class ResizeCacheStats {
       servedBytes: _int(json['servedBytes']),
       queue: _int(json['warmQueue']),
       active: _int(json['warmActive']),
-      hitRate: _rate(json['hitRate'], hit, total),
+      hitRate: _rate(json['hitRate'], hit, miss),
       pruneRuns: prune is Map ? _int(prune['runs']) : 0,
       pruneDeleted: prune is Map ? _int(prune['deleted']) : 0,
       pruneFreed: prune is Map ? _int(prune['freed']) : 0,
@@ -95,8 +102,18 @@ class ResizeCacheStats {
       : bytesText(bytes);
 
   /// 占用百分比（0–100，整数），上限未知时返回 null。
-  int? get usedPercent =>
-      maxBytes > 0 ? ((bytes * 100) / maxBytes).round().clamp(0, 100) : null;
+  ///
+  /// **不能写 `(bytes * 100) / maxBytes`**：int64 上 `9223372036854775807 * 100`
+  /// 实测得 **-100**，服务端把一个坏值（或 int 上限的占位值）写进 `bytes`
+  /// 时，缓存页会显示「已用 0%」——刚好是「看起来一切正常」的那种错。
+  /// 先做除法再乘 100，中间值始终在 0–1。
+  int? get usedPercent {
+    if (maxBytes <= 0) return null;
+    final b = bytes < 0 ? 0 : bytes;
+    final ratio = b / maxBytes;
+    if (!ratio.isFinite) return null;
+    return (ratio * 100).round().clamp(0, 100);
+  }
 
   String get hitRateText => '${(hitRate * 100).toStringAsFixed(1)}%';
 

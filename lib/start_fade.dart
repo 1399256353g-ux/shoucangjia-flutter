@@ -7,9 +7,13 @@ library;
 
 /// 生成淡入音量序列，最后一步等于目标音量（0–100）。
 ///
-/// 目标为 0 或步数非法时返回空列表，调用方直接设为 0/目标即可。
+/// 目标为 0 / 非有限值或步数非法时返回空列表，调用方直接设为 0/目标。
+///
+/// 必须单独挡 `!target.isFinite`：`NaN.clamp(0, 100)` 实测返回 **100.0**
+/// （不是 NaN），于是「音量未知」会被当成「满音量」淡入到最大声——
+/// 正是静音淡入本来要防的喇叭破音。
 List<double> fadeInSteps(double target, {int steps = 6}) {
-  if (steps <= 0) return const <double>[];
+  if (steps <= 0 || !target.isFinite) return const <double>[];
   final t = target.clamp(0.0, 100.0).toDouble();
   if (t <= 0) return const <double>[];
   return List<double>.generate(steps, (i) => t * (i + 1) / steps);

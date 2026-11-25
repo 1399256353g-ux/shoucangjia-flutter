@@ -10154,7 +10154,7 @@ class _PlayerPageState extends State<PlayerPage>
       _watchIdFor(w),
       thumb: '${w['th'] ?? ''}'.trim(),
       kind: '${w['t'] ?? ''}'.trim(),
-      at: DateTime.tryParse('${w['d'] ?? ''}')?.millisecondsSinceEpoch ?? 0,
+      at: msFromIso('${w['d'] ?? ''}'),
     );
     if (!canUsePreload) {
       try {

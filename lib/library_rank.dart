@@ -60,12 +60,16 @@ Map<String, dynamic> statsAuthors(dynamic raw) {
 }
 
 /// 汇总单个库的播放/水滴。
+///
+/// 用饱和加法（[addSat]）：服务端把某个作者的计数写成 int 上限时，
+/// 两个库条目相加就能让总播放量变成负数（实测 `max + max = -2`），
+/// 排行榜把该库排到最后并显示负值。
 ({int plays, int drops}) libraryTotals(Map<String, dynamic> stats) {
   var plays = 0, drops = 0;
   for (final v in stats.values) {
     if (v is! Map) continue;
-    plays += _num(v['p']);
-    drops += _num(v['dr']);
+    plays = addSat(plays, _num(v['p']));
+    drops = addSat(drops, _num(v['dr']));
   }
   return (plays: plays, drops: drops);
 }

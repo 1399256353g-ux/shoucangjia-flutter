@@ -43,12 +43,16 @@ class AuthorGrade {
     colors = List<int>.from(defaultColors);
   }
 
-  /// 加权分数；负值按 0 处理。
+  /// 加权分数；负值按 0 处理，中间乘法与加法均**不溢出**。
+  ///
+  /// 旧实现直接 `nz(plays) * playWeight + …`：服务端把计数写成 int 上限
+  /// 9223372036854775807 时，× 10 实测得 **-10**，整个分数变负 → 等级从 S
+  /// 直接掉到 D（而且负数在排序里总是垫底，看起来像「这个作者没数据」）。
   static int score({int plays = 0, int drops = 0, int works = 0}) {
     int nz(int v) => v < 0 ? 0 : v;
-    final s = nz(plays) * playWeight +
-        nz(drops) * dropWeight +
-        nz(works) * workWeight;
+    final s = addSat(
+        addSat(mulSat(nz(plays), playWeight), mulSat(nz(drops), dropWeight)),
+        mulSat(nz(works), workWeight));
     return s < 0 ? 0 : s;
   }
 

@@ -655,12 +655,22 @@ bool mediaDownloadSupported({required bool android, required bool ios}) =>
     !(android || ios);
 
 /// 从媒体 URL 推断保存文件扩展名（含点），无扩展名时按媒体类型兜底。
+///
+/// 不能只看「最后一个点」：路径里的目录名经常带点（`2026.11/作品`、
+/// `v1.2/a`）。取到的「扩展名」会带进 `/`，实测
+/// `http://h/media/lib-1/2026.11/x` → `.11/x`，落盘文件名里出现分隔符，
+/// 保存直接失败或写到别的目录里。
+///
+/// 所以先把路径截到最后一个 `/` 之后，再要求扩展名只含字母数字——
+/// 不满足就当作没扩展名，回落到按媒体类型给的 `.mp4`/`.jpg`。
 String mediaSaveExtension({required String url, bool video = true}) {
   final path = Uri.tryParse(url)?.path ?? url;
-  final dot = path.lastIndexOf('.');
-  if (dot > 0 && dot < path.length - 1) {
-    final ext = path.substring(dot).toLowerCase();
-    if (ext.length <= 6) return ext;
+  final slash = path.lastIndexOf('/');
+  final name = slash >= 0 ? path.substring(slash + 1) : path;
+  final dot = name.lastIndexOf('.');
+  if (dot > 0 && dot < name.length - 1) {
+    final ext = name.substring(dot).toLowerCase();
+    if (ext.length <= 6 && RegExp(r'^\.[a-z0-9]+$').hasMatch(ext)) return ext;
   }
   return video ? '.mp4' : '.jpg';
 }

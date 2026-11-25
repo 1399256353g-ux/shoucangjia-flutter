@@ -79,9 +79,30 @@ String monthDayTimeOfMs(int ms) {
   return t == null ? '—' : monthDayTime(t);
 }
 
+/// ISO 字符串 → DateTime；**超出人类可表示年份范围的返回 null**。
+///
+/// `DateTime.tryParse` 只在「年份位数超过 6 位」时返回 null，6 位年份会被
+/// 如实解析并**静默回绕**：实测 `999999-01-01T00:00:00Z` 得到
+/// `-169110-11-25`（毫秒值 -5.4e15，仍在 `kMaxEpochMs` 之内，所以
+/// 只查毫秒范围拦不住）。服务端一个写坏的时间字段就会让日志行显示成
+/// 「公元前十一万年」，排序也跟着乱。
+///
+/// 与 [msFromDateParts] 用同一个年份口径（1900–3000）：媒体/日志时间
+/// 都落在这个区间，区间外一律当作「没有时间」。
+DateTime? dateTimeOfIso(String at) {
+  final t = DateTime.tryParse(at);
+  if (t == null) return null;
+  if (t.year < 1900 || t.year > 3000) return null;
+  return t;
+}
+
+/// ISO 字符串 → 毫秒时间戳；解析失败或年份越界返回 0。
+int msFromIso(String at) =>
+    dateTimeOfIso(at)?.millisecondsSinceEpoch ?? 0;
+
 /// ISO 字符串版；解析失败返回 [fallback]（默认空串，由调用方决定显示什么）。
 String monthDayTimeOfIso(String at, {String fallback = ''}) {
-  final t = DateTime.tryParse(at);
+  final t = dateTimeOfIso(at);
   return t == null ? fallback : monthDayTime(t);
 }
 
