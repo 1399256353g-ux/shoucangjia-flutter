@@ -6116,12 +6116,28 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
           color: has ? null : Colors.grey.withValues(alpha: 0.4)),
       onTap: has
           ? () async {
+              // owner 2026-11-25：「总爬虫设置里进入单元库爬虫设置和相应单元库
+              // 封面进入爬虫设置里看到的内容不一样，总的里面进入后没有日志」。
+              //
+              // 根因：这里传的是 `libId: cfg.lib`（默认注册库），而日志面板按
+              // `/api/sync/logs?lib=` 过滤——库 id 不对就永远查不到该单元库的
+              // 日志。单元库页那条入口传的是 `u.basics.first.id`，所以那边有日志。
+              //
+              // 统一口径：库 id 取该单元库自己的第一个基础库；base/headers 也按
+              // 同一连接的凭据走（跨连接的多库场景下 Admin 头不能错配）。
+              final libId = u.basics.isNotEmpty ? u.basics.first.id : cfg.lib;
+              // base/headers 都按该库所属连接取（Cfg 内部已按库绑定解析），
+              // 不再自己遍历 servers——本页没有那边的作用域。
+              final base = u.node.serverBase.isNotEmpty
+                  ? u.node.serverBase
+                  : cfg.baseFor(libId);
+              final headers = cfg.headersFor(libId);
               await Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => UnitCrawlerPage(
                         unit: u,
-                        base: cfg.base,
-                        headers: cfg.headers,
-                        libId: cfg.lib,
+                        base: base,
+                        headers: headers,
+                        libId: libId,
                       )));
               load();
             }
