@@ -421,10 +421,14 @@ String formatCount(int n) {
 ///
 /// 截断而不是四舍五入：`999949` 向上会变成 `100万`（凭空跨档），
 /// 而计数类文案一旦多说就不能再用；末尾一整位小数也省下来（`3万` 而非 `3.0万`）。
+///
+/// **不能用 `n * 10 ~/ unit`**：int64 上 `n * 10` 在 `n > 9.2e17` 时会静默
+/// 回绕成负数，服务端把计数写成 `9223372036854775807`（int 上限，坏数据常见
+/// 形态）时显示成 `0亿`——看起来像「这个库没有作品」。先取整、再用余数求
+/// 小数位，中间值都不会超 `unit * 10`，任何计数都不会溢出。
 String _scaledCount(int n, int unit, String suffix) {
-  final tenths = n * 10 ~/ unit; // 十分位整数（截断）
-  final whole = tenths ~/ 10;
-  final frac = tenths % 10;
+  final whole = n ~/ unit;
+  final frac = (n % unit) * 10 ~/ unit; // 0–9，余数 < unit 所以不会溢出
   return frac == 0 ? '$whole$suffix' : '$whole.$frac$suffix';
 }
 

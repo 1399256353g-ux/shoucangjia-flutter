@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/author_index.dart';
 
@@ -69,23 +71,20 @@ void main() {
     });
   });
 
-  group('滑动字母条命中（owner 2026-11-22）', () {
-    test('落在每格中心时命中对应字母', () {
-      expect(authorLetterHitIndex(dy: 0, itemExtent: 20, count: 10), 0);
-      expect(authorLetterHitIndex(dy: 10, itemExtent: 20, count: 10), 0);
-      expect(authorLetterHitIndex(dy: 25, itemExtent: 20, count: 10), 1);
-      expect(authorLetterHitIndex(dy: 199, itemExtent: 20, count: 10), 9);
-    });
-
-    test('上下越界夹在两端', () {
-      expect(authorLetterHitIndex(dy: -50, itemExtent: 20, count: 5), 0);
-      expect(authorLetterHitIndex(dy: 9999, itemExtent: 20, count: 5), 4);
-    });
-
-    test('非法输入返回 -1（调用方据此不显示索引条）', () {
-      expect(authorLetterHitIndex(dy: 5, itemExtent: 0, count: 5), -1);
-      expect(authorLetterHitIndex(dy: 5, itemExtent: 20, count: 0), -1);
-    });
+  // 原有一组「均分命中」用例，测的是已删除的 `authorLetterHitIndex`
+  // （零调用、规则与真实字母条不同）。真实命中规则在
+  // `AuthorLetterBar.hitIndex`，用例在 `author_letter_bar_test.dart`。
+  // 这里改为钉住「作者索引模块不再自己造一套命中规则」。
+  test('字母条命中规则不属于本模块（避免第二套规则复活）', () {
+    final src = File('lib/author_index.dart')
+        .readAsStringSync()
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('//'))
+        .join('\n');
+    expect(src.contains('authorLetterHitIndex'), isFalse,
+        reason: '均分实现又回来了：与 AuthorLetterBar.hitIndex 会分叉');
+    expect(src.contains('.floor()'), isFalse,
+        reason: '索引模块里不该再有「按高度算格子」的取整逻辑');
   });
 
   group('作者网格跳转偏移', () {

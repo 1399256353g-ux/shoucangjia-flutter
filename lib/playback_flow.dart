@@ -47,8 +47,15 @@ bool shouldAutoPlay({required bool paused, required bool opening}) =>
 /// 按下/拖动时使用（floor），松手直接采用该下标，实现「拖动快速选图」。
 int picIndexAtFraction(double fraction, int count) {
   if (count <= 1) return 0;
+  // `NaN.clamp(0, 1)` **返回 NaN**（clamp 不消 NaN），随后 `NaN.floor()`
+  // 抛 `Unsupported operation: Infinity or NaN toInt`。调用方算的是
+  // `dx / width`，宽度来自 `LayoutBuilder`——零约束中间态下就是 NaN，
+  // 而这里在 `onHorizontalDragStart` 里，异常会把整页手势链打断。
+  if (!fraction.isFinite) return 0;
   final f = fraction.clamp(0.0, 1.0);
-  return (f * count).floor().clamp(0, count - 1);
+  final i = (f * count).floor();
+  if (i < 0) return 0;
+  return i > count - 1 ? count - 1 : i;
 }
 
 /// 暂停后的自救动作。

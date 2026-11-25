@@ -15,6 +15,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'layout_metric.dart';
+
 /// 顶部单个动作。
 class TopBarAction {
   final String id;
@@ -83,7 +85,15 @@ TopBarLayout topBarLayout({
 
   // 给固定尾位预留一格。
   final budget = pinned == null ? kTopBarMaxVisible : kTopBarMaxVisible - 1;
-  final slots = (width / kTopBarSlot).floor().clamp(2, budget);
+  // 宽度可能是 NaN（`LayoutBuilder` 在零约束/无限约束的中间态：
+  // 宿主还没量出尺寸、或放在 `IntrinsicWidth` 里）。`NaN.floor()` 抛
+  // `Unsupported operation: Infinity or NaN toInt`，而这段在 build 里——
+  // 顶部栏会整条消失并带一片黑黄条纹。用 [floorDim] 把非有限值当「很窄」，
+  // 结果就是「只留主按钮 + ⋯」，仍然可用。
+  // `clamp` 的上下界必须自己保证有序：`clamp(2, 1)` 会抛
+  // `Invalid argument(s)`，那同样发生在 build 里。
+  final hi = budget < 2 ? 2 : budget;
+  final slots = floorDim(width / kTopBarSlot, fallback: 2).clamp(2, hi);
   final direct = slots >= rest.length ? rest.length : slots - 1;
   var keep = direct.clamp(1, rest.length);
   // 宽度也要满足：`keep` 个按钮 + （有溢出时的）「⋯」+ 常驻尾位，

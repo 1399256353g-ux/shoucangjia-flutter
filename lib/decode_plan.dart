@@ -13,6 +13,8 @@ library;
 
 import 'dart:async';
 
+import 'layout_metric.dart';
+
 /// 作品卡（`WorkCard`）的最大显示宽度（逻辑像素）。
 ///
 /// 卡片按 `maxCrossAxisExtent: 150` 铺网格，桌面宽窗口下单格最大约 220dp；
@@ -41,9 +43,13 @@ int decodeWidthForDisplay(
   double devicePixelRatio, {
   int maxWidth = 0,
 }) {
-  if (displayWidth <= 0) return 0;
-  final dpr = devicePixelRatio <= 0 ? 1.0 : devicePixelRatio;
-  final px = (displayWidth * dpr).ceil();
+  // 必须判 `isFinite`：`NaN <= 0` / `infinity <= 0` 都是 false，只判 `<= 0`
+  // 的守卫会让 `(NaN * 3).ceil()` 在 build 里抛 `Unsupported operation`。
+  // 调用方传的是 `MediaQuery.sizeOf` 派生值，对话框/零约束布局里可以是 NaN。
+  if (!displayWidth.isFinite || displayWidth <= 0) return 0;
+  final dpr =
+      (devicePixelRatio.isFinite && devicePixelRatio > 0) ? devicePixelRatio : 1.0;
+  final px = ceilDim(displayWidth * dpr, fallback: 1);
   final capped = maxWidth > 0 && px > maxWidth ? maxWidth : px;
   return capped < 1 ? 1 : capped;
 }

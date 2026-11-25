@@ -13,9 +13,13 @@ bool volumeUiEnabled({required bool isDesktop, bool isWeb = false}) =>
 /// 以 [start] 为按下时的音量，手指横向移动 [dx] 像素后的新音量。
 double volumeFromDrag(double start, double dx,
     {double width = kVolumeDragWidth}) {
-  if (width <= 0) return start.clamp(0.0, 100.0);
-  final v = start + dx / width * 100.0;
-  return v.clamp(0.0, 100.0);
+  // `NaN.clamp(0, 100)` **返回 NaN**（clamp 不消 NaN），NaN 音量进
+  // `player.setVolume` 之后听感是「随机」——app 内音量条也会显示 NaN%。
+  // 用力上限：任何非有限输入都视为「这次拖动不改变音量」，取当前值。
+  final s0 = start.isFinite ? start.clamp(0.0, 100.0) : 100.0;
+  if (!width.isFinite || width <= 0 || !dx.isFinite) return s0;
+  final v = s0 + dx / width * 100.0;
+  return v.isFinite ? v.clamp(0.0, 100.0) : s0;
 }
 
 /// 静音切换后应使用的音量：静音时 0，取消静音时回到上次音量（无效则满音量）。
@@ -25,8 +29,12 @@ double volumeAfterMuteToggle({
   required double last,
 }) {
   if (nowMuted) return 0;
-  if (last > 0) return last.clamp(0.0, 100.0);
-  return current > 0 ? current.clamp(0.0, 100.0) : 100.0;
+  // 同上的 NaN 通道：`NaN > 0` 为 false，两个分支都会掉到「满音量」，
+  // 静音再取消静音会突然变成 100%。非有限值按 0 处理（随后用满音量兜底）。
+  final l = last.isFinite && last > 0 ? last.clamp(0.0, 100.0) : 0.0;
+  if (l > 0) return l;
+  final c = current.isFinite && current > 0 ? current.clamp(0.0, 100.0) : 0.0;
+  return c > 0 ? c : 100.0;
 }
 
 /// 音量图标档位。三处读数（任务栏按钮 / 拖动浮层 / 桌面音量模块）共用

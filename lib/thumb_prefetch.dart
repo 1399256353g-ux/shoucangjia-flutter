@@ -14,6 +14,7 @@ import 'package:flutter/widgets.dart';
 
 import 'decode_plan.dart';
 import 'grid_geometry.dart';
+import 'layout_metric.dart';
 import 'perf_diagnostics.dart';
 import 'time_labels.dart';
 
@@ -49,10 +50,20 @@ int firstScreenThumbCount({
   int maxItems = 24,
 }) {
   if (maxItems <= 0) return 0;
-  final px = (paddingX ?? padding) * 2;
-  final py = (paddingY ?? padding) * 2;
-  final usableW = viewportWidth - px;
-  final usableH = viewportHeight - py;
+  // 尺寸必须是**有限**值才往下算：`NaN <= 0` 与 `infinity <= 0` 都是 false，
+  // 只判 `<= 0` 的守卫拦不住它们，后面的 `.ceil()` 会抛
+  // `Unsupported operation: Infinity or NaN toInt`（实测
+  // `firstScreenThumbCount(viewportHeight: double.nan)` 直接抛）。
+  final vw = finiteOr(viewportWidth, 0);
+  final vh = finiteOr(viewportHeight, 0);
+  // 内边距非有限不是「没有内边距」，而是「无法判断可用空间」——按 0 张
+  // 预热收手（旧契约：`paddingX: double.infinity` → 0）。直接当成 0 会让
+  // 一个坏参数悄悄变成「整屏都预热」，那是把错误方向反过来。
+  final rawPx = (paddingX ?? padding) * 2;
+  final rawPy = (paddingY ?? padding) * 2;
+  if (!rawPx.isFinite || !rawPy.isFinite) return 0;
+  final usableW = vw - rawPx;
+  final usableH = vh - rawPy;
   if (usableW <= 0 || usableH <= 0) return 0;
   // 列数/列宽与 Flutter delegate 同一规则（grid_geometry 唯一实现）。
   // 旧写法 `ceil((usableW + crossSpacing) / stride)` 分子多加了一个间距，
@@ -79,7 +90,11 @@ int firstScreenThumbCount({
         );
   if (tileH <= 0) return 0;
   final rowStride = tileH + mainSpacing;
-  var rows = ((usableH * (screens < 1 ? 1 : screens)) / rowStride).ceil();
+  // 行距被传成 0/负数（调用方 spacing 配错）时不能进除法：除出 infinity
+  // 再 ceil 就是同一个异常。至少按一行算。
+  var rows = rowStride.isFinite && rowStride > 0
+      ? ceilDim(usableH * (screens < 1 ? 1 : screens) / rowStride, fallback: 1)
+      : 1;
   if (rows < 1) rows = 1;
   final n = cols * rows;
   return n > maxItems ? maxItems : n;
@@ -95,9 +110,13 @@ int firstScreenRowCount({
   int screens = 2,
   int maxItems = 12,
 }) {
-  if (maxItems <= 0 || viewportHeight <= 0 || rowExtent <= 0) return 0;
-  final h = viewportHeight * (screens < 1 ? 1 : screens);
-  final n = (h / rowExtent).ceil();
+  // 同上的有限性守卫：`NaN <= 0` 为 false，裸判 `<= 0` 拦不住。
+  if (maxItems <= 0) return 0;
+  final vh = finiteOr(viewportHeight, 0);
+  final re = finiteOr(rowExtent, 0);
+  if (vh <= 0 || re <= 0) return 0;
+  final h = vh * (screens < 1 ? 1 : screens);
+  final n = ceilDim(h / re, fallback: 1);
   if (n < 1) return 1;
   return n > maxItems ? maxItems : n;
 }

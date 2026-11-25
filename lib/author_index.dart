@@ -136,22 +136,12 @@ Map<String, int> authorGroupStarts(List<String> names) {
   return out;
 }
 
-/// 滑动字母条命中测试：按手指纵向位移落在第几个字母上。
-///
-/// 字母条是等高的竖排（每格 [itemExtent]），所以命中只和 dy 有关：
-/// `floor(dy / itemExtent)`，上下边缘夹在 [0, count-1]。越界返回 -1
-/// 只在 count<=0 或 itemExtent<=0 时出现（调用方此时不应显示索引条）。
-int authorLetterHitIndex({
-  required double dy,
-  required double itemExtent,
-  required int count,
-}) {
-  if (count <= 0 || itemExtent <= 0) return -1;
-  final i = (dy < 0 ? 0.0 : dy / itemExtent).floor();
-  if (i < 0) return 0;
-  if (i > count - 1) return count - 1;
-  return i;
-}
+
+// 这里原有一份 `authorLetterHitIndex`（按 `height / count` 均分算命中格）。
+// 0.9.245 起字母条改成「固定行高 + 整体居中」，真实判定在
+// `AuthorLetterBar.hitIndex`；那份均分实现**零调用**，只被测试引用。
+// 两条规则同时存在时，「点某个字母定位到哪一格」就有两个答案，而测试只
+// 覆盖了没人用的那个——已删除，命中规则只剩 `AuthorLetterBar.hitIndex` 一处。
 
 /// 作者网格内边距（**唯一定义**）：左侧固定，右侧在字母索引条出现时让出
 /// 28dp 条带 + 6dp 间隙。网格的实际 `padding` 与「按序号算滚动偏移」必须

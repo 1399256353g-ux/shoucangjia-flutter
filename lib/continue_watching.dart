@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_json.dart';
+import 'watch_progress.dart';
 
 /// SharedPreferences 键：整个「继续观看」列表存在一个 JSON 字符串里。
 const String kContinuePrefsKey = 'continue_watching_v1';
@@ -162,11 +163,14 @@ String encodeContinueItems(List<ContinueItem> items) =>
 /// 是否值得出现在「继续观看」：位置足够、未看完。
 bool isContinueCandidate(ContinueItem item) {
   if (item.positionMs < kContinueMinMs) return false;
-  if (item.durationMs > 0) {
-    if (item.durationMs - item.positionMs <= 4000) return false;
-    if (item.positionMs / item.durationMs >= 0.95) return false;
-  }
-  return true;
+  // 「看完没有」只有一条判定（`watch_progress.watchedDone`：剩余 ≤4s 或
+  // 进度 ≥95%）。这里原先又写了一遍 `- 4000` 与 `>= 0.95`——两个阈值聚在
+  // 三处（`kWatchedTailMs` / `kWatchedFraction` / 这里的字面量），改一处忘
+  // 一处的后果是「列表里已打勾的作品还留在继续观看」或反之。
+  return !watchedDone(
+    positionMs: item.positionMs,
+    durationMs: item.durationMs,
+  );
 }
 
 /// 插入/更新一条记录：同「库/作品」覆盖，按最近观看时间降序，截断到上限。

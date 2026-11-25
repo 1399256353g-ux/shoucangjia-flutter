@@ -641,8 +641,14 @@ double commentPanelSnap({
 double commentPanelHeight({
   required double fraction,
   required double screenHeight,
-}) =>
-    (fraction.clamp(0.0, 1.0)) * screenHeight;
+}) {
+  // 同上：`screenHeight` 非有限时结果是 NaN/Infinity，而它直接进
+  // `SizedBox(height:)` / `Positioned(bottom:)`，NaN 在布局阶段断言失败。
+  // 返回 0 表示「面板没有高度」，由调用方按关闭态渲染。
+  if (!screenHeight.isFinite || screenHeight <= 0) return 0;
+  final f = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+  return f * screenHeight;
+}
 
 /// 桌面端可落盘保存；Android/iOS 暂无下载目录权限，提示暂不可用。
 bool mediaDownloadSupported({required bool android, required bool ios}) =>
@@ -706,9 +712,17 @@ double scrubKnobX({
   required double fraction,
   double knobRadius = kScrubKnobRadius,
 }) {
-  if (trackWidth <= 0) return 0;
-  final f = fraction.isNaN ? 0.0 : fraction.clamp(0.0, 1.0);
-  final r = knobRadius.clamp(0.0, trackWidth / 2);
+  // `trackWidth` 来自 `LayoutBuilder`，在「还没量出宽度 / 放在无界约束里」
+  // 的中间态可以是 `Infinity`。旧守卫只判 `<= 0`，而 `infinity <= 0` 为
+  // false——`(∞ * f).clamp(r, ∞ - r)` 直接返回 **Infinity**，交给
+  // `Positioned(left:)` 就是布局断言失败（整页灰屏）。非有限值按「没有
+  // 轨道」处理，与 `<= 0` 走同一条出口。
+  if (!trackWidth.isFinite || trackWidth <= 0) return 0;
+  final f = fraction.isFinite ? fraction.clamp(0.0, 1.0) : 0.0;
+  // 半径同样可能是 NaN（外部直接传布局值）：先归零，再夹到半轨道内。
+  final rawR = (knobRadius.isFinite && knobRadius > 0) ? knobRadius : 0.0;
+  final half = trackWidth / 2;
+  final r = rawR > half ? half : rawR;
   return (trackWidth * f).clamp(r, trackWidth - r);
 }
 

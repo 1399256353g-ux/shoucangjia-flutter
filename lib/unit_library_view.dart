@@ -6,6 +6,7 @@ import 'cover_cache.dart';
 import 'cover_menu.dart';
 import 'cover_upload.dart';
 import 'decode_plan.dart';
+import 'layout_metric.dart';
 import 'library_badge.dart';
 import 'library_corner_badge.dart';
 import 'library_tree.dart';
@@ -1096,7 +1097,8 @@ class _UnitCoverFill extends StatelessWidget {
       memCacheWidth: decodeWidthForDisplay(
         displayWidth,
         MediaQuery.devicePixelRatioOf(context),
-        maxWidth: (displayWidth * 3).ceil(),
+        // `NaN.ceil()` 抛异常；`displayWidth` 来自卡片布局，零约束时可为 NaN。
+        maxWidth: ceilDim(displayWidth * 3, fallback: kLibCardMaxDecodeWidth),
       ),
       fit: BoxFit.cover,
       fadeInDuration: Duration.zero,

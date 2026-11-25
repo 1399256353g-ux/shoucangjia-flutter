@@ -37,6 +37,7 @@ import 'breadcrumb.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
 import 'decode_plan.dart';
+import 'layout_metric.dart';
 import 'work_cover.dart';
 import 'media_path.dart';
 import 'media_resize.dart';
@@ -11883,7 +11884,9 @@ class _PlayerPageState extends State<PlayerPage>
   int _posterDecodeWidth(BuildContext c) {
     final size = MediaQuery.sizeOf(c);
     final dpr = MediaQuery.devicePixelRatioOf(c);
-    return (size.width * dpr).round().clamp(360, 2160);
+    // `NaN.round()` 抛 `Unsupported operation`——窗口最小化/零约束的中间态
+    // 里 MediaQuery 可以是 NaN，那正好是这段注释要防的那个场景。
+    return roundDim(size.width * dpr, fallback: 360).clamp(360, 2160);
   }
 
   /// 播放页封面地址：与网格卡片**同一个解析入口**。
@@ -12401,7 +12404,10 @@ class _PlayerPageState extends State<PlayerPage>
     final it = _workAt(cur);
     // 原图可能几千像素宽，按屏幕宽度解码，避免大图整张进内存导致卡顿/闪退。
     final screenW = MediaQuery.sizeOf(context).width;
-    final decodeW = (screenW * MediaQuery.devicePixelRatioOf(context)).round();
+    final decodeW = roundDim(
+      screenW * MediaQuery.devicePixelRatioOf(context),
+      fallback: 1080,
+    );
     // G12：图片加载失败（弱网/文件损坏）给出重试，而不是空白
     Widget retryBox() => _MediaRetryBox(
           message: '图片加载失败',

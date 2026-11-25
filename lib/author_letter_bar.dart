@@ -50,6 +50,9 @@ class AuthorLetterBar extends StatefulWidget {
     required int count,
   }) {
     if (count <= 0) return -1;
+    // 高度/坐标非有限时按「第 0 个」处理：`NaN.floor()` 抛
+    // `Unsupported operation`，而这在 `onVerticalDragUpdate` 里。
+    if (!height.isFinite || !dy.isFinite) return dy.isNaN ? -1 : 0;
     final column = count * kAuthorLetterRowHeight;
     final top = height > column ? (height - column) / 2 : 0.0;
     final local = dy - top;
