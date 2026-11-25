@@ -59,6 +59,9 @@ class KeyCombo {
   static const int modAlt = 4;
   static const int modMeta = 8;
 
+  /// 四个修饰键位的全部合法位：掩码必须落在 `0..modAll` 之内。
+  static const int modAll = modShift | modCtrl | modAlt | modMeta;
+
   final int keyId;
   final int mods;
 
@@ -180,15 +183,43 @@ class AppSettings {
         }
       }
     }
-    final keys = j['keys'];
-    if (keys is Map) {
-      for (final a in PlayerAction.values) {
-        final v = keys[a.name];
-        final c = KeyCombo.fromJson(v);
-        // 落盘配置同样要过准入：旧版本允许把动作绑到保留键，
-        // 读入时丢弃该条，让固定键位保持可用。
-        if (c != null && bindComboError(c) == null) keyBindings[a] = c;
-      }
+    _applyKeysJson(j['keys']);
+  }
+
+  /// 落盘 `keys` 字段 → [keyBindings]。两趟处理，两趟解决的是**不同**问题：
+  ///
+  /// 1. **配置内部去重**（第一趟）。手改配置或两次并发保存之后，可能有两个
+  ///    动作都写成同一个组合。旧实现逐条直接赋值、完全不查重复，于是两行都
+  ///    显示 `F`（都「已绑定」），而 `actionForCombo` 只返回先命中的那个——
+  ///    另一个动作永远触发不了，且没有任何提示。配置里的重复只能保留一条，
+  ///    按 `PlayerAction.values` 顺序取先到的（与 `decodeServers` 等其它
+  ///    读入路径的「先到先得」一致）。
+  /// 2. **套用时走写路径的互换语义**（第二趟）。合法配置里用户完全可以把某个
+  ///    动作改绑到另一个动作**默认值**上（把静音绑到 `F`，而 `F` 本来是全屏
+  ///    的默认键）。这一步若直接赋值，全屏会保留 `F`、静音也拿到 `F`，又是
+  ///    两行同键；若「发现冲突就跳过」，用户刚保存的绑定会被静默丢弃。
+  ///    写路径的语义是互换，读入必须一致。
+  ///
+  /// 两趟缺一不可：只用互换、按顺序逐条套用，重复条目的第二次互换会把第一次
+  /// 的结果**原样换回去**（实测：`mute:F` + `fullscreen:F` 读完后两者仍是
+  /// 各自的默认值，配置里那条改绑等于没发生）。
+  static void _applyKeysJson(Object? keys) {
+    if (keys is! Map) return;
+    // 第一趟：准入 + 配置内部去重。
+    final picked = <PlayerAction, KeyCombo>{};
+    final used = <KeyCombo>{};
+    for (final a in PlayerAction.values) {
+      final c = KeyCombo.fromJson(keys[a.name]);
+      // 落盘配置同样要过准入：旧版本允许把动作绑到保留键/越界掩码，
+      // 读入时丢弃该条，让固定键位保持可用。
+      if (c == null || bindComboError(c) != null) continue;
+      if (!used.add(c)) continue;
+      picked[a] = c;
+    }
+    // 第二趟：按写入顺序套用，冲突走互换（与 [bindCombo] 同一条规则）。
+    for (final a in PlayerAction.values) {
+      final c = picked[a];
+      if (c != null) bindCombo(a, c);
     }
   }
 
@@ -237,17 +268,28 @@ class AppSettings {
   static bool bindCombo(PlayerAction action, KeyCombo combo) {
     if (bindComboError(combo) != null) return false;
     final old = keyBindings[action];
-    PlayerAction? conflict;
-    for (final e in keyBindings.entries) {
-      if (e.key != action && e.value == combo) {
-        conflict = e.key;
-        break;
-      }
-    }
+    final conflict = conflictOwner(action, combo);
     if (conflict != null && old != null) keyBindings[conflict] = old;
     keyBindings[action] = combo;
     return true;
   }
+
+  /// 该组合此刻被**哪个别的动作**占用；没被占用返回 null。
+  ///
+  /// 「同一组合只对应一个动作」这条规则只能有一处实现：写路径（[bindCombo]
+  /// 互换旧绑定）与读路径（[applyJson] 丢弃重复项）各抄一遍那个循环之后，
+  /// 总有一处忘记排除 [action] 自身，于是「重绑到当前同一个键」被判成自我
+  /// 冲突——点一次没反应，点两次才生效。
+  static PlayerAction? conflictOwner(PlayerAction action, KeyCombo combo) {
+    for (final e in keyBindings.entries) {
+      if (e.key != action && e.value == combo) return e.key;
+    }
+    return null;
+  }
+
+  /// [combo] 是否已被 [action] 之外的动作占用。
+  static bool isComboTakenByOther(PlayerAction action, KeyCombo combo) =>
+      conflictOwner(action, combo) != null;
 
   /// 组合能否成为绑定；不能时给出用户可读的原因（单一判定口）。
   ///
@@ -269,6 +311,19 @@ class AppSettings {
     }
     if (isModifierKeyId(combo.keyId)) return '修饰键不能单独绑定，请再按一个主键';
     if (isReservedKeyId(combo.keyId)) return '方向键与 Esc 是固定键位，不能绑定';
+    // 修饰键掩码必须落在已知范围内。
+    //
+    // 这条与上面的「键码真实存在」是同一类准入规则，不是防御性冗余。两条真实
+    // 输入都带得进越界掩码：手工改过的落盘配置（`{"k":102,"m":16}`、`m:-1`），
+    // 以及输入法/远程桌面把厂商自定义修饰位塞进 `HardwareKeyboard` 的中间态。
+    //
+    // 后果不是「多按一个键」，而是**这一项永远触发不了、界面还说已绑定**：
+    // `currentMods()` 只会置低 4 位，`actionForCombo(102, 16)` 要求精确等于 16，
+    // 任何真实按键都算不出 16；而 `comboLabel` 只读低 4 位，把 `m=16` 显示成
+    // 裸 `F`（看起来就是普通单键）。用户按 F 没反应，页面上却写着 F。
+    if (combo.mods < 0 || (combo.mods & ~KeyCombo.modAll) != 0) {
+      return '修饰键组合无法识别，请重新按下按键';
+    }
     return null;
   }
 
@@ -320,12 +375,23 @@ class AppSettings {
   }
 
   /// 修饰键显示片段，固定顺序 Ctrl → Shift → Alt → Win。
+  ///
+  /// 只看已知的四个位：`mods = -1` 时 `-1 & modCtrl != 0` 对**每一位**都成立，
+  /// 旧写法会把 `-1` 显示成 `Ctrl+Shift+Alt+Win`——一个用户既按不出来、
+  /// 也不会被 [bindComboError] 放行的组合（越界掩码已准入拦截）。显示层
+  /// 仍按「只读已知位」收口，避免任何绕过的调用方产出四个修饰键的假标签。
   static List<String> modsParts(int mods) {
+    // 只有落在已知位域内的掩码才解码。`-1` 的每一位都是 1，按位与之后
+    // 恰好等于 `modAll` —— 那会把它显示成「四个修饰键全按」，一个既按不
+    // 出来、也不会被 [bindComboError] 放行的组合。越界/负数一律当作「没有
+    // 已知修饰键」，标签退回裸主键，与「这项没有有效绑定」的观感一致。
+    if (mods < 0 || (mods & ~KeyCombo.modAll) != 0) return <String>[];
+    final m = mods;
     final parts = <String>[];
-    if (mods & KeyCombo.modCtrl != 0) parts.add('Ctrl');
-    if (mods & KeyCombo.modShift != 0) parts.add('Shift');
-    if (mods & KeyCombo.modAlt != 0) parts.add('Alt');
-    if (mods & KeyCombo.modMeta != 0) parts.add('Win');
+    if (m & KeyCombo.modCtrl != 0) parts.add('Ctrl');
+    if (m & KeyCombo.modShift != 0) parts.add('Shift');
+    if (m & KeyCombo.modAlt != 0) parts.add('Alt');
+    if (m & KeyCombo.modMeta != 0) parts.add('Win');
     return parts;
   }
 
