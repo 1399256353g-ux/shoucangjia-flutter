@@ -655,7 +655,10 @@ class _BasicLibPageState extends State<BasicLibPage>
     double size = 58,
   }) {
     final scheme = Theme.of(context).colorScheme;
-    final initial = name.isEmpty ? '?' : name.characters.first;
+    // 首字占位走 `author_avatar.avatarInitial`（唯一实现）：`characters.first`
+    // 只看字形簇，会取到零宽字符/组合附加符号这类**画不出来**的字符，
+    // 头像圆圈看起来是空的；avatarInitial 会把不可见字符跳过去。
+    final initial = avatarInitial(name);
     final placeholder = Center(
       child: Text(initial,
           style: TextStyle(

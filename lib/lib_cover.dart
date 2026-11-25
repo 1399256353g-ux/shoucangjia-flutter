@@ -218,14 +218,15 @@ CoverPick pickBasicCover({
   String crawlerThumb = '',
   String version = '',
   String ext = 'jpg',
-}) {
-  final custom = coverImageRel(rel, version, ext: ext);
-  if (custom.isNotEmpty) return CoverPick(custom, custom: true);
-  final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
-  if (pick.isNotEmpty) return CoverPick(pick);
-  // 高优先级来源都不可用时的兜底：第一张作品的封面（仅图片）。
-  return pickFirstWorkCover(firstThumb);
-}
+}) =>
+    _pickLibCover(
+      rel: rel,
+      bestThumb: bestThumb,
+      firstThumb: firstThumb,
+      crawlerThumb: crawlerThumb,
+      version: version,
+      ext: ext,
+    );
 
 /// 单元库（上级文件夹）封面：
 ///  - 有自定义版本 → `_cover/<version>.<ext>`；
@@ -239,10 +240,34 @@ CoverPick pickUnitCover({
   String crawlerThumb = '',
   String version = '',
   String ext = 'jpg',
+}) =>
+    _pickLibCover(
+      rel: rel,
+      bestThumb: bestThumb,
+      firstThumb: firstThumb,
+      crawlerThumb: crawlerThumb,
+      version: version,
+      ext: ext,
+    );
+
+/// 基础库与单元库共用的**唯一**取图实现。
+///
+/// 两者只有「为什么 bestThumb 是这一张」不同（单元库是整棵子树合并，
+/// 基础库是本库），**取图优先级完全相同**：自定义 → 爬虫/最高播放 →
+/// 第一张作品。此前这里有两份逐字相同的实现；改一处忘一处会让同一张封面
+/// 在两个入口上优先级不一致（典型现象：单元库卡片显示了，基础库卡片没显示）。
+CoverPick _pickLibCover({
+  required String rel,
+  String bestThumb = '',
+  String firstThumb = '',
+  String crawlerThumb = '',
+  String version = '',
+  String ext = 'jpg',
 }) {
   final custom = coverImageRel(rel, version, ext: ext);
   if (custom.isNotEmpty) return CoverPick(custom, custom: true);
   final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
   if (pick.isNotEmpty) return CoverPick(pick);
+  // 高优先级来源都不可用时的兜底：第一张作品的封面（仅图片）。
   return pickFirstWorkCover(firstThumb);
 }

@@ -400,15 +400,32 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
   return out;
 }
 
-/// 计数显示：1234 → 1.2k，12345 → 1.2万。
+/// 计数显示：1234 → 1.2k，12345 → 1.2万，1.2e8 → 1.2亿。
+///
+/// 三处缺口：
+///  - 没有「亿」档，`1.23e8` 显示成 `12345.7万`（五个数字，比原文还长）；
+///  - 负计数直接输出 `-5`（服务端出错时会把 `-1` 当计数发下来，
+///    在卡片上读成「负数个作品」）；
+///  - **四舍五入会把计数说大**：`999949` 先切万再 `toStringAsFixed(1)`
+///    得到 `100.0` → `100万`，实际还不满 100 万。计数一律**向下截断**
+///    到一位小数（宁可少报也不能虚假跨档）。
 String formatCount(int n) {
+  if (n <= 0) return '0';
   if (n < 1000) return '$n';
-  if (n < 10000) {
-    final s = (n / 1000).toStringAsFixed(1);
-    return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}k';
-  }
-  final s = (n / 10000).toStringAsFixed(1);
-  return '${s.endsWith('.0') ? s.substring(0, s.length - 2) : s}万';
+  if (n < 10000) return _scaledCount(n, 1000, 'k');
+  if (n < 100000000) return _scaledCount(n, 10000, '万');
+  return _scaledCount(n, 100000000, '亿');
+}
+
+/// `n / unit` 保留一位小数（**截断**，不进位），去掉末尾 `.0`。
+///
+/// 截断而不是四舍五入：`999949` 向上会变成 `100万`（凭空跨档），
+/// 而计数类文案一旦多说就不能再用；末尾一整位小数也省下来（`3万` 而非 `3.0万`）。
+String _scaledCount(int n, int unit, String suffix) {
+  final tenths = n * 10 ~/ unit; // 十分位整数（截断）
+  final whole = tenths ~/ 10;
+  final frac = tenths % 10;
+  return frac == 0 ? '$whole$suffix' : '$whole.$frac$suffix';
 }
 
 /// 手动模式的节点列表：`/api/nodes` 的相对路径 → 单元库节点。

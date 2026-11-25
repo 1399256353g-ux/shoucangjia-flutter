@@ -2550,7 +2550,15 @@ class LibBadges extends StatelessWidget {
   Widget build(BuildContext context) {
     final labels = LibraryBadge.labels(libIds, names: names);
     if (labels.isEmpty && grade.isEmpty) return const SizedBox.shrink();
-    final shown = libIds.where((e) => e.isNotEmpty).toList();
+    // 与 [LibraryBadge.labels] **同一去重口径**：它按「非空 + 首次出现」去重，
+    // 这里只过滤空串而不去重的话，`['a','a','b']` 会让第二个词条用 `a`
+    // 的颜色/层级（label 是 `b`）——颜色与文字对不上。
+    final shown = <String>[];
+    final seenIds = <String>{};
+    for (final id in libIds) {
+      if (id.isEmpty || !seenIds.add(id)) continue;
+      shown.add(id);
+    }
     // 配色顺序：全局单元库顺序优先（与基础库卡同源），没有时才用调用方的。
     final colorOrder = UnitBadgeRegistry.orderOr(order);
     return Wrap(

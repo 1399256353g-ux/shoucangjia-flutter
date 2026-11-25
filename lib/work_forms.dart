@@ -207,14 +207,16 @@ String workSortLabel(WorkSort sort) {
 
 int _intOf(dynamic v) => intOf(v);
 
-/// 时间戳归一到毫秒；无法识别返回 0。
+/// 时间戳归一到毫秒；无法识别或超出可表示范围返回 0。
 ///
-/// 秒级换算走 [msFromEpochSeconds]：`n * 1000` 在这里是**唯一**的换算点，
-/// 越界的大数会静默回绕成负数（排到最后、显示 1969 年）。
+/// 两档都要过范围校验：
+///  - 秒级走 [msFromEpochSeconds]（`n * 1000` 越界会静默回绕成负数）；
+///  - 毫秒级也必须过 [isValidEpochMs]：`9.2e16` 看起来“就是毫秒”，
+///    但它已经超出 `DateTime` 的 ±8.64e15，后续拿去构造会在 build 阶段抛。
 int _msOf(dynamic v) {
   final n = intOf(v);
   if (n <= 0) return 0;
-  if (n >= 100000000000) return n; // 毫秒级（约 1e12）
+  if (n >= 100000000000) return isValidEpochMs(n) ? n : 0; // 毫秒级（约 1e12）
   if (n >= 1000000000) return msFromEpochSeconds(n); // 秒级（约 1e9）
   return 0;
 }
