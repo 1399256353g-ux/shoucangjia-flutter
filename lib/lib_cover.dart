@@ -23,20 +23,33 @@ import 'text_clip.dart';
 // 使既有 import 点不必改。
 export 'cover_ext.dart' show kCoverExts, kCoverImageExts, isCoverImagePath;
 
+// 后缀剥除（`?` / `#` 段）走 `media_path.dart`（已在上方 import），
+// 取末段走 `rel_path.lastRelName`（连 `\` 一起认）。
+import 'rel_path.dart' show lastRelName;
+
 /// 自定义封面目录名（位于库/单元库文件夹内）。
 const String kCoverDir = '_cover';
 
 /// 版本号合法化：只允许 `[A-Za-z0-9_-]`，拒绝路径分隔符与 `..`。
 /// 返回空串表示非法（调用方应回退到下一种封面来源）。
 String normalizeCoverVersion(String raw) {
-  var s = raw.trim();
+  // 先剥 `?query` / `#fragment` 再取文件名。
+  //
+  // 封面指针可以来自服务端下发的地址（`_cover/v1.png?w=480`）、也可以来自
+  // 用户粘贴的链接。旧写法只按 `/` 取最后一段、再按最后一个 `.` 截扩展名，
+  // 于是 `_cover/v1.png?w=200` 的最后一段是 `v1.png?w=200`，扩展名判成
+  // `png?w=200`（不在白名单里）→ 整个版本号被白名单拒绝，返回**空串**
+  // ——`coverImageRel` 拿不到路径，库封面退回默认图，看起来像「封面丢了」。
+  // 同一份路径在 `isCoverImagePath` 里早就认得这两个后缀，这里也必须剥。
+  var s = stripMediaSuffix(raw);
   if (s.isEmpty) return '';
   // 上级目录穿越一律拒绝（指针只允许是纯版本名）
   if (s.contains('..')) return '';
-  // 兼容「_cover/xxx.jpg」这种带目录与扩展名的写法
-  s = s.replaceAll('\\', '/');
-  final slash = s.lastIndexOf('/');
-  if (slash >= 0) s = s.substring(slash + 1);
+  // 兼容「_cover/xxx.jpg」这种带目录与扩展名的写法。
+  // 取末段走 `lastRelName`（唯一实现，连 `\` 一起认）；旧写法手写
+  // `lastIndexOf('/')`，Windows 风格的 `_cover\v3.png` 取不到末段，
+  // 整串 `_cover\v3.png` 随后被白名单拒成空串。
+  s = lastRelName(s);
   final dot = s.lastIndexOf('.');
   if (dot > 0 && kCoverExts.contains(s.substring(dot + 1).toLowerCase())) {
     s = s.substring(0, dot);
@@ -90,11 +103,18 @@ String coverImageRel(String rel, String version, {String ext = 'jpg'}) {
   }
   final version = normalizeCoverVersion(v);
   if (version.isEmpty) return (version: '', ext: 'jpg');
-  // `cover: "v1.png"`：扩展名取自字符串本身
+  // `cover: "v1.png"`：扩展名取自字符串本身。
+  //
+  // 先剥 `?` / `#`：服务端可能把封面指针写成地址形式
+  // （`v1.webp?w=480`），旧写法直接取最后一个 `.` 之后作为扩展名，
+  // 得到 `webp?w=480`（不在白名单）→ 回落 `jpg`，与 `normalizeCoverVersion`
+  // 剥完取到的 `webp` **不是同一个扩展名**：请求的是 `v1.jpg`，磁盘上是
+  // `v1.webp`，封面 404。剥后缀与取末段都走公共函数。
   if (raw is String && e == 'jpg') {
-    final dot = raw.trim().lastIndexOf('.');
+    final body = stripMediaSuffix(raw);
+    final dot = body.lastIndexOf('.');
     if (dot > 0) {
-      final tail = raw.trim().substring(dot + 1).toLowerCase();
+      final tail = body.substring(dot + 1).toLowerCase();
       if (kCoverExts.contains(tail)) e = tail;
     }
   }

@@ -89,9 +89,15 @@ List<LibraryRankRow> buildLibraryRank({
   String? currentLib,
 }) {
   final rows = <LibraryRankRow>[];
+  final seen = <String>{};
   for (final lib in libs) {
     final id = '${lib['id'] ?? ''}';
     if (id.isEmpty) continue;
+    // 同一个库 id 出现两次（聚合时两台服务端报同一个库、或旧格式重注册）
+    // 会产出两行**完全等键**的记录：`score`/`plays`/`name`/`id` 四项全相等，
+    // 而 `List.sort` 不保证稳定——同一份数据刷两次，两行名次岔开（1/2 变 2/1）。
+    // 库 id 是唯一标识，重复项按第一条计入（与 `lib_id` 去重同一口径）。
+    if (!seen.add(id)) continue;
     final online = libraryOnline(lib);
     if (!online) continue;
     final st = stats[id];
@@ -107,6 +113,10 @@ List<LibraryRankRow> buildLibraryRank({
       rank: 0,
     ));
   }
+  // 排序规则（**唯一**）：指标分降序 → 播放量降序 → 库名升序 → id 升序。
+  // 四级键里最后一级（id）保证唯一（上面已按 id 去重），所以结果与 libs 的
+  // 入参顺序无关；不要去掉 id 这一级——只到库名为止时，两个同名库
+  // （`(8) 🦶` 与 `(9) 🦶` 去序号后同名）名次会随服务端下发顺序变。
   rows.sort((a, b) {
     final c = b.score(metric).compareTo(a.score(metric));
     if (c != 0) return c;

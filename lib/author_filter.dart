@@ -13,6 +13,7 @@ import 'http_json.dart';
 import 'json_num.dart';
 
 import 'work_forms.dart';
+import 'stable_order.dart';
 
 class AuthorBigNode {
   final String id;
@@ -159,40 +160,38 @@ class AuthorFilterState {
   }
 
   /// 生成一行简短摘要，例如「基础库 2 · 大库 1 · 等级 A/S · 视频/图文」。
+  ///
+  /// 四个库维度（top/unit/basic/big）此前各自写了一遍「取名字 → 排序 → 拼接」
+  /// ——同一段 5 行代码四份拷贝，改一处就分叉。这里只留一条：[_namesPart]。
   String summary({
     Map<String, String> basicNames = const {},
     Map<String, String> bigNames = const {},
     Map<String, String> unitNames = const {},
     Map<String, String> topNames = const {},
   }) {
-    final parts = <String>[];
-    if (tops.isNotEmpty) {
-      final names = tops.map((id) => topNames[id] ?? id).toList()..sort();
-      parts.add('顶级节点 ${names.join('/')}');
-    }
-    if (units.isNotEmpty) {
-      final names = units.map((id) => unitNames[id] ?? id).toList()..sort();
-      parts.add('单元库 ${names.join('/')}');
-    }
-    if (basics.isNotEmpty) {
-      final names = basics.map((id) => basicNames[id] ?? id).toList()..sort();
-      parts.add('基础库 ${names.join('/')}');
-    }
-    if (bigs.isNotEmpty) {
-      final names = bigs.map((id) => bigNames[id] ?? id).toList()..sort();
-      parts.add('媒体库 ${names.join('/')}');
-    }
-    if (grades.isNotEmpty) {
-      final order = ['S', 'A', 'B', 'C', 'D'];
-      final gs = order.where(grades.contains);
-      parts.add('等级 ${gs.join('/')}');
-    }
-    if (types.isNotEmpty) {
-      final order = workFilterOrder.where(types.contains);
-      parts.add(order.map(workFilterLabel).join('/'));
-    }
+    final parts = <String>[
+      if (tops.isNotEmpty) _namesPart('顶级节点', tops, topNames),
+      if (units.isNotEmpty) _namesPart('单元库', units, unitNames),
+      if (basics.isNotEmpty) _namesPart('基础库', basics, basicNames),
+      if (bigs.isNotEmpty) _namesPart('媒体库', bigs, bigNames),
+      if (grades.isNotEmpty)
+        '等级 ${['S', 'A', 'B', 'C', 'D'].where(grades.contains).join('/')}',
+      if (types.isNotEmpty)
+        workFilterOrder.where(types.contains).map(workFilterLabel).join('/'),
+    ];
     return parts.isEmpty ? '未筛选' : parts.join(' · ');
   }
+}
+
+/// 单个库维度的摘要片段：`<标题> 名字/名字`。
+///
+/// 名字排序用 [stableSort]：同一个 id 在 `names` 里缺省时回落 id，两个 id
+/// 指向同一个显示名（服务端两台主机同名库）时裸 `sort` 会换位——摘要文字
+/// 每次刷新不一样，看起来像「筛选条件变了」。
+String _namesPart(String label, Set<String> ids, Map<String, String> names) {
+  final list = [for (final id in ids) names[id] ?? id];
+  stableSort(list, (a, b) => a.compareTo(b));
+  return '$label ${list.join('/')}';
 }
 
 /// 把基础库 id/名称/大库 id 组装成节点列表，按 rel/名称稳定排序。

@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'media_path.dart' show isGifMediaPath, stripMediaSuffix;
 import 'work_safety.dart';
 
 /// 头像候选图。`width/height` 未知时填 0（列表接口通常不给尺寸）。
@@ -34,10 +35,7 @@ class AvatarCandidate {
   bool get valid => path.trim().isNotEmpty;
   bool get hasDims => width > 0 && height > 0;
   double get aspect => hasDims ? width / height : 0;
-  bool get isGif {
-    final p = path.toLowerCase();
-    return p.endsWith('.gif') || p.contains('.gif?');
-  }
+  bool get isGif => isGifMediaPath(path);
 
   @override
   String toString() => 'AvatarCandidate($kind,$path,${width}x$height)';
@@ -159,12 +157,8 @@ const List<String> kAvatarImageExts = <String>[
 /// 路径是否指向图片：去掉 `?w=200` 之类的查询串后再判断扩展名。
 /// 非图片（视频、文本、无扩展名）一律返回 false，避免把 mp4 当头像去请求。
 bool isAvatarImagePath(String path) {
-  var p = path.trim().toLowerCase();
+  final p = stripMediaSuffix(path).toLowerCase();
   if (p.isEmpty) return false;
-  final q = p.indexOf('?');
-  if (q >= 0) p = p.substring(0, q);
-  final h = p.indexOf('#');
-  if (h >= 0) p = p.substring(0, h);
   return kAvatarImageExts.any(p.endsWith);
 }
 

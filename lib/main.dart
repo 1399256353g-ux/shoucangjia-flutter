@@ -218,10 +218,12 @@ Future<void> main() async {
 
 // 动图判断：GIF 必须交给 Image.network 才能播放动画，
 // CachedNetworkImage 只取首帧。
-bool isGifPath(String path) {
-  final low = path.toLowerCase();
-  return low.endsWith('.gif') || low.contains('.gif?');
-}
+//
+// 规则本身收口到 `media_path.isGifMediaPath`（与 `isCoverImagePath` /
+// `isVideoMediaPath` 同一条后缀剥除）：旧写法 `endsWith('.gif') ||
+// contains('.gif?')` 只认查询串，`/m/a.gif#poster` 判成**不是动图**，
+// 那张动图在网格里只播第一帧。这里只保留函数名（调用点与测试在用）。
+bool isGifPath(String path) => isGifMediaPath(path);
 
 class Cfg {
   String base = '';

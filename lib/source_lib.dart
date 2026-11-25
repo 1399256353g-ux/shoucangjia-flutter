@@ -54,15 +54,19 @@ String normalizeLibLabel(String raw) {
 /// 把媒体 URL 解码为相对库根的路径（去掉 `/media/` 前缀）。
 /// 非法百分号编码时退化为原串，避免抛异常。
 String decodeMediaRel(String mediaPath) {
-  var p = mediaPath.trim();
-  final q = p.indexOf('?');
-  if (q >= 0) p = p.substring(0, q);
+  // 剥 `?` / `#` 走 [stripMediaSuffix]（唯一实现）。
+  //
+  // 旧写法只 `indexOf('?')` 截查询串，`#fragment` **原样留下**：实测
+  // `decodeMediaRel('/media/lib/@a/x.jpg#poster')` 返回 `lib/@a/x.jpg#poster`。
+  // 后果是这条 rel 永远匹配不上磁盘上的目录（基础库归属、作者前缀都算废），
+  // 而 `isCoverImagePath` / `isVideoMediaPath` 早已把片段剥掉——同一份路径
+  // 在两处判定里是两个不同的名字。
+  var p = stripMediaSuffix(mediaPath);
   if (isMediaPath(p)) p = p.substring(7);
-  p = decodeComponentOrRaw(p);
-  while (p.startsWith('/')) {
-    p = p.substring(1);
-  }
-  return p;
+  // 逐段解码再做归一：整串先解码会把文件名里的 `%2F` 变成真分隔符，
+  // 一条作品路径凭空多出一层目录。
+  final segs = relSegments(p).map(decodeComponentOrRaw);
+  return relJoin(segs);
 }
 
 /// 把基础库的绝对路径换算成相对注册库根目录的路径；不在此根下返回空串。

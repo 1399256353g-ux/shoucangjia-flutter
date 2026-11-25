@@ -99,6 +99,24 @@ bool isVideoMediaPath(String p) {
   return false;
 }
 
+/// 路径是否指向 GIF 动图（**唯一定义**，忽略 `?query` 与 `#fragment`）。
+///
+/// 此前这条判定有两个手写副本，都只处理了一半后缀：
+///  - `main.isGifPath`：`low.endsWith('.gif') || low.contains('.gif?')`；
+///  - `author_avatar.AvatarCandidate.isGif`：同一段代码再抄一遍。
+///
+/// 两处都靠 `contains('.gif?')` 认查询串，于是**片段**形式的地址全部漏判：
+/// 实测 `isGifPath('/m/a.gif#poster')` 返回 **false**——`CachedNetworkImage`
+/// 只取首帧，一张动图在网格里就变成静止的第一帧，看起来像「动图丢了」。
+/// 同一份图像路径在别处（`isCoverImagePath` / `isVideoMediaPath`）已经认
+/// 片段，只有动图这一条不认。
+///
+/// 后缀剥除统一走 [stripMediaSuffix]，判定只写一份。
+bool isGifMediaPath(String p) {
+  final l = stripMediaSuffix(p).toLowerCase();
+  return l.endsWith('.gif');
+}
+
 String encodeMediaPath(String path) {
   if (path.isEmpty) return path;
   if (isAbsoluteMediaUrl(path)) return path;

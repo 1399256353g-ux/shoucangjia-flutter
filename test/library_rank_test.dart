@@ -82,8 +82,34 @@ void main() {
         isEmpty);
   });
 
-  test('解析 author_stats 的 authors 包装', () {
-    final m = statsAuthors({
+  test('库 id 重复时不产生两行等键记录（名次不会随下发顺序岔开）', () {
+    final libs = [
+      {'id': 'x', 'name': '同名', 'baseOk': true, 'indexOk': true},
+      {'id': 'x', 'name': '同名', 'baseOk': true, 'indexOk': true},
+      {'id': 'y', 'name': '同名', 'baseOk': true, 'indexOk': true},
+    ];
+    final stats = {
+      'x': {
+        'a': {'p': 10},
+      },
+      'y': {
+        'a': {'p': 10},
+      },
+    };
+    for (var i = 0; i < 5; i++) {
+      final rows = buildLibraryRank(libs: libs, stats: stats, metric: 'play');
+      expect(rows.length, 2, reason: '同一个库 id 只该占一行');
+      expect(rows.map((e) => e.id).toList(), ['x', 'y'],
+          reason: '四级排序键最后一档是 id，结果与入参顺序无关');
+      expect(rows.map((e) => e.rank).toList(), [1, 2]);
+    }
+    // 入参换序也是同一结果
+    final rev = buildLibraryRank(
+        libs: libs.reversed.toList(), stats: stats, metric: 'play');
+    expect(rev.map((e) => e.id).toList(), ['x', 'y']);
+  });
+
+  test('解析 author_stats 的 authors 包装', () {    final m = statsAuthors({
       'updated': 1,
       'authors': {
         'a': {'p': 2},

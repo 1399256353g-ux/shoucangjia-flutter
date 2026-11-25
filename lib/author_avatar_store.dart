@@ -107,7 +107,13 @@ bool isServerAvatarFileName(String file) {
 /// 只认精确的三段式 `/media/<lib>/.avatars/<file>`；旧目录
 /// `@manual-avatar/...` 不是「按文件注册」的来源，交给旧上传链路处理。
 ({String lib, String file})? serverAvatarFileFromPath(String? mediaPath) {
-  final s = mediaPath?.trim() ?? '';
+  // 先剥 `?query` / `#fragment`：`av` 里的头像地址可能带缓存参数
+  // （`/media/lib/.avatars/a.jpg?w=200`）。旧写法直接按 `/` 切三段，
+  // 文件段是 `a.jpg?w=200`，`isServerAvatarFileName` 判为非法 → 返回 null，
+  // 于是「设置头像」静默退化成**只存本机**（跨设备不生效），而那张图本身
+  // 完全可以用于注册。实测 `serverAvatarFileFromPath(
+  // '/media/lib/.avatars/a.jpg?w=200')` 返回 null。
+  final s = stripMediaSuffix(mediaPath?.trim() ?? '');
   if (!isMediaPath(s)) return null;
   final parts = s.substring(7).split('/');
   if (parts.length != 3 || parts[1] != '.avatars') return null;

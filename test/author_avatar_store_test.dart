@@ -100,8 +100,13 @@ void main() {
     final r = serverAvatarFileFromPath('/media/lib-001/.avatars/a.jpg');
     expect(r?.lib, 'lib-001');
     expect(r?.file, 'a.jpg');
-    expect(serverAvatarFileFromPath('/media/lib-001/.avatars/a.jpg?x=1'),
-        isNull);
+    // `?query` / `#fragment` 里的**缓存参数不算文件名**：先剥后缀再校验。
+    // 旧实现直接按 `/` 切三段，文件段是 `a.jpg?x=1`，被判非法 → 返回 null,
+    // 于是这一张明明可以注册的头像只能存本机（跨设备不生效）。
+    final q = serverAvatarFileFromPath('/media/lib-001/.avatars/a.jpg?x=1');
+    expect(q?.lib, 'lib-001');
+    final f = serverAvatarFileFromPath('/media/lib-001/.avatars/a.jpg#v2');
+    expect(f?.file, 'a.jpg');
     expect(serverAvatarFileFromPath('/media/lib-001/@manual-avatar/x/_avatar/a.jpg'),
         isNull);
     expect(serverAvatarFileFromPath('/media/lib-001/.avatars/a.txt'), isNull);

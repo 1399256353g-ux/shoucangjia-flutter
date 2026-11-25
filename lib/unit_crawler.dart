@@ -8,6 +8,7 @@
 
 import 'api_url.dart';
 import 'json_num.dart';
+import 'media_path.dart' show stripMediaSuffix;
 import 'text_clip.dart';
 
 import 'interval_label.dart';
@@ -181,8 +182,14 @@ int normalizeCooldown(dynamic raw) {
 }
 
 /// 脚本名：只允许文件名，禁止目录穿越与隐藏文件。
+///
+/// 先剥 `?query` / `#fragment` 再取末段：服务端可能把脚本名字段写成地址
+/// 形式（`crawler/run.py?t=2`）。旧写法先取最后一段得到 `run.py?t=2`，
+/// 白名单不认 `?` → 回落到 `sync.sh`（一个**不存在**的默认名），于是
+/// 「运行」按钮打到一个不存在的脚本上。实测
+/// `normalizeScriptName('run.py?x=1')` 返回 `'sync.sh'`。
 String normalizeScriptName(String raw) {
-  var s = raw.trim().replaceAll('\\', '/');
+  var s = stripMediaSuffix(raw).replaceAll('\\', '/');
   final slash = s.lastIndexOf('/');
   if (slash >= 0) s = s.substring(slash + 1);
   if (s.isEmpty || s == '.' || s == '..' || s.startsWith('.')) {
