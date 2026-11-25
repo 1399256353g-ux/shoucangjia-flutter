@@ -3680,6 +3680,10 @@ class _StripIndexTileState extends State<_StripIndexTile> {
       value: AppSettings.stripLibIndex,
       onChanged: (v) async {
         setState(() => AppSettings.stripLibIndex = v);
+        // owner 2026-11-25：「重新打开后也同步重新显示」。
+        // 只落盘不够：已经渲染好的卡片/词条不会自己重算。递增唯一变更信号，
+        // 让订阅它的卡片（作者卡/基础库卡/播放页词条）立即按新设置重绘。
+        LibraryBadge.revision.value++;
         await AppSettings.save();
       },
     );
@@ -6104,7 +6108,10 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         has ? Icons.folder_copy_outlined : Icons.folder_off_outlined,
         color: has ? null : Colors.grey,
       ),
-      title: Text(u.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      // owner 2026-11-25：「爬虫设置还有任何地方里也都同步应用省略序号设置」。
+      // 这里原来直接显示 u.name，序号 `(1) ` 会露出来，与卡片/词条不一致。
+      title: Text(LibraryBadge.stripIndex(u.name),
+          maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         has ? '已配置爬虫脚本 · 可单独设置同步频率' : '无爬虫脚本（J17：同步设置不可用）',
         maxLines: 1,
@@ -6179,8 +6186,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                     ListTile(
                       leading: const Icon(Icons.library_books_outlined),
                       title: Text(
-                          displayLibraryName(
-                              '${l['id']}', '${l['name'] ?? l['id']}'),
+                          LibraryBadge.stripIndex(displayLibraryName(
+                              '${l['id']}', '${l['name'] ?? l['id']}')),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                       subtitle: Text(
