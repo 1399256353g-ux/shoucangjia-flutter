@@ -5296,14 +5296,39 @@ class _LibraryPageState extends State<LibraryPage> {
       // 标记节点来自 servers.first（_fetchMarkedNodes 的取数口径），
       // 因此连接标识也必须取同一条连接，不能留空。
       final firstServer = servers.isEmpty ? null : servers.first;
-      final nodes = marked.rels
+      // owner 2026-11-25：「单元库选过往封面，返回界面就恢复原样」。
+      //
+      // 封面指针有两个来源，取并集：`/api/libraries.json` 的整棵树（全部层级
+      // 都有，实测 6/6）优先，`/api/nodes` 的 covers 兜底（只覆盖被标记为节点
+      // 的 rel，实测 31 条里仅 4 条带封面）。此前只认后者，第 3 层那 2 条单元库
+      // 的指针永远到不了卡片——当场靠本地覆盖撑着，页面一重建就回落。
+      final treeCovers = <String, String>{};
+      final rawTreeCovers = merged['unitCovers'];
+      if (rawTreeCovers is Map) {
+        for (final e in rawTreeCovers.entries) {
+          final k = normalizeUnitRel('${e.key}');
+          final v = '${e.value ?? ''}'.trim();
+          if (k.isEmpty || v.isEmpty) continue;
+          treeCovers[k] = v;
+        }
+      }
+      String coverOfRel(String rel) =>
+          treeCovers[normalizeUnitRel(rel)] ?? marked.covers[rel] ?? '';
+      // 节点＝owner 在文件结构里标记的 rel；再补上「树里有封面指针但没被标记」
+      // 的 rel —— 否则那几条指针即使拿到了也没有节点承载，卡片仍然拿不到。
+      final rels = <String>{
+        ...marked.rels,
+        ...treeCovers.keys,
+      }.toList(growable: false)
+        ..sort();
+      final nodes = rels
           .map((rel) => LibNode(
                 id: 'node:$rel',
                 rel: rel,
                 name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
                 // owner 2026-11-24：必须带上服务端下发的封面指针，
                 // 否则选完过往封面返回界面就回落到自动封面。
-                coverUrl: marked.covers[rel] ?? '',
+                coverUrl: coverOfRel(rel),
                 // serverId 必须是连接 id（buildUnitTree 按它归组），
                 // 不能写成 cardLabel——那会让分层再次错位。
                 serverId: firstServer?.id ?? '',

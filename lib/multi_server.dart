@@ -12,6 +12,7 @@
 import 'dart:convert';
 
 import 'json_num.dart';
+import 'media_path.dart' show isMediaPath;
 import 'text_fold.dart';
 
 class ServerConn {
@@ -266,11 +267,24 @@ List<Map<String, dynamic>> mergeRegisteredLibraries(
 }
 
 /// 聚合 v2 库树：大库与基础库都按 id 去重。
+///
+/// 同时把**整棵树的单元库封面指针**（`nodes` / `bigLibraries` / `groups` 里
+/// 的 `cover.u`）按归一化 rel 合并成一张表随结果带出。
+///
+/// owner 2026-11-25：「单元库选过往封面，返回界面就恢复原样」。
+/// 根因不是服务端——`/api/libraries.json` 下发的 6 条指针一条不少，而是客户端
+/// 建树只从 `/api/nodes` 的 `covers` 取，那里只有被 owner 标记为节点的那些 rel
+/// （实测 31 条里仅 4 条带封面）。第 3 层那 2 条不在 marks 里，指针永远到不了
+/// 卡片；卡片靠本地 `_coverOverride` 撑过当场，页面一重建就回落。
+///
+/// 指针按 rel 存，不看层级，因此「标不标记为节点」不再影响封面上屏。
 Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
   final seenBig = <String>{};
   final seenBasic = <String>{};
   final bigs = <Map<String, dynamic>>[];
   final basics = <Map<String, dynamic>>[];
+  // 归一化 rel → 封面媒体路径。先到先得（与其它字段的去重口径一致）。
+  final unitCovers = <String, String>{};
   var any = false;
   for (final snap in snapshots) {
     if (!snap.server.visible || snap.tree == null) continue;
@@ -291,14 +305,48 @@ Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
       if (id.isEmpty || !seenBasic.add(id)) continue;
       basics.add(_tag(raw, snap.server));
     }
+    _collectUnitCovers(t, unitCovers);
   }
   if (!any) return null;
-  return {
-    ...{
-      'bigLibraries': bigs,
-      'basicLibraries': basics,
-    }
+  return <String, dynamic>{
+    'bigLibraries': bigs,
+    'basicLibraries': basics,
+    if (unitCovers.isNotEmpty) 'unitCovers': unitCovers,
   };
+}
+
+/// 从一棵 v2 树的三个节点数组里收集 `rel → cover.u`。
+///
+/// 与 `gallery_server.js` 下发时的口径保持一致：只认 `cover` 对象里的 `u`，
+/// 且必须是媒体路径（`/media/...`）。rel 归一化走 [normalizeUnitRel]，
+/// 与服务端 `unitRelKey` 同一套规则，避免「写进去、读不回来」。
+void _collectUnitCovers(Map<String, dynamic> tree, Map<String, String> out) {
+  for (final key in const ['nodes', 'bigLibraries', 'groups']) {
+    final arr = tree[key];
+    if (arr is! List) continue;
+    for (final raw in arr) {
+      if (raw is! Map) continue;
+      final rel = normalizeUnitRel('${raw['rel'] ?? raw['path'] ?? ''}');
+      if (rel.isEmpty) continue;
+      final cover = raw['cover'];
+      if (cover is! Map) continue;
+      final u = '${cover['u'] ?? ''}'.trim();
+      if (u.isEmpty || !isMediaPath(u)) continue;
+      out.putIfAbsent(rel, () => u);
+    }
+  }
+}
+
+/// 单元库 rel 归一化——与服务端 `unitRelKey` 同一套规则：
+/// `\` 与 `/` 等价，去空段与 `.`，`..` 原样保留（由校验层拒绝）。
+String normalizeUnitRel(String rel) {
+  final out = <String>[];
+  for (final raw in rel.split(RegExp(r'[\\/]+'))) {
+    final s = raw.trim();
+    if (s.isEmpty || s == '.') continue;
+    out.add(s);
+  }
+  return out.join('/');
 }
 
 /// 单条绑定记录的唯一拼装口。

@@ -19,6 +19,7 @@ import 'star_store.dart';
 import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'text_clip.dart';
+import 'unit_cover_store.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
 
@@ -819,33 +820,33 @@ class UnitLibraryCard extends StatefulWidget {
 }
 
 class _UnitLibraryCardState extends State<UnitLibraryCard> {
-  /// 菜单操作成功后的临时覆盖：非空直接使用；[_coverAuto] 为 true 时
-  /// 按自动封面链重新求值（不读服务端自定义指针）。
-  String? _coverOverride;
-  bool _coverAuto = false;
+  /// owner 2026-11-25：封面状态收归 [UnitCoverStore]。
+  ///
+  /// 原来这里有一份私有 `_coverOverride` / `_coverAuto`，`didUpdateWidget`
+  /// 发现 `coverUrl` 变了就把它清空——页面一重建，刚选好的封面就回落成
+  /// 树快照里的旧值（「返回界面就恢复原样」）。现在卡片不再自己存一份，
+  /// 直接问 store；store 变了由 [UnitCoverStore.revision] 通知所有卡片。
+  String get _coverKey => UnitCoverStore.unitKey(widget.unit.rel);
 
-  @override
-  void didUpdateWidget(covariant UnitLibraryCard old) {
-    super.didUpdateWidget(old);
-    if (old.coverUrl != widget.coverUrl ||
-        !identical(old.coverUrlOf, widget.coverUrlOf)) {
-      _coverOverride = null;
-      _coverAuto = false;
-    }
-  }
+  /// 服务端下发 / 调用方解析出来的「没有本地意见时」的封面地址。
+  String _serverCoverUrl() => widget.topCard
+      ? (widget.coverUrlOf?.call(widget.unit) ?? widget.coverUrl)
+      : unitCoverUrl(
+          widget.unit,
+          customUrl: widget.coverUrlOf?.call(widget.unit) ?? widget.coverUrl,
+        );
 
   String _coverUrlNow() {
-    if (_coverOverride != null) return _coverOverride!;
-    if (_coverAuto) {
-      if (widget.topCard) return '';
-      return unitCoverUrl(widget.unit, ignoreManual: true);
+    final local = UnitCoverStore.rawOf(_coverKey);
+    if (local != null) {
+      // 显式「恢复自动」：忽略服务端自定义指针，走自动链。
+      if (local.isEmpty) {
+        if (widget.topCard) return '';
+        return unitCoverUrl(widget.unit, ignoreManual: true);
+      }
+      return local;
     }
-    return widget.topCard
-        ? (widget.coverUrlOf?.call(widget.unit) ?? widget.coverUrl)
-        : unitCoverUrl(
-            widget.unit,
-            customUrl: widget.coverUrlOf?.call(widget.unit) ?? widget.coverUrl,
-          );
+    return _serverCoverUrl();
   }
 
   Future<void> _openCoverMenu() async {
@@ -856,10 +857,9 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
     }
     final out = await showCoverMenu(context, menu);
     if (!mounted || out == null) return;
-    setState(() {
-      _coverAuto = out.auto;
-      _coverOverride = out.auto || out.url.isEmpty ? null : out.url;
-    });
+    // 空串＝恢复自动；非空＝用这张图。写入 store 即触发重建，
+    // 不再依赖本卡片的 setState（那样页面一重建就丢）。
+    UnitCoverStore.set(_coverKey, out.auto || out.url.isEmpty ? '' : out.url);
   }
 
   @override
@@ -931,16 +931,21 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                 // 0.9.74：只监听本单元库子树内的库，播放别的库不再重建这张卡。
                 valueListenable:
                     WorkPlaysStore.libsListenable(unit.allBasics.map((b) => b.id)),
-                builder: (_, __, ___) => _UnitCoverFill(
-                  key: ValueKey('unit-cover-${unit.id}'),
-                  displayWidth: kUnitCardDisplayWidth,
-                  url: _coverUrlNow(),
-                  headers: widget.headers,
-                  fallbackIcon: Icons.folder_copy_outlined,
-                  tint: widget.topCard ? widget.fallbackTint : null,
-                  libId: unit.allBasics.isNotEmpty
-                      ? unit.allBasics.first.id
-                      : '',
+                // owner 2026-11-25：封面改动也走通知，不再靠卡片自己的
+                // setState——那份状态在页面重建时会丢。
+                builder: (_, __, ___) => ValueListenableBuilder<int>(
+                  valueListenable: UnitCoverStore.revision,
+                  builder: (_, __, ___) => _UnitCoverFill(
+                    key: ValueKey('unit-cover-${unit.id}'),
+                    displayWidth: kUnitCardDisplayWidth,
+                    url: _coverUrlNow(),
+                    headers: widget.headers,
+                    fallbackIcon: Icons.folder_copy_outlined,
+                    tint: widget.topCard ? widget.fallbackTint : null,
+                    libId: unit.allBasics.isNotEmpty
+                        ? unit.allBasics.first.id
+                        : '',
+                  ),
                 ),
               ),
             ),
@@ -1528,26 +1533,21 @@ class BasicLibCard extends StatefulWidget {
 }
 
 class _BasicLibCardState extends State<BasicLibCard> {
-  String? _coverOverride;
-  bool _coverAuto = false;
-
-  @override
-  void didUpdateWidget(covariant BasicLibCard old) {
-    super.didUpdateWidget(old);
-    if (old.coverUrl != widget.coverUrl ||
-        !identical(old.coverUrlOf, widget.coverUrlOf)) {
-      _coverOverride = null;
-      _coverAuto = false;
-    }
-  }
+  /// owner 2026-11-25：与单元库卡片同一处状态（[UnitCoverStore]）。
+  /// 原来这里也有一份私有覆盖，页面重建即丢——同一个 bug 的第二份拷贝。
+  String get _coverKey => UnitCoverStore.basicKey(widget.basic.id);
 
   String _coverUrlNow() {
-    if (_coverOverride != null) return _coverOverride!;
+    final local = UnitCoverStore.rawOf(_coverKey);
+    if (local != null && local.isNotEmpty) return local;
+    final auto = local != null; // 空串＝显式恢复自动
     return basicCoverUrl(
       widget.basic,
-      preset: _coverAuto ? '' : (widget.coverUrlOf?.call(widget.basic) ?? widget.coverUrl),
+      preset: auto
+          ? ''
+          : (widget.coverUrlOf?.call(widget.basic) ?? widget.coverUrl),
       firstThumb: widget.basic.firstCover,
-      ignoreCustom: _coverAuto,
+      ignoreCustom: auto,
     );
   }
 
@@ -1559,10 +1559,7 @@ class _BasicLibCardState extends State<BasicLibCard> {
     }
     final out = await showCoverMenu(context, menu);
     if (!mounted || out == null) return;
-    setState(() {
-      _coverAuto = out.auto;
-      _coverOverride = out.auto || out.url.isEmpty ? null : out.url;
-    });
+    UnitCoverStore.set(_coverKey, out.auto || out.url.isEmpty ? '' : out.url);
   }
 
   Widget _badge() {
@@ -1610,12 +1607,16 @@ class _BasicLibCardState extends State<BasicLibCard> {
           ValueListenableBuilder<int>(
             // 0.9.74：基础库封面只依赖自己的播放量，按库通知即可。
             valueListenable: WorkPlaysStore.libListenable(basic.id),
-            builder: (_, __, ___) => _UnitCoverFill(
-              key: ValueKey('basic-cover-${basic.id}'),
-              url: _coverUrlNow(),
-              headers: widget.headers,
-              fallbackIcon: Icons.folder_outlined,
-              libId: basic.id,
+            // owner 2026-11-25：封面改动同单元库卡片一样走 store 通知。
+            builder: (_, __, ___) => ValueListenableBuilder<int>(
+              valueListenable: UnitCoverStore.revision,
+              builder: (_, __, ___) => _UnitCoverFill(
+                key: ValueKey('basic-cover-${basic.id}'),
+                url: _coverUrlNow(),
+                headers: widget.headers,
+                fallbackIcon: Icons.folder_outlined,
+                libId: basic.id,
+              ),
             ),
           ),
           Positioned(
