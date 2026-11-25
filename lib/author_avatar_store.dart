@@ -118,9 +118,11 @@ bool isServerAvatarFileName(String file) {
   // 于是「设置头像」静默退化成**只存本机**（跨设备不生效），而那张图本身
   // 完全可以用于注册。实测 `serverAvatarFileFromPath(
   // '/media/lib/.avatars/a.jpg?w=200')` 返回 null。
-  final s = stripMediaSuffix(mediaPath?.trim() ?? '');
-  if (!isMediaPath(s)) return null;
-  final parts = s.substring(7).split('/');
+  // `/media/` 尾部走 `mediaRelOrNull`：前缀判定与切片同一个出口（自己 trim），
+  // 不再手写 `substring(7)`——那是这条规则在第四个文件里的第二份拷贝。
+  final rest = mediaRelOrNull(stripMediaSuffix(mediaPath ?? ''));
+  if (rest == null) return null;
+  final parts = rest.split('/');
   if (parts.length != 3 || parts[1] != '.avatars') return null;
   final lib = decodeComponentOrRaw(parts[0]);
   final file = decodeComponentOrRaw(parts[2]);

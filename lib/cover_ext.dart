@@ -42,14 +42,33 @@ const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
 ///
 /// 取末段走 `rel_path.lastRelName`（连 `\` 一起认），后缀剥除走
 /// `media_path.stripMediaSuffix`——两件已有公共出口的事不再各写一份。
-String normalizeCoverExt(String raw) {
+String normalizeCoverExt(String raw) => coverExtOrNull(raw) ?? 'jpg';
+
+/// 同 [normalizeCoverExt]，但**不在白名单时返回 null**（区分「没写」与「写错」）。
+///
+/// 需要「有就用、没有再看别处」的调用方用它：封面指针里 `e` 字段缺失、
+/// 或写了一个服务端并不支持的扩展名（`gif`）时，必须能判断出「这一项没说」，
+/// 而不是拿到一个被兜底成 `jpg` 的值再当成用户的真实意图。
+String? coverExtOrNull(String raw) {
   // 先剥 `?query`/`#fragment`，再取末段（`_cover/v3.PNG` 也能到 `PNG`）。
   var e = lastRelName(stripMediaSuffix(raw)).trim().toLowerCase();
   // 传进来的可能是「扩展名」本身（`png` / `.webp`），也可能是带扩展名的
   // 文件名（`v3.PNG`）——两种都归一到点后那一段。
   final dot = e.lastIndexOf('.');
   if (dot >= 0) e = e.substring(dot + 1);
-  return kCoverExts.contains(e) ? e : 'jpg';
+  return kCoverExts.contains(e) ? e : null;
+}
+
+/// 从**文件名**里取扩展名（要求末段确实带 `.`）；没有返回 null。
+///
+/// 与 [coverExtOrNull] 的区别只在「裸版本名」这一种输入：版本名 `v1` 不含点，
+/// 不能被当成「扩展名 v1」；而版本名恰好叫 `png` 时也不该被认成 png 扩展名。
+String? coverExtInName(String raw) {
+  final name = lastRelName(stripMediaSuffix(raw));
+  final dot = name.lastIndexOf('.');
+  if (dot <= 0 || dot == name.length - 1) return null;
+  final e = name.substring(dot + 1).trim().toLowerCase();
+  return kCoverExts.contains(e) ? e : null;
 }
 
 /// 路径是否是可显示的封面图片（视频路径一律不是）。

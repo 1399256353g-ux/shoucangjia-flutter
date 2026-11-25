@@ -22,14 +22,20 @@ import 'text_clip.dart';
 // `cover_ext.dart`（第十二批收口）；本文件继续 re-export，
 // 使既有 import 点不必改。
 export 'cover_ext.dart'
-    show kCoverExts, kCoverImageExts, isCoverImagePath, normalizeCoverExt;
+    show
+        kCoverExts,
+        kCoverImageExts,
+        isCoverImagePath,
+        normalizeCoverExt,
+        coverExtOrNull,
+        coverExtInName;
 
 // 扩展名归一（`normalizeCoverExt`）同样在 `cover_ext.dart`，经上面的
 // re-export 暴露；本文件不再写转发函数（同名再定义会让调用方歧义）。
 
 // 后缀剥除（`?` / `#` 段）走 `media_path.dart`（已在上方 import），
 // 取末段走 `rel_path.lastRelName`（连 `\` 一起认）。
-import 'rel_path.dart' show lastRelName;
+import 'rel_path.dart' show lastRelName, relSegments, relJoin;
 
 /// 自定义封面目录名（位于库/单元库文件夹内）。
 const String kCoverDir = '_cover';
@@ -82,14 +88,22 @@ String normalizeCoverVersion(String raw) => normalizeCoverVersionName(raw);
 // import 两个文件的调用方变成歧义引用（实测 `test` 直接报
 // `'normalizeCoverExt' is imported from both`）。
 
-/// 拼接相对路径（去掉多余分隔符）。
-String joinRel(String a, String b) {
-  final x = a.trim().replaceAll(RegExp(r'[\\/]+'), '/');
-  final y = b.trim().replaceAll(RegExp(r'[\\/]+'), '/');
-  if (x.isEmpty || x == '.') return y;
-  if (y.isEmpty) return x;
-  return '${x.replaceAll(RegExp(r'/+$'), '')}/$y';
-}
+/// 拼接相对路径（去掉多余分隔符、`.` 段与首尾斜杠）。
+///
+/// 拆分/归一交给 `rel_path.relSegments` + `relJoin`（**唯一实现**）。此前这里
+/// 自己写了一套「`replaceAll(RegExp(r'[\\\\/]+'), '/')` + 掐尾斜杠」，与那条
+/// 链差三点，实测都能拼出请求不到的文件名：
+///
+/// ```
+/// joinRel('A', '/B')   -> 'A//B'          ← 第二段的前导斜杠没吃掉
+/// joinRel('A', ' /x')  -> 'A//x'          ← 空格在 trim 之后仍留了斜杠
+/// coverImageRel('A/./B', 'v1') -> 'A/./B/_cover/v1.jpg'  ← `.` 段没消
+/// ```
+///
+/// 三个返回值都能拼成 `/media/<lib>/A//B` 这类地址：服务端按字面路径找不到
+/// 文件，封面 404 而界面只显示默认图，看不出是哪一层拼错。
+String joinRel(String a, String b) =>
+    relJoin([...relSegments(a), ...relSegments(b)]);
 
 /// 自定义封面目录的相对路径：`<rel>/_cover`。
 String coverDirRel(String rel) => joinRel(rel, kCoverDir);
@@ -107,32 +121,30 @@ String coverImageRel(String rel, String version, {String ext = 'jpg'}) {
 /// `cover: "v1.png"`。返回 (版本, 扩展名)；无封面时版本为空。
 ({String version, String ext}) coverPointerOf(dynamic raw) {
   String v = '';
-  String e = 'jpg';
+  // `e` 只保留**服务端真的写了什么**：默认空串，不能预先填 'jpg'——
+  // 预填会让「没写 e」与「e: jpg」两种输入变得不可区分（下面的三态判定失效）。
+  String e = '';
   if (raw is String) {
     v = raw;
   } else if (raw is Map) {
     v = '${raw['v'] ?? raw['version'] ?? raw['name'] ?? ''}';
-    final re = '${raw['e'] ?? raw['ext'] ?? ''}'.trim();
-    if (re.isNotEmpty) e = re;
+    e = '${raw['e'] ?? raw['ext'] ?? ''}'.trim();
   }
   final version = normalizeCoverVersion(v);
   if (version.isEmpty) return (version: '', ext: 'jpg');
-  // `cover: "v1.png"`：扩展名取自字符串本身。
+  // 扩展名优先级：**显式声明的 `e`（合法时）> 版本名自带的扩展名 > jpg**。
   //
-  // 先剥 `?` / `#`：服务端可能把封面指针写成地址形式
-  // （`v1.webp?w=480`），旧写法直接取最后一个 `.` 之后作为扩展名，
-  // 得到 `webp?w=480`（不在白名单）→ 回落 `jpg`，与 `normalizeCoverVersion`
-  // 剥完取到的 `webp` **不是同一个扩展名**：请求的是 `v1.jpg`，磁盘上是
-  // `v1.webp`，封面 404。剥后缀与取末段都走公共函数。
-  if (raw is String && e == 'jpg') {
-    final body = stripMediaSuffix(raw);
-    final dot = body.lastIndexOf('.');
-    if (dot > 0) {
-      final tail = body.substring(dot + 1).toLowerCase();
-      if (kCoverExts.contains(tail)) e = tail;
-    }
-  }
-  return (version: version, ext: normalizeCoverExt(e));
+  // 旧写法只在 `raw is String` 时才看版本名里的扩展名，`cover:{v:"v1.png"}`
+  // （服务端把版本名与扩展名合成一个字段的写法）实测返回 `ext: jpg`——
+  // 请求 `v1.jpg`、磁盘是 `v1.png`，封面 404。另一半是反过来的：
+  // `cover:{v:"v1.png", e:"gif"}` 里 `e` 不在白名单，旧写法先把它兜底成
+  // `jpg` 再也没机会看版本名，于是明明有 `png` 可用却请求 `jpg`。
+  //
+  // 所以先把「显式 e」判成 `合法 / 没写 / 写错` 三态（`coverExtOrNull`），
+  // 只有「没写」才回落到版本名自带扩展名（`coverExtInName`）。
+  final declared = raw is Map ? coverExtOrNull(e) : null;
+  if (declared != null) return (version: version, ext: declared);
+  return (version: version, ext: coverExtInName(v) ?? 'jpg');
 }
 
 /// 一张封面结果：路径 + 来源（用于 UI 区分「自定义」与「作品封面」）。
@@ -194,24 +206,21 @@ String absoluteMediaUrl(
   // 查询串与片段必须留在路径段之外：外链封面（CDN）的 `?w=480` 是真正的
   // 查询、`#poster` 是真正的片段，整串丢给 `encodeMediaPath` 会被转成
   // `%3Fw=480` /  `%23poster`——服务端收到一个不存在的路径，封面 404。
-  // 切分走 `stripMediaSuffix` 的同一条顺序（先 `?` 后 `#`），但不丢尾巴。
+  //
+  // 切分走 `media_path.splitMediaSuffix`（唯一实现）。旧写法在这里自己又写了
+  // 一遍「先找 `#` 截断、再在截断结果里找 `?`」，**片段里带 `?`** 时顺序就错了：
+  // `http://cdn/x.jpg#f?w=1` 会把 `?w=1` 当成片段的一部分保留，
+  // 而 `withImageWidth` 那边对同一段字符的判定是反的——两处对同一个地址给出
+  // 两种「查询串在哪」，缩图参数与转义各按各的理解拼。
   if (isAbsoluteMediaUrl(p)) {
     final authorityEnd = p.indexOf('/', p.indexOf('//') + 2);
     if (authorityEnd < 0) return p;
     final head = p.substring(0, authorityEnd);
-    var tail = p.substring(authorityEnd);
-    var suffix = '';
-    final hash = tail.indexOf('#');
-    if (hash >= 0) {
-      suffix = tail.substring(hash) + suffix;
-      tail = tail.substring(0, hash);
-    }
-    final q = tail.indexOf('?');
-    if (q >= 0) {
-      suffix = tail.substring(q) + suffix;
-      tail = tail.substring(0, q);
-    }
-    return '$head${encodeMediaPath(tail)}$suffix';
+    final parts = splitMediaSuffix(p.substring(authorityEnd));
+    final suffix = parts.query.isEmpty
+        ? parts.fragment
+        : '?${parts.query}${parts.fragment}';
+    return '$head${encodeMediaPath(parts.path)}$suffix';
   }
   return '$b${encodeMediaPath(p)}';
 }
@@ -238,9 +247,11 @@ String coverUrlOf(dynamic raw) {
 /// 的封面/删除记录/头像全部解析不到连接，退回当前库 → 请求打错服务器。
 /// 与 `serverAvatarFileFromPath` 的解码口径保持一致（同一规则不允许两份）。
 String libOfMediaPath(String p) {
-  final path = p.trim();
-  if (!isMediaPath(path)) return '';
-  final rest = path.substring(7);
+  // `/media/` 之后的尾部与「是否媒体路径」在同一个出口里给出（`mediaRelOrNull`
+  // 自己 trim）——旧写法先 `p.trim()` 判定、再对**原串** `substring(7)`，
+  // 前导空白/制表符时库段少一个字符。
+  final rest = mediaRelOrNull(p);
+  if (rest == null) return '';
   final at = rest.indexOf('/');
   if (at <= 0) return '';
   final seg = rest.substring(0, at);

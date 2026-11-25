@@ -52,7 +52,26 @@ bool isApiMediaPath(String path) => path.trim().startsWith('/api/');
 /// `unit_library` / `cover_upload` / `source_lib`），都是裸
 /// `startsWith('/media/')`：哪天服务端把前缀改成 `/m/` 或加上域名，
 /// 六处得同时改，漏一处就是「封面/头像/节点封面一半显示一半空」。
-bool isMediaPath(String path) => path.trim().startsWith('/media/');
+bool isMediaPath(String path) => mediaRelOrNull(path) != null;
+
+/// `/media/` 之后的部分；不是媒体路径时返回 **null**（与「有前缀但后面为空」区分）。
+///
+/// 前缀长度 `7` 此前在四个文件里各写了一遍（`lib_cover.libOfMediaPath`、
+/// `author_avatar_store.serverAvatarFileFromPath`、`source_lib.decodeMediaRel`、
+/// `main.Cfg.media` / `main.authorPrefixOfMedia`），而且每一处都得**先自己
+/// trim** 才安全：`isMediaPath` 是 trim 后比较的，`p.substring(7)` 用的却是
+/// 原串，`'\t/media/lib-7/a.jpg'` 会切出 `ib-7/a.jpg`。哪一处忘了 trim，
+/// 库段就少一个字符，绑定表查不到 → 请求打到默认服务器。
+///
+/// 现在前缀判定与切片在同一个函数里，调用方拿到的就是已经 trim 过的尾部。
+String? mediaRelOrNull(String path) {
+  final p = path.trim();
+  if (!p.startsWith('/media/')) return null;
+  return p.substring(7);
+}
+
+/// `/media/` 之后的路径段；不是媒体路径返回空串（需要区分时用 [mediaRelOrNull]）。
+String mediaRel(String path) => mediaRelOrNull(path) ?? '';
 
 /// 百分号解码，非法编码原样返回（**唯一实现**）。
 ///
@@ -103,6 +122,46 @@ String stripMediaSuffix(String p) {
   final h = s.indexOf('#');
   if (h >= 0) s = s.substring(0, h);
   return s;
+}
+
+/// 把地址切成 `路径 / 查询串 / 片段` 三段（**唯一实现**）。
+///
+/// [stripMediaSuffix] 是它的「丢掉后两段」特例；需要**保留**后缀再拼回去的
+/// 调用方（缩图参数、绝对地址转义）用它，否则各自手写「先 find `#` 再 find
+/// `?`」，顺序一错就切反：
+///
+/// ```
+/// withImageWidth('/a.jpg#f?w=1', 640)  -> '/a.jpg?w=640#f?w=1'   ← 实测（片段里又长出参数）
+/// ```
+///
+/// 片段本身可以包含 `?`（它只是片段内容），所以**必须先切 `?` 再切 `#`**：
+/// 反过来时 `/a.jpg#f?w=1` 的 `#` 在前，`?` 会被判成「片段内的字符」，
+/// 查询串整个丢掉。
+({String path, String query, String fragment}) splitMediaSuffix(String p) {
+  final s = p.trim();
+  final q = s.indexOf('?');
+  final h = s.indexOf('#');
+  // 先算 `#`，再在 `#` 之前找 `?`：两者都能正确落在路径段内。
+  if (h >= 0) {
+    final head = s.substring(0, h);
+    final q2 = head.indexOf('?');
+    if (q2 >= 0) {
+      return (
+        path: head.substring(0, q2),
+        query: head.substring(q2 + 1),
+        fragment: s.substring(h),
+      );
+    }
+    return (path: head, query: '', fragment: s.substring(h));
+  }
+  if (q >= 0) {
+    return (
+      path: s.substring(0, q),
+      query: s.substring(q + 1),
+      fragment: '',
+    );
+  }
+  return (path: s, query: '', fragment: '');
 }
 
 bool isVideoMediaPath(String p) {

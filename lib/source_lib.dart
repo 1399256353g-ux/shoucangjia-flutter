@@ -61,8 +61,10 @@ String decodeMediaRel(String mediaPath) {
   // 后果是这条 rel 永远匹配不上磁盘上的目录（基础库归属、作者前缀都算废），
   // 而 `isCoverImagePath` / `isVideoMediaPath` 早已把片段剥掉——同一份路径
   // 在两处判定里是两个不同的名字。
-  var p = stripMediaSuffix(mediaPath);
-  if (isMediaPath(p)) p = p.substring(7);
+  // 前缀判定与切片走同一条 `mediaRelOrNull`：旧写法 `isMediaPath(p)` 判的是
+  // trim 后的串、`p.substring(7)` 切的是原串，带前导空白时库段少一个字符。
+  final p = mediaRelOrNull(stripMediaSuffix(mediaPath)) ??
+      stripMediaSuffix(mediaPath);
   // 逐段解码再做归一：整串先解码会把文件名里的 `%2F` 变成真分隔符，
   // 一条作品路径凭空多出一层目录。
   final segs = relSegments(p).map(decodeComponentOrRaw);

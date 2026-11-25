@@ -313,7 +313,8 @@ class Cfg {
       final rel = path.replaceFirst(RegExp(r'^/+'), '');
       return '/media/${Uri.encodeComponent(l)}/$rel';
     }
-    final rest = path.substring(7);
+    // `/media/` 尾部走 `mediaRelOrNull`（自身 trim）：前缀判定与切片同一个出口。
+    final rest = mediaRelOrNull(path)!;
     // 已带库段的媒体路径是自描述的：`/media/lib-012/...` 的库段就是
     // 服务端路由依据（gallery_server 先看第一段是不是库 id）。
     // 若再套当前库会得到 `/media/<当前库>/lib-012/...`，服务端把
@@ -1185,11 +1186,13 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
 /// K2：从作品媒体路径推断作者目录前缀（VID/PIC 之前的段）。
 /// 路径形如 `/media/<lib>/<rel>`，先去掉 `/media/` 与库 id 再取前缀。
 String authorPrefixOfMedia(String path) {
+  // 去 `/media/<lib>/` 前缀走 `lib_cover` 的既有出口（内部同样是
+  // `mediaRelOrNull` + 取第一段）；本文件不再手写 `substring(7)`。
   var p = path.trim();
-  if (isMediaPath(p)) {
-    p = p.substring(7);
-    final at = p.indexOf('/');
-    if (at > 0) p = p.substring(at + 1);
+  final rest = mediaRelOrNull(p);
+  if (rest != null) {
+    final at = rest.indexOf('/');
+    if (at > 0) p = rest.substring(at + 1);
   }
   // 拆分走 `rel_path.dart` 唯一实现：`A\\B` 与 `A/B` 必须是同一组段，
   // 否则「移动到文件夹」的作者前缀算不出候选，跟同一作者在别的库里的

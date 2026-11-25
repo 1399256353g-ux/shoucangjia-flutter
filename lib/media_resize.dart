@@ -7,7 +7,7 @@
 /// `w=`，播放页等大图场景不带，保持原画质。
 library;
 
-import 'media_path.dart' show isAbsoluteMediaUrl;
+import 'media_path.dart' show isAbsoluteMediaUrl, splitMediaSuffix;
 
 /// 库/单元库卡片封面宽度（卡片约 150–180dp，2x 屏 360px 足够）。
 const int kCardImageWidth = 480;
@@ -95,11 +95,12 @@ String _queryWithWidth(String query, int width) {
 int? requestedImageWidth(String raw) {
   final url = raw.trim();
   if (url.isEmpty) return null;
-  final hash = url.indexOf('#');
-  final body = hash >= 0 ? url.substring(0, hash) : url;
-  final q = body.indexOf('?');
-  if (q < 0) return null;
-  for (final t in body.substring(q + 1).split('&')) {
+  // 切分走 `media_path.splitMediaSuffix`（唯一实现）：这段代码此前自己写了
+  // 一遍「先找 `#`、截断、再在截断结果里找 `?`」，与写侧 `withImageWidth`
+  // 是第二份。两份一起改才不会出现「写的时候认、读的时候不认」。
+  final query = splitMediaSuffix(url).query;
+  if (query.isEmpty) return null;
+  for (final t in query.split('&')) {
     final eq = t.indexOf('=');
     if (eq < 0) continue;
     if (t.substring(0, eq).trim().toLowerCase() != 'w') continue;
@@ -123,19 +124,16 @@ String withImageWidth(String raw, int width) {
   final url = raw.trim();
   if (url.isEmpty || width <= 0) return raw;
   if (!(isAbsoluteMediaUrl(url) || url.startsWith('/'))) return raw;
-  var body = url;
-  var fragment = '';
-  final hash = url.indexOf('#');
-  if (hash >= 0) {
-    body = url.substring(0, hash);
-    fragment = url.substring(hash);
-  }
-  final q = body.indexOf('?');
-  final pathPart = q >= 0 ? body.substring(0, q) : body;
-  final query = q >= 0 ? body.substring(q + 1) : '';
-  if (!_imageExt.hasMatch(pathPart)) return raw;
-  final nextQuery = _queryWithWidth(query, width);
+  // 切分走 `media_path.splitMediaSuffix`：旧写法先找 `#` 截断、再在截断结果里
+  // 找 `?`，于是**片段里带 `?`** 的地址切反了——实测
+  // `withImageWidth('/a.jpg#f?w=1', 640)` 返回 `'/a.jpg?w=640#f?w=1'`：
+  // 查询串从片段里凭空长出来，服务端把 `#f?w=1` 当片段丢掉，卡片拉的是
+  // **原图**；而 `requestedImageWidth` 对同一个地址返回 null，
+  // `cover_cache.oversizedResizeResponse` 于是认为「没加宽度」→ 原图存 14 天。
+  final parts = splitMediaSuffix(url);
+  if (!_imageExt.hasMatch(parts.path)) return raw;
+  final nextQuery = _queryWithWidth(parts.query, width);
   // 值没变（已经有了可用宽度）时原样返回，不重排用户的查询串。
-  if (nextQuery == query) return raw;
-  return '$pathPart?$nextQuery$fragment';
+  if (nextQuery == parts.query) return raw;
+  return '${parts.path}?$nextQuery${parts.fragment}';
 }

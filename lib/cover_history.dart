@@ -147,20 +147,37 @@ Future<CoverActionResult> restoreCoverVersion({
   String unitRel = '',
   required String version,
   String ext = 'jpg',
+  http.Client? client,
 }) async {
   if (libId.trim().isEmpty || version.trim().isEmpty) {
     return const CoverActionResult(false, '缺少库或版本标识');
   }
+  // 版本名与扩展名在这里归一，**不直接透传调用方给的值**。
+  //
+  // 旧写法把 `version` / `ext` 原样写进请求体：`lib_cover.coverVersionFromJson`
+  // 早已把两者归一到「剥后缀 → 取末段 → 白名单」，但这条写入路径自己没做，
+  // 于是任何一处调用方（历史面板以外的入口、测试、将来新增的恢复入口）
+  // 传进 `.png`、`PNG`、`png?w=480` 时，服务端落盘的指针与磁盘上的文件名
+  // 不是一个名字——恢复「成功」，封面却退回默认图。
+  //
+  // 读取侧与写入侧现在共用同一对函数：版本名 `normalizeCoverVersionName`
+  // （读取侧不截断）、扩展名 `normalizeCoverExt`。
+  final v = normalizeCoverVersionName(version, clip: false);
+  if (v.isEmpty) {
+    return const CoverActionResult(false, '封面版本名非法');
+  }
+  final e = normalizeCoverExt(ext);
+  final c = client ?? http.Client();
   try {
-    final r = await http
+    final r = await c
         .post(
           url,
           headers: {...headers, 'Content-Type': 'application/json'},
           body: jsonEncode({
             'lib': libId,
             if (unitRel.isNotEmpty) 'unitRel': unitRel,
-            'v': version,
-            'e': ext,
+            'v': v,
+            'e': e,
           }),
         )
         .timeout(const Duration(seconds: 15));
@@ -176,6 +193,8 @@ Future<CoverActionResult> restoreCoverVersion({
     return CoverActionResult(true, '已切换到该封面', url: u);
   } catch (_) {
     return const CoverActionResult(false, '切换封面失败：网络异常');
+  } finally {
+    if (client == null) c.close();
   }
 }
 

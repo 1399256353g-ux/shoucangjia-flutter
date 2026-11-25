@@ -138,7 +138,13 @@ void main() {
     test('契约扫描：扩展名归一只有一份实现', () {
       final ce = _lib('lib/cover_ext.dart');
       expect(ce.contains('String normalizeCoverExt('), isTrue);
-      expect(ce.contains('contains(e) ? e : \'jpg\''), isTrue);
+      // 白名单判定只剩一处（`coverExtOrNull`），`normalizeCoverExt` 只是
+      // 「没有就回落 jpg」的薄包装：三态与兜底不能各写一遍。
+      expect(ce.contains("coverExtOrNull(raw) ?? 'jpg'"), isTrue);
+      expect(
+          RegExp(r'kCoverExts\.contains\(e\)').allMatches(ce).length, 2,
+          reason: '白名单判定只允许「显式 e」与「文件名里的 e」两处，'
+              '不得再多一份');
       // 另外两处只能转发
       final lc = _lib('lib/lib_cover.dart');
       expect(lc.contains('normalizeCoverExt'), isTrue);
