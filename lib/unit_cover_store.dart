@@ -13,6 +13,12 @@
 ///
 /// 键带命名空间（`u:` 单元库 / `b:` 基础库）：同一个 rel 字符串既可能是
 /// 单元库路径也可能是基础库路径，共用一张表会串封面。
+///
+/// 键还必须带**连接标识**（owner 2026-11-26）：单元库的 rel 是相对各自
+/// 媒体库根的路径，两台服务端各有一个 `(1) 抖音` 时 rel 完全是同一个字符串。
+/// 只按 rel 存，在 A 库设的封面会同时改掉 B 库同名目录的卡片——而两边是两份
+/// 独立数据、封面文件也各在各的机器上。这与 `buildUnitTree` 里节点去重必须带
+/// 连接（`_nodeKeyOf`）是同一条规则；那边修好了，这张表当时漏了。
 library;
 
 import 'package:flutter/foundation.dart';
@@ -31,16 +37,35 @@ class UnitCoverStore {
   /// 唯一变更信号：任何一处封面改动都自增一次。
   static final ValueNotifier<int> revision = ValueNotifier<int>(0);
 
-  /// 单元库封面的键（rel 归一化后加前缀）。
-  static String unitKey(String rel) => 'u:${normalizeUnitRel(rel)}';
+  /// 键的字段分隔符。rel 里可能出现 `|` `:` `/`，但不会是控制字符。
+  static const String _sep = '\u0001';
 
-  /// 基础库封面的键（基础库 id 本身唯一）。
-  static String basicKey(String id) => 'b:${id.trim()}';
+  /// 键的公共拼装口：`<命名空间>:<连接>␁<rel 或 id>`。
+  ///
+  /// 连接为空时仍是 `u:␁A/B`（不是 `u:A/B`）——留一个固定字段位，
+  /// 否则「有连接」与「没连接」两种写法会拼出同一个键，作用域又回到 rel。
+  static String _keyOf(String ns, String scope, String id) =>
+      '$ns:${scope.trim()}$_sep$id';
+
+  /// 单元库封面的键（连接 + 归一化 rel）。
+  static String unitKey(String rel, {String serverId = ''}) =>
+      _keyOf('u', serverId, normalizeUnitRel(rel));
+
+  /// 基础库封面的键（连接 + 基础库 id）。
+  static String basicKey(String id, {String serverId = ''}) =>
+      _keyOf('b', serverId, id.trim());
 
   /// 本地意见；没设过返回 null。
   static String? rawOf(String key) {
-    if (key.isEmpty || key == 'u:' || key == 'b:') return null;
+    if (!_isWellFormed(key)) return null;
     return _byKey[key];
+  }
+
+  /// 键必须带命名空间与分隔符，否则视为脏键（不读也不写）。
+  static bool _isWellFormed(String key) {
+    if (key.isEmpty) return false;
+    if (!key.startsWith('u:') && !key.startsWith('b:')) return false;
+    return key.contains(_sep);
   }
 
   /// 是否被显式要求「恢复自动」（忽略服务端指针）。
@@ -51,7 +76,7 @@ class UnitCoverStore {
 
   /// 写入。[url] 为空串表示「恢复自动」。
   static void set(String key, String url) {
-    if (key.isEmpty || key == 'u:' || key == 'b:') return;
+    if (!_isWellFormed(key)) return;
     final v = url.trim();
     if (_byKey[key] == v) return;
     _byKey[key] = v;

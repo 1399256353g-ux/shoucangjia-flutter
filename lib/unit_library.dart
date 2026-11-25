@@ -477,6 +477,55 @@ String _scaledCount(int n, int unit, String suffix) {
   return frac == 0 ? '$whole$suffix' : '$whole.$frac$suffix';
 }
 
+/// `/api/nodes` 载荷的解析结果（唯一实现）。
+///
+/// 此前 `main.dart` 里**两处**各写了一遍「把 nodes 列表与 covers 映射读出来」
+/// 的代码（主页 `_fetchMarkedNodes` 与文件结构页），两处都只做 `trim()`：
+/// 服务端把 rel 写成 `A\B` 或 `A//B` 时，键与 `splitRel` 归一后的形式不一致，
+/// 同一个目录会在「节点 id / 封面指针」两边归一不同——写进去、读不回来；
+/// 封面指针还会被另一个同 rel 目录认领。归一化只在 [parseNodesPayload] 做一次。
+class NodesPayload {
+  final List<String> rels;
+
+  /// 归一化 rel → `/media/<lib>/...` 封面指针。
+  final Map<String, String> covers;
+
+  const NodesPayload(this.rels, this.covers);
+
+  static const NodesPayload empty = NodesPayload(<String>[], <String, String>{});
+}
+
+/// 解析 `/api/nodes`：`nodes` 既可能是字符串也可能是 `{id,rel,name}` 对象。
+/// 非媒体路径的封面指针不收（避免半截路径被当封面去请求）。
+NodesPayload parseNodesPayload(Object? json) {
+  if (json is! Map) return NodesPayload.empty;
+  final rels = <String>[];
+  final seen = <String>{};
+  final list = json['nodes'];
+  if (list is List) {
+    for (final e in list) {
+      final raw = e is Map
+          ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}'
+          : '$e';
+      final rel = splitRel(raw).join('/');
+      if (rel.isEmpty || !seen.add(rel)) continue;
+      rels.add(rel);
+    }
+  }
+  final covers = <String, String>{};
+  final cm = json['covers'];
+  if (cm is Map) {
+    for (final e in cm.entries) {
+      final k = splitRel('${e.key}').join('/');
+      final v = '${e.value ?? ''}'.trim();
+      if (k.isEmpty || v.isEmpty) continue;
+      if (!isMediaPath(v)) continue;
+      covers.putIfAbsent(k, () => v);
+    }
+  }
+  return NodesPayload(rels, covers);
+}
+
 /// 手动模式的节点列表：`/api/nodes` 的相对路径 → 单元库节点。
 /// 空数组表示只有顶级 SECRET（不生成任何下级节点）。
 ///

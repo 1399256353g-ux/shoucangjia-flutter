@@ -269,21 +269,24 @@ List<Map<String, dynamic>> mergeRegisteredLibraries(
 /// 聚合 v2 库树：大库与基础库都按 id 去重。
 ///
 /// 同时把**整棵树的单元库封面指针**（`nodes` / `bigLibraries` / `groups` 里
-/// 的 `cover.u`）按归一化 rel 合并成一张表随结果带出。
+/// 的 `cover.u`）合并成一张表随结果带出。
 ///
 /// owner 2026-11-25：「单元库选过往封面，返回界面就恢复原样」。
 /// 根因不是服务端——`/api/libraries.json` 下发的 6 条指针一条不少，而是客户端
 /// 建树只从 `/api/nodes` 的 `covers` 取，那里只有被 owner 标记为节点的那些 rel
 /// （实测 31 条里仅 4 条带封面）。第 3 层那 2 条不在 marks 里，指针永远到不了
-/// 卡片；卡片靠本地 `_coverOverride` 撑过当场，页面一重建就回落。
+/// 卡片；卡片靠本地 `_override` 撑过当场，页面一重建就回落。
 ///
-/// 指针按 rel 存，不看层级，因此「标不标记为节点」不再影响封面上屏。
+/// owner 2026-11-26：这张表的键**必须带连接**。rel 是相对各自媒体库根的路径，
+/// 两台服务端各有一个同名目录时 rel 完全一样；只按 rel 合并，B 的指针会被
+/// A 的同名 rel 认领（先到先得），卡片拿着 A 的连接去请求 B 的文件，必然 404——
+/// 而且封面“看起来设了又没设”。与 `buildUnitTree` 的 `_nodeKeyOf` 同一条规则。
 Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
   final seenBig = <String>{};
   final seenBasic = <String>{};
   final bigs = <Map<String, dynamic>>[];
   final basics = <Map<String, dynamic>>[];
-  // 归一化 rel → 封面媒体路径。先到先得（与其它字段的去重口径一致）。
+  // `<连接>\u0001<归一化 rel>` → 封面媒体路径。先到先得（与其它字段口径一致）。
   final unitCovers = <String, String>{};
   var any = false;
   for (final snap in snapshots) {
@@ -305,7 +308,7 @@ Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
       if (id.isEmpty || !seenBasic.add(id)) continue;
       basics.add(_tag(raw, snap.server));
     }
-    _collectUnitCovers(t, unitCovers);
+    _collectUnitCovers(t, unitCovers, snap.server.id);
   }
   if (!any) return null;
   return <String, dynamic>{
@@ -315,12 +318,20 @@ Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
   };
 }
 
-/// 从一棵 v2 树的三个节点数组里收集 `rel → cover.u`。
+/// 单元库封面指针的键：`<连接>\u0001<归一化 rel>`。
+///
+/// 与 [UnitCoverStore] 的键、`buildUnitTree` 的 `_nodeKeyOf` 同一套作用域：
+/// 「哪个连接下的哪个目录」才是唯一身份，rel 单独不唯一。
+String unitCoverKey(String serverId, String rel) =>
+    '${serverId.trim()}\u0001${normalizeUnitRel(rel)}';
+
+/// 从一棵 v2 树的三个节点数组里收集封面指针，键带连接（见 [unitCoverKey]）。
 ///
 /// 与 `gallery_server.js` 下发时的口径保持一致：只认 `cover` 对象里的 `u`，
 /// 且必须是媒体路径（`/media/...`）。rel 归一化走 [normalizeUnitRel]，
 /// 与服务端 `unitRelKey` 同一套规则，避免「写进去、读不回来」。
-void _collectUnitCovers(Map<String, dynamic> tree, Map<String, String> out) {
+void _collectUnitCovers(
+    Map<String, dynamic> tree, Map<String, String> out, String serverId) {
   for (final key in const ['nodes', 'bigLibraries', 'groups']) {
     final arr = tree[key];
     if (arr is! List) continue;
@@ -332,7 +343,7 @@ void _collectUnitCovers(Map<String, dynamic> tree, Map<String, String> out) {
       if (cover is! Map) continue;
       final u = '${cover['u'] ?? ''}'.trim();
       if (u.isEmpty || !isMediaPath(u)) continue;
-      out.putIfAbsent(rel, () => u);
+      out.putIfAbsent(unitCoverKey(serverId, rel), () => u);
     }
   }
 }

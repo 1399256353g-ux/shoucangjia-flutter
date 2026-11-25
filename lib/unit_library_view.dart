@@ -826,7 +826,10 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
   /// 发现 `coverUrl` 变了就把它清空——页面一重建，刚选好的封面就回落成
   /// 树快照里的旧值（「返回界面就恢复原样」）。现在卡片不再自己存一份，
   /// 直接问 store；store 变了由 [UnitCoverStore.revision] 通知所有卡片。
-  String get _coverKey => UnitCoverStore.unitKey(widget.unit.rel);
+  ///
+  /// 键带连接标识：两台服务端的同名目录 rel 一样，只按 rel 存会串封面。
+  String get _coverKey =>
+      UnitCoverStore.unitKey(widget.unit.rel, serverId: widget.unit.node.serverId);
 
   /// 服务端下发 / 调用方解析出来的「没有本地意见时」的封面地址。
   String _serverCoverUrl() => widget.topCard
@@ -1535,7 +1538,9 @@ class BasicLibCard extends StatefulWidget {
 class _BasicLibCardState extends State<BasicLibCard> {
   /// owner 2026-11-25：与单元库卡片同一处状态（[UnitCoverStore]）。
   /// 原来这里也有一份私有覆盖，页面重建即丢——同一个 bug 的第二份拷贝。
-  String get _coverKey => UnitCoverStore.basicKey(widget.basic.id);
+  /// 键带连接标识（同 [UnitCoverStore.unitKey] 的理由）。
+  String get _coverKey => UnitCoverStore.basicKey(widget.basic.id,
+      serverId: widget.basic.serverId);
 
   String _coverUrlNow() {
     final local = UnitCoverStore.rawOf(_coverKey);

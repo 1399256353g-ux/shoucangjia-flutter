@@ -588,38 +588,17 @@ class LibMeta {
               allBasics = rootBasics.isNotEmpty ? rootBasics : basics;
               // 单元库＝owner 在「文件结构」里勾选的节点文件夹（/api/nodes），
               // 与主页使用同一份来源；只有节点为空时才退回 v2 分组。
-              final marks = <String>[];
-              final markCovers = <String, String>{};
+              // 解析与归一化只在 [parseNodesPayload] 一处（与主页同一个入口）。
+              var markRels = const <String>[];
+              var markCovers = const <String, String>{};
               if (rs[3].statusCode == 200) {
-                try {
-                  final nj = jsonOf(rs[3]);
-                  final list = nj is Map ? nj['nodes'] : null;
-                  if (list is List) {
-                    for (final e in list) {
-                      // /api/nodes 既可能是字符串，也可能是 {id,rel,name} 对象。
-                      final s = (e is Map
-                              ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}'
-                              : '$e')
-                          .trim();
-                      if (s.isNotEmpty) marks.add(s);
-                    }
-                  }
-                  // 0.9.36：手动节点模式下单元库封面指针也随 /api/nodes 下发
-                  // （`covers: {rel: "/media/..."}`），按 rel 收进映射表。
-                  final cm = nj is Map ? nj['covers'] : null;
-                  if (cm is Map) {
-                    for (final e in cm.entries) {
-                      final k = '${e.key}'.trim();
-                      final v = '${e.value ?? ''}'.trim();
-                      if (k.isEmpty || v.isEmpty) continue;
-                      markCovers[k] = v;
-                    }
-                  }
-                } catch (_) {}
+                final p = parseNodesPayload(jsonOf(rs[3]));
+                markRels = p.rels;
+                markCovers = p.covers;
               }
-              final nodes = marks.isEmpty
+              final nodes = markRels.isEmpty
                   ? nodesFromV2(ljm, root: base)
-                  : nodesFromMarks(marks,
+                  : nodesFromMarks(markRels,
                       covers: markCovers,
                       serverBase: cfg.base,
                       serverId: cfg.serverIdFor(cfg.lib),
@@ -5302,23 +5281,34 @@ class _LibraryPageState extends State<LibraryPage> {
       // 都有，实测 6/6）优先，`/api/nodes` 的 covers 兜底（只覆盖被标记为节点
       // 的 rel，实测 31 条里仅 4 条带封面）。此前只认后者，第 3 层那 2 条单元库
       // 的指针永远到不了卡片——当场靠本地覆盖撑着，页面一重建就回落。
+      //
+      // owner 2026-11-26：表键带连接（`unitCoverKey`）。rel 相对各自库根，
+      // 两台服务端同名目录的 rel 一模一样；只按 rel 查会让 B 的卡片拿到 A 的
+      // 指针，去 A 的机器上取 B 的文件。下面**不再**按 rel 重新拆一遍键——
+      // 拆开时只能丢了连接字段，等于把这个 bug 再写回去一次。
       final treeCovers = <String, String>{};
       final rawTreeCovers = merged['unitCovers'];
       if (rawTreeCovers is Map) {
         for (final e in rawTreeCovers.entries) {
-          final k = normalizeUnitRel('${e.key}');
+          final k = '${e.key}';
           final v = '${e.value ?? ''}'.trim();
           if (k.isEmpty || v.isEmpty) continue;
           treeCovers[k] = v;
         }
       }
+      // 节点标识取第一条连接（与 `_fetchMarkedNodes` 同一取数口径）。
+      final markedSid = firstServer?.id ?? '';
       String coverOfRel(String rel) =>
-          treeCovers[normalizeUnitRel(rel)] ?? marked.covers[rel] ?? '';
-      // 节点＝owner 在文件结构里标记的 rel；再补上「树里有封面指针但没被标记」
+          treeCovers[unitCoverKey(markedSid, rel)] ??
+          marked.covers[normalizeUnitRel(rel)] ??
+          '';      // 节点＝owner 在文件结构里标记的 rel；再补上「树里有封面指针但没被标记」
       // 的 rel —— 否则那几条指针即使拿到了也没有节点承载，卡片仍然拿不到。
+      // 补的那部分只认本条连接自己的指针（其它连接的 rel 与这里的节点无关）。
       final rels = <String>{
         ...marked.rels,
-        ...treeCovers.keys,
+        for (final k in treeCovers.keys)
+          if (k.startsWith('$markedSid\u0001'))
+            k.substring(k.indexOf('\u0001') + 1),
       }.toList(growable: false)
         ..sort();
       final nodes = rels
@@ -5554,29 +5544,17 @@ class _LibraryPageState extends State<LibraryPage> {
       }).timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return const MarkedNodes([], {});
       final j = jsonOf(r);
-      final list = (j is Map) ? j['nodes'] : null;
-      if (list is! List) return const MarkedNodes([], {});
       // owner 2026-11-24：把 `/api/nodes` 的 covers 映射一并带出，
       // 否则 LibNode.coverUrl 恒为空，手动设过的单元库封面永远不生效
       // （选完过往封面返回界面就回落到自动封面）。
-      final rels = list
-          .map((e) =>
-              (e is Map ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}' : '$e')
-                  .trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-      final covers = <String, String>{};
-      final cm = (j is Map) ? j['covers'] : null;
-      if (cm is Map) {
-        for (final e in cm.entries) {
-          final k = '${e.key}'.trim();
-          final v = '${e.value ?? ''}'.trim();
-          if (k.isEmpty || v.isEmpty) continue;
-          if (!isMediaPath(v)) continue;
-          covers[k] = v;
-        }
-      }
-      return MarkedNodes(rels, covers);
+      //
+      // owner 2026-11-26：rel 与 covers 的键统一在 [parseNodesPayload] 归一。
+      // 这里原先两处都只 `trim()`：服务端把分隔符写成 `A\B`（或 `A//B`）时，
+      // 节点 rel 与封面键保持原样，而调用方一律用归一化形式去查——写进去、
+      // 读不回来；同一目录还会以 `node:A\B` 与 `node:A/B` 两个 id 各建一个
+      // 节点，首页出现重复卡片，星标/词条也各存一半。
+      final payload = parseNodesPayload(j);
+      return MarkedNodes(payload.rels, payload.covers);
     } catch (_) {
       return const MarkedNodes([], {});
     }
