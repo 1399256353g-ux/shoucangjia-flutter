@@ -276,14 +276,21 @@ void main() {
       expect(src.contains('final success = okRow'), isTrue);
     });
 
-    test('commentPanelSnap 里比例必须过 isFinite', () {
+    test('commentPanelSnap 里比例必须走唯一归一（含非有限处理）', () {
       final src = lib.firstWhere((e) => e.$1 == 'player_controls.dart').$2;
       final start = src.indexOf('double commentPanelSnap(');
       // 注意：函数签名多行，`}) {` 本身以 `\n}` 开头——不能拿 `'\n}'` 找结尾，
       // 否则切出来只有参数列表。这里按固定窗口取整段实现。
       final body = src.substring(start, start + 1600);
-      expect(body.contains('fraction.isFinite'), isTrue);
-      expect(body.contains('velocity.isFinite'), isTrue);
+      // 2026-11-26：比例归一下沉到 `unit_fraction.dart` 的唯一实现
+      // （`unitFraction` 内部处理 NaN/±Infinity）。这条契约改为盯「有没有走
+      // 那个唯一出口」，而不是逼调用点各写一遍 isFinite——否则每统一一处
+      // 都要来改这条断言，等于把「第二份实现」制度化。
+      expect(body.contains('unitFraction(fraction'), isTrue,
+          reason: '比例必须过唯一归一（非有限值的口径只能有一处）');
+      // 速度不是 0–1 比例，不进 unitFraction，必须自己挡非有限。
+      expect(body.contains('velocity.isFinite'), isTrue,
+          reason: '速度非有限会让方向判定恒真/恒假');
     });
 
     test('normalizeBase 校验主机段空白与端口范围', () {
