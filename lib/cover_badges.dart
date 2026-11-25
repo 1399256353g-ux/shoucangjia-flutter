@@ -8,12 +8,24 @@ import 'json_num.dart';
 import 'work_forms.dart';
 import 'work_safety.dart';
 
+/// 封面角标时长上限（秒）：100 小时。
+///
+/// 媒体时长不可能超过这个量级；超过它的 `du` 只有一种来源——坏数据。
+const int kBadgeMaxSeconds = 100 * 60 * 60;
+
 /// 把秒数格式化成 `m:ss`（超过 1 小时为 `h:mm:ss`）。
 /// 非法/非正数返回空串，调用方据此隐藏角标。
+///
+/// **超出人类可信区间的时长同样返回空串**（[kBadgeMaxSeconds]）：服务端把
+/// `du` 写成 `1e18` 或 int 上限时，这个函数以前会一本正经地算出
+/// `277777777777777:46:40`（实测），角标把整张封面挤爆。数值没有算错，
+/// 是输入不可能是真的媒体时长——比「显示一个荒唐数字」更诚实的答案是
+/// 「不显示」，与「缺 `du` 就不显示」走同一条出口。
 String formatBadgeDuration(num? seconds) {
   if (seconds == null) return '';
   final total = seconds.toDouble();
   if (total.isNaN || total.isInfinite || total < 1) return '';
+  if (total > kBadgeMaxSeconds) return '';
   final s = total.round();
   final h = s ~/ 3600;
   final m = (s % 3600) ~/ 60;

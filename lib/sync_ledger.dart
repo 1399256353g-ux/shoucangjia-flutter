@@ -211,6 +211,9 @@ SyncLog parseSyncLog(dynamic raw) {
 /// `11-23 17:05`（本地时区）；无效时间返回 `—`。
 String syncTimeLabel(int ms) => monthDayTimeOfMs(ms);
 
+/// 同步耗时上限（48 小时）：超过它的 `ms` 只可能是坏数据。
+const int kSyncMaxDurationMs = 48 * 60 * 60 * 1000;
+
 /// `820ms` / `2.4s` / `1m 05s`。
 ///
 /// **先归一到秒再拆分**：此前先 `~/60` 取整分、再对余数 `round()`，
@@ -219,6 +222,10 @@ String syncTimeLabel(int ms) => monthDayTimeOfMs(ms);
 /// 小数，10s 以上向下取整——59.9s 显示 `59s`，不写成一个假的 `60s`。
 String syncDurationLabel(int ms) {
   if (ms <= 0) return '—';
+  // 48 小时以上的耗时只有一个来源：坏数据。int 上限会被算成
+  // `153722867280912m 56s`（实测），同步日志那一行直接把页面撑出横向滚动。
+  // 与「耗时未知」同一条出口，不编造一个看起来合理的数字。
+  if (ms > kSyncMaxDurationMs) return '—';
   if (ms < 1000) return '${ms}ms';
   // 秒级展示按**原始毫秒**判断（59.9s 就是 59.9s，不因为四舍五入成 60
   // 就跳进分钟分支）；进入分钟分支后才四舍五入到秒，余数不会再出现 60。

@@ -58,9 +58,16 @@ class ResizeCacheStats {
   ///
   /// 自算分支的除法用 **double**：`hit + miss` 在 int64 上会回绕（两个
   /// 计数分别接近 int 上限时得到负数），命中率跟着变成负值或超过 100%。
+  ///
+  /// 服务端值同样要过**同一个区间**：命中率是 0–1 的比例（服务端
+  /// `Math.round(hit*1000/total)/1000`），但这里以前只校验「能不能解析成
+  /// 有限 double」，于是 `hitRate: 62`（某次改成百分数）显示成
+  /// **`6200.0%`**、`hitRate: -0.5` 显示成 **`-50.0%`**（均实测）。
+  /// 区间外的值不是「一个更大的命中率」，而是口径变了或数据坏了——
+  /// 与「解析不了」一样退回按计数自算，界面上不会出现不可能的百分比。
   static double _rate(dynamic raw, num hit, num miss) {
     final v = doubleOrNull(raw);
-    if (v != null) return v;
+    if (v != null && v >= 0 && v <= 1) return v;
     final h = hit <= 0 ? 0.0 : hit.toDouble();
     final m = miss <= 0 ? 0.0 : miss.toDouble();
     final total = h + m;

@@ -33,7 +33,10 @@ class AuthorDrag {
 
   /// 手指横向位移 → 进度（0..1）。前 [dampStart] 线性跟手，之后加阻尼。
   static double progress({required double dx, required double width}) {
-    if (width <= 0) return 0;
+    // `width <= 0` 拦不住 NaN：`NaN <= 0` 为 false，随后 `dx / NaN` 得到 NaN，
+    // 一路传进 `AnimationController.value`（它只夹紧不消 NaN），作者页整层
+    // 变成不可见也不可关的空白。非有限值按「还没有可拖动宽度」处理。
+    if (!width.isFinite || width <= 0 || !dx.isFinite) return 0;
     final raw = dx / width;
     if (raw <= 0) return 0;
     if (raw <= dampStart) return raw;
@@ -56,8 +59,9 @@ class AuthorDrag {
     required double dx,
     required double width,
   }) {
-    if (width <= 0) return start;
+    if (!width.isFinite || width <= 0 || !dx.isFinite) return start;
     final p = start - dx / width;
+    if (!p.isFinite) return start;
     if (p < 0) return 0;
     return p > 1 ? 1 : p;
   }

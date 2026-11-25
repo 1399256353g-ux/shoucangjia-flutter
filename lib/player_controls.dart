@@ -726,6 +726,20 @@ const int kScrubFadeMs = 180;
 const Color kScrubTrackColor = Color(0x40FFFFFF);
 const Color kScrubPlayedColor = Color(0xFFFFFFFF);
 
+/// 指针位置 → 0–1 的进度比例；宽度或坐标不可用时返回 **null**。
+///
+/// 进度条的拖动、桌面端点按、悬停预览三处都要做这次换算，此前各写一遍
+/// `(dx / width).clamp(0, 1)`。宽度来自 `LayoutBuilder`，在「还没量出宽度」
+/// 的中间态是 NaN/Infinity，而 `NaN.clamp(0, 1)` **返回 1.0**（clamp 对 NaN
+/// 走上界）——「宽度未知」会被当成「拖到片尾」，松手直接跳到结尾。
+///
+/// 返回 null 而不是 0 是刻意的：0 是一个合法的进度（片头），调用方据此
+/// 无法区分「用户指在片头」与「这次输入不可用」。不可用就该什么都不做。
+double? scrubFractionOf(double dx, double width) {
+  if (!width.isFinite || width <= 0 || !dx.isFinite) return null;
+  return (dx / width).clamp(0.0, 1.0);
+}
+
 /// 滑块中心 x：按比例落在轨道内，并夹住半径，避免半个圆出界。
 double scrubKnobX({
   required double trackWidth,

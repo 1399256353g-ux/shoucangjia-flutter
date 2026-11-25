@@ -13,7 +13,15 @@ bool willOverflowText(
   TextScaler textScaler = TextScaler.noScaling,
   Locale? locale,
 }) {
-  if (text.isEmpty || maxWidth <= 0) return false;
+  // 可用宽度必须先过有限性：`TextPainter.layout(maxWidth:)` 对 **NaN** 直接
+  // 断言失败（`!maxWidth.isNaN`），对**负数**断言失败（`dart:ui/math`）。
+  // 调用方算的是 `c.maxWidth - expandWidth`——`LayoutBuilder` 在无界约束下
+  // 给 infinity（减完仍是 infinity，可接受），而容器窄于展开按钮宽度时
+  // 直接给出**负数**；这两条都发生在 build 里，断言失败 = 整页灰屏。
+  //
+  // 宽度不可用时唯一安全的答案是「不显示展开按钮」：没有可靠可用宽度就
+  // 无法证明文本被截断，宁可不给入口，也不要为了显示入口而崩掉信息区。
+  if (text.isEmpty || !maxWidth.isFinite || maxWidth <= 0) return false;
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     maxLines: maxLines,

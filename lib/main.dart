@@ -13365,6 +13365,12 @@ class _PlayerPageState extends State<PlayerPage>
                 behavior: HitTestBehavior.opaque,
                 // 内层手势优先：底部横向拖动归进度条，不再触发“左拖进作者页”。
                 // owner 2026-11-20：进度条只认「横向拖动」，不再响应点按。
+                // owner 2026-11-25：「windows 版进度条也不能点击跳转」——
+                // 桌面端鼠标点击跳转是标准交互，这里补上；**移动端仍然只认
+                // 拖动**（手指在细条上点一下多半是误触，不是想跳转）。
+                onTapDown: desktop
+                    ? (d) => _scrubTapSeek(d.localPosition, width)
+                    : null,
                 onHorizontalDragStart: (d) =>
                     _scrubStart(d.localPosition, width),
                 onHorizontalDragUpdate: (d) =>
@@ -13399,18 +13405,28 @@ class _PlayerPageState extends State<PlayerPage>
     );
   }
 
+  /// 指针位置 → 0–1 的进度比例；不可用时返回 null。
+  ///
+  /// 换算规则只在 [scrubFractionOf] 一处（`player_controls.dart`）：拖动、
+  /// 桌面端点按、悬停预览三处共用，避免出现「点按跳得准、拖动跳得偏」。
+  double? _scrubFractionOf(Offset p, double width) {
+    if (!mounted) return null;
+    return scrubFractionOf(p.dx, width);
+  }
+
   void _scrubStart(Offset p, double width) {
-    if (!mounted || width <= 0) return;
+    final f = _scrubFractionOf(p, width);
+    if (f == null) return;
     _scrubThinTimer?.cancel();
-    final f = (p.dx / width).clamp(0.0, 1.0);
     _scrubFrac = f;
     _scrubFracVN.value = f;
     setState(() => _scrubActive = true);
   }
 
   void _scrubMove(Offset p, double width) {
-    if (!mounted || !_scrubActive || width <= 0) return;
-    final next = (p.dx / width).clamp(0.0, 1.0);
+    if (!mounted || !_scrubActive) return;
+    final next = _scrubFractionOf(p, width);
+    if (next == null) return;
     final prev = _scrubFrac;
     if (prev != null && (prev - next).abs() < 0.002) return;
     _scrubFrac = next;
@@ -13422,7 +13438,23 @@ class _PlayerPageState extends State<PlayerPage>
   void _scrubEnd() {
     if (!mounted || !_scrubActive) return;
     final f = _scrubFrac;
-    if (f != null && dur.inMilliseconds > 0) {
+    _settleScrub(f ?? 0, seek: f != null);
+  }
+
+  /// 桌面端点按进度条跳转（owner 2026-11-25）。
+  ///
+  /// 与拖动松手**共用同一个出口** [\_settleScrub]：比例换算、seek、细条淡出
+  /// 三件事只有一份实现，不会出现「点按跳得准、拖动跳得偏」这种两套口径。
+  void _scrubTapSeek(Offset p, double width) {
+    final f = _scrubFractionOf(p, width);
+    if (f == null) return;
+    _settleScrub(f);
+  }
+
+  /// 进度条跳转的唯一出口：[f] 为 0–1；[seek] 为 false 时只收尾不跳转。
+  void _settleScrub(double f, {bool seek = true}) {
+    if (!mounted) return;
+    if (seek && dur.inMilliseconds > 0) {
       // 页面可能正在切走，播放器已释放；seek 失败不能让整个 App 崩。
       try {
         player.seek(dur * f);
@@ -13449,7 +13481,10 @@ class _PlayerPageState extends State<PlayerPage>
   }) {
     void seekAt(Offset p) {
       if (dur.inMilliseconds == 0) return;
-      final f = (p.dx / width).clamp(0.0, 1.0);
+      // 换算走 [scrubFractionOf]：宽度未知时它返回 null，而旧写法
+      // `NaN.clamp(0,1)` 返回 1.0 —— 松手直接跳到片尾。
+      final f = scrubFractionOf(p.dx, width);
+      if (f == null) return;
       player.seek(dur * f);
     }
 
@@ -13466,7 +13501,7 @@ class _PlayerPageState extends State<PlayerPage>
       }
       setState(() {
         dragging = true;
-        dragFrac = (p.dx / width).clamp(0.0, 1.0);
+        dragFrac = scrubFractionOf(p.dx, width);
       });
     }
 
@@ -13532,7 +13567,8 @@ class _PlayerPageState extends State<PlayerPage>
         });
       },
       onHorizontalDragUpdate: (d) {
-        final f = (d.localPosition.dx / width).clamp(0.0, 1.0);
+        final f = scrubFractionOf(d.localPosition.dx, width);
+        if (f == null) return;
         setState(() => dragFrac = f);
       },
       onHorizontalDragEnd: spec
@@ -13720,7 +13756,8 @@ class _PlayerPageState extends State<PlayerPage>
         });
       },
       onHorizontalDragUpdate: (d) {
-        final f = (d.localPosition.dx / width).clamp(0.0, 1.0);
+        final f = scrubFractionOf(d.localPosition.dx, width);
+        if (f == null) return;
         final k = picIndexAtFraction(f, pics.length);
         setState(() {
           dragPic = k;
@@ -15473,21 +15510,45 @@ double avatarCropClampZoom(double zoom) {
 }
 
 /// cover 之后乘 zoom 的显示尺寸；参数非法时返回 [Size.zero]。
+///
+/// 守卫必须判 `isFinite`，只判 `<= 0` 拦不住 NaN/Infinity：实测
+/// `avatarCropDisplaySize(Size(1000,500), double.nan, 1)` 返回
+/// `Size(NaN, NaN)`、`viewSide == infinity` 返回 `Size(infinity, infinity)`。
+/// 这两个值会直接进 `SizedBox(width:, height:)` —— 无界宽度让父级布局断言
+/// 失败，NaN 则让 `RawImage` 整块不画（真机表现是裁剪页一片黑，日志无异常）。
 Size avatarCropDisplaySize(Size image, double viewSide, double zoom) {
-  if (image.width <= 0 || image.height <= 0 || viewSide <= 0) {
+  if (!image.width.isFinite ||
+      !image.height.isFinite ||
+      !viewSide.isFinite ||
+      image.width <= 0 ||
+      image.height <= 0 ||
+      viewSide <= 0) {
     return Size.zero;
   }
   final z = avatarCropClampZoom(zoom);
   final scale = max(viewSide / image.width, viewSide / image.height) * z;
-  return Size(image.width * scale, image.height * scale);
+  final w = image.width * scale;
+  final h = image.height * scale;
+  if (!w.isFinite || !h.isFinite) return Size.zero;
+  return Size(w, h);
 }
 
 /// 平移夹紧：显示尺寸超出视窗的一半即上限，另一方向不许移动。
+///
+/// `max(0.0, NaN)` **返回 NaN**（不是 0），随后 `clamp(-NaN, NaN)` 得到一个
+/// NaN 偏移——`Transform.translate` 拿到它以后整张图不画。显示尺寸或视窗
+/// 非有限时按「没有可平移空间」处理，偏移归零。
 Offset avatarCropClampOffset(Offset offset, Size display, double viewSide) {
+  if (!display.width.isFinite ||
+      !display.height.isFinite ||
+      !viewSide.isFinite) {
+    return Offset.zero;
+  }
   final mx = max(0.0, (display.width - viewSide) / 2);
   final my = max(0.0, (display.height - viewSide) / 2);
   final dx = offset.dx.isFinite ? offset.dx : 0.0;
   final dy = offset.dy.isFinite ? offset.dy : 0.0;
+  if (!mx.isFinite || !my.isFinite) return Offset.zero;
   return Offset(dx.clamp(-mx, mx).toDouble(), dy.clamp(-my, my).toDouble());
 }
 
