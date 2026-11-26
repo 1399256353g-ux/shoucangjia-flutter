@@ -88,6 +88,7 @@ import 'library_refresh.dart';
 import 'library_revision.dart';
 import 'refresh_all.dart';
 import 'library_rank.dart';
+import 'rank_filter.dart';
 import 'rank_metric.dart';
 import 'lib_cover.dart';
 import 'loop_link.dart';
@@ -2776,9 +2777,12 @@ class UnitBadges extends StatelessWidget {
   /// 而不是只贴主库那一个。为空时退回 `basicId`（单来源）。
   final List<String> basicIds;
 
-  /// 没有单元库归属时显示的库 id / 库名。
-  final String fallbackId;
-  final String fallbackName;
+  /// 等级词条（D–S），空串表示不显示。
+  ///
+  /// 0.9.317：`fallbackId` / `fallbackName` 两个参数在这里**零读取方**——
+  /// 「没有单元库归属时显示的库名」这条规则早就换成了「无归属一律 SECRET」
+  /// （owner 2026-11-27：不给作者编一个看着像库名的假归属）。参数留着
+  /// 只会让调用方以为它还在起作用，所以整组删掉。
   final String grade;
 
   /// T5：词条唯一来源。调用方传入与基础库卡片同一份映射
@@ -2790,8 +2794,6 @@ class UnitBadges extends StatelessWidget {
     super.key,
     required this.meta,
     required this.mediaPath,
-    required this.fallbackId,
-    required this.fallbackName,
     this.basicId = '',
     this.basicIds = const <String>[],
     this.grade = '',
@@ -2961,8 +2963,11 @@ class AuthorBadges extends StatelessWidget {
   /// 词条按**每个来源**各贴一条，而不是只贴主库那一个。
   final List<String> basicIds;
 
+  /// 已知基础库 id（基础库页/基础库作者页直接给 id 时用）。
+  ///
+  /// 0.9.317：`fallbackName` 一并删掉——它只被转发给 `UnitBadges` 的一个
+  /// 零读取方参数，界面上从来没有「回退显示库名」这条路（无归属一律 SECRET）。
   final String fallbackId;
-  final String fallbackName;
   final int works;
 
   /// 显式指定的作者统计（含 `p`/`dr`）；null 表示从 [meta] 取。
@@ -2978,7 +2983,6 @@ class AuthorBadges extends StatelessWidget {
     required this.name,
     required this.mediaPath,
     required this.fallbackId,
-    required this.fallbackName,
     this.basicId = '',
     this.basicIds = const <String>[],
     this.works = 0,
@@ -3018,8 +3022,6 @@ class AuthorBadges extends StatelessWidget {
       basicIds: basicIds.isNotEmpty
           ? basicIds
           : (_basicId.isEmpty ? const <String>[] : <String>[_basicId]),
-      fallbackId: fallbackId,
-      fallbackName: fallbackName,
       grade: AuthorGrade.fromStats(_stats, works: works),
       unitLabels: unitLabels,
       unitKeys: unitKeys,
@@ -7319,6 +7321,29 @@ class _RankPageState extends State<RankPage> {
   bool loading = true;
   String? err;
 
+  /// 选中库包含的基础库 id（`sel` 是注册库 id，`libs` 行里是基础库 id）。
+  ///
+  /// 这是本轮修掉的真缺陷：`sel` 此前被直接当 `big_id`（历史分组 id）去比，
+  /// 两个命名空间永远不相等，点「某库」进来看不到任何作者。归属判定改由
+  /// `rank_filter.authorInLibrary` 一处完成，这里只提供它要的集合。
+  Set<String> get _memberBasics {
+    if (sel.isEmpty || sel == 'all') return const <String>{};
+    // **只认选中库自己那份 meta**。回落 `metas[cfg.lib]` 会把「当前库的基础库」
+    // 当成选中库的成员——换一个库看就会列出别人家的作者，而且看不出原因。
+    final meta = metas[sel];
+    // 拿不到元数据时返回空集：**不猜**归属。`authorInLibrary` 对空集一律
+    // 返回 false，界面上会显示「该库本期还没有播放记录」——比把注册库 id
+    // 硬当基础库 id 去比（必然全不中、且原因看不出来）更诚实。
+    if (meta == null) return const <String>{};
+    final ids = <String>{
+      for (final b in meta.filterBasics) b.id,
+      for (final b in meta.allBasics) b.id,
+    };
+    // 当前库本身可能就是基础库 id（从基础库页进来）——直接当成员。
+    if (meta.basicById(sel) != null) ids.add(sel);
+    return ids;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -7329,22 +7354,42 @@ class _RankPageState extends State<RankPage> {
 
   Future<void> loadLibs() async {
     try {
+      // 库列表＝**注册库**（`/api/libraries` 的 `libraries`），不是历史分组。
+      //
+      // 此前这里从 `meta.bigNames`（`basicLibraries[].big_id`）造列表，而服务端
+      // 早已不再下发 `big_id`（`grep big_id` = 0）：列表恒空、`libName` 恒回落到
+      // id，从「各库排行」点进来的选中项也不在列表里。排行榜的「按库看」说的
+      // 是媒体库，和「各库排行」页列的是同一批东西。
+      final r = await http
+          .get(cfg.u('/api/libraries'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 8));
+      final reg = r.statusCode == 200
+          ? librariesWithDisplayNames(mapsOf(jsonMapOf(r)['libraries']))
+          : const <Map<String, dynamic>>[];
       final meta = await LibMeta.load(cfg.lib);
       if (!mounted) return;
-      // 同名媒体库（两台服务端各自的库根重名、或名称被改成一样）之间没有
-      // 次序依据；`List.sort` 不稳定 → 排行榜的库下拉刷新一次换一次顺序，
-      // 选中项还跟着跳。同分保持 `bigNames` 的注册顺序（稳定排序），
-      // 与首页卡片下发的顺序一致。
-      final list = stableSort(
-          [
-            for (final e in meta.bigNames.entries)
-              {'id': e.key, 'name': e.value}
-          ],
-          (a, b) => '${a['name']}'.compareTo('${b['name']}'));
+      // 同名媒体库之间没有次序依据；`List.sort` 不稳定 → 下拉刷新一次换一次
+      // 顺序、选中项还跟着跳。稳定排序 + id 作为最终键。
+      final list = stableSort(reg, (a, b) {
+        final c = '${a['name']}'.compareTo('${b['name']}');
+        return c != 0 ? c : '${a['id']}'.compareTo('${b['id']}');
+      });
       setState(() {
         libs = list;
         metas[cfg.lib] = meta;
+        if (sel.isNotEmpty && sel != 'all' && !metas.containsKey(sel)) {
+          _loadMetaFor(sel);
+        }
       });
+    } catch (_) {}
+  }
+
+  /// 为选中的库加载元数据（`loadLibs` 只装了当前库那份）。
+  Future<void> _loadMetaFor(String lib) async {
+    try {
+      final meta = await LibMeta.load(lib);
+      if (!mounted || metas.containsKey(lib)) return;
+      setState(() => metas[lib] = meta);
     } catch (_) {}
   }
 
@@ -7399,8 +7444,13 @@ class _RankPageState extends State<RankPage> {
         viewportHeight: viewportHeight, rowExtent: kAuthorRankRowExtent);
     if (n <= 0) return;
     // 行库：榜单「全部」时按该行自己的库，选了具体库时一律用选中库。
-    String libOf(Map e) =>
-        sel == 'all' ? '${e['lib'] ?? cfg.lib}' : (sel.isEmpty ? cfg.lib : sel);
+    // 缩略图路由用**该行自己的库**，不用 `sel`：`sel` 是注册库 id，
+    // 而头像路径 `/media/<基础库>/…` 里带的是基础库 id，拿注册库 id 去
+    // 换地址会把它当成「未知库」再补一次前缀（同一张图 404）。
+    String libOf(Map e) {
+      final own = '${e['lib'] ?? ''}'.trim();
+      return own.isEmpty ? cfg.lib : own;
+    }
     prefetchAvatarItems(
       [
         for (final e in visibleRows.take(n))
@@ -7419,26 +7469,50 @@ class _RankPageState extends State<RankPage> {
   /// 此前预热用 `MediaQuery.size.height`（整窗口），而列表上压着 AppBar +
   /// 周期条（46）+ 说明行（约 24）：按窗口算出的行数偏多，末行预热的是
   /// 屏幕外那张头像。高度现在来自列表自己的 `LayoutBuilder`。
-  /// 榜单列表自己的可用高度（0.9.300）。
-  ///
-  /// 此前预热用 `MediaQuery.size.height`（整窗口），而列表上压着 AppBar +
-  /// 周期条（46）+ 说明行（约 24）：按窗口算出的行数偏多，末行预热的是
-  /// 屏幕外那张头像。高度现在来自列表自己的 `LayoutBuilder`。
   double? _listViewportHeight;
 
   Map<String, dynamic> _rowMap(dynamic e) =>
       e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{};
 
-  LibMeta? _rowMeta(Map<String, dynamic> e) =>
-      metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
+  /// 榜单行用的元数据：选中库优先 → 行自己的库 → 当前库。
+  ///
+  /// 「选中库优先」是从「各库排行」点进来的场景（`sel` 是那个注册库）；
+  /// 行自己的库用于 `lib=all` 下跨连接作者（词条要按作者所在库的颜色/名称）。
+  LibMeta? _rowMeta(Map<String, dynamic> e) {
+    final want = [
+      if (sel.isNotEmpty && sel != 'all') sel,
+      '${e['lib'] ?? ''}'.trim(),
+      cfg.lib,
+    ];
+    for (final id in want) {
+      if (id.isEmpty) continue;
+      final hit = metas[id];
+      if (hit != null) return hit;
+    }
+    return metas.isEmpty ? null : metas.values.first;
+  }
 
-  List<Map<String, dynamic>> get _visibleRows => [
-        for (final e in rows)
-          if (sel == 'all' ||
-              _rowMeta(_rowMap(e))?.bigIdFor('${_rowMap(e)['avatar'] ?? ''}') ==
-                  sel)
-            _rowMap(e)
-      ];
+  /// 按选中库收敛作者（`sel == 'all'` 时全量）。
+  ///
+  /// 归属判定只有 `rank_filter.authorInLibrary` 一处：榜单行自带 `libs`
+  /// （服务端 `lib=all` 下发的来源基础库），`sel` 再展开成它包含的基础库集合。
+  /// 此前这里拿 `sel`（注册库 id）去比 `bigIdFor(...)`（历史分组 id），
+  /// 两个命名空间永不相等 —— 点「某库」进来一条都不显示。
+  List<Map<String, dynamic>> get _visibleRows {
+    if (sel == 'all') return [for (final e in rows) _rowMap(e)];
+    final members = _memberBasics;
+    return [
+      for (final e in rows)
+        if (authorInLibrary(
+          memberBasics: members,
+          basicId:
+              _rowMeta(_rowMap(e))?.basicIdForPath('${_rowMap(e)['avatar'] ?? ''}') ??
+                  '',
+          rowLibs: stringsOf(_rowMap(e)['libs']),
+        ))
+          _rowMap(e)
+    ];
+  }
 
   Future<void> _open(String name) async {
     dynamic row;
@@ -7574,13 +7648,18 @@ class _RankPageState extends State<RankPage> {
                             // 0.9.15：排行榜每行都用有效 meta（缺行库时回退到当前库），
                             // 否则作者词条会退化成 SECRET/旧词条。
                             final meta = _rowMeta(_rowMap(e));
+                            // 行库名先查注册库列表（媒体库），再查该行 meta 的
+                            // 基础库名（`lib=all` 行的 `lib` 是基础库 id）。
                             String libName(String id) {
                               for (final l in libs) {
                                 if ('${l['id']}' == id) {
-                                  return '${l['name'] ?? l['id']}';
+                                  return libraryDisplayName(
+                                      '${l['id']}', '${l['name'] ?? ''}');
                                 }
                               }
-                              return id;
+                              final b = meta?.basicById(id);
+                              if (b != null) return displayLibraryName(b.id, b.name);
+                              return displayLibraryName(id, id);
                             }
 
                             return AuthorRankTile(
@@ -7621,6 +7700,13 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
   bool loading = true;
   String? err;
 
+  /// 服务端注册表里的默认库 id（`/api/libraries` 的 `default`）。
+  ///
+  /// 此前行尾那枚词条标的是「当前」＝`cfg.lib`——那是单库时代的措辞与口径：
+  /// 多库里没有任何一个库是「当前」，服务端只有「默认」。口径改成默认库后，
+  /// 词条文字与网络设置页的「默认」是同一个意思。
+  String defaultId = '';
+
   @override
   void initState() {
     super.initState();
@@ -7636,6 +7722,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = librariesWithDisplayNames(mapsOf(j['libraries']));
+      defaultId = '${j['default'] ?? ''}'.trim();
 
       final loaded = <String, Map<String, dynamic>>{};
       var offline = 0;
@@ -7665,7 +7752,9 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
         libs: list,
         stats: loaded,
         metric: metric,
-        currentLib: cfg.lib,
+        // 「默认库」不是「当前库」：服务端只下发 `default`，多库里没有任何
+        // 一个库是「当前」（owner 2026-11-27「各地方都要适应多媒体库管理」）。
+        defaultLib: defaultId.isEmpty ? null : defaultId,
       );
       if (!mounted) return;
       setState(() {
@@ -7723,7 +7812,10 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                 child: Text(
                     '${rows.length} 个库参与'
                     '${skipped > 0 ? ' · 已跳过 $skipped 个离线库' : ''}'
-                    ' · 统计来自本机',
+                    // 数字来自服务端 `/api/author_stats.json`，不是这台设备。
+                    // 写「本机」会让用户以为统计只算当前手机/电脑上的播放，
+                    // 换个设备看同一份榜单还会怀疑数据不一致。
+                    ' · 统计来自服务端',
                     style: const TextStyle(fontSize: 11, color: Colors.grey))),
           ]),
         ),
@@ -7767,7 +7859,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                                           fontSize: 14,
                                           fontWeight: FontWeight.w600)),
                                 ),
-                                if (r.current)
+                                if (r.isDefault)
                                   Container(
                                     margin: const EdgeInsets.only(left: 6),
                                     padding: const EdgeInsets.symmetric(
@@ -7776,7 +7868,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                                         color: Colors.lightBlueAccent
                                             .withValues(alpha: 0.18),
                                         borderRadius: BorderRadius.circular(4)),
-                                    child: const Text('当前',
+                                    child: const Text('默认',
                                         style: TextStyle(
                                             fontSize: 9,
                                             color: Colors.lightBlueAccent)),
@@ -7914,7 +8006,6 @@ class AuthorGridCard extends StatelessWidget {
                 name: name,
                 mediaPath: avatar,
                 fallbackId: lib,
-                fallbackName: meta?.names[lib] ?? lib,
                 works: works,
                 stats: stats,
               ),
@@ -7990,7 +8081,6 @@ class AuthorRankTile extends StatelessWidget {
           name: name,
           mediaPath: avatar,
           fallbackId: lib,
-          fallbackName: libName,
           works: works,
         ),
         const SizedBox(height: 2),
@@ -8552,7 +8642,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(
-                              '$_shownLen/${_ordered.length} 位作者 · 播放/访问/水滴为本机统计',
+                              // 播放/访问/水滴都由服务端 `/api/author_stats.json`
+                              // 汇总（多设备共用一份），不是「本机」。
+                              '$_shownLen/${_ordered.length} 位作者 · 播放/访问/水滴来自服务端',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.grey))),
                     ]),
@@ -12705,8 +12797,6 @@ class _PlayerPageState extends State<PlayerPage>
                                   // 作品条目自带基础库 id 时直接用它归属单元库
                                   basicId: '${w['_bid'] ?? w['basicId'] ?? ''}',
                                   fallbackId: _curLib,
-                                  // 0.9.6：不再回退库名文案，无归属显示 SECRET
-                                  fallbackName: '',
                                   works: widget.works
                                       .where((e) =>
                                           e is Map &&
@@ -17602,8 +17692,6 @@ class _AuthorPageState extends State<AuthorPage> {
                     // owner 2026-11-26：这个作者分布在几个基础库，就贴几条
                     // 词条（他挂了几处文件夹一目了然），不再只贴主库一条。
                     basicIds: _libs,
-                    // 0.9.6：不再回退库名文案，无归属显示 SECRET
-                    fallbackName: '',
                     works: works.length,
                   ),
                   // 跨库同名作者合并：多库时才提示「来自 N 个库」。
@@ -18089,11 +18177,15 @@ class _AuthorPageSkeleton extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
-                    SkeletonBlock(width: 64, height: 10),
+                    // 三个宽度在 `card_metrics` 立了名：它们只描述占位块的
+                    // 相对长短，不对应真实文字宽度（那是 Expanded 里的换行文本）。
+                    SkeletonBlock(
+                        width: kAuthorHeaderLineShort, height: 10),
                     SizedBox(height: 10),
-                    SkeletonBlock(width: 220, height: 12),
+                    SkeletonBlock(
+                        width: kAuthorHeaderLineMedium, height: 12),
                     SizedBox(height: 8),
-                    SkeletonBlock(width: 160, height: 12),
+                    SkeletonBlock(width: kAuthorHeaderLineLong, height: 12),
                   ]),
             ),
           ]),

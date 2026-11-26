@@ -102,7 +102,6 @@ void main() {
         name: '33',
         mediaPath: '/media/lib-015/%4033/_avatar/x.jpg',
         fallbackId: 'douyin',
-        fallbackName: '',
       ))));
       expect(find.text('douyin'), findsOneWidget);
     });
@@ -122,7 +121,6 @@ void main() {
         name: 'Hetero 作者',
         mediaPath: '',
         fallbackId: 'lib-029',
-        fallbackName: '',
       ))));
       expect(find.text('Heterosexuality-异性恋'), findsOneWidget);
     });
@@ -148,7 +146,6 @@ void main() {
           mediaPath: '',
           basicId: 'lib-015',
           fallbackId: 'douyin',
-          fallbackName: '',
           unitLabels: labels,
           unitKeys: keys,
         ),
@@ -180,7 +177,6 @@ void main() {
         mediaPath: '',
         basicId: 'lib-015',
         fallbackId: 'douyin',
-        fallbackName: '',
       ))));
       expect(find.text('douyin'), findsOneWidget);
       expect(UnitBadgeRegistry.labelFor('lib-015'), '(2) douyin');

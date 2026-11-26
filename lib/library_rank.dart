@@ -21,7 +21,12 @@ class LibraryRankRow {
   final int plays;
   final int drops;
   final bool online;
-  final bool current;
+  /// 是否是服务端注册表里的**默认库**（`/api/libraries` 的 `default`）。
+  ///
+  /// 0.9.317：字段原名 `current`，界面写「当前」——那是单库时代的说法。
+  /// 多库里没有任何一个库是「当前」，只有服务端指定的默认库；口径统一后
+  /// 词条文字与网络设置/库管理的「默认」一致。
+  final bool isDefault;
   final int rank;
 
   const LibraryRankRow({
@@ -30,7 +35,7 @@ class LibraryRankRow {
     required this.plays,
     required this.drops,
     required this.online,
-    required this.current,
+    required this.isDefault,
     required this.rank,
   });
 
@@ -85,7 +90,7 @@ List<LibraryRankRow> buildLibraryRank({
   required List<Map<String, dynamic>> libs,
   required Map<String, Map<String, dynamic>> stats,
   required String metric,
-  String? currentLib,
+  String? defaultLib,
 }) {
   final rows = <LibraryRankRow>[];
   final seen = <String>{};
@@ -108,7 +113,7 @@ List<LibraryRankRow> buildLibraryRank({
       plays: t.plays,
       drops: t.drops,
       online: online,
-      current: currentLib != null && currentLib == id,
+      isDefault: defaultLib != null && defaultLib == id,
       rank: 0,
     ));
   }
@@ -134,7 +139,7 @@ List<LibraryRankRow> buildLibraryRank({
       plays: r.plays,
       drops: r.drops,
       online: r.online,
-      current: r.current,
+      isDefault: r.isDefault,
       rank: i + 1,
     ));
   }

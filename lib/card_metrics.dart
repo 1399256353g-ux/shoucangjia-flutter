@@ -59,6 +59,17 @@ const double kAuthorHeaderPadding = 14;
 /// 占位块与真实文字的左边界对不上，骨架阶段看起来像「两栏错位」。
 const double kAuthorHeaderAvatarGap = 12;
 
+/// 作者页加载骨架里三行占位文字的宽度（短 / 中 / 长）。
+///
+/// 0.9.317：这三个数此前是 `_AuthorPageSkeleton` 里的裸字面量 64 / 220 / 160。
+/// 它们**不是**真实文字宽度的副本——真实头部那三行是 `Expanded` 里的
+/// 自动换行文本，没有固定宽度。裸字面量的问题不是「和真实值不一致」，而是
+/// 读代码的人会以为这三个数对应某处的真实排版，改真实头部时还去找它们。
+/// 立名后语义明确：只描述骨架占位块的相对长短。
+const double kAuthorHeaderLineShort = 64;
+const double kAuthorHeaderLineMedium = 220;
+const double kAuthorHeaderLineLong = 160;
+
 /// 基础库页作者卡片上的头像边长（与作者总览一致）。
 const double kAvatarBasicAuthorSize = kAvatarGridSize;
 

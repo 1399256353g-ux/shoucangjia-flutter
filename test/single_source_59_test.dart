@@ -61,8 +61,11 @@ void main() {
     test('LibMeta 之外的作者归属仍只有一处（作者筛选）', () {
       final s = codeOf('lib/main.dart');
       // 两个页面的 `_matches` 都靠 meta 的三个查询，不自己拼路径。
-      expect(RegExp(r"\.bigIdFor\(").allMatches(s).length,
-          greaterThanOrEqualTo(3));
+      //
+      // 0.9.317：排行榜那处 `bigIdFor` 调用**必须**消失——它把注册库 id 当
+      // 历史分组 id 比，两个命名空间永不相等（点「某库」一条都看不到）。
+      // 所以这里从「≥3」收紧成「正好这两处」。
+      expect(RegExp(r"\.bigIdFor\(").allMatches(s).length, 2);
       expect(s.contains('basicLibForMedia(basics, mediaPath)'), isTrue,
           reason: 'labelFor/idFor 仍是唯一读 basics 的地方');
     });

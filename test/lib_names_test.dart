@@ -46,11 +46,11 @@ void main() {
 
   group('词条不再回退旧库名', () {
     testWidgets('UnitBadges 无单元库归属时显示 SECRET', (tester) async {
+      // 0.9.317：`fallbackId` 已从 UnitBadges 删除（零读取方）。
+      // 无归属一律 SECRET，没有任何「回退显示库名」的路。
       await tester.pumpWidget(host(const UnitBadges(
         meta: null,
         mediaPath: 'a/b/cover.jpg',
-        fallbackId: 'douyin',
-        fallbackName: '抖音收藏',
       )));
       expect(find.text('SECRET'), findsOneWidget);
       expect(find.text('抖音收藏'), findsNothing);

@@ -26,13 +26,13 @@ void main() {
         },
       },
       metric: 'play',
-      currentLib: 'douyin',
+      defaultLib: 'douyin',
     );
     expect(rows.length, 1);
     expect(rows.first.id, 'douyin');
     expect(rows.first.plays, 10);
     expect(rows.first.drops, 1);
-    expect(rows.first.current, isTrue);
+    expect(rows.first.isDefault, isTrue);
     expect(rows.first.rank, 1);
   });
 
@@ -60,6 +60,28 @@ void main() {
     final byDrop = buildLibraryRank(libs: libs, stats: stats, metric: 'drop');
     expect(byDrop.map((e) => e.id).toList(), ['a', 'c', 'b']);
     expect(byDrop.first.drops, 9);
+  });
+
+  test('默认库标记跟随服务端 default，不是客户端「当前库」', () {
+    final libs = [
+      {'id': 'a', 'name': 'A库', 'baseOk': true, 'indexOk': true},
+      {'id': 'b', 'name': 'B库', 'baseOk': true, 'indexOk': true},
+    ];
+    final stats = {
+      'a': {
+        'x': {'p': 1},
+      },
+      'b': {
+        'x': {'p': 2},
+      },
+    };
+    // 服务端没下发 default → 谁都不标「默认」
+    final none = buildLibraryRank(libs: libs, stats: stats, metric: 'play');
+    expect(none.every((e) => !e.isDefault), isTrue);
+    // 指定 b 为默认 → 只有 b 标
+    final one = buildLibraryRank(
+        libs: libs, stats: stats, metric: 'play', defaultLib: 'b');
+    expect([for (final e in one) '${e.id}/${e.isDefault}'], ['b/true', 'a/false']);
   });
 
   test('同分按名称稳定排序；空库不崩', () {
