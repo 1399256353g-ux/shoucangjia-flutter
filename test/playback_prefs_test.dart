@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/loop_link.dart';
 import 'package:shoucangjia/playback_prefs.dart';
@@ -93,6 +95,44 @@ void main() {
     test('循环关闭且连播开启时才调度下一条', () {
       const p = PlaybackPrefs(link: LoopLink(autoplay: true));
       expect(p.link.nextEnabled, isTrue);
+    });
+  });
+
+  // owner 2026-11-26：「每次退出播放或退出软件后播放设置要沿用上次退出时的啊，
+  // 为什么没有记忆功能」。
+  //
+  // 排查结论：`PlaybackPrefs` 本身是对的，坏在两条链路上——
+  //   1. 只有「用户点了某个开关」才落盘，**退出播放页时不保存**。没动过的
+  //      值从来没被记下，退出软件后自然回到默认。
+  //   2. 恢复是 `unawaited(...)`，与 postFrame 里的 `open()` 赛跑；恢复晚到
+  //      时播放器已按默认倍速起播，看起来就是「没记住」。
+  group('契约：退出落盘 + 起播前等恢复（0.9.303）', () {
+    String code() {
+      final src = File('lib/main.dart').readAsStringSync();
+      final start = src.indexOf('class _PlayerPageState');
+      expect(start, greaterThan(0), reason: '找不到 _PlayerPageState');
+      return src.substring(start);
+    }
+
+    test('退出播放页时必须落盘播放设置', () {
+      final body = code();
+      final disp = body.indexOf('void dispose()');
+      expect(disp, greaterThan(0), reason: '找不到播放页 dispose');
+      // 取 dispose 之后的一段（足够覆盖落盘调用）。
+      final tail = body.substring(disp, disp + 2500);
+      expect(tail.contains('_persistPlaybackPrefs()'), isTrue,
+          reason: '退出播放页不落盘设置 → 没动过的值永远记不住');
+    });
+
+    test('起播前必须等设置读回（不能与 open 赛跑）', () {
+      final body = code();
+      expect(body.contains('_prefsReady'), isTrue,
+          reason: '缺少读盘完成信号，open 会抢在恢复之前起播');
+      // open 必须包在 ready.then 里
+      final idx = body.indexOf('_prefsReady');
+      expect(idx, greaterThan(0));
+      expect(body.contains('ready.then('), isTrue,
+          reason: 'open() 必须在设置读回之后再执行');
     });
   });
 }

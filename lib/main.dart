@@ -9083,6 +9083,9 @@ class _PlayerPageState extends State<PlayerPage>
   // P0 §3：进度条是否处于「按住/拖动」态（与拖动 seek 合并为一次按下）。
   bool _seeking = false;
   double speed = 1.0;
+
+  /// 播放设置读盘的完成信号。`open()` 会等它，保证起播时用的就是上次的值。
+  Future<void>? _prefsReady;
   Timer? autoTimer;
   Timer? hideTimer;
 
@@ -9124,16 +9127,28 @@ class _PlayerPageState extends State<PlayerPage>
     _fromAuthor = widget.fromAuthor;
     cur = widget.start;
     // owner 2026-11-24：沿用上次的播放设置（倍速/连播/循环/乱序）。
-    // 先给默认值保证首帧可用，随后异步读回持久化覆盖。
+    // owner 2026-11-26 追加：「每次退出播放或退出软件后播放设置要沿用上次」。
+    //
+    // 这里先给默认值保证首帧可用；真正的恢复走 [_prefsReady]，**open() 会等它**
+    // ——此前是 `unawaited(_restorePlaybackPrefs())` 与 postFrame 里的 open()
+    // 赛跑，恢复晚到时播放器已按默认倍速起播，用户看到的就是「没记忆」。
     speed = AppSettings.defaultSpeed;
-    unawaited(_restorePlaybackPrefs());
+    _prefsReady = _restorePlaybackPrefs();
     _ensureMetaFor(_curLib);
     _bindPlayer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       focus.requestFocus();
       PerfDiagnostics.instance.endSpan(
           'page:player', <String, Object?>{'works': widget.works.length});
-      open(widget.start);
+      // 先等上次的播放设置读回来，再起播——否则默认倍速会先跑一拍。
+      final ready = _prefsReady;
+      if (ready != null) {
+        unawaited(ready.then((_) {
+          if (mounted) open(widget.start);
+        }));
+      } else {
+        open(widget.start);
+      }
       // 预热作者头像索引：作品没带 av 时用作者级头像兜底。
       ensureAuthorAvatarsLoaded();
       // P2：进入非全屏播放页即开始沉浸计时。
@@ -12195,6 +12210,12 @@ class _PlayerPageState extends State<PlayerPage>
     // G10：退出播放页前落盘当前进度
     _saveWatchProgress(force: true);
     WatchProgressStore.flush();
+    // owner 2026-11-26：退出播放页时也要落盘播放设置。
+    //
+    // 此前只有「用户点了某个开关」才写入，退出时什么都不存——所以「退出播放
+    // 或退出软件后沿用上次设置」根本不成立：没动过的值从来没被记下来，而
+    // 动过的值若在恢复完成前退出，还会被这里的默认值盖掉。
+    _persistPlaybackPrefs();
     _dropAnim.dispose();
     _menuAnim.dispose();
     _commentAnim.dispose();
