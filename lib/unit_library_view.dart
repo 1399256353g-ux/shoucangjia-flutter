@@ -1227,12 +1227,20 @@ class UnitLibraryPage extends StatefulWidget {
 }
 
 class _UnitLibraryPageState extends State<UnitLibraryPage> {
-  /// 本页内容区（AppBar 之下）的可用尺寸（0.9.313）。
+  /// 两类卡片网格**各自的**可见尺寸（0.9.315）。
   ///
-  /// 两类卡片都在一个 `ListView` 里（网格 `shrinkWrap`），它们的「首屏」是
-  /// 这块内容区的首屏。此前预热拿 `MediaQuery.size`（整个窗口）——比真实
-  /// 可用高度多出一个 AppBar，算出的张数偏多，末行预热的是屏幕外那张。
-  Size? _pageViewport;
+  /// 0.9.313 把「整窗口」换成了内容区的 `LayoutBuilder` 约束，但那个约束是
+  /// **整块内容区**（含另一个网格与两条标题行），不是任一个网格「在屏幕里」
+  /// 的高度：下级单元库网格只占顶部一两行，基础库网格在它下面，按内容区高度
+  /// 算就会给屏幕外的那个网格也预热一整屏。
+  ///
+  /// 现在一个网格一把 key，几何全部走 `scroll_viewport.visibleViewportOf`
+  /// （唯一实现）：滚出屏幕的网格可见高度为 0，`prefetchCount` 自己收手。
+  final GlobalKey _childrenGridKey = GlobalKey();
+  final GlobalKey _basicsGridKey = GlobalKey();
+
+  /// 内容区约束，只用于「窗口尺寸变了就重算一次」，**不作为**预热几何。
+  Size? _pageSize;
 
   @override
   void initState() {
@@ -1274,39 +1282,43 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
   void _prefetchCovers() {
     if (!mounted) return;
     final unit = widget.unit;
-    // 尺寸未知（首帧还没经过 `LayoutBuilder`）时不预热：拿窗口顶替一次
-    // 就再也不会被纠正。
-    final viewport = _pageViewport;
-    if (viewport == null) return;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
 
-    // 下级单元库卡片（260 / 1.02）。
-    prefetchLibCovers(
-      viewport: viewport,
-      grid: kUnitLibGrid,
-      padding: kLibGridPadding,
-      decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
-      maxItems: 6,
-      items: unit.children.map((sub) => (
-            cover: widget.unitCoverOf?.call(sub) ?? '',
-            headers: unitHeadersOf(sub, widget.headersOf),
-          )),
-    );
+    // 下级单元库卡片（260 / 1.02）。配额只来自 `kUnitLibGrid.maxPrefetch`：
+    // 此前这里另写 `maxItems: 6`，与规格里的 8 两个上限并存，谁说了算没人
+    // 写得清（同一个网格两处配额）。
+    final childrenViewport = visibleViewportOf(_childrenGridKey);
+    if (childrenViewport != null && unit.children.isNotEmpty) {
+      prefetchLibCovers(
+        viewport: childrenViewport,
+        grid: kUnitLibGrid,
+        padding: kLibGridPadding,
+        decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
+        items: unit.children.map((sub) => (
+              cover: widget.unitCoverOf?.call(sub) ?? '',
+              headers: unitHeadersOf(sub, widget.headersOf),
+            )),
+      );
+    }
 
     // 基础库卡片（220 / 0.92，与 `BasicLibCard` 同一条封面解析）。
-    prefetchLibCovers(
-      viewport: viewport,
-      grid: kBasicLibGrid,
-      padding: kLibGridPadding,
-      decodeWidth: kBasicLibGrid.decodeWidth(mq.devicePixelRatio),
-      items: unit.basics.map((b) => (
-            cover: basicCoverUrl(b,
-                preset: widget.coverOf?.call(b) ?? '',
-                firstThumb: b.firstCover),
-            headers: widget.headersOf?.call(b.id) ?? const <String, String>{},
-          )),
-    );
+    // 它在下级单元库网格下面，首屏常常还没露出来——可见高度 0 就不预热。
+    final basicsViewport = visibleViewportOf(_basicsGridKey);
+    if (basicsViewport != null && unit.basics.isNotEmpty) {
+      prefetchLibCovers(
+        viewport: basicsViewport,
+        grid: kBasicLibGrid,
+        padding: kLibGridPadding,
+        decodeWidth: kBasicLibGrid.decodeWidth(mq.devicePixelRatio),
+        items: unit.basics.map((b) => (
+              cover: basicCoverUrl(b,
+                  preset: widget.coverOf?.call(b) ?? '',
+                  firstThumb: b.firstCover),
+              headers: widget.headersOf?.call(b.id) ?? const <String, String>{},
+            )),
+      );
+    }
   }
 
   @override
@@ -1369,10 +1381,11 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
               ),
           ]),
       body: LayoutBuilder(builder: (c, cons) {
-        // 内容区自己的约束即预热几何（`_pageViewport`）：此前拿整窗口，
-        // AppBar 那一截被算成可用空间。
-        if (cons.biggest != _pageViewport) {
-          _pageViewport = cons.biggest;
+        // 内容区约束只用来判断「窗口尺寸变了没有」：两个网格是 `ListView` 里的
+        // `shrinkWrap` 块，这个约束不是它们任何一个的可见高度（几何在
+        // `visibleViewportOf` 里按各自的 key 读）。
+        if (cons.biggest != _pageSize) {
+          _pageSize = cons.biggest;
           _schedulePrefetch();
         }
         return ScrollDecodeScope(
@@ -1388,6 +1401,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                           TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
                 GridView.builder(
+                  key: _childrenGridKey,
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   padding: kLibGridPadding,
@@ -1429,6 +1443,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                           TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
                 GridView.builder(
+                  key: _basicsGridKey,
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   padding: kLibGridPadding,

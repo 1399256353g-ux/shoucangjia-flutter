@@ -1049,10 +1049,21 @@ void main() {
       expect(page.contains('_openSetFiles'), isTrue);
     });
 
-    test('非末梢「仅本层」必须在名字旁可见，而不是只在 subtitle', () {
+    test('不得再出现「仅本层 / 非末梢」这类与真实分发规则相反的文案', () {
+      // owner 2026-11-27 把规则改成「逐级上行，第一个设过色的层即分发源」，
+      // 于是旧标记（「非末梢设的色不分发」）说的是反话。按「同一问题不允许
+      // 两个兜底」的规矩整个删掉，而不是留一个永远不亮的组件。
       final main = codeOf('lib/main.dart');
-      expect(main.contains('_NoDistributeMark'), isTrue,
-          reason: '非末梢自定义色不分发时，名字旁没有可见标记');
+      expect(main.contains('_NoDistributeMark'), isFalse,
+          reason: '旧分发规则已经推翻，标记必须删掉');
+      expect(main.contains('仅本层'), isFalse,
+          reason: '「仅本层」与现行为相反，界面不得再出现');
+      expect(main.contains('非末梢'), isFalse,
+          reason: '内部结构叫法不进界面');
+      expect(main.contains('基础库（末梢'), isFalse,
+          reason: '基础库就是末级，不需要括号里的内部叫法');
+      // 正向断言：分发说明只剩一种口径。
+      expect(main.contains("'可分发给下级'"), isTrue);
     });
 
     test('组/作者卡副标题只有一个拼装出口', () {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'byte_size.dart';
 import 'library_badge.dart';
 import 'json_num.dart';
 
@@ -425,7 +426,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
               for (final s in list)
                 DropdownMenuItem(
                   value: s.name,
-                  child: Text('${s.name} · ${s.size} B'),
+                  child: Text('${s.name} · ${formatBytes(s.size)}'),
                 ),
             ],
             onChanged: (v) {
