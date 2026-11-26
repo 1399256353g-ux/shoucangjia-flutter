@@ -29,6 +29,27 @@ const List<String> kCoverImageExts = <String>[
 /// 规则 B：可以作为封面**版本文件**保存的扩展名（服务端只落这四种）。
 const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
 
+/// 路径是否是**服务端能吃**的图片（缩图与头像注册共用这一条判定）。
+///
+/// 服务端的两个接口认的是同一组四个扩展名，但客户端此前各写了一份：
+///  - `media_resize._imageExt = RegExp(r'\.(jpe?g|png|webp)$')`（是否加 `?w=`）；
+///  - `author_avatar_store.isServerAvatarFileName` 里又一条同义正则。
+///
+/// 两份都只看「末段是否匹配」，但都不剥 `?query` / `#fragment` 之外的形态，
+/// 且以后服务端加一种格式（或去掉一种）时必须两处同时改。成员集合只有
+/// [kCoverExts] 一份，判定也只有这一处。
+///
+/// 注意这是「服务端能处理」的规则，**不是**「能显示」（见 [kCoverImageExts]）：
+/// heic/gif 能显示，但缩图与头像注册都不吃。
+bool isServerImagePath(String p) {
+  final l = stripMediaSuffix(p).toLowerCase();
+  if (l.isEmpty) return false;
+  for (final e in kCoverExts) {
+    if (l.endsWith('.$e')) return true;
+  }
+  return false;
+}
+
 /// 扩展名归一（**唯一定义**）：剥 `?query`/`#fragment` → 取末段 → 去空白 →
 /// 去前导点 → 小写；不在 [kCoverExts] 内一律回落 `jpg`。
 ///

@@ -87,7 +87,7 @@ LibRefreshOutcome parseReindexResponse(
       row = rows.first as Map;
     }
   }
-  final okRow = row != null && row['ok'] == true;
+  final okRow = serviceSaidOk(row);
   final works = row?['works'] == null ? null : intOf(row!['works']);
   // 成功判定只有一处，**不能**让「行说 ok」与「状态码说失败」各自成立。
   //

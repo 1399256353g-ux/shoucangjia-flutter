@@ -100,7 +100,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       UnitAuthorCards c = const UnitAuthorCards();
       if (results[1].statusCode == 200) {
         final cj = jsonOf(results[1]);
-        if (cj is Map && cj['ok'] != false) c = UnitAuthorCards.fromJson(cj);
+        if (cj is Map && !serviceSaidFail(cj)) c = UnitAuthorCards.fromJson(cj);
       }
       if (!mounted) return;
       setState(() {

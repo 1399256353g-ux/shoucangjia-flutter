@@ -7,6 +7,7 @@
 /// `w=`，播放页等大图场景不带，保持原画质。
 library;
 
+import 'cover_ext.dart' show isServerImagePath;
 import 'media_path.dart' show isAbsoluteMediaUrl, splitMediaSuffix;
 
 /// 库/单元库卡片封面宽度（卡片约 150–180dp，2x 屏 360px 足够）。
@@ -21,8 +22,6 @@ const int kAvatarImageWidth = 200;
 /// 播放页海报（全屏铺底）宽度：1080p 屏也够清晰，比动辄 2400px 的
 /// 原图省一半以上流量与解码内存。
 const int kPlayerImageWidth = 1080;
-
-final RegExp _imageExt = RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false);
 
 /// 查询串里一个 `k=v` 段的解析结果（**读写共用的唯一实现**）。
 ///
@@ -133,8 +132,8 @@ int? requestedImageWidth(String raw) {
 ///    一遍 `startsWith('http://')`，于是 `HTTP://nas/x.jpg` 被判成「既不是绝对、
 ///    也不是根相对」，一张大图即使带参不成也不进缩图通道：`withImageWidth(
 ///    'HTTP://nas/x.jpg', 480)` 原样返回一个没加 `w=` 的地址。
-///  - 路径必须以 jpg/jpeg/png/webp 结尾（视频、`/api/thumb/...` 这类接口
-///    没有扩展名的地址不加，避免给抽帧接口塞无用参数）；
+///  - 路径必须是服务端能缩的图片（`cover_ext.isServerImagePath`；视频、
+///    `/api/thumb/...` 这类接口没有扩展名的地址不加，避免给抽帧接口塞无用参数）；
 ///  - 已有 `w=` 时不重复添加；
 ///  - 保留原有 query 与 `#fragment`。
 String withImageWidth(String raw, int width) {
@@ -148,7 +147,10 @@ String withImageWidth(String raw, int width) {
   // **原图**；而 `requestedImageWidth` 对同一个地址返回 null，
   // `cover_cache.oversizedResizeResponse` 于是认为「没加宽度」→ 原图存 14 天。
   final parts = splitMediaSuffix(url);
-  if (!_imageExt.hasMatch(parts.path)) return raw;
+  // 「服务端能吃这个格式吗」走 `cover_ext.isServerImagePath`（唯一实现）。
+  // 旧写法在本文件里又写了一条 `\.(jpe?g|png|webp)$` 正则，与
+  // `author_avatar_store.isServerAvatarFileName` 是同一组扩展名的第二份。
+  if (!isServerImagePath(parts.path)) return raw;
   final nextQuery = _queryWithWidth(parts.query, width);
   // 值没变（已经有了可用宽度）时原样返回，不重排用户的查询串。
   if (nextQuery == parts.query) return raw;

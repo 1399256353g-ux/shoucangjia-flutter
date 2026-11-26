@@ -909,7 +909,7 @@ Future<void> syncAllCollectionsFlow(BuildContext context,
   if (ok != true || !context.mounted) return;
   final j = await startServerSync(target: 'all');
   if (!context.mounted) return;
-  if (j == null || j['ok'] != true) {
+  if (j == null || !serviceSaidOk(j)) {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('同步启动失败：${serverErrorText(j) ?? '网络错误'}')));
     return;
@@ -5415,9 +5415,10 @@ class _LibraryPageState extends State<LibraryPage> {
     Uri versionsUri() {
       final base = cfg.u('/api/cover/versions', lib: libId);
       if (unitRel.isEmpty) return base;
-      final sep = base.toString().contains('?') ? '&' : '?';
+      // 追加参数走 `api_url.withQueryParam`：分隔符判定与编码都只在那一条链上
+      // （旧写法在这里自己写了 `contains('?') ? '&' : '?'`，是第二份）。
       return Uri.parse(
-          '$base${sep}unitRel=${Uri.encodeQueryComponent(unitRel)}');
+          withQueryParam(base.toString(), 'unitRel', unitRel));
     }
 
     final restoreUri = cfg.u('/api/cover/restore', lib: libId);
@@ -7818,7 +7819,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     );
     if (ok != true || !mounted) return;
     final j = await startServerSync(target: 'authors');
-    if (j == null || j['ok'] != true) {
+    if (j == null || !serviceSaidOk(j)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('同步启动失败：${serverErrorText(j) ?? '网络错误'}')));
@@ -16376,6 +16377,11 @@ class _AuthorPageState extends State<AuthorPage> {
                     _toast(r.message);
                     return;
                   }
+                  // 头像目录里的文件但扩展名服务端不收（gif/heic/avif/bmp）：
+                  // 旧行为是静默走「只存本机」，点完没有任何说明，用户以为
+                  // 跨设备生效了。这里按可注册性分开提示（不进 white list 的
+                  // 判定仍只有 `isServerAvatarFileName` 一处）。
+                  final localOnly = isServerAvatarDirPath(p);
                   final ok =
                       await AuthorAvatarStore.instance.setPath(widget.name, p);
                   if (!ctx.mounted) return;
@@ -16385,8 +16391,12 @@ class _AuthorPageState extends State<AuthorPage> {
                   setState(() {});
                   ScaffoldMessenger.of(context)
                     ..hideCurrentSnackBar()
-                    ..showSnackBar(
-                        SnackBar(content: Text(ok ? '已设为该作者头像' : '这张图不能作头像')));
+                    ..showSnackBar(SnackBar(
+                        content: Text(!ok
+                            ? '这张图不能作头像'
+                            : localOnly
+                                ? '已设为头像（该格式服务端不收，仅本机生效）'
+                                : '已设为该作者头像')));
                 },
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -16778,7 +16788,7 @@ class _AuthorPageState extends State<AuthorPage> {
             errors.add('网络错误');
             continue;
           }
-          if (j['ok'] != true) {
+          if (!serviceSaidOk(j)) {
             errors.add(_deleteFailureText(j));
             continue;
           }
@@ -16810,7 +16820,7 @@ class _AuthorPageState extends State<AuthorPage> {
       for (final e in groups.entries) {
         for (final id in e.value) {
           final j = await postWorkDelete(e.key, id, confirm: true);
-          if (j != null && j['ok'] == true) {
+          if (j != null && serviceSaidOk(j)) {
             done++;
           } else if (j != null) {
             errors.add(_deleteFailureText(j));
@@ -16933,12 +16943,12 @@ class _AuthorPageState extends State<AuthorPage> {
       for (final id in ids) {
         // 先 dry 预检（服务端校验同作者/同单元库），再确认执行。
         final dry = await postWorkMove(lib, id, target);
-        if (dry == null || dry['ok'] != true) {
+        if (dry == null || !serviceSaidOk(dry)) {
           errors.add(serverErrorText(dry) ?? '网络错误');
           continue;
         }
         final j = await postWorkMove(lib, id, target, confirm: true);
-        if (j != null && j['ok'] == true) {
+        if (j != null && serviceSaidOk(j)) {
           done++;
         } else {
           errors.add(serverErrorText(j) ?? '网络错误');

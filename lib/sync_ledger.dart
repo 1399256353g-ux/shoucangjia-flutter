@@ -319,7 +319,7 @@ Map<String, dynamic> syncRetryBody(
 ///    「HTTP 400」——状态码文案必须只有一个说法。
 /// 成功判定仍要求 `ok == true`（重试是写接口，缺字段不能当成功）。
 String syncRetryResultLabel(int status, dynamic body) {
-  if (body is Map && body['ok'] == true) {
+  if (serviceSaidOk(body)) {
     final n = _intOf(body['retried']);
     return '已开始重试 $n 条（任务 ${body['retryRunId'] ?? ''}）';
   }

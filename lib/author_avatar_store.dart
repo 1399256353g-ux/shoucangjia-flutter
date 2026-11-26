@@ -20,6 +20,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'cover_ext.dart' show isServerImagePath;
 import 'http_error_text.dart';
 import 'media_path.dart';
 import 'media_priority.dart';
@@ -100,11 +101,26 @@ const String kAuthorAvatarSetPath = '/api/avatar/set';
 /// 服务端头像文件名：只允许不含路径分隔符的 JPG/PNG/WebP。
 ///
 /// 服务端从 `<库>/.avatars/<file>` 解析，客户端不传路径，避免目录穿越。
+///
+/// 扩展名判定转发 `cover_ext.isServerImagePath`：这条规则此前在本文件写成
+/// `RegExp(r'\.(?:jpe?g|png|webp)$')`，与 `media_resize._imageExt` 是同一组
+/// 四个扩展名的第二份。服务端加/减一种格式时两处必须同时改，漏一处就是
+/// 「能显示但注册不上」或「缩图参数被当成非法地址」。
 bool isServerAvatarFileName(String file) {
   final f = file.trim();
   if (f.isEmpty || f.length > 160) return false;
   if (f.contains('/') || f.contains('\\') || f.contains('..')) return false;
-  return RegExp(r'\.(?:jpe?g|png|webp)$', caseSensitive: false).hasMatch(f);
+  return isServerImagePath(f);
+}
+
+/// 路径是否落在服务端头像目录 `<库>/.avatars/` 里（含百分号编码的 `%2E`）。
+///
+/// 只用于**提示**：这类文件本来走「按文件注册」跨设备生效，但格式不在
+/// 服务端白名单（gif/avif/bmp）时注册不了——旧行为是静默退化成「只存本机」，
+/// 点完没有任何反馈，用户以为跨设备生效了。
+bool isServerAvatarDirPath(String? path) {
+  final p = (path ?? '').toLowerCase();
+  return p.contains('/.avatars/') || p.contains('/%2eavatars/');
 }
 
 /// 从媒体地址解析 `<库>/.avatars/<file>`，返回库 id 与文件名；否则 null。

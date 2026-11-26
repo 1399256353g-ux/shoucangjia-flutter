@@ -54,11 +54,15 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
   http.Client get _client => widget.client ?? http.Client();
 
   Uri get _settingsUri {
-    final base = baseForJoin(widget.base);
-    final q = widget.libId.isEmpty
-        ? ''
-        : '?lib=${Uri.encodeQueryComponent(widget.libId)}';
-    return Uri.parse('$base/api/settings$q');
+    // 拼接走 `api_url.joinApiUrl`：`base` 带查询串 / 带尾斜杠 / 缺协议都已在
+    // 那一条链上归一。旧写法 `'$base/api/settings$q'` 直接假设 base 里没有
+    // 查询串——`http://nas:8090/?token=x` 会拼成 `...?token=x/api/settings?lib=...`，
+    // 路径被塞进查询串，请求打到别处（只显示「加载失败」，看不出原因）。
+    return Uri.parse(
+        joinApiUrl(widget.base, '/api/settings',
+            query: widget.libId.trim().isEmpty
+                ? null
+                : {'lib': widget.libId.trim()}));
   }
 
   List<CollectionSyncInfo> get visible => syncCollectionsForUnit(

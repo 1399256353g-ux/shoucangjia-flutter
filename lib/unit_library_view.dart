@@ -214,11 +214,28 @@ class LibCardInfo extends StatelessWidget {
 /// 绿色原点就可以了，不在线就变红色就行，简约一点」。
 /// 卡片底部不再写「已连接」这类文字，只留一个圆点 + 地址。
 /// 解析失败时返回原串（不清空，至少能看到配了什么）。
+///
+/// 补协议走 `api_url.baseForJoin`（= `multi_server.normalizeBase`），
+/// **不自己判 `contains('://')`**：那条判定是「这个串有没有协议」的第二份
+/// 实现，而且比连接配置层窄——实测
+///
+/// ```
+/// hostLabelOf('nas：8090')        -> 'nas%EF%BC%9A8090'  ← 全角冒号被当成主机名
+/// hostLabelOf('http://NAS:８０９０') -> 'http://NAS:８０９０'  ← 全角数字整串回落
+/// ```
+///
+/// 卡片底部是 owner 用来认「这张卡是哪个 NAS」的唯一线索，露出
+/// `nas%EF%BC%9A8090` 等于没有标注。归一后全角会被折叠，与连接实际能连上
+/// 的地址是同一个（`normalizeBase` 成功就说明这条连接存得下、请求打得通）。
 String hostLabelOf(String serverBase) {
   final raw = serverBase.trim();
   if (raw.isEmpty) return '';
+  // 归一后为空 = 这条串本来就不是可连接地址（`http://`、`//nas:8090`）：
+  // 原样返回，别把用户配的串吞成空白。
+  final base = baseForJoin(raw);
+  if (base.isEmpty) return raw;
   try {
-    final u = Uri.parse(raw.contains('://') ? raw : 'http://$raw');
+    final u = Uri.parse(base);
     if (u.host.isEmpty) return raw;
     return u.hasPort ? '${u.host}:${u.port}' : u.host;
   } catch (_) {

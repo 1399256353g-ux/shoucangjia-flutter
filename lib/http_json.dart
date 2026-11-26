@@ -85,14 +85,30 @@ String? apiFailureText(
   bool requireOk = true,
 }) {
   final ok = requireOk
-      ? status == 200 && json is Map && json['ok'] == true
-      : status == 200 && !(json is Map && json['ok'] == false);
+      ? status == 200 && serviceSaidOk(json)
+      : status == 200 && !serviceSaidFail(json);
   if (ok) return null;
   final serverSaid = serverErrorText(json);
   if (serverSaid != null) return serverSaid;
   final text = statusText ?? httpErrorText;
   return text(status);
 }
+
+/// 服务端**明确确认成功**：必须是对象且 `ok` 严格为 `true`（**唯一判定**）。
+///
+/// `ok == true` 这套判定此前在本文件、`main.dart`（6 处写接口收尾）、
+/// `sync_ledger`、`library_refresh` 各写一遍。写接口必须**严格**：`1` /
+/// `"true"` / 缺字段都不算成功——它们是「服务端没说成功」而不是「换了个
+/// 写法说成功」，放宽会让「请求被打回但没报错」变成静默的成功。
+///
+/// 与之相对的宽松判定见 [serviceSaidFail]（老读接口契约）。
+bool serviceSaidOk(dynamic json) => json is Map && json['ok'] == true;
+
+/// 服务端**明确说了失败**：对象里 `ok` 严格为 `false`。
+///
+/// 老读接口（缺 `ok` 字段即视为成功）的判断只有这一处，调用方写
+/// `!serviceSaidFail(j)` 即可，不再各自写 `!(j is Map && j['ok'] == false)`。
+bool serviceSaidFail(dynamic json) => json is Map && json['ok'] == false;
 
 /// 服务端 `error` 字段 → 可直接展示的原因；没有可展示的字符串时返回 null。
 ///
