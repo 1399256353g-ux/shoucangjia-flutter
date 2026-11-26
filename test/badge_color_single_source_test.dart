@@ -27,7 +27,6 @@ void main() {
     LibraryBadge.colorSource.clear();
     LibraryBadge.basicSource.clear();
     LibraryBadge.topOfUnit.clear();
-    LibraryBadge.leafUnits.clear();
     await LibraryBadge.load();
   });
 

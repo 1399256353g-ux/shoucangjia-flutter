@@ -465,9 +465,10 @@ void main() {
       expect(offenders, isEmpty, reason: '可显示图片白名单又抄了一份：$offenders');
       final src = libSourceAll();
       // 规则 A（能否渲染）与规则 B（能否存成版本）是两个不同集合，都必须只剩一处。
-      expect(RegExp(r"const List<String> kImageExts").allMatches(src).length,
-          1);
-      expect(RegExp(r"const List<String> kCoverImageExts").allMatches(src).length,
+      expect(
+          RegExp(r"const List<String> kImageExts").allMatches(src).length, 1);
+      expect(
+          RegExp(r"const List<String> kCoverImageExts").allMatches(src).length,
           1);
       expect(
           RegExp(r"const List<String> kCoverExts").allMatches(src).length, 1);
@@ -565,8 +566,7 @@ void main() {
       // 此前封面上传手拼 `HTTP 413`，作者头像走 httpErrorText 显示「图片过大」，
       // 同一个状态码两个页面两种说法。
       final up = codeOf(File('lib/cover_upload.dart'));
-      expect(up.contains('coverErrorText'), isTrue,
-          reason: '封面上传又自己拼状态码文案了');
+      expect(up.contains('coverErrorText'), isTrue, reason: '封面上传又自己拼状态码文案了');
       expect(RegExp(r"var msg = 'HTTP \$\{r\.statusCode\}'").hasMatch(up),
           isFalse);
     });
@@ -1005,9 +1005,9 @@ void main() {
   });
   // 第二十批（0.9.2xx）：词条注册表只有一份数据。
   //
-  // 风险不是「算错」，而是**同一张表存两份**：`UnitBadgeRegistry.leaf/topOf`
-  // 与 `LibraryBadge.leafUnits/topOfUnit` 若各存一份，任一处漏填就会出现
-  // 「设置页说可分发给下级、实际不分发」这种两边都自洽的矛盾。
+  // 风险不是「算错」，而是**同一张表存两份**：`UnitBadgeRegistry.topOf`
+  // 与 `LibraryBadge.topOfUnit` 若各存一份，任一处漏填就会出现
+  // 「设置页说能继承、实际继承不到」这种两边都自洽的矛盾。
   // 同理，配色顺序此前在 main.dart 两处各写一遍「注册表优先」三元式。
   group('第二十批：词条注册表与配色顺序单一出口', () {
     String codeOf(String path) => File(path)
@@ -1016,19 +1016,33 @@ void main() {
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
 
-    test('UnitBadgeRegistry.leaf / topOf 只能是 LibraryBadge 的视图', () {
+    test('UnitBadgeRegistry.topOf 只能是 LibraryBadge 的视图', () {
       final s = codeOf('lib/unit_library.dart');
-      expect(s.contains('static Map<String, bool> get leaf =>'), isTrue,
-          reason: 'leaf 变成了独立存储；应读 LibraryBadge.leafUnits');
       expect(s.contains('static Map<String, String> get topOf =>'), isTrue,
           reason: 'topOf 变成了独立存储；应读 LibraryBadge.topOfUnit');
-      expect(s.contains('static final Map<String, bool> leaf'), isFalse,
-          reason: 'leaf 又存了第二份');
       expect(s.contains('static final Map<String, String> topOf'), isFalse,
           reason: 'topOf 又存了第二份');
       // setFrom 只允许写 LibraryBadge 那一份。
-      expect(s.contains('LibraryBadge.leafUnits'), isTrue);
       expect(s.contains('LibraryBadge.topOfUnit'), isTrue);
+    });
+
+    test('「末梢才分发」那套表已整体删除（规则已推翻）', () {
+      // owner 2026-11-27 把分发改成「从直接上级逐级上行，第一个设过色的层
+      // 即分发源」——是否末梢与分发无关。保留 leafUnits / canDistribute
+      // 只会留下一个永远返回 true 的判定，读代码的人以为它还在起作用。
+      for (final path in [
+        'lib/library_badge.dart',
+        'lib/unit_library.dart',
+      ]) {
+        final s = codeOf(path);
+        expect(s.contains('leafUnits'), isFalse,
+            reason: '$path 仍残留 leafUnits 表');
+        expect(s.contains('canDistribute'), isFalse,
+            reason: '$path 仍残留 canDistribute 判定');
+        expect(s.contains('leafUnitIds'), isFalse,
+            reason: '$path 仍残留 leafUnitIds 构建函数');
+        expect(s.contains('get leaf =>'), isFalse, reason: '$path 仍暴露 leaf 视图');
+      }
     });
 
     test('配色顺序的三元式只允许出现在 orderOr 里', () {
@@ -1056,12 +1070,9 @@ void main() {
       final main = codeOf('lib/main.dart');
       expect(main.contains('_NoDistributeMark'), isFalse,
           reason: '旧分发规则已经推翻，标记必须删掉');
-      expect(main.contains('仅本层'), isFalse,
-          reason: '「仅本层」与现行为相反，界面不得再出现');
-      expect(main.contains('非末梢'), isFalse,
-          reason: '内部结构叫法不进界面');
-      expect(main.contains('基础库（末梢'), isFalse,
-          reason: '基础库就是末级，不需要括号里的内部叫法');
+      expect(main.contains('仅本层'), isFalse, reason: '「仅本层」与现行为相反，界面不得再出现');
+      expect(main.contains('非末梢'), isFalse, reason: '内部结构叫法不进界面');
+      expect(main.contains('基础库（末梢'), isFalse, reason: '基础库就是末级，不需要括号里的内部叫法');
       // 正向断言：分发说明只剩一种口径。
       expect(main.contains("'可分发给下级'"), isTrue);
     });
@@ -1210,12 +1221,12 @@ void main() {
         if (f.path.endsWith('http_error_text.dart')) continue;
         if (f.path.endsWith('http_json.dart')) continue;
         final src = codeOf(f.path);
-        if (RegExp(r"throw\s+(?:Exception\(|StateError\()?'HTTP \$\{").hasMatch(src)) {
+        if (RegExp(r"throw\s+(?:Exception\(|StateError\()?'HTTP \$\{")
+            .hasMatch(src)) {
           offenders.add(f.path);
         }
       }
-      expect(offenders, isEmpty,
-          reason: '状态码文案又手拼回去了：$offenders');
+      expect(offenders, isEmpty, reason: '状态码文案又手拼回去了：$offenders');
       final src = libDartFiles().map((f) => codeOf(f.path)).join('\n');
       final uses = RegExp(r'httpErrorText\(').allMatches(src).length;
       expect(uses, greaterThanOrEqualTo(4),
@@ -1232,7 +1243,8 @@ void main() {
       expect(sync.contains('String subtitleWith('), isTrue,
           reason: '副标题拼装口 subtitleWith 被删了');
       final panel = codeOf('lib/collection_sync_panel.dart');
-      expect(panel.contains('subtitleWith(isDefault: defaultIdx == c.idx)'), isTrue,
+      expect(panel.contains('subtitleWith(isDefault: defaultIdx == c.idx)'),
+          isTrue,
           reason: '单元库面板又自己拼同步源副标题了');
       expect(RegExp(r"' · 暂无索引'").hasMatch(panel), isFalse,
           reason: '面板又把「暂无索引」手拼回来了');
@@ -1242,9 +1254,7 @@ void main() {
       final crawler = codeOf('lib/unit_crawler.dart');
       expect(crawler.contains('int fullMinFrom(Map m)'), isTrue,
           reason: 'fullMinFrom 回退链被删了');
-      expect(
-          RegExp(r"\?\s*60\s*:\s*60").hasMatch(crawler),
-          isFalse,
+      expect(RegExp(r"\?\s*60\s*:\s*60").hasMatch(crawler), isFalse,
           reason: '又出现 `? 60 : 60` 这种两支相同的三元（等于丢掉旧值）');
       // 新字段优先、旧字段次之的真实语义必须被引用到。
       expect(crawler.contains("m['fullMin'] ?? m['intervalMin']"), isTrue);
@@ -1266,7 +1276,8 @@ void main() {
       for (final f in libDartFiles()) {
         if (f.path.endsWith('http_json.dart')) continue;
         final src = codeOf(f.path);
-        if (RegExp(r"\$\{(?:j|body|map|row)\[\s*'error'\s*\]\}").hasMatch(src)) {
+        if (RegExp(r"\$\{(?:j|body|map|row)\[\s*'error'\s*\]\}")
+            .hasMatch(src)) {
           offenders.add(f.path);
         }
       }
@@ -1330,9 +1341,8 @@ void main() {
         // `$err` 另行判定：它只有在源头是 `err = errorText(e)` 时才合法，
         // 所以这里只认精确的 `$e` / `${e}` token（`$exit` / `$err` 不匹配）。
         final tokenRe = RegExp(r'\$e(?![A-Za-z0-9_])|\$\{e\}');
-        final errFromCatch = RegExp(r'\berr\s*=\s*[^;]*\berrorText\(')
-                .hasMatch(src) ==
-            false;
+        final errFromCatch =
+            RegExp(r'\berr\s*=\s*[^;]*\berrorText\(').hasMatch(src) == false;
         for (final line in src.split('\n')) {
           final t = line.trim();
           if (t.startsWith('//')) continue;
@@ -1401,8 +1411,7 @@ void main() {
       final main = codeOf('lib/main.dart');
       expect(main.contains('headId'), isTrue,
           reason: 'media() 又直接拿原始库段去比对了（缺解码后的 headId）');
-      expect(
-          RegExp(r'_bindings\.containsKey\(headId\)').hasMatch(main), isTrue,
+      expect(RegExp(r'_bindings\.containsKey\(headId\)').hasMatch(main), isTrue,
           reason: 'media() 必须用解码后的 headId 查绑定表');
     });
 
@@ -1423,5 +1432,4 @@ void main() {
           reason: '挂载页必须用请求对象自带的 error');
     });
   });
-
 }

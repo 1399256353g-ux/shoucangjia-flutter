@@ -23,7 +23,6 @@ void main() {
     LibraryBadge.topCustom.clear();
     LibraryBadge.basicCustom.clear();
     LibraryBadge.topOfUnit.clear();
-    LibraryBadge.leafUnits.clear();
     UnitBadgeRegistry.order.clear();
   });
 

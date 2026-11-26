@@ -1,4 +1,5 @@
 import 'emoji_text.dart';
+import 'library_badge.dart' show LibraryBadge;
 
 /// 0.9.6 起：旧注册表（`/api/libraries`）里的「抖音收藏」不再作为展示文案。
 ///
@@ -18,6 +19,16 @@ String displayLibraryName(String id, String? rawName) {
   return name;
 }
 
+/// 界面上「一个媒体库叫什么」的**唯一**出口：先规范化名称，再按
+/// 设置里的「省略序号」开关去 `(1) ` 前缀。
+///
+/// 此前这条组合在两个页面各写一份、还写得不一致：
+///   网络设置/库管理只调 `displayLibraryName`，目录名带 `(1) ` 时原样露出；
+///   爬虫设置页套了 `LibraryBadge.stripIndex`，同一个库在两页显示两个名字。
+/// 用户以为那是两个库（「为什么这边有括号那边没有」）。
+String libraryDisplayName(String id, String? rawName) =>
+    LibraryBadge.stripIndex(displayLibraryName(id, rawName));
+
 /// 复制一份库列表并把每项的 `name` 换成展示文案（不改原 map）。
 List<Map<String, dynamic>> librariesWithDisplayNames(
     List<Map<String, dynamic>> libs) {
@@ -25,6 +36,8 @@ List<Map<String, dynamic>> librariesWithDisplayNames(
     for (final l in libs)
       {
         ...l,
+        // 只做名称规范化；去 `(1) ` 序号是渲染时的事（`libraryDisplayName`）。
+        // 这里不能顺手剥：库列表还要按原名与其它来源比对。
         'name': displayLibraryName('${l['id']}', l['name']?.toString()),
       }
   ];

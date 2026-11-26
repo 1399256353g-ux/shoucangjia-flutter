@@ -24,7 +24,6 @@ void main() {
     LibraryBadge.basicSource.clear();
     LibraryBadge.topOfUnit.clear();
     LibraryBadge.parentOfUnit.clear();
-    LibraryBadge.leafUnits.clear();
     await LibraryBadge.load();
   });
 
@@ -58,7 +57,6 @@ void main() {
     final root = buildTree();
     LibraryBadge.parentOfUnit.addAll(parentOfUnitIds(root));
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
-    LibraryBadge.leafUnits.addAll(leafUnitIds(root));
 
     const midColor = 0xFF123456;
     await LibraryBadge.setColor('MID', midColor);
@@ -71,7 +69,6 @@ void main() {
     final root = buildTree();
     LibraryBadge.parentOfUnit.addAll(parentOfUnitIds(root));
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
-    LibraryBadge.leafUnits.addAll(leafUnitIds(root));
 
     const midColor = 0xFF654321;
     await LibraryBadge.setColor('MID', midColor);
@@ -82,7 +79,6 @@ void main() {
     final root = buildTree();
     LibraryBadge.parentOfUnit.addAll(parentOfUnitIds(root));
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
-    LibraryBadge.leafUnits.addAll(leafUnitIds(root));
 
     await LibraryBadge.setColor('MID', 0xFF111111);
     await LibraryBadge.setColor('LEAF', 0xFF999999);
@@ -93,7 +89,6 @@ void main() {
     final root = buildTree();
     LibraryBadge.parentOfUnit.addAll(parentOfUnitIds(root));
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
-    LibraryBadge.leafUnits.addAll(leafUnitIds(root));
 
     await LibraryBadge.setTopColor('media:s1', 0xFF0000AA);
     await LibraryBadge.setColor('MID', 0xFF00AA00);
@@ -105,7 +100,6 @@ void main() {
     final root = buildTree();
     LibraryBadge.parentOfUnit.addAll(parentOfUnitIds(root));
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
-    LibraryBadge.leafUnits.addAll(leafUnitIds(root));
     expect(LibraryBadge.colorForUnit('LEAF'), isNotNull);
   });
 }

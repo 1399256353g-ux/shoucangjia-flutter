@@ -184,15 +184,17 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
-                    Text('单元库：${widget.unit.rel}',
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey)),
+                    // 标题已经写明是哪个单元库，这里只留一行「这个库在磁盘
+                    // 上的绝对路径」。此前还有一行 `单元库：<相对路径>`，与
+                    // 绝对路径说的是同一件事的两种坐标：相对路径要用户自己
+                    // 拼库根才找得到，读起来像两条不同的信息。
                     if (path.isNotEmpty)
                       Text(path,
+                          key: const ValueKey('unit-crawler-path'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 11, color: Colors.grey)),
+                              fontSize: 12, color: Colors.grey)),
                     const SizedBox(height: 12),
                     _capabilityBanner(),
                     if (!hasScript) ...[

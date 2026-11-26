@@ -364,7 +364,8 @@ class LibraryBadge {
         for (final e in entryStyle.entries) e.key.name: e.value.toJson(),
       });
 
-  static Future<void> saveStyle() => savePrefString(stylePrefsKey, encodeStyle());
+  static Future<void> saveStyle() =>
+      savePrefString(stylePrefsKey, encodeStyle());
 
   /// 容错读入：任何层级缺失/非法都回落默认，不阻断启动。
   static void applyStyleJson(Object? v) {
@@ -387,19 +388,6 @@ class LibraryBadge {
   /// owner 2026-11-27：「上级结构生成的词条要分发给下级啊」——中间层单元库
   /// 设的色此前无处可传：查询方只能一下跳到媒体库根，中间那层被跳过。
   static final Map<String, String> parentOfUnit = <String, String>{};
-
-  /// P1：单元库 id → 是否末梢（没有下级单元库）。同样由注册表从树结构填入。
-  /// 分发规则：**只有末梢单元库的词条向下分发**给它的基础库/作品/作者；
-  /// 非末梢单元库自定义色只作用于自己这一层，不参与分发。
-  static final Map<String, bool> leafUnits = <String, bool>{};
-
-  /// 该单元库能否向下分发词条。注册表为空（结构未加载）时不阻断，
-  /// 否则冷启动阶段所有词条都会退化成自动色。
-  static bool canDistribute(String unitId) {
-    if (unitId.isEmpty) return false;
-    if (leafUnits.isEmpty) return true;
-    return lookupByLibId(leafUnits, unitId) ?? true;
-  }
 
   /// 用户在设置里为某个库选择的 emoji 后缀；id -> emoji（最多 8 个字符）。
   static final Map<String, String> emoji = <String, String>{};
@@ -615,7 +603,8 @@ class LibraryBadge {
     }
     if (unitId.isNotEmpty) {
       final topId = lookupByLibId(topOfUnit, unitId);
-      final inherited = topId == null ? null : topEntryColor(topId, order: order);
+      final inherited =
+          topId == null ? null : topEntryColor(topId, order: order);
       if (inherited != null) return inherited;
     }
     return colorForUnit(unitId, order: order, allowCustom: false);
@@ -632,8 +621,7 @@ class LibraryBadge {
     if (sourceFor(unitId) == BadgeColorSource.autoAssign) return false;
     // 与 [colorForUnit] 同一条读法：两张表都查，不依赖 [topOfUnit] 是否
     // 已由注册表填好（冷启动阶段结构表还是空的）。
-    return lookupByLibId(custom, unitId) != null ||
-        topColorFor(unitId) != null;
+    return lookupByLibId(custom, unitId) != null || topColorFor(unitId) != null;
   }
 
   /// 基础库是否真有生效中的自定义色（来源=自动时不算）。
@@ -696,7 +684,8 @@ class LibraryBadge {
     });
   }
 
-  static Future<void> saveBasic() => savePrefString(basicPrefsKey, encodeBasic());
+  static Future<void> saveBasic() =>
+      savePrefString(basicPrefsKey, encodeBasic());
 
   /// 设置/清除顶级单元库颜色。清空即撤销该顶级单元库的向下继承。
   static Future<void> setTopColor(String topId, int? argb) async {
@@ -918,7 +907,8 @@ class LibraryBadge {
     await save();
   }
 
-  static Future<void> saveEmoji() => savePrefString(emojiPrefsKey, encodeEmoji());
+  static Future<void> saveEmoji() =>
+      savePrefString(emojiPrefsKey, encodeEmoji());
 
   /// 设置或清除单元库 emoji 后缀；同一单元库的 `rel` / `node:rel` 形式
   /// 一起清掉，避免两种 id 各留一份导致显示不一致。

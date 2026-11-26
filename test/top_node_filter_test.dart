@@ -41,9 +41,7 @@ UnitLibrary _tree() {
 void main() {
   setUp(() {
     LibraryBadge.topOfUnit.clear();
-    LibraryBadge.leafUnits.clear();
     UnitBadgeRegistry.topOf.clear();
-    UnitBadgeRegistry.leaf.clear();
     UnitBadgeRegistry.order.clear();
   });
 

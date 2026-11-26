@@ -97,7 +97,6 @@ void main() {
   group('规则不变：单元库词条仍由最下级单元库生成', () {
     test('entryKindOfUnit 仍按树结构判定，不因加了基础库词条而改变', () {
       LibraryBadge.topOfUnit.clear();
-      LibraryBadge.leafUnits.clear();
       // 没有结构表时，任何库都不被认成媒体库（退回单元库档）。
       expect(LibraryBadge.entryKindOfUnit('某个单元库'), LibEntryKind.unit);
     });

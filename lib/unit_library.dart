@@ -33,7 +33,6 @@ import 'top_node.dart';
 // `import 'unit_library.dart'` 的调用点与测试不必改。
 export 'count_label.dart' show formatCount;
 
-
 /// 一个节点文件夹（单元库候选）。
 class LibNode {
   final String id;
@@ -123,13 +122,6 @@ class UnitLibrary {
   }
 
   bool get isEmpty => basicCount == 0;
-
-  /// P1：末梢单元库——没有下级单元库。
-  ///
-  /// 只有末梢单元库的词条可以「向下分发」给它的基础库/作品/作者：
-  /// 作品归属由基础库反查得到，非末梢单元库下的作品都落在更深的单元库里，
-  /// 所以非末梢单元的样式只作用于自己这一层，分发出去也会被覆盖。
-  bool get isLeaf => children.isEmpty;
 
   /// 深度优先展开全部基础库（保持层级顺序）。
   List<BasicLib> get allBasics => [
@@ -294,8 +286,7 @@ UnitLibrary? buildUnitTree({
   // 而 `List.sort` 不稳定：一台服务端上多一个节点就能让「基础库归到哪一层」
   // 里的同深度候选顺序变化，未声明连接的旧格式基础库于是可能改挂到另一台
   // 服务端的同名目录上（词条/封面随之换源）。稳定排序消除这一层偶然性。
-  final ordered = stableSort(
-      byKey.values.toList(),
+  final ordered = stableSort(byKey.values.toList(),
       (a, b) => b.segments.length.compareTo(a.segments.length));
 
   final owned = <String, List<BasicLib>>{};
@@ -316,15 +307,16 @@ UnitLibrary? buildUnitTree({
       // 孤儿按**自己声明的**连接归组；没声明就进「未知来源」那组。
       orphanGroups.putIfAbsent(sid, () => <BasicLib>[]).add(b);
     } else {
-      owned.putIfAbsent(_nodeKeyOf(hit.serverId, splitRel(hit.rel).join('/')),
-          () => <BasicLib>[]).add(b);
+      owned
+          .putIfAbsent(_nodeKeyOf(hit.serverId, splitRel(hit.rel).join('/')),
+              () => <BasicLib>[])
+          .add(b);
     }
   }
 
   // 3. 建立节点树（父子按前缀关系）。
   final childrenOf = <String, List<LibNode>>{};
-  final sortedNodes = stableSort(
-      byKey.values.toList(),
+  final sortedNodes = stableSort(byKey.values.toList(),
       (a, b) => a.segments.length.compareTo(b.segments.length));
   final present = <String, LibNode>{};
   for (final n in sortedNodes) {
@@ -408,8 +400,7 @@ UnitLibrary? buildUnitTree({
   // 单连接 / 无连接信息（旧格式、离线快照）→ 保持旧形态：根即容器，
   // children 就是第一层单元库。此时不存在「哪个媒体库连不连得上」的问题，
   // 多插一层 `media:local` 只会让首页平白多一张没有连接信息的卡片。
-  final anyServer =
-      rootUnits.any((u) => u.node.serverId.trim().isNotEmpty);
+  final anyServer = rootUnits.any((u) => u.node.serverId.trim().isNotEmpty);
   if (!anyServer) {
     return UnitLibrary(
       node: LibNode(id: topId, rel: '', name: top),
@@ -555,7 +546,8 @@ class NodesPayload {
 
   const NodesPayload(this.rels, this.covers);
 
-  static const NodesPayload empty = NodesPayload(<String>[], <String, String>{});
+  static const NodesPayload empty =
+      NodesPayload(<String>[], <String, String>{});
 }
 
 /// 解析 `/api/nodes`：`nodes` 既可能是字符串也可能是 `{id,rel,name}` 对象。
@@ -567,9 +559,8 @@ NodesPayload parseNodesPayload(Object? json) {
   final list = json['nodes'];
   if (list is List) {
     for (final e in list) {
-      final raw = e is Map
-          ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}'
-          : '$e';
+      final raw =
+          e is Map ? '${e['rel'] ?? e['path'] ?? e['name'] ?? ''}' : '$e';
       final rel = splitRel(raw).join('/');
       if (rel.isEmpty || !seen.add(rel)) continue;
       rels.add(rel);
@@ -781,40 +772,9 @@ Map<String, String> topOfUnitIds(UnitLibrary root) {
   return out;
 }
 
-/// P1：单元库 id → 是否末梢（没有下级单元库）。
-///
-/// 只由树结构算出，不看任何目录名文本；`rel` 与 `node:rel` 两种 id 形式
-/// 都登记，查询端不必自己归一。
-Map<String, bool> leafUnitIds(UnitLibrary root) {
-  final out = <String, bool>{};
-  void walk(UnitLibrary u) {
-    final leaf = u.isLeaf;
-    // 与 topOfUnitIds 同一份等价键规则（含裸 rel 与带前缀形式）。
-    for (final f in idFormsOf(u.id)) {
-      out[f] = leaf;
-    }
-    out['node:${u.rel}'] = leaf;
-    for (final c in u.children) {
-      walk(c);
-    }
-  }
-
-  for (final c in root.children) {
-    walk(c);
-  }
-  return out;
-}
-
 class UnitBadgeRegistry {
   static final Map<String, String> labels = <String, String>{};
   static final Map<String, String> keys = <String, String>{};
-
-  /// P1：单元库 id → 是否末梢单元库（只有末梢可向下分发词条）。
-  ///
-  /// **不是独立的一份表**：读取端统一回落到 `LibraryBadge.leafUnits`。
-  /// 两份同名表并存时，任一处只填其一时「设置页说可分发给下级、实际不分发」
-  /// 这种两边都自洽的矛盾就会重新出现，所以这里只暴露同一份数据的视图。
-  static Map<String, bool> get leaf => LibraryBadge.leafUnits;
 
   /// 单元库配色顺序（不含顶级 SECRET）：作者词条与基础库卡片共用。
   static final List<String> order = <String>[];
@@ -829,7 +789,7 @@ class UnitBadgeRegistry {
       order.isNotEmpty ? order : fallback;
 
   /// P1：单元库 id → 所属顶级单元库 id（顶级单元库＝媒体库根）。
-  /// 只由结构关系算出，不看任何目录名文本；与 [leaf] 同样只是
+  /// 只由结构关系算出，不看任何目录名文本；只是
   /// `LibraryBadge.topOfUnit` 的视图，不另存一份。
   static Map<String, String> get topOf => LibraryBadge.topOfUnit;
 
@@ -847,13 +807,10 @@ class UnitBadgeRegistry {
           if (u.node.id != root.node.id) u.id,
       ]);
     // 词条继承/分发判定只有一处：LibraryBadge 的两张表。
-    // 这里不再写第二份副本，`topOf` / `leaf` 都是它的视图。
+    // 这里不再写第二份副本，`topOf` 只是它的视图。
     LibraryBadge.topOfUnit
       ..clear()
       ..addAll(topOfUnitIds(root));
-    LibraryBadge.leafUnits
-      ..clear()
-      ..addAll(leafUnitIds(root));
     // 直接上级：分发链逐级上行要用（owner 2026-11-27）。
     LibraryBadge.parentOfUnit
       ..clear()

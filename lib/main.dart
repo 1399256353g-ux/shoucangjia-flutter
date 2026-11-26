@@ -733,14 +733,15 @@ class LibMeta {
   Map<String, String> get unitNames =>
       {for (final u in units) u.id: unitNameOf(u.id)};
 
-  /// J10：作者所属大库 id；无法匹配基础库时为空。
-  String bigIdFor(String mediaPath) {
-    final b = basicLibForMedia(basics, mediaPath);
-    if (b == null) return '';
-    if (b.bigId.isNotEmpty) return b.bigId;
-    // 旧数据缺少 big_id 时按路径前缀回退到名称中含该前缀的大库。
-    return '';
-  }
+  /// 作者所属历史分组（服务端 `big_id`）；无法匹配基础库时为空。
+  ///
+  /// 基础库反查只走 [basicIdForPath] 一条链（`basics` + `allBasics`）。
+  /// 此前这里自己调 `basicLibForMedia(basics, …)`，只查当前注册库那一份：
+  /// 作者挂在别的单元库的基础库里时（`allBasics` 里才有），同一份数据
+  /// 「基础库/单元库归属算得出来、历史分组归属永远空」——筛选面板选了
+  /// 单元库能命中、选了分组却一条不中，两边都自称按同一份 meta 算的。
+  String bigIdFor(String mediaPath) =>
+      basicById(basicIdForPath(mediaPath))?.bigId ?? '';
 
   List<String> get order => filterBasics.map((e) => e.id).toList();
 
@@ -6013,7 +6014,7 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Future<void> _switchTo(Map<String, dynamic> l) async {
     cfg.lib = '${l['id']}';
-    cfg.libName = displayLibraryName('${l['id']}', '${l['name'] ?? ''}');
+    cfg.libName = libraryDisplayName('${l['id']}', '${l['name'] ?? ''}');
     final origin = serverOriginOf(l);
     // 账号/密码：**没写这个键**才回落到当前连接（旧格式/离线快照）；
     // 写了但为空串是有意的（该连接本来不需鉴权），不能当「缺失」处理。
@@ -6293,7 +6294,7 @@ class _LibraryPageState extends State<LibraryPage> {
           isDef ? Icons.radio_button_checked : Icons.radio_button_unchecked,
           color: isDef ? Colors.amber : Colors.grey),
       title: Text(
-          '${displayLibraryName('$id', '${l['name']}')}  ${isDef ? '★' : ''}'),
+          '${libraryDisplayName('$id', '${l['name']}')}  ${isDef ? '★' : ''}'),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -6689,8 +6690,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                     ListTile(
                       leading: const Icon(Icons.library_books_outlined),
                       title: Text(
-                          LibraryBadge.stripIndex(displayLibraryName(
-                              '${l['id']}', '${l['name'] ?? l['id']}')),
+                          libraryDisplayName(
+                              '${l['id']}', '${l['name'] ?? l['id']}'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                       subtitle: Text(
@@ -6807,7 +6808,12 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('爬虫配置 · ${widget.lib['name']}'), actions: [
+      // 名字统一走 `libraryDisplayName`：与设置列表/网络设置同一个出口，
+      // 目录名带 `(1) ` 前缀时这里也不再露出一份没剥序号的写法。
+      appBar: AppBar(
+          title: Text('爬虫配置 · '
+              '${libraryDisplayName('${widget.lib['id']}', '${widget.lib['name']}')}'),
+          actions: [
         TextButton(
             onPressed: saving ? null : save,
             child: Text(saving ? '保存中…' : '保存')),
@@ -6962,7 +6968,10 @@ class _MaintenancePageState extends State<MaintenancePage> {
     final deepOk = deep == null || boolOf(deep['ok']);
     final ok = boolOf(data['indexOk']) && boolOf(data['baseOk']) && deepOk;
     return Scaffold(
-      appBar: AppBar(title: Text('维护 · ${widget.lib['name']}'), actions: [
+      appBar: AppBar(
+          title: Text('维护 · '
+              '${libraryDisplayName('${widget.lib['id']}', '${widget.lib['name']}')}'),
+          actions: [
         IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => load(),
@@ -7126,7 +7135,7 @@ class _HomePageState extends State<HomePage> {
       final changed = cfg.lib != pick['id'];
       cfg.lib = '${pick['id']}';
       cfg.libName =
-          displayLibraryName('${pick['id']}', '${pick['name'] ?? ''}');
+          libraryDisplayName('${pick['id']}', '${pick['name'] ?? ''}');
       if (changed) {
         await savePrefString('lib', cfg.lib);
       }
@@ -7285,35 +7294,6 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
       authorAvatarRevision.value++;
     },
   );
-}
-
-/// 作者行的库归属（基础库/大库/单元库）：作者总览与排行榜共用。
-///
-/// 合并索引会给 `libs`（出处）或无头像作者只有 `_lib`，不能只看头像路径，
-/// 否则筛选面板选了库之后会把没有头像的作者全部排除。
-({String basic, String big, String unit}) authorRowIdsFor(Map e, LibMeta? m) {
-  var basic = '${e['_bid'] ?? ''}';
-  final libs = e['libs'];
-  if (basic.isEmpty && libs is List) {
-    for (final x in libs) {
-      final id = '$x';
-      if (m?.basicById(id) != null) {
-        basic = id;
-        break;
-      }
-    }
-  }
-  final av = '${e['avatar'] ?? ''}';
-  if (basic.isEmpty) basic = m?.basicIdForPath(av) ?? '';
-  if (basic.isEmpty) {
-    final l = workLibTag(e);
-    if (m?.basicById(l) != null) basic = l;
-  }
-  var unit =
-      basic.isEmpty ? (m?.unitIdFor(av) ?? '') : (m?.basicToUnit[basic] ?? '');
-  var big = m?.basicById(basic)?.bigId ?? '';
-  if (big.isEmpty) big = m?.bigIdFor(av) ?? '';
-  return (basic: basic, big: big, unit: unit);
 }
 
 class RankPage extends StatefulWidget {

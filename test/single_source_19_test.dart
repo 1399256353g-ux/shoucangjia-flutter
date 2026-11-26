@@ -47,7 +47,6 @@ void main() {
     LibraryCornerBadge.resetDefaults();
     LibraryBadge.topCustom.clear();
     LibraryBadge.topOfUnit.clear();
-    LibraryBadge.leafUnits.clear();
     UnitBadgeRegistry.order.clear();
   });
 
