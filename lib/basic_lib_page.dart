@@ -520,7 +520,7 @@ class _BasicLibPageState extends State<BasicLibPage>
             borderRadius: BorderRadius.circular(kCardRadius),
             onTap: () => widget.onOpenAuthor(name),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+              padding: kBasicAuthorCardPadding,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -589,7 +589,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: SizedBox(
-        height: 38,
+        height: kBasicAuthorSearchHeight,
         child: TextField(
           key: const ValueKey('basic-author-search'),
           controller: _authorSearch,

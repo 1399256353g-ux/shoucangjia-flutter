@@ -49,12 +49,12 @@ enum LibEntryKind {
   basic,
 }
 
-/// 词条圆角：四种层级共用，**不可调**（形状一致是硬约束）。
+/// 词条圆角：三种层级共用，**不可调**（形状一致是硬约束）。
 const double kEntryRadius = 6;
 
 /// P1：单个层级的词条外观（只允许改边框粗细与底纹透明度）。
 ///
-/// 刻意不暴露圆角/内边距/字号：形状与尺寸必须四级一致，
+/// 刻意不暴露圆角/内边距/字号：形状与尺寸必须三级一致，
 /// 层级差异只体现在边框与底纹上。
 class EntryStyle {
   /// 边框粗细（逻辑像素），限制在 0–3。
@@ -502,7 +502,7 @@ class LibraryBadge {
     return topColorFor(topId);
   }
 
-  /// P1：词条外观。四种层级共用同一圆角与内边距，只改边框与底纹强度，
+  /// P1：词条外观。三种层级共用同一圆角与内边距，只改边框与底纹强度，
   /// 因此「形状与尺寸保持一致」由这一个函数保证，调用方不再各写一份。
   ///
   /// 边框粗细与底纹浓度可在「设置 → 自定义 → 库词条配色」里按层级调整；
@@ -852,7 +852,7 @@ class LibraryBadge {
       emoji
         ..clear()
         ..addAll(parseEmoji(sp.getString(emojiPrefsKey)));
-      // P1：四层级外观（边框粗细/透明度 + 底纹浓度）。
+      // P1：三层级外观（边框粗细/透明度 + 底纹浓度）。
       final rawStyle = sp.getString(stylePrefsKey);
       if (rawStyle != null && rawStyle.isNotEmpty) {
         try {
@@ -909,7 +909,7 @@ class LibBadgeChip extends StatelessWidget {
   /// 单元库 id（`rel` 或 `node:rel`）；给出时追加该库 emoji 后缀。
   final String unitId;
 
-  /// P1：词条层级。四种层级共用同一形状/内边距/字号，只改边框与底纹。
+  /// P1：词条层级。三种层级共用同一形状/内边距/字号，只改边框与底纹。
   final LibEntryKind kind;
 
   const LibBadgeChip(

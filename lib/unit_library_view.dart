@@ -80,7 +80,7 @@ const LinearGradient kLibCardGradient = LinearGradient(
 /// P3：首页顶级单元库卡片上的词条色块边长（逻辑像素）。
 ///
 /// 尺寸固定、不随层级变化——「形状与尺寸一致」是词条体系的硬约束，
-/// 四种词条只在边框/底纹/图案上区分。
+/// 三种词条只在边框/底纹/图案上区分。
 /// 库卡片底部信息层：词条（基础库才有）→ 名称 → 统计 → 服务器。
 ///
 /// [dense] 用于网格更小的基础库卡片（字号/内边距各缩一档），层级与
@@ -274,11 +274,21 @@ String unitCoverUrl(
   // 解析（trim / 确认媒体路径 / 取库段）只有 `lib_cover.manualCoverUrl` 一处；
   // 本函数只负责拿所在连接拼绝对地址。
   if (!ignoreManual) {
-    final base = unit.node.serverBase.trim();
-    if (base.isNotEmpty) {
-      final manual = manualCoverUrl(unit.node.coverUrl,
-          build: (path, _) => '${baseForJoin(base)}$path');
-      if (manual.isNotEmpty) return manual;
+    // owner 2026-11-26：自动封面必须能取到**下级单元库**设过的手动封面。
+    //
+    // 此前这里只看 `unit.node.coverUrl`（自己），所以「下级设了手动封面、
+    // 上级选自动」时上级显示一张无关作品图或空白。现在先自己、再按树序
+    // 找第一个设过手动封面的下级；跨连接时用该节点自己的 base 拼地址。
+    final owner = unit.firstManualCoverUnit;
+    if (owner != null) {
+      final base = owner.node.serverBase.trim().isNotEmpty
+          ? owner.node.serverBase.trim()
+          : unit.node.serverBase.trim();
+      if (base.isNotEmpty) {
+        final manual = manualCoverUrl(owner.node.coverUrl,
+            build: (path, _) => '${baseForJoin(base)}$path');
+        if (manual.isNotEmpty) return manual;
+      }
     }
   }
   final top = topPlayedInUnit(unit);
@@ -927,7 +937,7 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
             // 底部渐变：与基础库卡片共用同一信息层排版。
             //
             // 0.9.191：这里曾试过给单元库卡也加一条本级词条，结果词条文字与
-            // 下方标题完全重复（同一张卡上同一个名字出现两次），属于为「四层级
+            // 下方标题完全重复（同一张卡上同一个名字出现两次），属于为「三层级
             // 差异化」硬凑的表现。层级已经由左上角图案角标（P4）与卡片在图里的
             // 位置（首页＝顶级、单元库页＝下级）表达，不再重复；词条仍只在
             // 作者/基础库卡上表示「属于哪个单元库」。

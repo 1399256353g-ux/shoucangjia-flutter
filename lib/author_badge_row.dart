@@ -121,10 +121,30 @@ class _CollapsibleBadgeWrapState extends State<CollapsibleBadgeWrap> {
   @override
   void didUpdateWidget(covariant CollapsibleBadgeWrap old) {
     super.didUpdateWidget(old);
-    // 词条集合变了（换作品/换作者）：折叠回常态，避免上一张卡的展开状态串过去。
-    if (old.chips.length != widget.chips.length) {
+    // 词条内容变了（换作品/换作者）：折叠回常态，避免上一张卡的展开状态串过去。
+    //
+    // 0.9.306：原来只比 `chips.length`。播放页左右滑到下一条作品时，
+    // 两条作品的词条条数**恰好相同**（同一个单元库 + 同一等级 + 同样两个基础库）
+    // 是非常常见的情形，于是就绪状态一路带过去：用户从未点过展开，
+    // 下一条作品的卡片却是展开的——「平日隐藏」形同虚设。
+    // 判据改成「内容是否完全相同」：条数相同但文字/颜色/层级不同也算变。
+    if (!_sameChips(old.chips, widget.chips)) {
       _expanded = widget.startExpanded;
     }
+  }
+
+  static bool _sameChips(List<BadgeChipSpec> a, List<BadgeChipSpec> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].label != b[i].label ||
+          a[i].color != b[i].color ||
+          a[i].unitId != b[i].unitId ||
+          a[i].kind != b[i].kind) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void _expand() {
@@ -197,6 +217,11 @@ class _BadgeExpandChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 0.9.306：展开键的底色/描边/文字此前写死成白色（`Colors.white` /
+    // `white70`）。主题里有浅色主题（`daylight`，背景 `0xFFF5F7FB`）：
+    // 白字压在浅色卡片上等于看不见——真缺陷，不是风格差异。
+    // 改用主题前景色，深/浅主题都自洽。
+    final fg = Theme.of(context).colorScheme.onSurface;
     return Semantics(
       button: true,
       label: '展开 $count 个基础库词条',
@@ -207,16 +232,17 @@ class _BadgeExpandChip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.10),
+            color: fg.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(kEntryRadius),
-            border: Border.all(
-                color: Colors.white.withValues(alpha: 0.22), width: 0.8),
+            border: Border.all(color: fg.withValues(alpha: 0.28), width: 0.8),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.expand_more, size: 11, color: Colors.white70),
+            Icon(Icons.expand_more, size: 11, color: fg.withValues(alpha: 0.75)),
             Text('$count',
-                style: const TextStyle(
-                    fontSize: 9, height: 1.2, color: Colors.white70)),
+                style: TextStyle(
+                    fontSize: 9,
+                    height: 1.2,
+                    color: fg.withValues(alpha: 0.75))),
           ]),
         ),
       ),
@@ -237,7 +263,7 @@ class AuthorBadgeRow extends StatelessWidget {
   /// 配色顺序（只在 [unitColor] 为 null 时用到），与主页词条同源。
   final List<String> order;
 
-  /// 单元库 id：决定 emoji 后缀与四级词条外观（顶级/单元/基础库）。
+  /// 单元库 id：决定 emoji 后缀与三级词条外观（媒体库/单元库/基础库）。
   final String unitId;
 
   /// 作者等级（D–S）；空串不显示。

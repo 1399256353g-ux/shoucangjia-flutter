@@ -1318,7 +1318,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
     cfg.lib = sp.getString('lib') ?? '';
     await AppSettings.load();
     await LibraryCornerBadge.load();
-    // P1：词条配色与四层级外观必须在首帧前就位，否则首屏卡片会先闪默认色。
+    // P1：词条配色与三层级外观必须在首帧前就位，否则首屏卡片会先闪默认色。
     await LibraryBadge.load();
     // P6：等级配置以服务端为准；这里先用本机只读缓存，联网后再覆写一次。
     await AuthorGrade.load();
@@ -1966,10 +1966,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                         '单元库/基础库；单元库可各自覆盖；基础库自己的颜色优先级最高。'
                         '分发规则：只有末梢单元库（没有下级单元库）的设色会向下分发，'
                         '非末梢单元库的设色只作用于本层，作品/作者仍取末梢或继承色。'
-                        '四种层级形状与尺寸一致，只用边框/底纹区分。',
+                        '三种词条形状与尺寸一致，只用边框/底纹区分。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
-                  const _SectionHeader('词条外观（四层级边框 / 底纹）'),
+                  const _SectionHeader('词条外观（三层级边框 / 底纹）'),
                   _entryStyleSection(),
                   const SizedBox(height: 8),
                   const _SectionHeader('按媒体库设置词条色'),
@@ -2735,7 +2735,13 @@ class LibBadges extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final labels = LibraryBadge.labels(libIds, names: names);
-    if (labels.isEmpty && grade.isEmpty) return const SizedBox.shrink();
+    // 基础库词条（owner 2026-11-26 新增）也必须参与「有没有词条」的判定：
+    // 只判 labels/grade 时，一个「单元库归属算不出来（labels 空）+ 没有等级」
+    // 却挂了多个基础库的作者，基础库词条会被这条早退整个丢掉——而那正是
+    // 基础库词条要回答的问题（他挂在哪几个基础库）。
+    if (labels.isEmpty && grade.isEmpty && basicChips.isEmpty) {
+      return const SizedBox.shrink();
+    }
     // 与 [LibraryBadge.labels] **同一去重口径**：它按「非空 + 首次出现」去重，
     // 这里只过滤空串而不去重的话，`['a','a','b']` 会让第二个词条用 `a`
     // 的颜色/层级（label 是 `b`）——颜色与文字对不上。
@@ -17349,7 +17355,9 @@ class _AuthorPageState extends State<AuthorPage> {
       );
     }
     return Padding(
-      padding: const EdgeInsets.all(14),
+      // 与加载骨架（`_AuthorPageSkeleton`）读同一个常量：两处都写 14 时，
+      // 改一处就会让「加载完成」那一刻整块信息区横向跳一下。
+      padding: const EdgeInsets.all(kAuthorHeaderPadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -17379,7 +17387,7 @@ class _AuthorPageState extends State<AuthorPage> {
                   onTap: _restoreAutoAvatar,
                 ),
             ]),
-            const SizedBox(width: 12),
+            const SizedBox(width: kAuthorHeaderAvatarGap),
             Expanded(
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -17818,6 +17826,11 @@ class WorkGridSkeleton extends StatelessWidget {
 }
 
 // 作者主页骨架：头像/简介占位 + 作品网格
+//
+// 0.9.306：这条骨架此前自己写了一遍头部几何（`all(14)` / 64 / 圆形 `32`
+// / 间距 12），与真实头部（`kAuthorHeaderPadding` + `AuthorAvatar.headerSize`）
+// 是两份。头像尺寸一改，骨架就按旧尺寸铺，加载完成那一刻头部整块换成另一个
+// 高度。现在四处都读 `card_metrics` 的同一组常量。
 class _AuthorPageSkeleton extends StatelessWidget {
   const _AuthorPageSkeleton();
 
@@ -17826,13 +17839,14 @@ class _AuthorPageSkeleton extends StatelessWidget {
     return _SkeletonPulse(
       child: Column(children: [
         Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(kAuthorHeaderPadding),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const SkeletonBlock(
-                width: 64,
-                height: 64,
-                radius: BorderRadius.all(Radius.circular(32))),
-            const SizedBox(width: 12),
+                width: kAvatarHeaderSize,
+                height: kAvatarHeaderSize,
+                radius: BorderRadius.all(
+                    Radius.circular(kAvatarHeaderSize / 2))),
+            const SizedBox(width: kAuthorHeaderAvatarGap),
             Expanded(
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

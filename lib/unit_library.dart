@@ -137,6 +137,40 @@ class UnitLibrary {
         for (final c in children) ...c.allBasics,
       ];
 
+  /// 子树里**第一个**设过手动封面的单元库（含自己）的封面路径；没有则空串。
+  ///
+  /// owner 2026-11-26：
+  /// > 「不是所有的单元库自动封面都有效，有些虽然选了自动但不会自动取优先级
+  /// >   高的下级单元库封面，也可能是下级单元库改为手动封面了但上级单元库
+  /// >   取不到」
+  ///
+  /// 根因：自动封面链只看「本机播放量最高的**作品**」，从不看下级单元库
+  /// 设过的手动封面。于是「下级设了手动封面、上级选自动」时，上级会显示
+  /// 一张无关的作品图（或干脆空白），而下级自己的卡上是那张手动封面。
+  ///
+  /// 现在的顺序与 [subtreeManualCovers] 一致：先自己，再按树序找第一个设过
+  /// 手动封面的下级单元库。**只读指针，不改任何目录**。
+  String get firstManualCover {
+    final own = node.coverUrl.trim();
+    if (own.isNotEmpty) return own;
+    for (final c in children) {
+      final hit = c.firstManualCover;
+      if (hit.isNotEmpty) return hit;
+    }
+    return '';
+  }
+
+  /// 子树里**第一个**设过手动封面（`cover.u`）的单元库所带的节点，供调用方
+  /// 拿到它的 `serverBase` 拼绝对地址（跨连接时不能借自己的 base）。
+  UnitLibrary? get firstManualCoverUnit {
+    if (node.coverUrl.trim().isNotEmpty) return this;
+    for (final c in children) {
+      final hit = c.firstManualCoverUnit;
+      if (hit != null) return hit;
+    }
+    return null;
+  }
+
   /// 子树里**第一个**带爬虫封面（`cv`）的基础库所给的封面路径；没有则空串。
   ///
   /// 「子树里第一个非空 `cv`」这条扫描此前写了三遍：`main._unitCoverUrl` 里的

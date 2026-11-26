@@ -23,6 +23,8 @@
 /// 本文件只有数字，不含任何布局逻辑。
 library;
 
+import 'package:flutter/painting.dart';
+
 /// 库卡片与作者卡片的统一圆角（单元库卡 / 基础库卡 / 作者总览卡 /
 /// 基础库页作者卡共用）。`kLibCardRadius` 与 `AuthorGridCard.radius`
 /// 都转发它。
@@ -43,6 +45,19 @@ const double kAvatarRankSize = 42;
 
 /// 作者主页头部头像边长（`AuthorAvatar.headerSize`）。
 const double kAvatarHeaderSize = 64;
+
+/// 作者主页信息头的内边距（四边同值）。
+///
+/// 0.9.306：真实头部写 `EdgeInsets.all(14)`，加载骨架又写一遍 `all(14)`，
+/// 两处是同一个数却没有名字——改真实头部的留白，骨架仍按 14 铺，
+/// 「加载完成」那一刻整块信息区横向跳一下。
+const double kAuthorHeaderPadding = 14;
+
+/// 作者主页信息头里「头像」与「文字列」之间的横向间距。
+///
+/// 同上：真实头部与骨架各写一遍 12。骨架按 12 排、真实头部改成别的值时，
+/// 占位块与真实文字的左边界对不上，骨架阶段看起来像「两栏错位」。
+const double kAuthorHeaderAvatarGap = 12;
 
 /// 基础库页作者卡片上的头像边长（与作者总览一致）。
 const double kAvatarBasicAuthorSize = kAvatarGridSize;
@@ -83,3 +98,17 @@ const double kAuthorRankDividerHeight = 1;
 /// 排行榜一行的纵向步进（行高 + 分隔线）：首屏预热算行数用它。
 const double kAuthorRankRowExtent =
     kAuthorRankTileHeight + kAuthorRankDividerHeight;
+
+/// 基础库页「作者」tab 搜索框高度（页面内唯一一份）。
+///
+/// 这个 38 与输入框自身的 `isDense` + 内边距一起决定行高：压低一格，
+/// 下方作者网格就多一行，而首屏预热按网格约束算张数。
+const double kBasicAuthorSearchHeight = 38;
+
+/// 基础库页「作者」tab 卡片的内容内边距。
+///
+/// 上 12 / 下 10 是刻意不对称（名字行贴近底边），四边同值就不对了。
+/// 这组数字在这页只出现一次，但它与网格行高（`kBasicAuthorGrid`
+/// 0.86 比例）一起决定卡片里能放几行字——立名后改比例时不会忘了同步。
+const EdgeInsets kBasicAuthorCardPadding =
+    EdgeInsets.fromLTRB(10, 12, 10, 10);
