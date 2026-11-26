@@ -18,6 +18,7 @@ import 'home_action.dart';
 import 'json_num.dart' show sumSat;
 import 'lib_refresh_button.dart';
 import 'scroll_decode.dart';
+import 'scroll_viewport.dart';
 import 'star_store.dart';
 import 'text_clip.dart';
 import 'unit_cover_store.dart';
@@ -414,6 +415,18 @@ class UnitLibraryHomeView extends StatefulWidget {
 }
 
 class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
+  /// 首页媒体库网格的**可见**尺寸（0.9.314）。
+  ///
+  /// 它是整页 `ListView` 里 `shrinkWrap` 的一块：`LayoutBuilder` 给出的高度
+  /// 是 infinity（滚动方向不受约束），而按 `MediaQuery.size`（整窗口）算
+  /// 又多出上方「媒体库 N 个」计数行与星标入口卡——两个数都不是这块网格
+  /// 真正在屏幕里的高度。
+  ///
+  /// 现在从渲染树取：视口高度 − 本块在视口内的纵向偏移，再用自身高度收顶
+  /// （几何唯一实现在 `scroll_viewport.visibleViewportOf`）。
+  final GlobalKey _gridKey = GlobalKey();
+  Size? _gridViewport;
+
   @override
   void initState() {
     super.initState();
@@ -455,20 +468,24 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
     if (!mounted) return;
     final units = widget.tree.children;
     if (units.isEmpty) return;
+    // 尺寸未知（首帧还没经过帧后测量）时不预热：拿窗口顶替一次
+    // 就再也不会被纠正，多拉的正是屏幕外那一行。
+    final viewport = _gridViewport;
+    if (viewport == null) return;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
     prefetchLibCovers(
-      viewport: mq.size,
+      viewport: viewport,
       grid: kUnitLibGrid,
       padding: kLibGridPadding,
       decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
-      items: [
-        for (final u in units)
-          (
+      // 惰性 `map`：`prefetchLibCovers` 只求值到配额用完为止。写成列表字面量
+      // 会先把**每一张**卡片的封面链跑一遍（几百个基础库 = 几百次
+      // `basicCoverUrl`），再只用前 8 张的结果。
+      items: units.map((u) => (
             cover: widget.unitCoverOf?.call(u) ?? '',
             headers: unitHeadersOf(u, widget.headersOf),
-          ),
-      ],
+          )),
     );
   }
 
@@ -510,47 +527,60 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
           ),
         // 与其他卡片一样铺成网格，单元库卡片尺寸更大。
         if (units.isNotEmpty)
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            padding: kLibGridPadding,
-            gridDelegate: kUnitLibGrid.delegate,
-            itemCount: units.length,
-            itemBuilder: (_, i) {
-              final u = units[i];
-              // 「代表基础库」只有 `UnitLibrary.coverLib` 一处判定。
-              final coverLib = u.coverLib?.id ?? '';
-              // P3：首页卡片＝顶级单元库卡片。只用 owner 设过的封面，
-              // 未设则用该顶级单元库的词条色块占位，不再拿作品图冒充库封面。
-              // 顶级卡片色块：与设置页/词条同一条链（colorForUnit 已内含
-              // 顶级自定义色）。这里再写 `topColorFor(...) ??` 是第二处口径，
-              // 顶级选「自动分配」时会继续拿到残留 topCustom 旧色。
-              final tint = LibraryBadge.colorForUnit(u.id,
-                  order: UnitBadgeRegistry.order);
-              return UnitLibraryCard(
-                unit: u,
-                topCard: true,
-                fallbackTint: tint,
-                online: widget.statusOf?.call(u),
-                coverUrl:
-                    (widget.topCoverOf ?? widget.unitCoverOf)?.call(u) ?? '',
-                coverUrlOf: widget.topCoverOf ?? widget.unitCoverOf,
-                headers: unitHeadersOf(u, widget.headersOf),
-                starred: liveStars.contains(u.id),
-                onToggleStar: () => widget.onToggleUnitStar(u),
-                onTap: () => widget.onOpenUnit(u),
-                coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
-                onQuickRefresh: widget.refreshOf == null || coverLib.isEmpty
-                    ? null
-                    : () => widget.refreshOf!(coverLib, u.rel),
-                onSetCover: widget.coverMenuOf != null
-                    ? null
-                    : (widget.coverUploader == null || coverLib.isEmpty
-                        ? null
-                        : () => _pickCover(coverLib, u.rel)),
-              );
-            },
-          ),
+          Builder(builder: (c) {
+            // 帧后读一次几何（布局阶段不写状态）：`shrinkWrap` 网格的
+            // `LayoutBuilder` 高度恒为 infinity，用它当「首屏高度」等于
+            // 永远只预热一行。
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              final v = visibleViewportOf(_gridKey);
+              if (v == null || v == _gridViewport) return;
+              _gridViewport = v;
+              _schedulePrefetch();
+            });
+            return GridView.builder(
+              key: _gridKey,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: kLibGridPadding,
+              gridDelegate: kUnitLibGrid.delegate,
+              itemCount: units.length,
+              itemBuilder: (_, i) {
+                final u = units[i];
+                // 「代表基础库」只有 `UnitLibrary.coverLib` 一处判定。
+                final coverLib = u.coverLib?.id ?? '';
+                // P3：首页卡片＝顶级单元库卡片。只用 owner 设过的封面，
+                // 未设则用该顶级单元库的词条色块占位，不再拿作品图冒充库封面。
+                // 顶级卡片色块：与设置页/词条同一条链（colorForUnit 已内含
+                // 顶级自定义色）。这里再写 `topColorFor(...) ??` 是第二处口径，
+                // 顶级选「自动分配」时会继续拿到残留 topCustom 旧色。
+                final tint = LibraryBadge.colorForUnit(u.id,
+                    order: UnitBadgeRegistry.order);
+                return UnitLibraryCard(
+                  unit: u,
+                  topCard: true,
+                  fallbackTint: tint,
+                  online: widget.statusOf?.call(u),
+                  coverUrl:
+                      (widget.topCoverOf ?? widget.unitCoverOf)?.call(u) ?? '',
+                  coverUrlOf: widget.topCoverOf ?? widget.unitCoverOf,
+                  headers: unitHeadersOf(u, widget.headersOf),
+                  starred: liveStars.contains(u.id),
+                  onToggleStar: () => widget.onToggleUnitStar(u),
+                  onTap: () => widget.onOpenUnit(u),
+                  coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
+                  onQuickRefresh: widget.refreshOf == null || coverLib.isEmpty
+                      ? null
+                      : () => widget.refreshOf!(coverLib, u.rel),
+                  onSetCover: widget.coverMenuOf != null
+                      ? null
+                      : (widget.coverUploader == null || coverLib.isEmpty
+                          ? null
+                          : () => _pickCover(coverLib, u.rel)),
+                );
+              },
+            );
+          }),
       ],
     );
   }
@@ -679,13 +709,13 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
       grid: kUnitLibGrid,
       padding: kStarredGridPadding,
       decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
-      items: [
-        for (final u in units)
-          (
+      // 惰性 `map`：`prefetchLibCovers` 只求值到配额用完为止。写成列表字面量
+      // 会先把**每一张**卡片的封面链跑一遍（几百个基础库 = 几百次
+      // `basicCoverUrl`），再只用前 8 张的结果。
+      items: units.map((u) => (
             cover: widget.unitCoverOf?.call(u) ?? '',
             headers: unitHeadersOf(u, widget.headersOf),
-          ),
-      ],
+          )),
     );
   }
 
@@ -1258,13 +1288,10 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
       padding: kLibGridPadding,
       decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
       maxItems: 6,
-      items: [
-        for (final sub in unit.children)
-          (
+      items: unit.children.map((sub) => (
             cover: widget.unitCoverOf?.call(sub) ?? '',
             headers: unitHeadersOf(sub, widget.headersOf),
-          ),
-      ],
+          )),
     );
 
     // 基础库卡片（220 / 0.92，与 `BasicLibCard` 同一条封面解析）。
@@ -1273,15 +1300,12 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
       grid: kBasicLibGrid,
       padding: kLibGridPadding,
       decodeWidth: kBasicLibGrid.decodeWidth(mq.devicePixelRatio),
-      items: [
-        for (final b in unit.basics)
-          (
+      items: unit.basics.map((b) => (
             cover: basicCoverUrl(b,
                 preset: widget.coverOf?.call(b) ?? '',
                 firstThumb: b.firstCover),
             headers: widget.headersOf?.call(b.id) ?? const <String, String>{},
-          ),
-      ],
+          )),
     );
   }
 

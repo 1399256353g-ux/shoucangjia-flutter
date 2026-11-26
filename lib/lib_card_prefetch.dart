@@ -68,7 +68,10 @@ List<ThumbPrefetchItem> libCoverPrefetchRequests(
 /// - [decodeWidth]：卡片渲染用的解码宽度，必须由 `decode_plan.libCardDecodeWidthOf`
 ///   按卡片真实显示宽度算出（单元库 260 / 基础库 220），否则缓存键不匹配、
 ///   预热白做；
-/// - [items]：按网格显示顺序的卡片，超出首屏的部分不会进请求；
+/// - [items]：按网格显示顺序的卡片，超出首屏的部分不会进请求。传**惰性**
+///   `Iterable`（`units.map(...)`）时只求值到配额用完为止——主页面有几百个
+///   基础库时，`basicCoverUrl` 每次都要跑一遍封面优先级链，先物化成 List
+///   等于给全部卡片算一次，再只用前 8 张的结果。
 /// - [maxItems]：覆盖 [LibGridSpec.maxPrefetch]。
 int prefetchLibCovers({
   required Size viewport,

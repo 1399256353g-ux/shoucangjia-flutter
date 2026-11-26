@@ -49,6 +49,21 @@ class SyncRunItem {
   }
 }
 
+/// 退出码 → 给人看的说法（**唯一出口**）。
+///
+/// owner 2026-11-27：「不要出现不明所以的文字」。`exit 0` / `exit 1` 是脚本
+/// 视角的字段：用户既不知道 0 是好是坏，也不知道非 0 时该去查什么。同步日志
+/// 与爬虫配置页的「上次运行」原先各写了一遍 `' · exit $exit'`（两份），
+/// 现在两处都读这里。
+///
+/// - 没有退出码（本轮还在跑 / 服务端没下发）→ 空串，不占位；
+/// - `0` → 「已完成」（脚本正常结束）；
+/// - 非 0 → 「退出码 N（有失败）」：把结论写在前面，号码留在括号里供排查。
+String syncExitLabel(int? exit) {
+  if (exit == null) return '';
+  return exit == 0 ? '已完成' : '退出码 $exit（有失败）';
+}
+
 /// 一轮同步。
 class SyncRun {
   final String id;
@@ -157,7 +172,6 @@ class SyncLog {
 
   bool get isEmpty => runs.isEmpty;
 }
-
 
 SyncRunItem _itemOf(Map m) => SyncRunItem(
       id: '${m['id'] ?? ''}',

@@ -839,9 +839,10 @@ class _BasicLibPageState extends State<BasicLibPage>
       padding: kBasicWorkGridPadding,
       devicePixelRatio: mq.devicePixelRatio,
       maxItems: shown.length,
-      items: [
-        for (final w in shown) (cover: _coverOf(w), headers: headers),
-      ],
+      // 惰性 `map`：只有真正入队的那几张才去跑封面链（`_coverOf` 要按
+      // th → 图文首图 → 视频抽帧 逐级判断）。写成列表字面量会把已渲染的
+      // 60 张全部算一遍，再只用前 24 张的结果。
+      items: shown.map((w) => (cover: _coverOf(w), headers: headers)),
     );
   }
 

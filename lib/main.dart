@@ -6968,7 +6968,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('爬虫已启动 pid=${j['pid']}，日志：${j['log']}')));
+          SnackBar(content: Text('爬虫已启动（进程 ${j['pid']}），日志：${j['log']}')));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -18307,21 +18307,23 @@ class _WorkGridState extends State<WorkGrid> {
       grid: kWorkGrid,
       padding: workGridPadding(context),
       devicePixelRatio: mq.devicePixelRatio,
-      items: [
-        for (final w in works)
-          (
-            cover: workCoverUrl(
-              w,
-              lib: _libFor(w),
-              urls: standardCoverUrls(
-                lib: _libFor(w),
-                mediaUrlOf: cfg.mediaUrl,
-                urlOf: cfg.u,
-              ),
+      // 惰性 `map`：作者主页/收藏夹可能上千条，但只预热首屏那 24 张。
+      // 写成列表字面量会先为每一条跑 `workCoverUrl` + 拼两份标准地址。
+      items: works.map((w) {
+        final lib = _libFor(w);
+        return (
+          cover: workCoverUrl(
+            w,
+            lib: lib,
+            urls: standardCoverUrls(
+              lib: lib,
+              mediaUrlOf: cfg.mediaUrl,
+              urlOf: cfg.u,
             ),
-            headers: cfg.headersFor(_libFor(w)),
           ),
-      ],
+          headers: cfg.headersFor(lib),
+        );
+      }),
     );
   }
 

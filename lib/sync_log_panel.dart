@@ -343,7 +343,9 @@ class SyncLogPanelState extends State<SyncLogPanel> {
               '${r.script.isEmpty ? '' : ' · ${r.script}'}'
               '${r.retryOf.isEmpty ? '' : ' · 重试 ${r.retryOf}'}'
               '${r.error.isEmpty ? '' : ' · ${r.error}'}'
-              '${r.exit == null ? '' : ' · exit ${r.exit}'}',
+              // 退出码的说法只有 `sync_ledger.syncExitLabel` 一处
+              // （爬虫配置页的「上次运行」读同一条）。
+              '${r.exit == null ? '' : ' · ${syncExitLabel(r.exit)}'}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),

@@ -9,6 +9,7 @@ import 'http_json.dart';
 import 'home_action.dart';
 import 'interval_label.dart';
 import 'collection_sync_panel.dart';
+import 'sync_ledger.dart';
 import 'sync_log_panel.dart';
 import 'time_labels.dart';
 import 'unit_crawler.dart';
@@ -149,7 +150,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content:
-              Text('已启动 ${j['script'] ?? config.script} pid=${j['pid']}')));
+              Text('已启动 ${j['script'] ?? config.script}（进程 ${j['pid']}）')));
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await load();
     } catch (e) {
@@ -343,8 +344,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     );
   }
 
-  Widget _errorView() =>
-      LoadErrorView(message: '加载失败：$err', onRetry: load);
+  Widget _errorView() => LoadErrorView(message: '加载失败：$err', onRetry: load);
 
   Widget _capabilityBanner() {
     final ok = hasScript;
@@ -361,9 +361,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            ok
-                ? '已配置脚本：${config.script}'
-                : '该单元库没有爬虫脚本，不支持同步设置',
+            ok ? '已配置脚本：${config.script}' : '该单元库没有爬虫脚本，不支持同步设置',
             style: const TextStyle(fontSize: 12),
           ),
         ),
@@ -391,13 +389,10 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
           color: ok ? null : Colors.grey),
       title: const Text('删除监测'),
       subtitle: Text(
-        ok
-            ? '本单元库已删除 / 取消收藏的作品记录 · 只读日志，不动媒体'
-            : '该单元库没有爬虫脚本，因此不支持删除监测',
+        ok ? '本单元库已删除 / 取消收藏的作品记录 · 只读日志，不动媒体' : '该单元库没有爬虫脚本，因此不支持删除监测',
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-            fontSize: 11, color: ok ? Colors.grey : Colors.orange),
+        style: TextStyle(fontSize: 11, color: ok ? Colors.grey : Colors.orange),
       ),
       trailing: Icon(Icons.chevron_right,
           color: ok ? null : Colors.grey.withValues(alpha: 0.4)),
@@ -459,6 +454,12 @@ class _ScheduleSummary extends StatelessWidget {
     return monthDayTimeOfMs(ms);
   }
 
+  /// 「 · 已完成」/「 · 退出码 1（有失败）」/ 空串（本轮无退出码）。
+  static String _exitPart(dynamic raw) {
+    final label = syncExitLabel(raw == null ? null : intOf(raw));
+    return label.isEmpty ? '' : ' · $label';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (schedule.isEmpty) return const SizedBox.shrink();
@@ -476,15 +477,18 @@ class _ScheduleSummary extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
+          // owner 2026-11-27：「不要出现不明所以的文字」——`exit 0` 是脚本
+          // 视角的说法。说法本体在 `sync_ledger.syncExitLabel`（同步日志同一条）。
           '上次运行 ${_t(schedule['lastRun'])}'
           '${mode.isEmpty ? '' : ' · ${mode == 'quick' ? '快检' : '全量'}'}'
-          '${exit == null ? '' : ' · exit $exit'}',
+          '${_exitPart(exit)}',
           style: style,
         ),
         const SizedBox(height: 2),
         Text(
           '下次快检 ${_t(schedule['nextQuick'])} · 下次全量 ${_t(schedule['nextFull'])}'
-          ' · 本小时快检 $qh/3',
+          // 3 是服务端每小时快检上限（M8），写成 `$qh/3` 只会让人猜分母是什么。
+          ' · 本小时已快检 $qh 次（每小时最多 3 次）',
           style: style,
         ),
       ]),
