@@ -164,6 +164,124 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
     await _send(req, g.unit);
   }
 
+  /// owner 2026-11-26：「主页只能看挂载的作者文件夹，不能设置修改」。
+  ///
+  /// 作者页此前只有「合并 / 拆分 / 解散」三个整组动作，没法精确指定
+  /// 「这个作者的这几处里，哪几处算同一个」。补 `setFiles`：
+  /// 勾上的成员组成一组，取消勾选即移出（**不会删任何目录**）。
+  ///
+  /// 只在同一单元库内可见可选——跨单元库服务端不合并（语料已在面板顶部说明）。
+  Future<void> _editMembers(String unit, AuthorMountGroup? group) async {
+    if (busy) return;
+    final pool = <AuthorGroupFile>[
+      for (final i in mounts.items)
+        if (i.unitRel == unit)
+          AuthorGroupFile(lib: i.lib, authorDir: i.authorDir),
+    ];
+    if (pool.length < 2) {
+      _toast('这个单元库里只有一处，无需编辑', bad: true);
+      return;
+    }
+    final picked = <String>{
+      if (group != null)
+        for (final f in group.files) f.key
+      else
+        for (final f in pool) f.key,
+    };
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('编辑组成员'),
+          content: SizedBox(
+            width: 460,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                    '勾选的文件夹算同一位作者（合并显示）；取消勾选即移出该组。'
+                    '只改显示与归类，不会删除或移动任何目录。',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(children: [
+                    for (final f in pool)
+                      CheckboxListTile(
+                        key: ValueKey('ams-setfiles-${f.key}'),
+                        dense: true,
+                        value: picked.contains(f.key),
+                        title: Text(f.authorDir,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13)),
+                        subtitle: Text(f.lib,
+                            style: const TextStyle(
+                                fontSize: 10, color: Colors.grey)),
+                        onChanged: (v) => setD(() {
+                          if (v == true) {
+                            picked.add(f.key);
+                          } else {
+                            picked.remove(f.key);
+                          }
+                        }),
+                      ),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(c).pop(false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: picked.isEmpty
+                    ? null
+                    : () => Navigator.of(c).pop(true),
+                child: const Text('保存')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final files = <AuthorGroupFile>[
+      for (final f in pool)
+        if (picked.contains(f.key)) f,
+    ];
+    final req = UnitAuthorRequest(
+      unit: unit,
+      action: UnitAuthorAction.setFiles,
+      // 新建组没有 groupId：setFiles 语义要求已有组，所以没组时先走 merge。
+      groupId: group?.groupId ?? '',
+      name: widget.authorName,
+      files: files,
+      groupFiles: group?.files ?? const <AuthorGroupFile>[],
+    );
+    if (group == null) {
+      final mergeReq = UnitAuthorRequest(
+        unit: unit,
+        action: UnitAuthorAction.merge,
+        name: widget.authorName,
+        files: files,
+      );
+      final bad = mergeReq.error;
+      if (bad != null) {
+        _toast(bad, bad: true);
+        return;
+      }
+      await _send(mergeReq, unit);
+      return;
+    }
+    final bad = req.error;
+    if (bad != null) {
+      _toast(bad, bad: true);
+      return;
+    }
+    await _send(req, unit);
+  }
+
   Future<void> _send(UnitAuthorRequest req, String unit) async {
     setState(() => busy = true);
     try {
@@ -354,7 +472,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
             ),
           if (items.length >= 2) ...[
             const SizedBox(height: 8),
-            Row(children: [
+            Wrap(spacing: 4, runSpacing: 4, children: [
               if (gid.isEmpty)
                 FilledButton.tonalIcon(
                   onPressed: busy ? null : () => _mergeAll(unit),
@@ -374,6 +492,15 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
                   label: const Text('解散合并'),
                 ),
               ],
+              // owner 2026-11-26：「主页只能看挂载的作者文件夹，不能设置修改」。
+              // 「合并这 N 处」只能一把梭全并；要精确挑哪几处算同一位作者，
+              // 走这里。已合并的组也能进来改成员。
+              TextButton.icon(
+                key: ValueKey('ams-edit-members-$unit'),
+                onPressed: busy ? null : () => _editMembers(unit, group),
+                icon: const Icon(Icons.checklist_rtl, size: 16),
+                label: const Text('编辑组成员'),
+              ),
             ]),
           ],
         ]),
