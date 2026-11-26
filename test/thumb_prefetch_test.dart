@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shoucangjia/card_metrics.dart';
 import 'package:shoucangjia/crash_reports_page.dart';
 import 'package:shoucangjia/thumb_prefetch.dart';
 
@@ -109,14 +110,32 @@ void main() {
 
   group('firstScreenRowCount', () {
     test('手机竖屏：两屏行数，受 maxItems 限制', () {
-      expect(firstScreenRowCount(viewportHeight: 800), 12);
-      expect(firstScreenRowCount(viewportHeight: 400, screens: 1), 6);
+      expect(
+          firstScreenRowCount(
+              viewportHeight: 800, rowExtent: kAuthorRankRowExtent),
+          12);
+      expect(
+          firstScreenRowCount(
+              viewportHeight: 400,
+              rowExtent: kAuthorRankRowExtent,
+              screens: 1),
+          6);
+    });
+
+    test('排行榜真实行步进 68（67 + 1dp 分隔线），不是默认的 72', () {
+      // 0.9.289：默认 72 已删除（第二份几何）。800 高两屏：
+      //   72 → ceil(1600/72)=23 行；68 → ceil(1600/68)=24 行，上限内。
+      expect(kAuthorRankRowExtent, 68);
+      expect(kAuthorRankTileHeight, 67);
     });
 
     test('参数异常不崩，至少 1 行', () {
-      expect(firstScreenRowCount(viewportHeight: 10), 1);
-      expect(firstScreenRowCount(viewportHeight: 0), 0);
-      expect(firstScreenRowCount(viewportHeight: 800, maxItems: 0), 0);
+      expect(firstScreenRowCount(viewportHeight: 10, rowExtent: 68), 1);
+      expect(firstScreenRowCount(viewportHeight: 0, rowExtent: 68), 0);
+      expect(
+          firstScreenRowCount(
+              viewportHeight: 800, rowExtent: 68, maxItems: 0),
+          0);
       expect(firstScreenRowCount(viewportHeight: 800, rowExtent: 0), 0);
     });
   });

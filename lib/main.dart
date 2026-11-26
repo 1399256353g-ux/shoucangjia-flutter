@@ -109,6 +109,7 @@ import 'perf_diagnostics.dart';
 import 'text_fit.dart';
 import 'esc_back.dart';
 import 'top_node.dart';
+import 'avatar_prefetch.dart';
 import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
@@ -7076,32 +7077,25 @@ class _RankPageState extends State<RankPage> {
     final visibleRows = _visibleRows;
     if (visibleRows.isEmpty) return;
     final mq = MediaQuery.of(context);
-    final n = firstScreenRowCount(viewportHeight: mq.size.height);
+    // 行步进来自尺寸表：此前这里用 `firstScreenRowCount` 的默认 72 行高，
+    // 实测 `AuthorRankTile` 是 67 + 1dp 分隔线 = 68 —— 预热多算约 7%，
+    // 最后一行取的是屏幕外的头像。
+    final n = firstScreenRowCount(
+        viewportHeight: mq.size.height, rowExtent: kAuthorRankRowExtent);
     if (n <= 0) return;
-    final px = avatarDecodeWidth(
-      displaySize: AuthorAvatar.rankSize,
-      devicePixelRatio: mq.devicePixelRatio,
-    );
-    prefetchThumbItems(
+    // 行库：榜单「全部」时按该行自己的库，选了具体库时一律用选中库。
+    String libOf(Map e) =>
+        sel == 'all' ? '${e['lib'] ?? cfg.lib}' : (sel.isEmpty ? cfg.lib : sel);
+    prefetchAvatarItems(
       [
         for (final e in visibleRows.take(n))
-          // 空头像必须在这里排掉：`cfg.mediaUrl('')` 返回的是 base 本身
-          // （不是空串），不去就会把服务器根地址当图片请求。
-          if ('${e['avatar'] ?? ''}'.trim().isNotEmpty)
-            (
-              url: withImageWidth(
-                  cfg.mediaUrl('${e['avatar'] ?? ''}',
-                      lib: sel == 'all'
-                          ? '${e['lib'] ?? cfg.lib}'
-                          : (sel.isEmpty ? cfg.lib : sel)),
-                  kAvatarImageWidth),
-              headers: cfg.headersFor(sel == 'all'
-                  ? '${e['lib'] ?? cfg.lib}'
-                  : (sel.isEmpty ? cfg.lib : sel)),
-            ),
+          (path: '${e['avatar'] ?? ''}', lib: libOf(e)),
       ],
       limit: n,
-      decodeWidth: px,
+      displaySize: AuthorAvatar.rankSize,
+      devicePixelRatio: mq.devicePixelRatio,
+      urlOf: (path, lib) => cfg.mediaUrl(path, lib: lib),
+      headersOf: cfg.headersFor,
     );
   }
 
@@ -8020,24 +8014,18 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
     );
     if (n <= 0) return;
-    final px = avatarDecodeWidth(
-      displaySize: AuthorAvatar.gridSize,
-      devicePixelRatio: mq.devicePixelRatio,
-    );
-    prefetchThumbItems(
+    // 0.9.289：整条链（空路径排掉 → 地址 → w= → 解码宽度 → 鉴权头）只有
+    // `avatar_prefetch.prefetchAvatarItems` 一处，与排行榜那份合流。
+    prefetchAvatarItems(
       [
         for (final e in _ordered.take(n))
-          if ('${e.value['av'] ?? ''}'.trim().isNotEmpty)
-            (
-              url: withImageWidth(
-                  cfg.mediaUrl('${e.value['av']}',
-                      lib: '${e.value['_lib'] ?? cfg.lib}'),
-                  kAvatarImageWidth),
-              headers: cfg.headersFor('${e.value['_lib'] ?? cfg.lib}'),
-            ),
+          (path: '${e.value['av'] ?? ''}', lib: '${e.value['_lib'] ?? cfg.lib}'),
       ],
       limit: n,
-      decodeWidth: px,
+      displaySize: AuthorAvatar.gridSize,
+      devicePixelRatio: mq.devicePixelRatio,
+      urlOf: (path, lib) => cfg.mediaUrl(path, lib: lib),
+      headersOf: cfg.headersFor,
     );
   }
 
@@ -14517,7 +14505,7 @@ class _PlayerPageState extends State<PlayerPage>
               Positioned(
                 // P0 §6：非全屏左边距 12dp（全屏保持旧值 8dp）。
                 left: pad.left + (fs ? 8 : 12),
-                top: pad.top + 8,
+                top: pad.top + kStageToolbarTopOffset,
                 child: IgnorePointer(
                   ignoring: !ui,
                   child: AnimatedOpacity(
@@ -14824,7 +14812,8 @@ class _PlayerTopNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     return Positioned(
       // 顶部工具按钮行高 48；下移一行避免遮挡返回/主页/封面按钮。
-      top: pad.top + 58,
+      // 下移一行避开返回/主页/封面按钮；数字只有 `kPlayerNoticeTop` 一处。
+      top: pad.top + kPlayerNoticeTop,
       left: 0,
       right: 0,
       child: IgnorePointer(

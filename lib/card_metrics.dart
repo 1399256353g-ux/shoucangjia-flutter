@@ -46,3 +46,17 @@ const double kAvatarHeaderSize = 64;
 
 /// 基础库页作者卡片上的头像边长（与作者总览一致）。
 const double kAvatarBasicAuthorSize = kAvatarGridSize;
+
+/// 排行榜一行（`AuthorRankTile` 的 `ListTile`）的实测逻辑高度。
+///
+/// 0.9.289：首屏预热此前按 `firstScreenRowCount` 的默认 72 行高估算，实际
+/// 排版是 67（`ListTile` + 两行 subtitle），多算约 7% —— 预热到的是屏幕外的
+/// 最后一行头像。列表页的分隔线也是 1dp，两者一起决定真实行步进。
+const double kAuthorRankTileHeight = 67;
+
+/// 排行榜列表的分隔线高度（页面 `Divider(height: ...)`）。
+const double kAuthorRankDividerHeight = 1;
+
+/// 排行榜一行的纵向步进（行高 + 分隔线）：首屏预热算行数用它。
+const double kAuthorRankRowExtent =
+    kAuthorRankTileHeight + kAuthorRankDividerHeight;

@@ -85,7 +85,7 @@ void main() {
       for (final h in _nonFinite) {
         expect(firstScreenThumbCount(viewportWidth: 360, viewportHeight: h), 0);
         expect(firstScreenThumbCount(viewportWidth: h, viewportHeight: 640), 0);
-        expect(firstScreenRowCount(viewportHeight: h), 0);
+        expect(firstScreenRowCount(viewportHeight: h, rowExtent: 68), 0);
       }
       // 行距为 0/负（调用方 spacing 配错）时除出 infinity：至少按一行。
       expect(

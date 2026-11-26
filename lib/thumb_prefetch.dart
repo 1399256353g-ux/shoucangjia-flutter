@@ -161,10 +161,13 @@ int prefetchThumbItems(
 /// 列表（非网格）首屏需要预热的行数。
 ///
 /// 排行榜这类 `ListTile` 列表按固定行高估算：默认预热 2 屏、上限 [maxItems] 行。
-/// [rowExtent] 取一行（含分隔线）的实际逻辑高度。
+/// [rowExtent] 取一行（含分隔线）的实际逻辑高度，**必须由调用方给出**：
+/// 0.9.289 之前它有一个 72 的默认值，而排行榜实测行步进是 68（67 + 1dp 分隔线），
+/// 多算约 7% —— 预热了屏幕外的最后一行。一个“看起来合理”的默认值就是
+/// 第二份几何，调用方不写也能编过。
 int firstScreenRowCount({
   required double viewportHeight,
-  double rowExtent = 72,
+  required double rowExtent,
   int screens = 2,
   int maxItems = 12,
 }) {

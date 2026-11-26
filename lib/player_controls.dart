@@ -423,6 +423,30 @@ const double kPressScaleTo = 0.92;
 const int kPressScaleMs = 120;
 const Color kPressOverlayColor = Color(0x24FFFFFF);
 
+/// 顶部图标行：上边距 / 方形按钮边长。
+///
+/// 0.9.289：播放页顶部这一行有两套按钮（全屏 `IconButton` 48、非全屏
+/// [StageIconButton] 40），而提示条的 `top: pad.top + 58` 是第三个数字，
+/// `58` 就是「8 + 48 + 2」算出来的——三个数分居三处，改一个另外两个不跟。
+/// 现在这三个数只在这里出现一次。
+const double kStageToolbarTopOffset = 8;
+const double kStageButtonExtent = 40;
+
+/// 全屏 `IconButton` 的行高（Material 默认 48 触摸目标）。
+const double kStageToolbarRowHeight = 48;
+
+/// 图标行与提示条之间的留白。
+const double kStageToolbarRowGap = 2;
+
+/// 播放页顶部胶囊提示条距 SafeArea 顶部的下移量。
+///
+/// 唯一出处：`_PlayerTopNotice` 与顶部图标行都从这里取值，不再各写一个
+/// 数字（旧写法 `top: pad.top + 58` 与工具栏 48 / 任务栏 48 毫无关系，
+/// 看上去像同一套数字，其实 58 是自己算出来的第三个值）。
+const double kPlayerNoticeTop = kStageToolbarTopOffset +
+    kStageToolbarRowHeight +
+    kStageToolbarRowGap;
+
 /// §6 左上角操作按钮：常态透明，仅按压时出现 40dp white24 圆底并轻微缩放。
 class StageIconButton extends StatefulWidget {
   const StageIconButton({
@@ -459,8 +483,8 @@ class _StageIconButtonState extends State<StageIconButton> {
       onTapCancel: () => _setDown(false),
       onTap: widget.onPressed,
       child: SizedBox(
-        width: 40,
-        height: 40,
+        width: kStageButtonExtent,
+        height: kStageButtonExtent,
         child: Center(
           child: AnimatedScale(
             scale: _down ? kPressScaleTo : 1.0,
@@ -469,8 +493,8 @@ class _StageIconButtonState extends State<StageIconButton> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: kPressScaleMs),
               curve: Curves.easeOut,
-              width: 40,
-              height: 40,
+              width: kStageButtonExtent,
+              height: kStageButtonExtent,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: _down ? kPressOverlayColor : Colors.transparent,
