@@ -50,7 +50,6 @@ bool libraryOnline(Map<String, dynamic> lib) {
   return true;
 }
 
-int _num(dynamic v) => intOf(v);
 
 /// 从一份 author_stats 响应中取出 authors 映射。
 Map<String, dynamic> statsAuthors(dynamic raw) {
@@ -74,8 +73,8 @@ Map<String, dynamic> statsAuthors(dynamic raw) {
   var plays = 0, drops = 0;
   for (final v in stats.values) {
     if (v is! Map) continue;
-    final p = _num(v['p']);
-    final d = _num(v['dr']);
+    final p = intOf(v['p']);
+    final d = intOf(v['dr']);
     if (p > 0) plays = addSat(plays, p);
     if (d > 0) drops = addSat(drops, d);
   }

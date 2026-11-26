@@ -105,17 +105,65 @@ void main() {
     expect(img.imageUrl, contains('/media/lib-029/%40a/VID/cover.jpg'));
   });
 
-  test('basicLibFromRef 保留 fc（单元库树构建不丢封面）', () {
-    const ref = BasicLibRef(
-      id: 'lib-029',
-      name: '(5) 强奸',
-      rel: '(5) 强奸',
-      firstCover: '/media/lib-029/x/cover.jpg',
-    );
-    final b = basicLibFromRef(ref);
+  test('basicsUnderBase 直接产出 BasicLib（不再有转换点，字段一个不丢）', () {
+    final libs = basicsUnderBase(<String, dynamic>{
+      'basicLibraries': <dynamic>[
+        <String, dynamic>{
+          'id': 'lib-029',
+          'name': '(5) 强奸',
+          'path': '/root/(5) 强奸',
+          'big_id': 'big-01',
+          'authors': 7,
+          'works': 9,
+          'cover': <String, dynamic>{'v': 'c2026', 'e': 'png'},
+          'cv': ' /media/lib-029/a/cv.jpg ',
+          'fc': '/media/lib-029/x/cover.jpg',
+        },
+      ],
+    }, '/root');
+    final b = libs.single;
     expect(b.id, 'lib-029');
     expect(b.firstCover, '/media/lib-029/x/cover.jpg');
-    expect(b.authors, 0);
+    expect(b.authors, 7, reason: '统计字段不再由调用方补 0');
+    expect(b.works, 9);
+    expect(b.coverVersion, 'c2026',
+        reason: '自定义 _cover/ 指针必须在单元库这条构建路径上活下来');
+    expect(b.coverExt, 'png');
+    expect(b.crawlerCover, '/media/lib-029/a/cv.jpg',
+        reason: 'cv 爬虫封面必须在单元库这条构建路径上活下来');
+  });
+
+  test('basicsUnderBase 与 LibraryTree.parse 对同一条记录给出同一个模型', () {
+    final raw = <String, dynamic>{
+      'id': 'lib-029',
+      'name': 'X',
+      'rel': 'A/X',
+      'path': '/root/A/X',
+      'big_id': 'big-01',
+      'cover': <String, dynamic>{'v': 'v9', 'e': 'webp'},
+      'cv': '/media/lib-029/a/cv.jpg',
+      'fc': '/media/lib-029/a/fc.jpg',
+    };
+    final fromTree = LibraryTree.parse(<String, dynamic>{
+      'bigLibraries': <dynamic>[
+        <String, dynamic>{'id': 'big-01', 'name': 'A', 'path': '/root/A'},
+      ],
+      'basicLibraries': <dynamic>[raw],
+    })!
+        .allBasics
+        .single;
+    final fromRef = basicsUnderBase(
+        <String, dynamic>{'basicLibraries': <dynamic>[raw]}, '/root').single;
+    for (final pair in <List<String>>[
+      <String>[fromTree.coverVersion, fromRef.coverVersion],
+      <String>[fromTree.coverExt, fromRef.coverExt],
+      <String>[fromTree.crawlerCover, fromRef.crawlerCover],
+      <String>[fromTree.firstCover, fromRef.firstCover],
+      <String>[fromTree.rel, fromRef.rel],
+      <String>[fromTree.bigId, fromRef.bigId],
+    ]) {
+      expect(pair[0], pair[1], reason: '两个入口必须解析成同一份数据');
+    }
   });
 
   test('basicsUnderBase/basicLibFromRef 保留来源连接（卡片自己拼地址要靠它）', () {
@@ -138,7 +186,7 @@ void main() {
     expect(refs.single.serverLabel, 'NAS');
     expect(refs.single.serverId, 's1');
     // 缺 base 时 `basicCoverUrl` 只能返回空串 → 灰卡；这里断言整条链能拼出地址。
-    final b = basicLibFromRef(refs.single);
+    final b = refs.single;
     expect(b.serverBase, 'http://nas:8090');
     expect(basicCoverUrl(b), 'http://nas:8090/media/lib-029/a/cover.jpg');
   });

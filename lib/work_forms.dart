@@ -211,7 +211,6 @@ String workSortLabel(WorkSort sort) {
   }
 }
 
-int _intOf(dynamic v) => intOf(v);
 
 /// 时间戳归一到毫秒；无法识别或超出可表示范围返回 0。
 ///
@@ -255,8 +254,8 @@ int workIngestMs(dynamic work) {
 /// 作品播放量：`pl` 优先，其次 `plays`。
 int workPlayCount(dynamic work) {
   if (work is! Map) return 0;
-  final n = _intOf(work['pl']);
-  return n > 0 ? n : _intOf(work['plays']);
+  final n = intOf(work['pl']);
+  return n > 0 ? n : intOf(work['plays']);
 }
 
 String workTitle(dynamic work) =>

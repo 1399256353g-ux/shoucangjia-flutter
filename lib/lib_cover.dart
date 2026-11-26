@@ -265,10 +265,8 @@ String libraryMediaPath(String lib, String path) {
   // `absoluteMediaUrl` 只补服务器前缀。
   if (isApiMediaPath(p)) return p;
   if (isMediaPath(p)) return p;
-  final l = lib.trim();
-  final rest = p.replaceFirst(RegExp(r'^/+'), '');
-  if (l.isEmpty) return '/media/$rest';
-  return '/media/${Uri.encodeComponent(l)}/$rest';
+  // 前缀拼装只有 `media_path.libMediaPrefix` 一处（库段编码也在那里）。
+  return libMediaPrefix(lib, p);
 }
 
 /// 媒体绝对地址：`<base>/media/<lib>/<相对路径>`。

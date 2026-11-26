@@ -49,7 +49,6 @@ class ResizeCacheStats {
 
   // 数值解析统一走 `json_num`：此前这里是全仓库唯一用 `round()` 的地方，
   // 同一个 1.6 个文件在缓存页显示 2、在别处显示 1。
-  static int _int(dynamic v) => intOf(v);
 
   /// 命中率：优先用服务端给的值，缺失/非数值/非有限值时按 `hit / (hit+miss)` 自算。
   ///
@@ -80,24 +79,24 @@ class ResizeCacheStats {
   static ResizeCacheStats? fromJson(dynamic json) {
     if (json is! Map) return null;
     final prune = json['prune'];
-    final hit = _int(json['hit']);
-    final miss = _int(json['miss']);
+    final hit = intOf(json['hit']);
+    final miss = intOf(json['miss']);
     return ResizeCacheStats(
-      files: _int(json['files']),
-      bytes: _int(json['bytes']),
-      maxBytes: _int(json['maxBytes']),
-      hit: _int(json['hit']),
-      miss: _int(json['miss']),
-      gen: _int(json['gen']),
-      fail: _int(json['fail']),
-      savedBytes: _int(json['savedBytes']),
-      servedBytes: _int(json['servedBytes']),
-      queue: _int(json['warmQueue']),
-      active: _int(json['warmActive']),
+      files: intOf(json['files']),
+      bytes: intOf(json['bytes']),
+      maxBytes: intOf(json['maxBytes']),
+      hit: intOf(json['hit']),
+      miss: intOf(json['miss']),
+      gen: intOf(json['gen']),
+      fail: intOf(json['fail']),
+      savedBytes: intOf(json['savedBytes']),
+      servedBytes: intOf(json['servedBytes']),
+      queue: intOf(json['warmQueue']),
+      active: intOf(json['warmActive']),
       hitRate: _rate(json['hitRate'], hit, miss),
-      pruneRuns: prune is Map ? _int(prune['runs']) : 0,
-      pruneDeleted: prune is Map ? _int(prune['deleted']) : 0,
-      pruneFreed: prune is Map ? _int(prune['freed']) : 0,
+      pruneRuns: prune is Map ? intOf(prune['runs']) : 0,
+      pruneDeleted: prune is Map ? intOf(prune['deleted']) : 0,
+      pruneFreed: prune is Map ? intOf(prune['freed']) : 0,
     );
   }
 

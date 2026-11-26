@@ -158,7 +158,6 @@ class SyncLog {
   bool get isEmpty => runs.isEmpty;
 }
 
-int _intOf(dynamic v, [int d = 0]) => intOf(v, d);
 
 SyncRunItem _itemOf(Map m) => SyncRunItem(
       id: '${m['id'] ?? ''}',
@@ -167,7 +166,7 @@ SyncRunItem _itemOf(Map m) => SyncRunItem(
       state: '${m['st'] ?? 'failed'}',
       why: '${m['why'] ?? ''}',
       local: '${m['local'] ?? ''}',
-      at: _intOf(m['at']),
+      at: intOf(m['at']),
     );
 
 SyncRun _runOf(Map m) {
@@ -179,23 +178,23 @@ SyncRun _runOf(Map m) {
   ];
   return SyncRun(
     id: '${m['id'] ?? ''}',
-    at: _intOf(m['at']),
-    ended: _intOf(m['ended']),
+    at: intOf(m['at']),
+    ended: intOf(m['ended']),
     lib: '${m['lib'] ?? ''}',
     unit: '${m['unit'] ?? ''}',
     mode: '${m['mode'] ?? ''}',
     script: '${m['script'] ?? ''}',
-    ok: _intOf(m['ok']),
-    fail: _intOf(m['fail']),
-    deleted: _intOf(m['deleted']),
-    total: _intOf(m['total']),
-    ms: _intOf(m['ms']),
-    exit: m['exit'] == null ? null : _intOf(m['exit']),
+    ok: intOf(m['ok']),
+    fail: intOf(m['fail']),
+    deleted: intOf(m['deleted']),
+    total: intOf(m['total']),
+    ms: intOf(m['ms']),
+    exit: m['exit'] == null ? null : intOf(m['exit']),
     running: boolOf(m['running']),
     error: '${m['error'] ?? ''}',
     retryOf: '${m['retryOf'] ?? ''}',
     items: items,
-    itemsTotal: _intOf(m['itemsTotal'], items.length),
+    itemsTotal: intOf(m['itemsTotal'], items.length),
   );
 }
 
@@ -210,8 +209,8 @@ SyncLog parseSyncLog(dynamic raw) {
   ];
   return SyncLog(
     runs: runs,
-    total: _intOf(raw['total'], runs.length),
-    keptDays: _intOf(raw['keptDays'], 7),
+    total: intOf(raw['total'], runs.length),
+    keptDays: intOf(raw['keptDays'], 7),
   );
 }
 
@@ -320,7 +319,7 @@ Map<String, dynamic> syncRetryBody(
 /// 成功判定仍要求 `ok == true`（重试是写接口，缺字段不能当成功）。
 String syncRetryResultLabel(int status, dynamic body) {
   if (serviceSaidOk(body)) {
-    final n = _intOf(body['retried']);
+    final n = intOf(body['retried']);
     return '已开始重试 $n 条（任务 ${body['retryRunId'] ?? ''}）';
   }
   final err = apiFailureText(status, body, requireOk: false) ?? '';

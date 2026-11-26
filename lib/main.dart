@@ -323,10 +323,8 @@ class Cfg {
     if (l.isEmpty) return path;
     // 相对路径（如手动封面 `_cover/v1.jpg`）必须补成 /media/<lib>/...，
     // 否则会被直接拼到域名后面变成 `http://ip:8090_cover/...`，永远加载不出来。
-    if (!isMediaPath(path)) {
-      final rel = path.replaceFirst(RegExp(r'^/+'), '');
-      return '/media/${Uri.encodeComponent(l)}/$rel';
-    }
+    // 前缀拼装只有 `media_path.libMediaPrefix` 一处（库段编码也在那里）。
+    if (!isMediaPath(path)) return libMediaPrefix(l, path);
     // `/media/` 尾部走 `mediaLibSplitOrNull`（前缀判定、切片、库段解码与
     // `lib_cover.libOfMediaPath` / `authorPrefixOfMedia` 同一个出口）；未知
     // 首段要连带它自己一起重新前缀，所以这里还需要原始 rest 拼回去。
@@ -336,7 +334,7 @@ class Cfg {
         (_bindings.containsKey(headId) || headId == l)) {
       return path;
     }
-    return '/media/${Uri.encodeComponent(l)}/$rest';
+    return libMediaPrefix(l, rest);
   }
 
   /// 媒体绝对地址：按作品所属库路由到对应 IP。
@@ -435,12 +433,12 @@ Future<CoverUploadResult> uploadCoverFromPicker({
 /// J9：作者来源词条所需的基础库映射与统计。
 /// 一次加载后按库缓存，词条显示「基础库」名称（如「🦶」），不是大库名。
 class LibMeta {
-  final List<BasicLibRef> basics;
+  final List<BasicLib> basics;
 
   /// 0.9.9：库根坐标系下的**全部**基础库（含其它单元库下的）。
   /// `basics` 只覆盖当前注册库目录，作者总览/排行榜/推荐/搜索的筛选与词条
   /// 需要跨全部基础库，否则非当前库的作者会落到 SECRET 或无法被筛到。
-  final List<BasicLibRef> allBasics;
+  final List<BasicLib> allBasics;
   final Map<String, dynamic> stats;
 
   /// J10：大库 id → 名称，用于作者筛选里的「大库」多选。
@@ -466,7 +464,7 @@ class LibMeta {
   });
 
   /// 跨库口径的基础库列表（全量优先，缺失时回落到当前库）。
-  List<BasicLibRef> get filterBasics =>
+  List<BasicLib> get filterBasics =>
       allBasics.isNotEmpty ? allBasics : basics;
 
   /// P3：顶级节点列表（＝每个连接的媒体库根，即单元库树的直接子节点）。
@@ -515,8 +513,8 @@ class LibMeta {
       return Future.value(hit);
     }
     return _loading.putIfAbsent(lib, () async {
-      var basics = const <BasicLibRef>[];
-      var allBasics = const <BasicLibRef>[];
+      var basics = const <BasicLib>[];
+      var allBasics = const <BasicLib>[];
       var stats = <String, dynamic>{};
       var bigNames = <String, String>{};
       UnitLibrary? unitTree;
@@ -580,20 +578,15 @@ class LibMeta {
               final root = '${ljm['root'] ?? ''}'.trim();
               // owner 2026-11-22：顶级节点名＝媒体库根目录名（不是内置常量）。
               TopNodeName.setFromRoot(root);
-              final basicList = <BasicLib>[
-                for (final b in basics) basicLibFromRef(b),
-              ];
-              var unitBasics = basicList;
-              var rootBasics = const <BasicLibRef>[];
+              // 0.9.284：`basicsUnderBase` 直接返回 `BasicLib`，不再有
+              // 「ref → 模型」的转换点（那里就是丢 cover/cv 的地方）。
+              var unitBasics = basics;
+              var rootBasics = const <BasicLib>[];
               if (root.isNotEmpty) {
                 // 以库根为坐标系取**全部**基础库（39 个），既给单元库归属，
                 // 也给作者筛选/词条用。
                 rootBasics = basicsUnderBase(ljm, root);
-                if (rootBasics.isNotEmpty) {
-                  unitBasics = <BasicLib>[
-                    for (final b in rootBasics) basicLibFromRef(b),
-                  ];
-                }
+                if (rootBasics.isNotEmpty) unitBasics = rootBasics;
               }
               allBasics = rootBasics.isNotEmpty ? rootBasics : basics;
               // 单元库＝owner 在「文件结构」里勾选的节点文件夹（/api/nodes），
@@ -676,7 +669,7 @@ class LibMeta {
   }
 
   /// 按基础库 id 取词条（搜索结果直接带 `_bid`，无需按路径反查）。
-  BasicLibRef? basicById(String id) {
+  BasicLib? basicById(String id) {
     for (final b in [...basics, ...allBasics]) {
       if (b.id == id) return b;
     }
@@ -7068,7 +7061,6 @@ class _RankPageState extends State<RankPage> {
     }
   }
 
-  int _n(dynamic v) => intOf(v);
 
   /// 0.9.30：排行榜首屏头像预热。
   ///
@@ -7237,7 +7229,7 @@ class _RankPageState extends State<RankPage> {
                             final e = visible[i];
                             final name = '${e['name'] ?? ''}';
                             final av = '${e['avatar'] ?? ''}';
-                            final score = _n(e['score']);
+                            final score = intOf(e['score']);
                             final rowLib = sel == 'all'
                                 ? '${e['lib'] ?? cfg.lib}'
                                 : (sel.isEmpty ? cfg.lib : sel);
@@ -7261,9 +7253,9 @@ class _RankPageState extends State<RankPage> {
                               lib: rowLib,
                               libName: libName(rowLib),
                               meta: meta,
-                              works: _n(e['works']),
-                              plays: _n(e['plays']),
-                              drops: _n(e['drops']),
+                              works: intOf(e['works']),
+                              plays: intOf(e['plays']),
+                              drops: intOf(e['drops']),
                               scoreText:
                                   metric == 'drop' ? '💧 $score' : '$score',
                               onTap: name.isEmpty ? null : () => _open(name),
@@ -7975,21 +7967,20 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Map<String, dynamic> _s(String name) =>
       mapOrNull(stats[name]) ?? const <String, dynamic>{};
 
-  int _num(dynamic v) => intOf(v);
 
   int _metric(MapEntry<String, Map<String, dynamic>> e) {
     final s = _s(e.key);
     switch (sort) {
       case 'visits':
-        return _num(s['v']);
+        return intOf(s['v']);
       case 'visited':
-        return _num(s['lv']);
+        return intOf(s['lv']);
       case 'works':
-        return _num(e.value['n']);
+        return intOf(e.value['n']);
       case 'drops':
-        return _num(s['dr']);
+        return intOf(s['dr']);
       default:
-        return _num(s['p']);
+        return intOf(s['p']);
     }
   }
 
@@ -8000,7 +7991,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// 分页只用 [_shown] 控制渲染条数，数据不动。
   void _applyOrder({bool resetShown = true}) {
     _ordered = sortAuthorEntries(authors,
-        metric: _metric, works: (e) => _num(e.value['n']), name: (e) => e.key);
+        metric: _metric, works: (e) => intOf(e.value['n']), name: (e) => e.key);
     if (resetShown) {
       _shown = _initialShown(_ordered.length);
     } else if (_shown > _ordered.length) {
@@ -8085,15 +8076,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final s = _s(e.key);
     switch (sort) {
       case 'visits':
-        return '访问 ${_num(s['v'])} 次';
+        return '访问 ${intOf(s['v'])} 次';
       case 'visited':
-        return '最近 ${_fmtDate(_num(s['lv']))}';
+        return '最近 ${_fmtDate(intOf(s['lv']))}';
       case 'works':
-        return '${formatCount(_num(e.value['n']))} 个作品';
+        return '${formatCount(intOf(e.value['n']))} 个作品';
       case 'drops':
-        return '水滴 ${_num(s['dr'])}';
+        return '水滴 ${intOf(s['dr'])}';
       default:
-        return '播放 ${_num(s['p'])}';
+        return '播放 ${intOf(s['p'])}';
     }
   }
 
@@ -8146,7 +8137,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       lib: lib,
       meta: meta,
       stats: _s(e.key),
-      works: _num(e.value['n']),
+      works: intOf(e.value['n']),
       subtitle: _sub(e),
       onTap: () => _open(e.key),
     );
@@ -10524,17 +10515,15 @@ class _PlayerPageState extends State<PlayerPage>
     final r = await fetchDropStatus(id, lib: lib);
     if (!mounted || token != _openToken || r == null) return;
     setState(() {
-      dropDayLeft = _intOf(r['dayLeft'], 1);
-      dropWeekLeft = _intOf(r['weekLeft'], 3);
-      dropTotal = _intOf(r['total'], 0);
-      gDropDayLeft = _intOf(r['gDayLeft'], gDropDayLeft);
-      gDropWeekLeft = _intOf(r['gWeekLeft'], gDropWeekLeft);
-      gDropDayLimit = _intOf(r['gDayLimit'], 5);
-      gDropWeekLimit = _intOf(r['gWeekLimit'], 15);
+      dropDayLeft = intOf(r['dayLeft'], 1);
+      dropWeekLeft = intOf(r['weekLeft'], 3);
+      dropTotal = intOf(r['total'], 0);
+      gDropDayLeft = intOf(r['gDayLeft'], gDropDayLeft);
+      gDropWeekLeft = intOf(r['gWeekLeft'], gDropWeekLeft);
+      gDropDayLimit = intOf(r['gDayLimit'], 5);
+      gDropWeekLimit = intOf(r['gWeekLimit'], 15);
     });
   }
-
-  int _intOf(dynamic v, int fallback) => intOf(v, fallback);
 
   Future<void> _sendDrop() async {
     final w = _workAt(cur);
@@ -10571,13 +10560,13 @@ class _PlayerPageState extends State<PlayerPage>
     setState(() {
       dropBusy = false;
       if (r != null) {
-        dropDayLeft = _intOf(r['dayLeft'], dropDayLeft);
-        dropWeekLeft = _intOf(r['weekLeft'], dropWeekLeft);
-        dropTotal = _intOf(r['total'], dropTotal);
-        gDropDayLeft = _intOf(r['gDayLeft'], gDropDayLeft);
-        gDropWeekLeft = _intOf(r['gWeekLeft'], gDropWeekLeft);
-        gDropDayLimit = _intOf(r['gDayLimit'], gDropDayLimit);
-        gDropWeekLimit = _intOf(r['gWeekLimit'], gDropWeekLimit);
+        dropDayLeft = intOf(r['dayLeft'], dropDayLeft);
+        dropWeekLeft = intOf(r['weekLeft'], dropWeekLeft);
+        dropTotal = intOf(r['total'], dropTotal);
+        gDropDayLeft = intOf(r['gDayLeft'], gDropDayLeft);
+        gDropWeekLeft = intOf(r['gWeekLeft'], gDropWeekLeft);
+        gDropDayLimit = intOf(r['gDayLimit'], gDropDayLimit);
+        gDropWeekLimit = intOf(r['gWeekLimit'], gDropWeekLimit);
       } else {
         dropTotal = before;
         dropGlow = false;
@@ -15090,7 +15079,7 @@ class _RecommendPageState extends State<RecommendPage> {
 
   List<AuthorLibNode> get _filterBasics {
     final out = <AuthorLibNode>[];
-    for (final b in meta?.filterBasics ?? const <BasicLibRef>[]) {
+    for (final b in meta?.filterBasics ?? const <BasicLib>[]) {
       out.add(AuthorLibNode(
           id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
     }
@@ -15372,8 +15361,8 @@ class _SearchPageState extends State<SearchPage> {
         } catch (_) {}
         // T3：作品来源改为基础库 `works.json`（旧 `/api/c/` 收藏夹通道已移除）
         final basics = (sel == 'all' || sel.isEmpty)
-            ? (metas[lib]?.filterBasics ?? const <BasicLibRef>[])
-            : (metas[lib]?.basics ?? const <BasicLibRef>[]);
+            ? (metas[lib]?.filterBasics ?? const <BasicLib>[])
+            : (metas[lib]?.basics ?? const <BasicLib>[]);
         for (final b in basics) {
           jobs.add(
               _BasicJob(lib: lib, basicId: b.id, rel: b.rel, name: b.name));
@@ -17037,12 +17026,12 @@ class _AuthorPageState extends State<AuthorPage> {
   ///
   /// 只在多库合并时用（单库不显示筛选条），所以查不到名称时直接给 id 也能读。
   String libLabel(String id) {
-    for (final b in (meta?.allBasics ?? const <BasicLibRef>[])) {
+    for (final b in (meta?.allBasics ?? const <BasicLib>[])) {
       if (b.id == id) {
         return displayLibraryName(b.id, b.name);
       }
     }
-    for (final b in (meta?.basics ?? const <BasicLibRef>[])) {
+    for (final b in (meta?.basics ?? const <BasicLib>[])) {
       if (b.id == id) return displayLibraryName(b.id, b.name);
     }
     return displayLibraryName(id, id);

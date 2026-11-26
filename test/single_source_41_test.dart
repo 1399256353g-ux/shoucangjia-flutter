@@ -319,7 +319,7 @@ void main() {
           reason: '大库自己那份 _server* 也要落到模型上');
     });
 
-    test('BasicLibRef 与 BasicLib 对同一条数据的来源字段一致', () {
+    test('基础库只有一个模型：basicsUnderBase 与 LibraryTree.parse 来源字段一致', () {
       final raw = <String, dynamic>{
         'id': 'lib-1',
         'name': 'A',
@@ -334,7 +334,16 @@ void main() {
         'root': '/root',
         'basicLibraries': <dynamic>[raw],
       }, '/root').single;
-      final lib = basicLibFromRef(ref);
+      final lib = LibraryTree.parse(<String, dynamic>{
+        'bigLibraries': <dynamic>[
+          <String, dynamic>{'id': 'big-1', 'name': 'A', 'path': '/root/A'},
+        ],
+        'basicLibraries': <dynamic>[
+          <String, dynamic>{...raw, 'big_id': 'big-1'},
+        ],
+      })!
+          .allBasics
+          .single;
       expect(lib.serverId, ref.serverId);
       expect(lib.serverBase, ref.serverBase);
       expect(lib.serverLabel, ref.serverLabel);

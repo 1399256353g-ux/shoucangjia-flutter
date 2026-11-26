@@ -139,6 +139,29 @@ String? mediaRelOrNull(String path) {
 /// `/media/` 之后的路径段；不是媒体路径返回空串（需要区分时用 [mediaRelOrNull]）。
 String mediaRel(String path) => mediaRelOrNull(path) ?? '';
 
+/// 相对路径 → `/media/<lib>/<rel>`（**唯一拼装口**）。
+///
+/// 「库前缀」这件事此前在三个文件里各拼一遍，而且各自的**判定集合不同**：
+///
+/// ```
+/// lib_cover.libraryMediaPath  network/api/media 三种都判，不补前缀
+/// main.Cfg.media              同上，但 `/media/` 已知库段时原样返回
+/// main.Cfg.media（相对分支）   '/media/${Uri.encodeComponent(l)}/$rel'
+/// ```
+///
+/// 编`Uri.encodeComponent(l)` 这一句就抄了两次：只要有一处改成不编码（或
+/// 编码两次），中文/空格库名的封面在其中一个入口就是 `%25E4%25B8%25AD`
+/// ——服务端按字面路径找不到目录，返回 404，卡片只剩底色。
+///
+/// [lib] 为空时返回 `/media/<rel>`（服务端接受无库段的形式）。
+/// [rel] 前导斜杠会被吃掉：`'/cover/v1.jpg'` 不能拼成 `//cover`。
+String libMediaPrefix(String lib, String rel) {
+  final r = rel.trim().replaceFirst(RegExp(r'^/+'), '');
+  final l = lib.trim();
+  if (l.isEmpty) return '/media/$r';
+  return '/media/${Uri.encodeComponent(l)}/$r';
+}
+
 /// 百分号解码，非法编码原样返回（**唯一实现**）。
 ///
 /// 媒体路径的库段与 `.avatars` 文件名都可能是百分号编码的，而文件名本身

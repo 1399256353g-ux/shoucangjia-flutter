@@ -197,7 +197,7 @@ class _BasicLibPageState extends State<BasicLibPage>
         final c = compareAuthorNames(
             '${x['name'] ?? x['name_raw'] ?? ''}', '${y['name'] ?? y['name_raw'] ?? ''}');
         if (c != 0) return c;
-        return _int(y['works']).compareTo(_int(x['works']));
+        return intOf(y['works']).compareTo(intOf(x['works']));
       });
       if (!mounted) return;
       setState(() {
@@ -323,7 +323,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       setState(() {
         if (reset) works = [];
         works.addAll(batch);
-        total = _int(j['total']);
+        total = intOf(j['total']);
         _filteredCache = null;
         loadingWorks = false;
         loadingMore = false;
@@ -347,7 +347,6 @@ class _BasicLibPageState extends State<BasicLibPage>
     }
   }
 
-  static int _int(dynamic v) => intOf(v);
 
   static String _kindsLabel(Map<String, dynamic> a) {
     final k = a['kinds'];
@@ -355,7 +354,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     int v = 0, p = 0, c = 0;
     for (final e in k.entries) {
       final key = '${e.key}';
-      final n = _int(e.value);
+      final n = intOf(e.value);
       if (key.startsWith('v:')) {
         if (key.endsWith('chapters')) {
           c += n;
@@ -519,7 +518,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                       Builder(builder: (_) {
                         final g = AuthorGrade.fromStats(
                             _authorStats[name],
-                            works: _int(a['works']));
+                            works: intOf(a['works']));
                         return Container(
                           key: const ValueKey('basic-author-grade'),
                           padding: const EdgeInsets.symmetric(
@@ -551,7 +550,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                               fontSize: 12, fontWeight: FontWeight.w600)),
                     ),
                   ),
-                  Text('${formatCount(_int(a['works']))} 作品',
+                  Text('${formatCount(intOf(a['works']))} 作品',
                       style: const TextStyle(fontSize: 9.5, color: Colors.grey)),
                   if (sub.isNotEmpty)
                     Text(sub,

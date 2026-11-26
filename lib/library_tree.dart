@@ -1,8 +1,6 @@
-import 'disk_name.dart';
+import 'basic_lib.dart';
 import 'json_num.dart';
-import 'lib_cover.dart';
 import 'server_origin.dart';
-import 'source_lib.dart';
 
 // 「大库 / 基础库」两级选择模型（纯函数，便于单测）。
 //
@@ -16,73 +14,12 @@ import 'source_lib.dart';
 //  - 已星标的基础库不再重复出现在大库分组里，避免同一项出现两次
 //  - 找不到 big_id 的基础库归入「未归属」分组，不丢数据
 //  - 旧版（v1，只有 libraries 注册表）解析返回 null，由页面走原列表兜底
+//
+// `BasicLib` 模型本身在 `basic_lib.dart`（0.9.284 与 `source_lib.BasicLibRef`
+// 合并为一份）：两处各定义一个「基础库」时，单元库页走的那个少 `cover`/`cv`
+// 两个字段，同一张卡在两个页面就取到不同的封面。
 
-class BasicLib {
-  final String id;
-  final String name;
-  final String rel;
-  final String bigId;
-  final int authors;
-  final int works;
-
-  /// L5-C：自定义封面版本（`_cover/<version>.<ext>`）；空串表示无自定义封面。
-  final String coverVersion;
-  final String coverExt;
-
-  /// 0.9.9：爬虫脚本抓到的封面（作品目录 `cover.jpg`，服务端索引 `cv` 下发）；
-  /// 空串表示没有。优先级介于手动封面与自动封面之间。
-  final String crawlerCover;
-
-  /// G：服务端 `/api/libraries.json` 下发的「首张作品封面」（`fc`，已带
-  /// `/media/<lib>/` 前缀，且保证是图片）。只在手动/爬虫/播放量都拿不到图时兜底。
-  final String firstCover;
-
-  /// J7：来源连接（多 IP 聚合时用于路由与去重展示）。
-  final String serverId;
-  final String serverBase;
-  final String serverLabel;
-
-  const BasicLib({
-    required this.id,
-    required this.name,
-    required this.rel,
-    required this.bigId,
-    required this.authors,
-    required this.works,
-    this.coverVersion = '',
-    this.coverExt = 'jpg',
-    this.crawlerCover = '',
-    this.firstCover = '',
-    this.serverId = '',
-    this.serverBase = '',
-    this.serverLabel = '',
-  });
-
-  // 0.9.229 删掉 `toJson()`：它只在 `test/basic_lib_first_cover_test.dart`
-  // 被断言，`lib/` 里没有任何调用点——库树从不回写本地快照（重启是重拉
-  // `/api/libraries.json`）。一条「写了没人读」的序列化会让人误以为存在缓存，
-  // 甚至照着它改字段名，而产品行为其实只取决于 `LibraryTree.parse`。
-}
-
-/// 把 `BasicLibRef` 转成页面用的 `BasicLib`（单元库树构建时用）。
-///
-/// 统计字段由调用方补（树构建阶段没有 0 值以外的数据），但封面 `fc` 必须
-/// 原样带过来 —— 单元库页基础库卡片只读 `BasicLib.firstCover`。
-BasicLib basicLibFromRef(BasicLibRef r, {int authors = 0, int works = 0}) =>
-    BasicLib(
-      id: r.id,
-      name: r.name,
-      rel: r.rel,
-      bigId: r.bigId,
-      authors: authors,
-      works: works,
-      firstCover: r.firstCover,
-      // 连接信息必须跟着走：卡片自己的兜底解析（`basicCoverUrl` →
-      // `absoluteMediaUrl`）靠 `serverBase` 拼地址，缺了就是空串 → 灰卡。
-      serverId: r.serverId,
-      serverBase: r.serverBase,
-      serverLabel: r.serverLabel,
-    );
+export 'basic_lib.dart' show BasicLib;
 
 class BigLib {
   final String id;
@@ -136,23 +73,14 @@ class LibraryTree {
       if (raw is! Map) continue;
       final id = '${raw['id'] ?? ''}'.trim();
       if (id.isEmpty) continue;
-      final relRaw = '${raw['rel'] ?? ''}'.trim();
-      final origin = serverOriginOf(raw);
-      basics.add(BasicLib(
+      // 解析本体只有 `basic_lib.basicLibFromJson` 一处（与 `source_lib.
+      // basicsUnderBase` 同一个入口）：这里再手抄一遍字段，漏掉 `cover`
+      // 指针或 `cv` 其中之一，首页与单元库页就会取到不同的封面。
+      basics.add(basicLibFromJson(
+        raw,
         id: id,
-        name: diskNameOf(relRaw, '${raw['name'] ?? id}'.trim(),
-            where: 'BasicLib'),
-        rel: relRaw,
-        bigId: '${raw['big_id'] ?? ''}'.trim(),
-        authors: _num(raw['authors']),
-        works: _num(raw['works']),
-        coverVersion: coverPointerOf(raw['cover']).version,
-        coverExt: coverPointerOf(raw['cover']).ext,
-        crawlerCover: '${raw['cv'] ?? ''}'.trim(),
-        firstCover: firstWorkCoverOf(raw),
-        serverId: origin.id,
-        serverBase: origin.base,
-        serverLabel: origin.label,
+        rel: '${raw['rel'] ?? ''}'.trim(),
+        fallbackName: '${raw['name'] ?? id}'.trim(),
       ));
     }
 
@@ -166,8 +94,8 @@ class LibraryTree {
         id: id,
         name: '${raw['name'] ?? id}'.trim(),
         path: '${raw['path'] ?? ''}'.trim(),
-        authors: _num(raw['authors']),
-        works: _num(raw['works']),
+        authors: intOf(raw['authors']),
+        works: intOf(raw['works']),
         basics: basics.where((b) => b.bigId == id).toList(growable: false),
         serverId: origin.id,
         serverBase: origin.base,
@@ -213,4 +141,3 @@ List<String> toggleStar(List<String> stars, String id, {int max = 20}) {
   return next;
 }
 
-int _num(dynamic v) => intOf(v);
