@@ -80,3 +80,18 @@ String rankDetailLine({
 /// 排行指标 → 数值类型文字。两个榜共用，不许在页面里另写一份。
 String rankMetricLabel(String metric) =>
     metric == 'drop' ? '小水滴' : '播放量';
+
+/// 空榜文案（**唯一出口**）。
+///
+/// 两件事必须一起说清，否则同一句空话在不同状态下读起来一样：
+///   1. **指标**：播放量榜与小水滴榜的「没有」不是一回事；
+///   2. **作用域**：`scoped` 为真表示看的是某个具体库，不写作用域会让人
+///      以为全部库都没有数据。
+///
+/// 页面只传两个参数，不再自己拼 `metric == 'drop' ? … : …`——那正是本轮
+/// 之前两处空态各写一份的来源。
+String rankEmptyText(String metric, {bool scoped = false}) {
+  final what = metric == 'drop' ? '小水滴' : '播放记录';
+  if (scoped) return '这个库本期还没有$what';
+  return metric == 'drop' ? '本期还没有小水滴，去播放页送一颗吧' : '本期还没有播放记录';
+}

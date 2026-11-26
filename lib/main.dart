@@ -7321,6 +7321,12 @@ class _RankPageState extends State<RankPage> {
   bool loading = true;
   String? err;
 
+  /// 选中库的元数据是否正在读取。
+  ///
+  /// 空列表有两种原因：「这个库本期确实没有播放」和「还没算出它包含哪些
+  /// 基础库」。同一个空态文案说两句不同的事，用户只会以为数据丢了。
+  bool metaLoading = false;
+
   /// 选中库包含的基础库 id（`sel` 是注册库 id，`libs` 行里是基础库 id）。
   ///
   /// 这是本轮修掉的真缺陷：`sel` 此前被直接当 `big_id`（历史分组 id）去比，
@@ -7386,11 +7392,17 @@ class _RankPageState extends State<RankPage> {
 
   /// 为选中的库加载元数据（`loadLibs` 只装了当前库那份）。
   Future<void> _loadMetaFor(String lib) async {
+    if (mounted) setState(() => metaLoading = true);
     try {
       final meta = await LibMeta.load(lib);
-      if (!mounted || metas.containsKey(lib)) return;
-      setState(() => metas[lib] = meta);
-    } catch (_) {}
+      if (!mounted) return;
+      setState(() {
+        metas[lib] = meta;
+        metaLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => metaLoading = false);
+    }
   }
 
   Future<void> load() async {
@@ -7625,12 +7637,15 @@ class _RankPageState extends State<RankPage> {
                   ? LoadErrorView(
                       message: '加载失败：$err',
                       onRetry: load)
+                  : visible.isEmpty && metaLoading
+                      ? const Center(child: CircularProgressIndicator())
                   : visible.isEmpty
                       ? Center(
                           child: Text(
-                              metric == 'drop'
-                                  ? '本期还没有小水滴，去播放页送一颗吧'
-                                  : '本期还没有播放记录',
+                              // 指标与作用域都由 `rank_metric.rankEmptyText`
+                              // 一处表达：页面不再自己拼分支。
+                              rankEmptyText(metric,
+                                  scoped: sel.isNotEmpty && sel != 'all'),
                               style: const TextStyle(
                                   color: Colors.grey, fontSize: 12)))
                       : ListView.separated(

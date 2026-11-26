@@ -91,6 +91,25 @@ void main() {
     });
   });
 
+  group('空列表的两种原因不说成一句话', () {
+    test('选中库的元数据还没读完时转圈，不写「没有播放记录」', () {
+      final main = codeOf('lib/main.dart');
+      final start = main.indexOf('class _RankPageState');
+      final end = main.indexOf('class LibraryRankPage');
+      final body = main.substring(start, end);
+      expect(body.contains('bool metaLoading = false;'), isTrue);
+      expect(body.contains('visible.isEmpty && metaLoading'), isTrue,
+          reason: '元数据未就绪与「本期没有播放」是两件事');
+      // 空态文案只由 rank_metric.rankEmptyText 一处表达
+      expect(body.contains('rankEmptyText('), isTrue);
+      expect(body.contains("metric == 'drop' ?  '本期"), isFalse);
+      final metric = codeOf('lib/rank_metric.dart');
+      expect(metric.contains('String rankEmptyText('), isTrue);
+      expect(metric.contains('这个库本期还没有'), isTrue,
+          reason: '选了具体库时要说清作用域');
+    });
+  });
+
   group('「当前」不是多库的说法', () {
     test('各库排行标「默认」，字段名 isDefault', () {
       final rank = codeOf('lib/library_rank.dart');
