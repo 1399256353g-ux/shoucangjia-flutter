@@ -7082,17 +7082,20 @@ class _RankPageState extends State<RankPage> {
     prefetchThumbItems(
       [
         for (final e in visibleRows.take(n))
-          (
-            url: withImageWidth(
-                cfg.mediaUrl('${e['avatar'] ?? ''}',
-                    lib: sel == 'all'
-                        ? '${e['lib'] ?? cfg.lib}'
-                        : (sel.isEmpty ? cfg.lib : sel)),
-                kAvatarImageWidth),
-            headers: cfg.headersFor(sel == 'all'
-                ? '${e['lib'] ?? cfg.lib}'
-                : (sel.isEmpty ? cfg.lib : sel)),
-          ),
+          // 空头像必须在这里排掉：`cfg.mediaUrl('')` 返回的是 base 本身
+          // （不是空串），不去就会把服务器根地址当图片请求。
+          if ('${e['avatar'] ?? ''}'.trim().isNotEmpty)
+            (
+              url: withImageWidth(
+                  cfg.mediaUrl('${e['avatar'] ?? ''}',
+                      lib: sel == 'all'
+                          ? '${e['lib'] ?? cfg.lib}'
+                          : (sel.isEmpty ? cfg.lib : sel)),
+                  kAvatarImageWidth),
+              headers: cfg.headersFor(sel == 'all'
+                  ? '${e['lib'] ?? cfg.lib}'
+                  : (sel.isEmpty ? cfg.lib : sel)),
+            ),
       ],
       limit: n,
       decodeWidth: px,
@@ -8019,7 +8022,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     prefetchThumbItems(
       [
         for (final e in _ordered.take(n))
-          if (e.value['av'] != null && '${e.value['av']}'.isNotEmpty)
+          if ('${e.value['av'] ?? ''}'.trim().isNotEmpty)
             (
               url: withImageWidth(
                   cfg.mediaUrl('${e.value['av']}',
@@ -17689,6 +17692,8 @@ class _WorkGridState extends State<WorkGrid> {
     prefetchThumbItems(
       [
         for (final w in works.take(n))
+          // `workCoverUrl` 没封面时返回空串；若塞进 `mediaUrl` 会拼出服务器
+          // 根地址——`withImageWidth('')` 也为空，交给预热入口排掉即可。
           (
             url: withImageWidth(
                 workCoverUrl(
