@@ -37,6 +37,7 @@ import 'breadcrumb.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
 import 'decode_plan.dart';
+import 'grid_spec.dart';
 import 'layout_metric.dart';
 import 'work_cover.dart';
 import 'media_path.dart';
@@ -5042,14 +5043,9 @@ class _LibraryPageState extends State<LibraryPage> {
   /// （本机播放量最高的作品，有图文作品时优先图文图片）。
   String _basicCoverUrl(BasicLib b) {
     final top = topPlayed(WorkPlaysStore.countsFor(b.id));
-    // owner 2026-11-21：基础库的封面在「库根/_cover/」下，而 cfg.mediaUrl 的
-    // `/media/<库id>/` 已经指向库根；再拼 rel 会变成 `<rel>/_cover/...` → 404。
-    // 实测：不带 rel 的地址返回 200 image/jpeg。
-    // 顺序本体只有 `lib_cover.kCoverSourceOrder`（`basicCoverUrl` 同一条）：
-    // 旧写法在本函数里把「自定义 → 爬虫 → 最高播放 → 首张」再排了一遍，
-    // 还多一条「挑不出来就直接用 cv」的补丁。
-    final hit = resolveCover(
-      rel: '',
+    // 「基础库的 `_cover/` 在库根」这条语义只在 `lib_cover.resolveBasicCover`
+    // 里（`rel` 固定空串，与单元库的 `<rel>/_cover/` 区分开）。
+    final hit = resolveBasicCover(
       version: b.coverVersion,
       ext: b.coverExt,
       bestThumb: top?.thumb ?? '',
@@ -5453,16 +5449,15 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 两者都没有就返回空串，卡片用词条色块占位；不取爬虫封面/作品图，
   /// 避免首页把某个作者的封面当成媒体库封面。
   String _topNodeCoverUrl(UnitLibrary u) {
-    final pick = u.node.coverUrl.trim();
-    if (pick.isNotEmpty) {
-      final ownLib = libOfMediaPath(pick);
-      final url = cfg.mediaUrl(pick, lib: ownLib.isEmpty ? null : ownLib);
-      if (url.isNotEmpty) return url;
-    }
-    // 第二级（自定义 `_cover/`）也走 `resolveCover`：只取前两级（manual 已在上
-    // 面处理，这里关掉 crawler/best/first），避免这段顺序成为第三份手写链。
-    final hit = resolveCover(
-      rel: u.rel,
+    // 手动指针的解析（trim / 取库段 / 路由）只有 `lib_cover.manualCoverUrl`
+    // 一处（单元库卡片与单元库页也走它）。
+    final manual = manualCoverUrl(u.node.coverUrl,
+        build: (path, libId) => cfg.mediaUrl(path, lib: libId));
+    if (manual.isNotEmpty) return manual;
+    // 第二级（自定义 `_cover/`）也走同一个入口：单元库的 `_cover/` 在节点目录
+    // 下（`resolveUnitCover` 包住 rel 的语义），避免这段顺序成为第三份手写链。
+    final hit = resolveUnitCover(
+      unitRel: u.rel,
       version: u.node.coverVersion,
       ext: u.node.coverExt,
     );
@@ -5474,31 +5469,33 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 0.9.35：owner 手动设置的单元库封面（服务端 `unit-covers.json` → `cover.u`）
   /// 优先 > 手动 `_cover/` > 子树最高播放基础库的封面 > 第一个有封面的基础库。
   String _unitCoverUrl(UnitLibrary u) {
-    final pick = u.node.coverUrl.trim();
-    if (pick.isNotEmpty) {
-      final ownLib = libOfMediaPath(pick);
-      final url = cfg.mediaUrl(pick, lib: ownLib.isEmpty ? null : ownLib);
-      if (url.isNotEmpty) return url;
-    }
+    final manual = manualCoverUrl(u.node.coverUrl,
+        build: (path, libId) => cfg.mediaUrl(path, lib: libId));
+    if (manual.isNotEmpty) return manual;
     // owner 2026-11-21：单元库以前只传 firstThumb（服务端 `fc`，常指向视频），
     // 从没把「爬虫封面 cv」传进来 —— 而 cv 才是真正有图片的那条链路。
     // 这就是单元库卡片长期灰着的原因。
     // 爬虫封面：整棵子树里第一个非空 `cv`，扫描本体在 `UnitLibrary.firstCrawlerCover`
     // （`unit_library_view.unitCoverUrl` 走同一个属性）。
     final top = _topPlayedBasic(u);
-    final custom = pickUnitCover(
-        rel: u.rel,
-        version: u.node.coverVersion,
-        ext: u.node.coverExt,
-        crawlerThumb: u.firstCrawlerCover,
-        firstThumb: _firstFcOfUnit(u)?.path ?? '');
-    if (!custom.isEmpty) {
+    // 单元库的 `_cover/` 在节点目录下（`resolveUnitCover` 包住 rel 语义）；
+    // 旧写法自己传 `rel: u.rel` 并在注释里解释“哪个入口用 rel”，
+    // 与 `basicCoverUrl` 的 `rel: ''` 只靠注释区分。
+    final hit = resolveUnitCover(
+      unitRel: u.rel,
+      version: u.node.coverVersion,
+      ext: u.node.coverExt,
+      crawlerThumb: u.firstCrawlerCover,
+      firstThumb: _firstFcOfUnit(u)?.path ?? '',
+    );
+    if (hit.path.isNotEmpty) {
       // 子树第一张作品封面按所属基础库路由；自定义 `_cover/` 保持原解析。
+      final custom = hit.source == CoverSource.custom;
       final fc = _firstFcOfUnit(u);
-      return custom.custom
-          ? cfg.mediaUrl(custom.path)
-          : cfg.mediaUrl(custom.path,
-              lib: fc != null && custom.path == fc.path ? fc.lib : null);
+      return custom
+          ? cfg.mediaUrl(hit.path)
+          : cfg.mediaUrl(hit.path,
+              lib: fc != null && hit.path == fc.path ? fc.lib : null);
     }
     // 自动生成：整棵子树里本机播放量最高的基础库，走该基础库完整封面链
     // （手动 > 爬虫 > 自动），并按基础库所属连接解析媒体地址。
@@ -7082,28 +7079,23 @@ class _RankPageState extends State<RankPage> {
       displaySize: AuthorAvatar.rankSize,
       devicePixelRatio: mq.devicePixelRatio,
     );
-    final urls = <String>[];
-    final headers = <String, Map<String, String>>{};
-    for (final e in visibleRows.take(n)) {
-      final av = '${e['avatar'] ?? ''}';
-      if (av.isEmpty) continue;
-      final lib = sel == 'all'
-          ? '${e['lib'] ?? cfg.lib}'
-          : (sel.isEmpty ? cfg.lib : sel);
-      final u = withImageWidth(cfg.mediaUrl(av, lib: lib), kAvatarImageWidth);
-      urls.add(u);
-      headers[u] = cfg.headersFor(lib);
-    }
-    if (urls.isEmpty) return;
-    ThumbPrefetch.instance.run(
-      urls,
+    prefetchThumbItems(
+      [
+        for (final e in visibleRows.take(n))
+          (
+            url: withImageWidth(
+                cfg.mediaUrl('${e['avatar'] ?? ''}',
+                    lib: sel == 'all'
+                        ? '${e['lib'] ?? cfg.lib}'
+                        : (sel.isEmpty ? cfg.lib : sel)),
+                kAvatarImageWidth),
+            headers: cfg.headersFor(sel == 'all'
+                ? '${e['lib'] ?? cfg.lib}'
+                : (sel.isEmpty ? cfg.lib : sel)),
+          ),
+      ],
       limit: n,
-      provider: (u) => thumbImageProvider(
-        u,
-        decodeWidth: px,
-        headers: headers[u] ?? cfg.headers,
-        cacheManager: DiziCache.manager,
-      ),
+      decodeWidth: px,
     );
   }
 
@@ -7480,7 +7472,10 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
 /// 名称/统计/作品数各一行、文字一律单行省略，卡片尺寸不随内容变化。
 class AuthorGridCard extends StatelessWidget {
   static const double radius = 12;
-  static const double extent = 170;
+
+  /// 卡片固定行高：唯一数字在 `grid_spec.kAuthorCardExtent`
+  /// （页面 delegate 与首屏预热都从那里读）。
+  static const double extent = kAuthorCardExtent;
 
   final String name;
   final String avatar;
@@ -8010,45 +8005,31 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   void _prefetchAvatars() {
     if (!mounted || _ordered.isEmpty) return;
     final mq = MediaQuery.of(context);
-    final n = firstScreenThumbCount(
-      viewportWidth: mq.size.width,
-      viewportHeight: mq.size.height,
-      maxCrossAxisExtent: 150,
-      // 与页面里的 delegate 逐项同源（此前一律用默认值，三项都不对）：
-      // padding `fromLTRB(12, 4, 12, 16)`、间距 10（默认 8）、
-      // 行高固定 `mainAxisExtent: AuthorGridCard.extent`。
-      // 旧写法按 `150 / 170` 估行高且宽高各只扣 10×2，首屏会多预热一行。
-      paddingX: 12,
-      paddingY: 10, // (4 + 16) / 2，上下之和与页面一致
-      crossSpacing: 10,
-      mainSpacing: 10,
-      mainAxisExtent: AuthorGridCard.extent,
+    // 几何全部来自 `kAuthorGrid`（与页面 delegate 同一份规格）：此前这里
+    // 自己写一遍 150/10/10/170，页面 delegate 再写一遍，改一处就预热到屏幕外。
+    final n = kAuthorGrid.prefetchCount(
+      mq.size,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
     );
     if (n <= 0) return;
     final px = avatarDecodeWidth(
       displaySize: AuthorAvatar.gridSize,
       devicePixelRatio: mq.devicePixelRatio,
     );
-    final urls = <String>[];
-    final headers = <String, Map<String, String>>{};
-    for (final e in _ordered.take(n)) {
-      final av = '${e.value['av'] ?? ''}';
-      if (av.isEmpty) continue;
-      final lib = '${e.value['_lib'] ?? cfg.lib}';
-      final u = withImageWidth(cfg.mediaUrl(av, lib: lib), kAvatarImageWidth);
-      urls.add(u);
-      headers[u] = cfg.headersFor(lib);
-    }
-    if (urls.isEmpty) return;
-    ThumbPrefetch.instance.run(
-      urls,
+    prefetchThumbItems(
+      [
+        for (final e in _ordered.take(n))
+          if (e.value['av'] != null && '${e.value['av']}'.isNotEmpty)
+            (
+              url: withImageWidth(
+                  cfg.mediaUrl('${e.value['av']}',
+                      lib: '${e.value['_lib'] ?? cfg.lib}'),
+                  kAvatarImageWidth),
+              headers: cfg.headersFor('${e.value['_lib'] ?? cfg.lib}'),
+            ),
+      ],
       limit: n,
-      provider: (u) => thumbImageProvider(
-        u,
-        decodeWidth: px,
-        headers: headers[u] ?? cfg.headers,
-        cacheManager: DiziCache.manager,
-      ),
+      decodeWidth: px,
     );
   }
 
@@ -8222,13 +8203,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                             return GridView.builder(
                               controller: _scroll,
                               padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-                              gridDelegate:
-                                  const SliverGridDelegateWithMaxCrossAxisExtent(
-                                maxCrossAxisExtent: 150,
-                                mainAxisSpacing: 10,
-                                crossAxisSpacing: 10,
-                                mainAxisExtent: AuthorGridCard.extent,
-                              ),
+                              gridDelegate: kAuthorGrid.delegate,
                               itemCount: _shownLen,
                               itemBuilder: (_, i) => _authorCell(_ordered[i]),
                             );
@@ -17542,11 +17517,7 @@ class WorkGridSkeleton extends StatelessWidget {
       child: GridView.builder(
         physics: const NeverScrollableScrollPhysics(),
         padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 180,
-            childAspectRatio: 3 / 4,
-            mainAxisSpacing: 2,
-            crossAxisSpacing: 2),
+        gridDelegate: kWorkGrid.delegate,
         itemCount: count,
         itemBuilder: (_, __) => const SkeletonBlock(radius: BorderRadius.zero),
       ),
@@ -17709,44 +17680,32 @@ class _WorkGridState extends State<WorkGrid> {
     final works = widget.works;
     if (works.isEmpty) return;
     final mq = MediaQuery.of(context);
-    final n = firstScreenThumbCount(
-      viewportWidth: mq.size.width,
-      viewportHeight: mq.size.height,
-      maxCrossAxisExtent: 180,
-      padding: 0,
-      crossSpacing: 2,
-      mainSpacing: 2,
-      aspectRatio: WorkCard.aspect,
-    );
+    // 几何与 `_buildGrid` 的 delegate 同源（`kWorkGrid`）：180/2/3:4、无内边距。
+    final n = kWorkGrid.prefetchCount(mq.size, padding: EdgeInsets.zero);
     if (n <= 0) return;
     final px = workCardDecodeWidth(mq.devicePixelRatio);
     // 网格可能跨库（收藏夹/搜索/推荐），headers 按作品各自的库取，
     // 与 `WorkCard.headers` 一致，缓存键才对得上。
-    final headersOfUrl = <String, Map<String, String>>{};
-    for (final w in works.take(n)) {
-      final lib = _libFor(w);
-      final cover = workCoverUrl(
-        w,
-        lib: lib,
-        urls: WorkCoverUrls.standard(
-          mediaUrl: (path) => cfg.mediaUrl(path, lib: lib),
-          rawUrl: (path) => cfg.u(path, lib: lib).toString(),
-        ),
-      );
-      if (cover.isEmpty) continue;
-      headersOfUrl.putIfAbsent(
-          withImageWidth(cover, kWorkImageWidth), () => cfg.headersFor(lib));
-    }
-    if (headersOfUrl.isEmpty) return;
-    ThumbPrefetch.instance.runWith(
-      headersOfUrl.keys,
+    prefetchThumbItems(
+      [
+        for (final w in works.take(n))
+          (
+            url: withImageWidth(
+                workCoverUrl(
+                  w,
+                  lib: _libFor(w),
+                  urls: WorkCoverUrls.standard(
+                    mediaUrl: (path) => cfg.mediaUrl(path, lib: _libFor(w)),
+                    rawUrl: (path) =>
+                        cfg.u(path, lib: _libFor(w)).toString(),
+                  ),
+                ),
+                kWorkImageWidth),
+            headers: cfg.headersFor(_libFor(w)),
+          ),
+      ],
       limit: n,
-      fetch: (u) => loadImage(thumbImageProvider(
-        u,
-        decodeWidth: px,
-        headers: headersOfUrl[u] ?? const <String, String>{},
-        cacheManager: DiziCache.manager,
-      )),
+      decodeWidth: px,
     );
   }
 
@@ -17791,11 +17750,7 @@ class _WorkGridState extends State<WorkGrid> {
     final shown = _shown > total ? total : _shown;
     return GridView.builder(
       controller: _scroll,
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 180,
-          childAspectRatio: 3 / 4,
-          mainAxisSpacing: 2,
-          crossAxisSpacing: 2),
+      gridDelegate: kWorkGrid.delegate,
       itemCount: shown,
       itemBuilder: (_, i) {
         final w = works[i];

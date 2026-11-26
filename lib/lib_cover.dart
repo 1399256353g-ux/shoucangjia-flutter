@@ -34,7 +34,7 @@ export 'cover_ext.dart'
 
 // 后缀剥除（`?` / `#` 段）走 `media_path.dart`（已在上方 import），
 // 取末段走 `rel_path.lastRelName`（连 `\` 一起认）。
-import 'rel_path.dart' show lastRelName, relSegments, relJoin;
+import 'rel_path.dart' show lastRelName, relSegments, relJoin, normalizeRelPath;
 
 /// 自定义封面目录名（位于库/单元库文件夹内）。
 const String kCoverDir = '_cover';
@@ -158,7 +158,7 @@ String coverImageRel(String rel, String version, {String ext = 'jpg'}) {
   return (version: version, ext: coverExtInName(v) ?? 'jpg');
 }
 
-/// 一张封面结果：路径 + 来源（用于 UI 区分「自定义」与「作品封面」）。
+/// 封面结果：路径 + 来源（用于 UI 区分「自定义」与「作品封面」）。
 class CoverPick {
   /// 相对库根的媒体路径；空串表示无图，调用方显示默认图。
   final String path;
@@ -171,17 +171,27 @@ class CoverPick {
         custom = false;
 
   bool get isEmpty => path.isEmpty;
+
+  /// [CoverHit] → [CoverPick]。
+  ///
+  /// 空路径一律归为「无图」：`resolveCover` 在全部落空时仍会返回
+  /// `source: first`，直接看 `source == custom` 会把一张不存在的图当成
+  /// 「自定义封面」传给调用方。
+  factory CoverPick.of(CoverHit hit) => hit.path.isEmpty
+      ? const CoverPick.none()
+      : CoverPick(hit.path, custom: hit.source == CoverSource.custom);
 }
 
 /// 封面候选来源，**声明顺序就是优先级（高 → 低）**。
 ///
 /// owner 的口径只有一条链：手动指定 > 自定义 `_cover/` > 爬虫封面 `cv` >
-/// 本机播放量最高 > 首张作品图。这条链此前在四处各写一遍（`pickBasicCover` /
-/// `pickUnitCover` / `main._basicCoverUrl` / `main._unitCoverUrl`），
+/// 本机播放量最高 > 首张作品图。这条链此前在四处各写一遍（`pick*Cover` /
+/// `main._basicCoverUrl` / `main._unitCoverUrl`），
 /// 每处的「顺序」和「哪几种参与」都略有不同——所以会出现「单元库卡片显示了、
 /// 基础库卡片没显示」这类只在某个入口复现的灰卡。
 ///
-/// 现在顺序只在这一张表里；[resolveCover] 是唯一走表的人。
+/// 现在顺序只在这一张表里；[resolveCover] 是唯一走表的人，
+/// 而「`rel` 该传什么」只由 [resolveBasicCover] / [resolveUnitCover] 决定。
 enum CoverSource { manual, custom, crawler, best, first }
 
 const List<CoverSource> kCoverSourceOrder = <CoverSource>[
@@ -346,75 +356,118 @@ String libOfMediaPath(String p) {
 ///
 /// 只在「自定义 / 爬虫 / 播放量最高」都拿不到可用图片时才被用到；
 /// 视频路径（mp4/mov…）当封面只会一直渲染失败，因此直接判为无图。
-CoverPick pickFirstWorkCover(String firstThumb) {
+CoverHit resolveFirstWorkCover(String firstThumb) {
   final fb = firstThumb.trim();
-  if (!isCoverImagePath(fb)) return const CoverPick.none();
-  return CoverPick(fb);
+  if (!isCoverImagePath(fb)) return (path: '', source: CoverSource.first);
+  return (path: fb, source: CoverSource.first);
 }
 
-/// 基础库封面：按 [kCoverSourceOrder]（自定义 → 爬虫 → 最高播放 → 首张作品）。
+/// 服务端下发的「手动封面」指针（`cover.u`）→ 可直接请求的绝对地址。
 ///
-/// 只保留签名兼容的转发：顺序本体在 [resolveCover]。
-CoverPick pickBasicCover({
-  required String rel,
-  String bestThumb = '',
-  String firstThumb = '',
-  String crawlerThumb = '',
-  String version = '',
-  String ext = 'jpg',
-}) =>
-    _pickLibCover(
-      rel: rel,
-      bestThumb: bestThumb,
-      firstThumb: firstThumb,
-      crawlerThumb: crawlerThumb,
-      version: version,
-      ext: ext,
-    );
-
-/// 单元库（上级文件夹）封面：与基础库同一条优先级链。
+/// 这段判定在三个地方各写了一遍（`main._topNodeCoverUrl`、
+/// `main._unitCoverUrl`、`unit_library_view.unitCoverUrl`）：
+/// 都是「trim → 确认是媒体路径 → 取路径里的库段 → 交给调用方拼地址」，
+/// 差别只在「谁来拼」——主页用 `cfg.mediaUrl`（按库路由到对应连接），
+/// 卡片直连用 `absoluteMediaUrl(serverBase, …)`。
 ///
-/// 两者只有「为什么 bestThumb 是这一张」不同（单元库是整棵子树合并，
-/// 基础库是本库），**取图优先级完全相同**。
-CoverPick pickUnitCover({
-  required String rel,
-  String bestThumb = '',
-  String firstThumb = '',
-  String crawlerThumb = '',
-  String version = '',
-  String ext = 'jpg',
-}) =>
-    _pickLibCover(
-      rel: rel,
-      bestThumb: bestThumb,
-      firstThumb: firstThumb,
-      crawlerThumb: crawlerThumb,
-      version: version,
-      ext: ext,
-    );
-
-/// 基础库与单元库共用的取图实现：**转发 [resolveCover]**，不自己写顺序。
-///
-/// 旧实现里这里自己按「自定义 → `pickCoverPath(爬虫,最高)` → 首张」三步走，
-/// 而 `main._basicCoverUrl` / `main._unitCoverUrl` 又各自写了一遍同样的顺序
-/// （外加服务端 `cover.u` 那一级），四处各一份——任何一处漏一级，那个入口的
-/// 卡片就是灰的。现在顺序只在 [kCoverSourceOrder] 里出现一次。
-CoverPick _pickLibCover({
-  required String rel,
-  String bestThumb = '',
-  String firstThumb = '',
-  String crawlerThumb = '',
-  String version = '',
-  String ext = 'jpg',
+/// [build] 拿到 `(路径, 库 id)`；库 id 为空（路径里没写库段）时传 null，
+/// 由调用方决定用当前库还是当前连接。返回空串表示「指针不可用」，
+/// 调用方继续走下面的封面链。
+String manualCoverUrl(
+  String raw, {
+  required String Function(String path, String? libId) build,
 }) {
-  final hit = resolveCover(
-    rel: rel,
-    version: version,
-    ext: ext,
-    crawlerThumb: crawlerThumb,
-    bestThumb: bestThumb,
-    firstThumb: firstThumb,
-  );
-  if (hit.path.isEmpty) return const CoverPick.none();
-  return CoverPick(hit.path, custom: hit.source == CoverSource.custom);
+  final pick = raw.trim();
+  if (pick.isEmpty) return '';
+  // 非 `/media/` 开头的指针一律当没设过：旧写法只判了非空，
+  // 半截路径会被当封面去请求（404，界面只剩默认图）。
+  if (!isMediaPath(pick)) return '';
+  final ownLib = libOfMediaPath(pick);
+  return build(pick, ownLib.isEmpty ? null : ownLib).trim();
 }
+
+/// 基础库封面的目录相对路径：**库根**（空串）。
+///
+/// 这是一条**语义常量**，不是“随便一个空串”：`/media/<库id>/` 已经指向基础库
+/// 根目录，自定义封面就写在库根的 `_cover/` 里；再拼 `rel` 会变成
+/// `<rel>/_cover/...` → 404（实测 2026-11-21，卡片只显示默认图）。
+///
+/// 第六十四批之前，“什么时候用 `rel`、什么时候用空串”这个判断在四处各写
+/// 一遍（`main._basicCoverUrl` 的注释、`unit_library_view.basicCoverUrl`、
+/// `resolveCover` 的 `rel` 参数语义、`pick*Cover` 两个同名不同义的入口）。现在只有 [resolveBasicCover] 与 [resolveUnitCover]
+/// 两个入口，调用方不再自己决定。
+const String kLibRootCoverRel = '';
+
+/// 封面作用域：基础库（库根）或单元库（节点目录）。
+///
+/// [basic] 与 [unit] 的区别只在“`rel` 传什么”：基础库传 [kLibRootCoverRel]，
+/// 单元库传该节点的 rel。以前这个区别藏在四五个调用点的注释里。
+enum CoverScopeDir { basic, unit }
+
+/// 某作用域下**节点目录**的相对路径（[resolveCover] 的 `rel` 参数就取这个值）。
+///
+/// **唯一判定**：基础库 → 空串（库根）；单元库 → 归一后的节点 rel
+/// （空 rel 的节点本身就是库根，仍返回空串）。
+///
+/// 注意返回的是**节点目录**（`A/B`），不是封面目录（`A/B/_cover`）——
+/// [resolveCover] 内部会再拼 `/_cover/`（`coverImageRel`）。早期写成返回
+/// 封面目录时实测拼出 `A/_cover/_cover/v1.jpg`，服务端必然 404。
+String coverScopeRel(CoverScopeDir scope, {String unitRel = ''}) =>
+    scope == CoverScopeDir.basic ? kLibRootCoverRel : normalizeRelPath(unitRel);
+
+/// 基础库封面（文件在库根 `_cover/`）。[resolveCover] 的 `rel` 固定为空串。
+CoverHit resolveBasicCover({
+  String manualUrl = '',
+  String version = '',
+  String ext = 'jpg',
+  String crawlerThumb = '',
+  String bestThumb = '',
+  String firstThumb = '',
+  bool ignoreManual = false,
+  bool ignoreCustom = false,
+}) =>
+    resolveCover(
+      manualUrl: manualUrl,
+      rel: kLibRootCoverRel,
+      version: version,
+      ext: ext,
+      crawlerThumb: crawlerThumb,
+      bestThumb: bestThumb,
+      firstThumb: firstThumb,
+      ignoreManual: ignoreManual,
+      ignoreCustom: ignoreCustom,
+    );
+
+/// 单元库封面（文件在节点目录 `<rel>/_cover/`）。
+/// [resolveCover] 的 `rel` 由 [coverDirRelOf] 决定，调用方不再自己选。
+CoverHit resolveUnitCover({
+  required String unitRel,
+  String manualUrl = '',
+  String version = '',
+  String ext = 'jpg',
+  String crawlerThumb = '',
+  String bestThumb = '',
+  String firstThumb = '',
+  bool ignoreManual = false,
+  bool ignoreCustom = false,
+}) =>
+    resolveCover(
+      manualUrl: manualUrl,
+      rel: coverScopeRel(CoverScopeDir.unit, unitRel: unitRel),
+      version: version,
+      ext: ext,
+      crawlerThumb: crawlerThumb,
+      bestThumb: bestThumb,
+      firstThumb: firstThumb,
+      ignoreManual: ignoreManual,
+      ignoreCustom: ignoreCustom,
+    );
+
+/// 旧的 `pick*Cover` 三件套已删除
+/// （0.9.287）。它们的签名都是 `required String rel`：调用方自己决定
+/// “传节点 rel 还是空串”，而这正是本批要收口的那条判断——同一个基础库
+/// 在 `main._basicCoverUrl` 里传 `''`、在历史遗留的 `pick*Cover` 调用点
+/// 里传 rel，同一张封面就变成两个路径（一个 200、一个 404）。
+///
+/// 现在只有两个入口：[resolveBasicCover]（库根）与 [resolveUnitCover]
+/// （节点目录）。要取封面就选作用域，不再选 `rel`。

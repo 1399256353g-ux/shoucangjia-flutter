@@ -25,7 +25,12 @@ import 'package:flutter/widgets.dart';
 
 import 'thumb_prefetch.dart';
 
-/// 一类库卡片的网格规格。
+/// 一类卡片网格的**唯一规格**。
+///
+/// 0.9.287（第六十四批）：这张表此前只覆盖库卡片（260/220），作者网格与作品
+/// 网格仍各自「页面 delegate 写一遍数字、预热再写一遍」——正是本文件存在的
+/// 理由。现在四类网格（库卡片 / 作者卡片 / 作品 / 基础库作品）都进表，
+/// 页面 delegate 与首屏预热都读同一份字段。
 class LibGridSpec {
   /// 与 `SliverGridDelegateWithMaxCrossAxisExtent.maxCrossAxisExtent` 同义。
   final double maxCrossAxisExtent;
@@ -34,16 +39,28 @@ class LibGridSpec {
   final double spacing;
 
   /// 与 delegate 的 `childAspectRatio` 同义：卡片宽 / 高。
+  /// 给了 [mainAxisExtent] 时被 delegate 忽略（高度固定）。
   final double aspectRatio;
+
+  /// 与 delegate 的 `mainAxisExtent` 同义：固定行高（作者卡片是固定 170）。
+  final double? mainAxisExtent;
 
   /// 首屏预热的张数上限（默认值；调用方可按页面覆盖）。
   final int maxPrefetch;
+
+  /// 预热几屏（默认 1 屏；作品/作者网格历来是 2 屏）。
+  ///
+  /// 此前这个数只存在于各调用点传给 `firstScreenThumbCount` 的默认值里
+  /// （库卡片 1 屏、另两类 2 屏），同一个网格的页面各拿自己的泵。
+  final int prefetchScreens;
 
   const LibGridSpec({
     required this.maxCrossAxisExtent,
     required this.spacing,
     required this.aspectRatio,
     required this.maxPrefetch,
+    this.mainAxisExtent,
+    this.prefetchScreens = 1,
   });
 
   /// 页面上真实使用的 delegate（参数与 [prefetchCount] 同源）。
@@ -53,6 +70,7 @@ class LibGridSpec {
         mainAxisSpacing: spacing,
         crossAxisSpacing: spacing,
         childAspectRatio: aspectRatio,
+        mainAxisExtent: mainAxisExtent,
       );
 
   /// 首屏需要预热的张数。
@@ -65,7 +83,7 @@ class LibGridSpec {
     Size viewport, {
     required EdgeInsets padding,
     int? maxItems,
-    int screens = 1,
+    int? screens,
   }) =>
       firstScreenThumbCount(
         viewportWidth: viewport.width,
@@ -76,7 +94,8 @@ class LibGridSpec {
         crossSpacing: spacing,
         mainSpacing: spacing,
         aspectRatio: aspectRatio,
-        screens: screens,
+        mainAxisExtent: mainAxisExtent,
+        screens: screens ?? prefetchScreens,
         maxItems: maxItems ?? maxPrefetch,
       );
 }
@@ -95,4 +114,57 @@ const LibGridSpec kBasicLibGrid = LibGridSpec(
   spacing: 10,
   aspectRatio: 0.92,
   maxPrefetch: 8,
+);
+
+/// 作者卡片固定行高（逻辑像素）。
+///
+/// `AuthorGridCard.extent` 转发它、`kAuthorGrid.mainAxisExtent` 读它：此前
+/// 「170」这个数字在卡片类与页面 delegate 各写一遍，预热里再写第三遍。
+const double kAuthorCardExtent = 170;
+
+/// 作者卡片（`AuthorGridCard`）：`maxCrossAxisExtent: 150` / 间距 10 /
+/// 固定行高 [kAuthorCardExtent]（高度与宽度无关）。
+///
+/// 页面 delegate 与 `_prefetchAvatars` 此前各写一遍这三个数字：数字对齐时
+/// 「巧合正确」，任一处改动都会让预热算出屏幕外的另一行。
+const LibGridSpec kAuthorGrid = LibGridSpec(
+  maxCrossAxisExtent: 150,
+  spacing: 10,
+  aspectRatio: 1,
+  maxPrefetch: 24,
+  mainAxisExtent: kAuthorCardExtent,
+  prefetchScreens: 2,
+);
+
+/// 基础库页作者网格（`basic_lib_page` 的作者 tab）：180 / 间距 10 / 0.86。
+///
+/// 它与作者总览的 `kAuthorGrid` 是**两个不同的网格**（卡片比例 vs 固定行高），
+/// 但 `author_index.authorGridOffsetForIndex` 的默认参数此前也把这组数字写了
+/// 一份——字母条跳转与真实排布因此有第二个来源。
+const LibGridSpec kBasicAuthorGrid = LibGridSpec(
+  maxCrossAxisExtent: 180,
+  spacing: 10,
+  aspectRatio: 0.86,
+  maxPrefetch: 24,
+);
+
+/// 作品网格（作者主页 / 收藏夹 / 搜索 / 推荐 / 骨架屏）：180 / 间距 2 / 3:4。
+///
+/// 三个地方在用它：`WorkGrid._buildGrid`、`WorkGridSkeleton`、
+/// `recommendVisibleCount` 的默认几何。
+const LibGridSpec kWorkGrid = LibGridSpec(
+  maxCrossAxisExtent: 180,
+  spacing: 2,
+  aspectRatio: 3 / 4,
+  maxPrefetch: 24,
+  prefetchScreens: 2,
+);
+
+/// 基础库页作品网格：150 / 间距 8 / 0.72（页面 `EdgeInsets.all(10)`）。
+const LibGridSpec kBasicWorkGrid = LibGridSpec(
+  maxCrossAxisExtent: 150,
+  spacing: 8,
+  aspectRatio: 0.72,
+  maxPrefetch: 24,
+  prefetchScreens: 2,
 );

@@ -75,52 +75,51 @@ void main() {
     });
   });
 
-  group('封面选择', () {
-    test('自定义版本优先于作品封面', () {
-      final p = pickBasicCover(
-        rel: '(1) A/x',
+  group('封面选择：基础库落在库根，单元库落在节点目录', () {
+    test('基础库自定义封面在库根（不拼 rel）', () {
+      final h = resolveBasicCover(
         version: 'v9',
         ext: 'png',
         bestThumb: '/media/lib/th.jpg',
       );
-      expect(p.custom, isTrue);
-      expect(p.path, '(1) A/x/_cover/v9.png');
+      expect(h.source, CoverSource.custom);
+      expect(h.path, '_cover/v9.png');
+      expect(CoverPick.of(h).custom, isTrue);
     });
 
     test('无自定义时用播放量最高作品的缩略图', () {
-      final p = pickBasicCover(rel: '(1) A/x', bestThumb: '/media/lib/th.jpg');
-      expect(p.custom, isFalse);
-      expect(p.path, '/media/lib/th.jpg');
+      final h = resolveBasicCover(bestThumb: '/media/lib/th.jpg');
+      expect(CoverPick.of(h).custom, isFalse);
+      expect(h.path, '/media/lib/th.jpg');
     });
 
     test('都没有时为空（显示默认图）', () {
-      expect(pickBasicCover(rel: '(1) A/x').isEmpty, isTrue);
+      expect(CoverPick.of(resolveBasicCover()).isEmpty, isTrue);
+      expect(resolveUnitCover(unitRel: '(1) A').path, '');
     });
 
-    test('单元库：自定义封面优先', () {
-      expect(pickUnitCover(rel: '(1) A').isEmpty, isTrue);
-      final p = pickUnitCover(rel: '(1) A', version: 'v1');
-      expect(p.path, '(1) A/_cover/v1.jpg');
-      expect(p.custom, isTrue);
+    test('单元库：自定义封面在节点目录', () {
+      final h = resolveUnitCover(unitRel: '(1) A', version: 'v1');
+      expect(h.path, '(1) A/_cover/v1.jpg');
+      expect(CoverPick.of(h).custom, isTrue);
     });
 
     test('单元库：无自定义时用子树内播放量最高的作品封面', () {
-      final p = pickUnitCover(
-          rel: '(1) A', bestThumb: '/media/lib-01/a/th.jpg');
-      expect(p.custom, isFalse);
-      expect(p.path, '/media/lib-01/a/th.jpg');
+      final h = resolveUnitCover(
+          unitRel: '(1) A', bestThumb: '/media/lib-01/a/th.jpg');
+      expect(CoverPick.of(h).custom, isFalse);
+      expect(h.path, '/media/lib-01/a/th.jpg');
     });
 
     test('爬虫封面优先于自动生成的最高播放缩略图', () {
-      final b = pickBasicCover(
-        rel: '(1) A/x',
+      final b = resolveBasicCover(
         crawlerThumb: '/media/lib-01/x/cover.jpg',
         bestThumb: '/media/lib-01/x/thumb.jpg',
       );
       expect(b.path, '/media/lib-01/x/cover.jpg');
-      expect(b.custom, isFalse);
-      final u = pickUnitCover(
-        rel: '(1) A',
+      expect(CoverPick.of(b).custom, isFalse);
+      final u = resolveUnitCover(
+        unitRel: '(1) A',
         crawlerThumb: '/media/lib-01/x/cover.jpg',
         bestThumb: '/media/lib-01/x/thumb.jpg',
       );
@@ -128,13 +127,23 @@ void main() {
     });
 
     test('手动封面仍优先于爬虫封面', () {
-      final p = pickBasicCover(
-        rel: '(1) A/x',
+      final h = resolveBasicCover(
         version: 'v2',
         crawlerThumb: '/media/lib-01/x/cover.jpg',
       );
-      expect(p.custom, isTrue);
-      expect(p.path, '(1) A/x/_cover/v2.jpg');
+      expect(CoverPick.of(h).custom, isTrue);
+      expect(h.path, '_cover/v2.jpg');
+    });
+
+    test('封面目录作用域只有一处判定', () {
+      expect(coverScopeRel(CoverScopeDir.basic), kLibRootCoverRel);
+      expect(coverScopeRel(CoverScopeDir.basic, unitRel: 'A/B'), '');
+      expect(coverScopeRel(CoverScopeDir.unit, unitRel: 'A/B'), 'A/B');
+      expect(coverScopeRel(CoverScopeDir.unit), '');
+      expect(coverScopeRel(CoverScopeDir.unit, unitRel: '/'), '');
+      expect(coverScopeRel(CoverScopeDir.unit, unitRel: r'A\B'), 'A/B');
+      // 节点目录 + `_cover` 才是封面目录：传给 resolveCover 的是前者。
+      expect(coverDirRel('A/B'), 'A/B/_cover');
     });
   });
 

@@ -15,6 +15,7 @@ library;
 import 'package:pinyin/pinyin.dart';
 
 import 'grid_geometry.dart';
+import 'grid_spec.dart';
 import 'text_fold.dart';
 
 /// 名称 → 索引字母（`A`–`Z` 或 `#`）。
@@ -192,25 +193,32 @@ double authorGridPadRight({required bool hasIndexBar}) => hasIndexBar
 /// 两边都按 12 算，于是宽 400 时算出 3 列、网格实际只排 2 列——点一个字母
 /// 滚到的行是错的（差一列就错一整行，而且越往下差得越多）。
 /// 两边同值时传两个一样的数，不要再加第二个入口。
+///
+/// 0.9.287：三个几何默认值改为**引用** `grid_spec.kBasicAuthorGrid`（页面
+/// delegate 与预热读同一份表）。此前它们在这里写第二遍
+/// （180/10/0.86），字母条跳转与真实排布各有各的数字。
 double authorGridOffsetForIndex({
   required int index,
   required double viewportWidth,
   required double maxScrollExtent,
   double paddingLeft = kAuthorGridPadLeft,
   double paddingRight = kAuthorGridPadRight,
-  double maxCrossAxisExtent = 180,
-  double spacing = 10,
-  double aspectRatio = 0.86,
+  double? maxCrossAxisExtent,
+  double? spacing,
+  double? aspectRatio,
 }) {
+  final maxExtent = maxCrossAxisExtent ?? kBasicAuthorGrid.maxCrossAxisExtent;
+  final gapArg = spacing ?? kBasicAuthorGrid.spacing;
+  final aspect = aspectRatio ?? kBasicAuthorGrid.aspectRatio;
   if (index <= 0) return 0;
   final left = paddingLeft < 0 ? 0.0 : paddingLeft;
   final right = paddingRight < 0 ? 0.0 : paddingRight;
   final avail = viewportWidth - left - right;
-  if (avail <= 0 || maxCrossAxisExtent <= 0 || aspectRatio <= 0) return 0;
-  final gap = spacing < 0 ? 0.0 : spacing;
+  if (avail <= 0 || maxExtent <= 0 || aspect <= 0) return 0;
+  final gap = gapArg < 0 ? 0.0 : gapArg;
   final columns = gridColumnCount(
     crossAxisExtent: avail,
-    maxCrossAxisExtent: maxCrossAxisExtent,
+    maxCrossAxisExtent: maxExtent,
     spacing: gap,
   );
   final childWidth = gridTileWidth(
@@ -221,7 +229,7 @@ double authorGridOffsetForIndex({
   if (childWidth <= 0) return 0;
   final childHeight = gridTileHeight(
     tileWidth: childWidth,
-    aspectRatio: aspectRatio,
+    aspectRatio: aspect,
   );
   if (childHeight <= 0) return 0;
   final row = index ~/ columns;

@@ -12,10 +12,12 @@ import 'dart:collection';
 
 import 'package:flutter/widgets.dart';
 
+import 'cover_cache.dart';
 import 'decode_plan.dart';
 import 'grid_geometry.dart';
 import 'layout_metric.dart';
 import 'perf_diagnostics.dart';
+import 'thumb_image.dart';
 import 'time_labels.dart';
 
 /// 首屏需要预热的封面张数。
@@ -98,6 +100,62 @@ int firstScreenThumbCount({
   if (rows < 1) rows = 1;
   final n = cols * rows;
   return n > maxItems ? maxItems : n;
+}
+
+/// 一条待预热的缩略图：地址 + 该图自己的鉴权头。
+///
+/// 鉴权头必须**随图走**：收藏夹/搜索/推荐这些列表可能跨库（跨连接），
+/// 同一批预热里两张图要带两种 `Authorization`。此前每处调用点自己维护
+/// 一个 `Map<String, Map<String,String>>`（键是带缩略参数的 URL），
+/// 四份写法里只有两份记得把 `withImageWidth` 之后的那份地址当键，
+/// 另外两份拿原地址当键——预热时查不到头，请求 401，白拉一次。
+typedef ThumbPrefetchItem = ({String url, Map<String, String> headers});
+
+/// 预热一批缩略图：`trim → 去空 → 按图地址去重 → 限量 → 交给 [ThumbPrefetch]`。
+///
+/// **唯一实现**（0.9.287）：这段流程此前在四个地方各写一遍——
+/// `basic_lib_page._prefetchFirstScreen`、`main._prefetchFirstScreen`、
+/// `main._prefetchAvatars`、`main._prefetchRankAvatars`——四份各自维护
+/// `urls` 列表与 `headers` 表，去重键一份用原地址、一份用带参地址，
+/// provider 构造一段用 `run`、一段用 `runWith`。参数（几何、解码宽度、
+/// 图片来源）依旧由调用方决定，这里只收「怎么把一批图排上队」。
+///
+/// [limit] 是「最多预热几张」，调用方用 `LibGridSpec.prefetchCount` 或
+/// `firstScreenRowCount` 算出来；[decodeWidth] 必须与卡片渲染用的是同一个数
+/// （`decode_plan`），否则缓存键不同、预热白做。
+///
+/// 返回实际入队张数（去重后可能少于 [limit]）。
+int prefetchThumbItems(
+  Iterable<ThumbPrefetchItem> items, {
+  required int limit,
+  required int decodeWidth,
+}) {
+  if (limit <= 0) return 0;
+  final seen = <String>{};
+  final urls = <String>[];
+  final headers = <String, Map<String, String>>{};
+  for (final it in items) {
+    if (urls.length >= limit) break;
+    final u = it.url.trim();
+    if (u.isEmpty) continue;
+    // 同一张图在两张卡片上重复出现（同名库、同一张自定义封面、同一作者
+    // 在两个列表里）时只拉一次：以第一次出现的鉴权头为准。
+    if (!seen.add(u)) continue;
+    urls.add(u);
+    headers[u] = it.headers;
+  }
+  if (urls.isEmpty) return 0;
+  ThumbPrefetch.instance.run(
+    urls,
+    limit: urls.length,
+    provider: (u) => thumbImageProvider(
+      u,
+      decodeWidth: decodeWidth,
+      headers: headers[u] ?? const <String, String>{},
+      cacheManager: DiziCache.manager,
+    ),
+  );
+  return urls.length;
 }
 
 /// 列表（非网格）首屏需要预热的行数。

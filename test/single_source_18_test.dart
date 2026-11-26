@@ -189,38 +189,56 @@ void main() {
     });
   });
 
-  group('库封面取图：基础库与单元库共用一份实现', () {
-    test('两份入口行为完全一致（同样输入同结果）', () {
-      const inputs = <String>['', '/media/l/th.jpg', '/media/l/_cover/v1.jpg'];
-      for (final best in inputs) {
-        final b = pickBasicCover(
-            rel: '(1) A', bestThumb: best, version: 'v1');
-        final u = pickUnitCover(
-            rel: '(1) A', bestThumb: best, version: 'v1');
-        expect(b.path, u.path, reason: 'best=$best');
-        expect(b.custom, u.custom, reason: 'best=$best');
-      }
+  group('库封面取图：基础库与单元库各自一个作用域入口', () {
+    test('两个入口共享同一条优先级链（差别只在作用域目录）', () {
+      // 自定义 `_cover/` 优先于最高播放作品图（这条链两个作用域共用），
+      // 差别只在自定义封面文件落在哪：库根 vs 节点目录。
+      final b = resolveBasicCover(
+          bestThumb: '/media/l/th.jpg', version: 'v1');
+      final u = resolveUnitCover(
+          unitRel: '(1) A', bestThumb: '/media/l/th.jpg', version: 'v1');
+      expect(b.path, '_cover/v1.jpg');
+      expect(b.source, CoverSource.custom);
+      expect(u.path, '(1) A/_cover/v1.jpg');
+      expect(u.source, CoverSource.custom);
+
+      // 没有自定义封面时两个作用域给出**逐字相同**的答案。
+      final b2 = resolveBasicCover(bestThumb: '/media/l/th.jpg');
+      final u2 = resolveUnitCover(unitRel: '(1) A', bestThumb: '/media/l/th.jpg');
+      expect(b2.path, '/media/l/th.jpg');
+      expect(u2.path, '/media/l/th.jpg');
+      expect(b2.source, u2.source);
     });
 
-    test('自定义封面优先，随后爬虫/最高播放，最后第一张作品', () {
-      final custom = pickBasicCover(rel: 'A', version: 'v2', ext: 'png');
-      expect(custom.path, 'A/_cover/v2.png');
-      expect(custom.custom, isTrue);
-
-      final auto = pickBasicCover(rel: 'A', bestThumb: '/media/l/zz.jpg');
-      expect(auto.path, '/media/l/zz.jpg');
-      expect(auto.custom, isFalse);
-
-      final finger = pickUnitCover(rel: 'A', firstThumb: '/media/l/first.jpg');
-      expect(finger.path, '/media/l/first.jpg');
+    test('基础库封面永远在库根（传什么 rel 都不影响）', () {
+      expect(resolveBasicCover(version: 'v2', ext: 'png').path,
+          '_cover/v2.png');
+      expect(resolveBasicCover().path, '');
     });
 
-    test('lib_cover 内不再有两份逐字相同的取图实现', () {
+    test('单元库封面在节点目录；rel 为空时回到库根', () {
+      expect(resolveUnitCover(unitRel: '(1) A', version: 'v1').path,
+          '(1) A/_cover/v1.jpg');
+      expect(resolveUnitCover(unitRel: '', version: 'v1').path,
+          '_cover/v1.jpg');
+      expect(resolveUnitCover(unitRel: '/', version: 'v1').path,
+          '_cover/v1.jpg');
+    });
+
+    test('自己的封面链只剩 resolveBasicCover / resolveUnitCover', () {
       final src = codeOfLib('lib/lib_cover.dart');
       // 只允许一份 `coverImageRel(rel, version, ext: ext)` 的调用点。
       final hits = RegExp(r'coverImageRel\(rel, version').allMatches(src).length;
-      expect(hits, 1, reason: '取图实现应只有一处（_pickLibCover）');
-      expect(src.contains('_pickLibCover'), isTrue);
+      expect(hits, 1, reason: '取图实现应只有一处（resolveCover）');
+      // 旧三件套不得复活：它们的 `required String rel` 就是那条判断本身。
+      // 扫描时去掉注释行（它们在文件头注释里用作反面例子）。
+      final code = src
+          .split('\n')
+          .where((l) => !l.trimLeft().startsWith('//'))
+          .join('\n');
+      expect(code.contains('pickBasicCover'), isFalse);
+      expect(code.contains('pickUnitCover'), isFalse);
+      expect(code.contains('_pickLibCover'), isFalse);
     });
   });
 

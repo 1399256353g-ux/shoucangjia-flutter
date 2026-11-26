@@ -10,6 +10,7 @@ import 'http_error_text.dart';
 
 import 'cover_cache.dart';
 import 'decode_plan.dart';
+import 'grid_spec.dart';
 import 'author_avatar.dart';
 import 'author_index.dart';
 import 'author_letter_bar.dart';
@@ -22,7 +23,6 @@ import 'stable_order.dart';
 import 'media_priority.dart';
 import 'media_resize.dart';
 import 'scroll_decode.dart';
-import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'work_card.dart';
 import 'work_forms.dart';
@@ -458,12 +458,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               12,
               authorGridPadRight(hasIndexBar: letters.length > 1),
               12),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 180,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 0.86,
-          ),
+          gridDelegate: kBasicAuthorGrid.delegate,
           itemCount: shown.length,
           itemBuilder: (c, i) {
         final a = shown[i];
@@ -740,12 +735,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       child: GridView.builder(
       controller: _worksScroll,
       padding: const EdgeInsets.all(10),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 150,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        childAspectRatio: 0.72,
-      ),
+      gridDelegate: kBasicWorkGrid.delegate,
       itemCount: filtered.length + (loadingMore ? 1 : 0),
       itemBuilder: (c, i) {
         if (i >= filtered.length) {
@@ -786,35 +776,26 @@ class _BasicLibPageState extends State<BasicLibPage>
   void _prefetchFirstScreen() {
     if (!mounted || works.isEmpty) return;
     final mq = MediaQuery.of(context);
-    final n = firstScreenThumbCount(
-      viewportWidth: mq.size.width,
-      viewportHeight: mq.size.height,
-      maxCrossAxisExtent: 150,
-      // 与 `_worksGrid` 的 `EdgeInsets.all(10)` 逐项同源（间距 8）。
-      paddingX: 10,
-      paddingY: 10,
-      crossSpacing: 8,
-      mainSpacing: 8,
-      aspectRatio: 0.72,
+    // 几何与 `_worksGrid` 的 delegate 同源（`kBasicWorkGrid`：页面 padding 是
+    // `EdgeInsets.all(10)`，上下各 10）。
+    final n = kBasicWorkGrid.prefetchCount(
+      mq.size,
+      padding: const EdgeInsets.all(10),
     );
     if (n <= 0) return;
     // 与 `WorkCard` 用同一个解码宽度（decode_plan），缓存键一致才能命中。
     final px = workCardDecodeWidth(mq.devicePixelRatio);
     final headers = widget.headersOf(widget.basic.id);
-    final urls = <String>[];
-    for (final w in filtered.take(n)) {
-      final c = _coverOf(w);
-      if (c.isNotEmpty) urls.add(withImageWidth(c, kWorkImageWidth));
-    }
-    ThumbPrefetch.instance.run(
-      urls,
+    prefetchThumbItems(
+      [
+        for (final w in filtered.take(n))
+          (
+            url: withImageWidth(_coverOf(w), kWorkImageWidth),
+            headers: headers,
+          ),
+      ],
       limit: n,
-      provider: (u) => thumbImageProvider(
-        u,
-        decodeWidth: px,
-        headers: headers,
-        cacheManager: DiziCache.manager,
-      ),
+      decodeWidth: px,
     );
   }
 

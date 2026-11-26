@@ -1,5 +1,6 @@
 import 'cover_cache.dart';
 import 'decode_plan.dart';
+import 'grid_spec.dart';
 import 'media_resize.dart';
 import 'watch_progress.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -17,7 +18,10 @@ import 'package:flutter/material.dart';
 /// 不允许各自再写一套卡片。
 class WorkCard extends StatefulWidget {
   static const double radius = 10;
-  static const double aspect = 3 / 4;
+
+  /// 卡片宽高比：唯一数字在 `grid_spec.kWorkGrid.aspectRatio`
+  /// （页面 delegate 与首屏预热都从那里读）。
+  static double get aspect => kWorkGrid.aspectRatio;
 
   final String title;
   final String typeLabel;

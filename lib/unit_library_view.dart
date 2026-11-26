@@ -289,16 +289,19 @@ String unitCoverUrl(
   // 调用方已解析好的地址（自定义封面，鉴权/路由由调用方掌握）优先。
   if (!ignoreManual && preset.isNotEmpty) return preset;
   // 0.9.35：owner 手动设的单元库封面（服务端 `cover.u`）。
-  final manual = ignoreManual ? '' : unit.node.coverUrl.trim();
-  if (manual.isNotEmpty) {
+  // 解析（trim / 确认媒体路径 / 取库段）只有 `lib_cover.manualCoverUrl` 一处；
+  // 本函数只负责拿所在连接拼绝对地址。
+  if (!ignoreManual) {
     final base = unit.node.serverBase.trim();
     if (base.isNotEmpty) {
-      return '${baseForJoin(base)}$manual';
+      final manual = manualCoverUrl(unit.node.coverUrl,
+          build: (path, _) => '${baseForJoin(base)}$path');
+      if (manual.isNotEmpty) return manual;
     }
   }
   final top = topPlayedInUnit(unit);
-  final hit = resolveCover(
-    rel: unit.rel,
+  final hit = resolveUnitCover(
+    unitRel: unit.rel,
     version: ignoreManual ? '' : unit.node.coverVersion,
     ext: unit.node.coverExt,
     // 爬虫封面：子树里第一个有 `cv` 的基础库。扫描本体在
@@ -343,11 +346,10 @@ String basicCoverUrl(BasicLib basic,
   final top = topPlayed(WorkPlaysStore.countsFor(basic.id));
   // `fc` 只在调用方没指定时兜底用，保证「库 → 封面」只有一套取値口径。
   final fb = firstThumb.trim().isNotEmpty ? firstThumb : basic.firstCover;
-  // 服务端把自定义封面写在「库根/_cover/」，而 `/media/<库id>/` 已指向库根；
-  // 再拼 rel 会变成 `<rel>/_cover/...` → 404（实测 2026-11-21）。
+  // 基础库的 `_cover/` 在库根（`resolveBasicCover` 里写死空 rel），
+  // 与单元库的 `<rel>/_cover/` 语义分开。
   // 顺序本体在 `lib_cover.kCoverSourceOrder`（`main._basicCoverUrl` 同一条）。
-  final hit = resolveCover(
-    rel: '',
+  final hit = resolveBasicCover(
     version: ignoreCustom ? '' : basic.coverVersion,
     ext: basic.coverExt,
     crawlerThumb: basic.crawlerCover,

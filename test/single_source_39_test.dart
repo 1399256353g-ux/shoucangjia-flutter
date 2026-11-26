@@ -284,7 +284,7 @@ void main() {
       WorkPlaysStore.resetForTest(items: const {});
     });
 
-    test('契约：优先级链只在 lib_cover 定义', () {
+    test('契约：优先级链只在 lib_cover 定义，作用域选择也只有一个入口', () {
       final decl =
           RegExp(r'kCoverSourceOrder').allMatches(_code('lib_cover.dart')).length;
       expect(decl, greaterThanOrEqualTo(2), reason: '声明与使用都应在 lib_cover');
@@ -302,8 +302,27 @@ void main() {
         }
       }
       expect(offenders, isEmpty, reason: '封面链又被排了一遍：$offenders');
-      expect(_code('unit_library_view.dart').contains('resolveCover('), isTrue);
-      expect(_code('main.dart').contains('resolveCover('), isTrue);
+      // 0.9.287：页面只能走「作用域入口」，不再自己传 rel。
+      // 直接调 resolveCover 的只允许是 lib_cover 自己。
+      final rawCallers = <String>[];
+      for (final f in _libFiles()) {
+        final name = _fileName(f);
+        if (name == 'lib_cover.dart') continue;
+        if (_code(name).contains('resolveCover(')) rawCallers.add(f.path);
+      }
+      expect(rawCallers, isEmpty,
+          reason: '又绕过作用域入口自己传 rel 了：$rawCallers');
+      for (final n in <String>['unit_library_view.dart', 'main.dart']) {
+        final src = _code(n);
+        expect(
+            src.contains('resolveBasicCover(') ||
+                src.contains('resolveUnitCover('),
+            isTrue,
+            reason: '$n 应走作用域入口');
+        // `rel:` 参数不再由页面决定：出现 `resolveCover(` + `rel:` 就是回退。
+        expect(RegExp(r'resolveCover\([^)]*rel:').hasMatch(src), isFalse,
+            reason: '$n 里又自己传 rel 给 resolveCover');
+      }
     });
   });
 }
