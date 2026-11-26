@@ -57,6 +57,7 @@ import 'author_merge.dart';
 import 'author_mount_sheet.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
+import 'author_avatar_view.dart';
 import 'author_filter_bar.dart';
 import 'author_filter_ui.dart';
 import 'author_grid.dart';
@@ -2762,42 +2763,26 @@ class AuthorAvatar extends StatelessWidget {
   }
 
   Widget _buildWith(BuildContext context, {required String override}) {
-    // 覆盖图可能来自别的基础库：按路径里的库前缀路由/取鉴权，避免拼错地址。
-    final overLib = override.isEmpty ? '' : libOfMediaPath(override);
     // owner 2026-11-18：作者主页/作者总览也要吃「作者级头像」兜底——
     // 卡片上能显示的头像，播放页与主页必须一致，不再只依赖调用方传入。
     final authorAv = override.isEmpty && mediaPath.isEmpty
         ? (authorAvatarIndex[name] ?? '')
         : '';
-    final src = override.isNotEmpty
-        ? override
-        : (mediaPath.isNotEmpty ? mediaPath : authorAv);
-    final srcLib =
-        override.isNotEmpty ? (overLib.isEmpty ? lib : overLib) : lib;
-    // 统一占位：无图/加载中/失败都不空白，用首字母圆形占位（emoji 安全）。
-    final placeholder = AvatarLetterPlaceholder(name: name, size: size);
-    return ClipOval(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: src.isEmpty
-            ? placeholder
-            : CachedNetworkImage(
-                cacheManager: DiziCache.manager,
-                // 头像最大显示 64dp：要 200px 缩图即可（服务端 `w=`）。
-                imageUrl: withImageWidth(
-                    cfg.mediaUrl(src, lib: srcLib), kAvatarImageWidth),
-                httpHeaders: cfg.headersFor(srcLib),
-                fit: BoxFit.cover,
-                // 按实际显示尺寸 × 像素比解码，避免整张大图进内存
-                memCacheWidth: avatarDecodeWidth(
-                    displaySize: size,
-                    devicePixelRatio: MediaQuery.devicePixelRatioOf(context)),
-                fadeInDuration: Duration.zero,
-                placeholder: (_, __) => placeholder,
-                errorWidget: (_, __, ___) => placeholder,
-              ),
-      ),
+    // 0.9.290：优先级合成与绘制都只有一处（`author_avatar_view`）。
+    // 与基础库页作者 tab 共用同一个组件——此前那页自己画一遍，于是不监听
+    // `AuthorAvatarStore`（手动头像在那页不生效）而且占位样式也不同。
+    final picked = resolveAvatarSource(
+      manual: override,
+      fallback: mediaPath.isNotEmpty ? mediaPath : authorAv,
+      fallbackLib: lib,
+    );
+    return AuthorAvatarView(
+      name: name,
+      mediaPath: picked.path,
+      lib: picked.lib,
+      size: size,
+      urlOf: (path, {String? lib}) => cfg.mediaUrl(path, lib: lib),
+      headersOf: ([String? lib]) => cfg.headersFor(lib),
     );
   }
 }
@@ -14831,18 +14816,22 @@ class _PlayerTopNotice extends StatelessWidget {
             ),
             child: Container(
               key: ValueKey<String>(text),
-              margin: const EdgeInsets.symmetric(horizontal: 24),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              margin:
+                  const EdgeInsets.symmetric(horizontal: kPlayerNoticeMarginX),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: kPlayerNoticePaddingX,
+                  vertical: kPlayerNoticePaddingY),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.62),
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(kPlayerNoticeRadius),
               ),
               child: Text(
                 text,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: Colors.white),
+                style: const TextStyle(
+                    fontSize: kPlayerNoticeFontSize, color: Colors.white),
               ),
             ),
           ),

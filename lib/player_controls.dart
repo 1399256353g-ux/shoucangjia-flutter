@@ -447,6 +447,17 @@ const double kPlayerNoticeTop = kStageToolbarTopOffset +
     kStageToolbarRowHeight +
     kStageToolbarRowGap;
 
+/// 播放页顶部胶囊提示条：左右留白 / 圆角 / 内边距 / 文字大小。
+///
+/// 0.9.290：`margin: horizontal 24`、`borderRadius: 999`、内边距 14/7 与字号
+/// 13 此前是内联数字，看着像与工具栏 48 / 任务栏 48 同一套，其实毫无关系。
+/// 它们和 `kPlayerNoticeTop` 一样是提示条自身尺寸，统一收在这里。
+const double kPlayerNoticeMarginX = 24;
+const double kPlayerNoticePaddingX = 14;
+const double kPlayerNoticePaddingY = 7;
+const double kPlayerNoticeRadius = 999;
+const double kPlayerNoticeFontSize = 13;
+
 /// §6 左上角操作按钮：常态透明，仅按压时出现 40dp white24 圆底并轻微缩放。
 class StageIconButton extends StatefulWidget {
   const StageIconButton({

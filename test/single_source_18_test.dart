@@ -185,7 +185,12 @@ void main() {
       final src = codeOfLib('lib/basic_lib_page.dart');
       expect(src.contains('name.characters.first'), isFalse,
           reason: '首字口径必须走 avatar_initial 唯一实现');
-      expect(src.contains('avatarInitial('), isTrue);
+      // 0.9.290：本页也不再自己算首字/画占位——绘制统一走
+      // `author_avatar_view.AuthorAvatarView`（内部用 avatarInitial）。
+      expect(src.contains('avatarInitial('), isFalse);
+      expect(src.contains('AuthorAvatarView('), isTrue);
+      final view = codeOfLib('lib/author_avatar_view.dart');
+      expect(view.contains('AvatarLetterPlaceholder('), isTrue);
     });
   });
 

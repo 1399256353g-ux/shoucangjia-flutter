@@ -1,5 +1,4 @@
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'count_label.dart';
 import 'json_num.dart';
 import 'package:flutter/foundation.dart';
@@ -8,21 +7,21 @@ import 'package:http/http.dart' as http;
 import 'http_json.dart';
 import 'http_error_text.dart';
 
-import 'cover_cache.dart';
 import 'card_metrics.dart';
 import 'grid_spec.dart';
 import 'work_card_prefetch.dart';
 import 'author_avatar.dart';
+import 'author_avatar_store.dart';
+import 'author_avatar_view.dart';
+import 'avatar_prefetch.dart';
 import 'author_index.dart';
 import 'author_letter_bar.dart';
 import 'home_action.dart';
-import 'author_grid.dart';
 import 'category_tree_page.dart';
 import 'library_revision.dart';
 import 'library_tree.dart';
 import 'stable_order.dart';
 import 'media_priority.dart';
-import 'media_resize.dart';
 import 'scroll_decode.dart';
 import 'work_card.dart';
 import 'work_forms.dart';
@@ -145,6 +144,7 @@ class _BasicLibPageState extends State<BasicLibPage>
   void initState() {
     super.initState();
     _worksScroll.addListener(_onScroll);
+    _tabs.addListener(_onTabChanged);
     LibDataRevision.listenable(widget.basic.id).addListener(_onLibDataChanged);
     _libRev.value = LibDataRevision.revisionOf(widget.basic.id);
     _loadAuthors();
@@ -157,6 +157,7 @@ class _BasicLibPageState extends State<BasicLibPage>
   void dispose() {
     LibDataRevision.listenable(widget.basic.id)
         .removeListener(_onLibDataChanged);
+    _tabs.removeListener(_onTabChanged);
     _libRev.dispose();
     _worksScroll.removeListener(_onScroll);
     _worksScroll.dispose();
@@ -164,6 +165,21 @@ class _BasicLibPageState extends State<BasicLibPage>
     _authorSearch.dispose();
     _tabs.dispose();
     super.dispose();
+  }
+
+  /// 作者 tab 切进来时才预热：停在作品页时不必先占解码额度。
+  void _onTabChanged() {
+    if (_tabs.index == 1) _scheduleAuthorPrefetch();
+  }
+
+  /// 三份数据（作者列表 / `av` / 兜底图）任一到手都可能补齐首屏头像，
+  /// 都已就绪时发一次预热；不在 build 里做，放帧后。
+  void _scheduleAuthorPrefetch() {
+    if (!mounted || authors.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _prefetchAuthors();
+    });
   }
 
   void _onScroll() {
@@ -205,6 +221,8 @@ class _BasicLibPageState extends State<BasicLibPage>
         _authorShownCache = null;
         loadingAuthors = false;
       });
+      // 作者 tab 已在前台就直接预热首屏头像（从其它页返回/搜索后也一样）。
+      if (_tabs.index == 1) _scheduleAuthorPrefetch();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -239,6 +257,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       _authorShownCache = null;
     });
     if (_authorScroll.hasClients) _authorScroll.jumpTo(0);
+    _scheduleAuthorPrefetch();
   }
 
   void _clearAuthorQuery() {
@@ -269,6 +288,8 @@ class _BasicLibPageState extends State<BasicLibPage>
           ..clear()
           ..addAll(map);
       });
+      // `av` 通常晚于作者列表到达：到了再补一次首屏预热（去重表会挡重复）。
+      if (_tabs.index == 1) _scheduleAuthorPrefetch();
     } catch (_) {}
   }
 
@@ -650,54 +671,78 @@ class _BasicLibPageState extends State<BasicLibPage>
         duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
   }
 
-  /// 作者卡片头像：有 `av` 用 `av`（带鉴权、按显示尺寸解码），
-  /// 否则用兜底图（该作者第一件作品的缩略图），都没有时回退首字占位。
+  /// 作者卡片头像：手动设置 > 爬虫 `av` > 兜底图（该作者第一件作品的缩略图），
+  /// 都没有时回退首字占位。
+  ///
+  /// 0.9.290：绘制与优先级合成只有一处（`author_avatar_view`）。此前本页自己
+  /// 画了一遍，**不监听** `AuthorAvatarStore`——在作者主页手动设的头像，回到
+  /// 这里仍然是旧图（真缺陷）；占位样式与解码宽度也都是第二套。
   Widget _authorAvatar({
     Key? key,
     required BuildContext context,
     required String name,
     double size = kAvatarBasicAuthorSize,
   }) {
-    final scheme = Theme.of(context).colorScheme;
-    // 首字占位走 `author_avatar.avatarInitial`（唯一实现）：`characters.first`
-    // 只看字形簇，会取到零宽字符/组合附加符号这类**画不出来**的字符，
-    // 头像圆圈看起来是空的；avatarInitial 会把不可见字符跳过去。
-    final initial = avatarInitial(name);
-    final placeholder = Center(
-      child: Text(initial,
-          style: TextStyle(
-              fontSize: size * 0.38,
-              fontWeight: FontWeight.w600,
-              color: scheme.primary)),
+    // 本页不是 `main.AuthorAvatar`，手动头像的变更信号要自己接。
+    return AnimatedBuilder(
+      animation: AuthorAvatarStore.instance,
+      builder: (c, _) {
+        final picked = resolveAvatarSource(
+          manual: AuthorAvatarStore.instance.pathFor(name) ?? '',
+          fallback: pickAuthorAvatar(
+              av: _authorAv[name] ?? '', fallback: _authorFallback[name] ?? ''),
+          fallbackLib: widget.basic.id,
+        );
+        return AuthorAvatarView(
+          key: key,
+          name: name,
+          mediaPath: picked.path,
+          lib: picked.lib,
+          size: size,
+          urlOf: widget.mediaUrlOf,
+          headersOf: widget.headersOf,
+        );
+      },
     );
-    final path = pickAuthorAvatar(
-        av: _authorAv[name] ?? '', fallback: _authorFallback[name] ?? '');
-    final url =
-        path.isEmpty ? '' : widget.mediaUrlOf(path, lib: widget.basic.id);
-    // 缩略按显示尺寸 × 像素比解码，避免整张头像原图进内存。
-    final px = avatarDecodeWidth(
-        displaySize: size,
-        devicePixelRatio: MediaQuery.devicePixelRatioOf(context));
-    return ClipOval(
-      child: Container(
-        key: key,
-        width: size,
-        height: size,
-        color: scheme.primary.withValues(alpha: 0.15),
-        child: url.isEmpty
-            ? placeholder
-            : CachedNetworkImage(
-              cacheManager: DiziCache.manager,
-                imageUrl: withImageWidth(url, kAvatarImageWidth),
-                httpHeaders: widget.headersOf(widget.basic.id),
-                width: size,
-                height: size,
-                fit: BoxFit.cover,
-                memCacheWidth: px,
-                fadeInDuration: Duration.zero,
-                errorWidget: (_, __, ___) => placeholder,
-              ),
-      ),
+  }
+
+  /// 作者 tab 首屏头像预热（0.9.290）。
+  ///
+  /// 此前本页是**唯一没有预热入口**的头像列表：首屏逐张请求，先露占位再跳图。
+  /// 整条链复用 `avatar_prefetch.prefetchAvatarItems`（与排行榜、作者总览同一
+  /// 份），本页只决定「预热哪些作者」与「几何用哪个网格」。
+  void _prefetchAuthors() {
+    if (!mounted || authors.isEmpty) return;
+    final shown = _shownAuthors;
+    if (shown.isEmpty) return;
+    final mq = MediaQuery.of(context);
+    final hasIndexBar = authorIndexLetters(_authorShownKeys).length > 1;
+    // 几何与 `_authorsView` 的 delegate / padding 同源：只读
+    // `kBasicAuthorGrid` 与 `authorGridPadRight`，不自己挑数字。
+    final n = kBasicAuthorGrid.prefetchCount(
+      mq.size,
+      padding: EdgeInsets.fromLTRB(
+          kAuthorGridPadLeft,
+          12,
+          authorGridPadRight(hasIndexBar: hasIndexBar),
+          12),
+    );
+    if (n <= 0) return;
+    String avOf(Map<String, dynamic> a) =>
+        _authorAv['${a['name'] ?? a['name_raw'] ?? ''}'] ?? '';
+    String fbOf(Map<String, dynamic> a) =>
+        _authorFallback['${a['name'] ?? a['name_raw'] ?? ''}'] ?? '';
+    prefetchAvatarItems(
+      [
+        for (final a in shown.take(n))
+          (path: pickAuthorAvatar(av: avOf(a), fallback: fbOf(a)),
+              lib: widget.basic.id),
+      ],
+      limit: n,
+      displaySize: kAvatarBasicAuthorSize,
+      devicePixelRatio: mq.devicePixelRatio,
+      urlOf: (path, lib) => widget.mediaUrlOf(path, lib: lib),
+      headersOf: (lib) => widget.headersOf(lib),
     );
   }
 
