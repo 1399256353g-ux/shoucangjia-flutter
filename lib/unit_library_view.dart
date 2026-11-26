@@ -482,7 +482,8 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
   }
 
   Widget _buildView(BuildContext context) {
-    final liveStars = StarStore.instance.ready ? StarStore.instance.ids : widget.stars;
+    final liveStars =
+        StarStore.instance.ready ? StarStore.instance.ids : widget.stars;
     final units = widget.tree.children;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -531,7 +532,8 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
                 topCard: true,
                 fallbackTint: tint,
                 online: widget.statusOf?.call(u),
-                coverUrl: (widget.topCoverOf ?? widget.unitCoverOf)?.call(u) ?? '',
+                coverUrl:
+                    (widget.topCoverOf ?? widget.unitCoverOf)?.call(u) ?? '',
                 coverUrlOf: widget.topCoverOf ?? widget.unitCoverOf,
                 headers: unitHeadersOf(u, widget.headersOf),
                 starred: liveStars.contains(u.id),
@@ -717,35 +719,36 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                   _schedulePrefetch();
                 }
                 return GridView.builder(
-              padding: kStarredGridPadding,
-              gridDelegate: kUnitLibGrid.delegate,
-              itemCount: units.length,
-              itemBuilder: (_, i) {
-                final u = units[i];
-                final coverLib = u.coverLib?.id ?? '';
-                return UnitLibraryCard(
-                  unit: u,
-                  coverUrl: widget.unitCoverOf?.call(u) ?? '',
-                  coverUrlOf: widget.unitCoverOf,
-                  headers: unitHeadersOf(u, widget.headersOf),
-                  starred: true,
-                  onToggleStar: () => _toggle(u),
-                  onTap: () => widget.onOpenUnit(u),
-                  coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
-                  onQuickRefresh: widget.refreshOf == null || coverLib.isEmpty
-                      ? null
-                      : () => widget.refreshOf!(coverLib, u.rel),
-                  onSetCover: widget.coverMenuOf != null
-                      ? null
-                      : (widget.coverUploader == null || coverLib.isEmpty
+                  padding: kStarredGridPadding,
+                  gridDelegate: kUnitLibGrid.delegate,
+                  itemCount: units.length,
+                  itemBuilder: (_, i) {
+                    final u = units[i];
+                    final coverLib = u.coverLib?.id ?? '';
+                    return UnitLibraryCard(
+                      unit: u,
+                      coverUrl: widget.unitCoverOf?.call(u) ?? '',
+                      coverUrlOf: widget.unitCoverOf,
+                      headers: unitHeadersOf(u, widget.headersOf),
+                      starred: true,
+                      onToggleStar: () => _toggle(u),
+                      onTap: () => widget.onOpenUnit(u),
+                      coverMenu: widget.coverMenuOf?.call(coverLib, u.rel),
+                      onQuickRefresh:
+                          widget.refreshOf == null || coverLib.isEmpty
+                              ? null
+                              : () => widget.refreshOf!(coverLib, u.rel),
+                      onSetCover: widget.coverMenuOf != null
                           ? null
-                          : () => _pickCover(coverLib, u.rel)),
-                  onConfigure: (widget.onConfigureUnit == null ||
-                          !UnitLibraryCard.canConfigure(u))
-                      ? null
-                      : () => widget.onConfigureUnit!(u),
-                );
-              },
+                          : (widget.coverUploader == null || coverLib.isEmpty
+                              ? null
+                              : () => _pickCover(coverLib, u.rel)),
+                      onConfigure: (widget.onConfigureUnit == null ||
+                              !UnitLibraryCard.canConfigure(u))
+                          ? null
+                          : () => widget.onConfigureUnit!(u),
+                    );
+                  },
                 );
               }),
             ),
@@ -836,8 +839,8 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
   /// 直接问 store；store 变了由 [UnitCoverStore.revision] 通知所有卡片。
   ///
   /// 键带连接标识：两台服务端的同名目录 rel 一样，只按 rel 存会串封面。
-  String get _coverKey =>
-      UnitCoverStore.unitKey(widget.unit.rel, serverId: widget.unit.node.serverId);
+  String get _coverKey => UnitCoverStore.unitKey(widget.unit.rel,
+      serverId: widget.unit.node.serverId);
 
   /// 服务端下发 / 调用方解析出来的「没有本地意见时」的封面地址。
   String _serverCoverUrl() => widget.topCard
@@ -927,9 +930,8 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
       borderRadius: BorderRadius.circular(UnitLibraryCard.radius),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        key: ValueKey(widget.onTap == null
-            ? 'unit-head-${unit.id}'
-            : 'unit-${unit.id}'),
+        key: ValueKey(
+            widget.onTap == null ? 'unit-head-${unit.id}' : 'unit-${unit.id}'),
         borderRadius: BorderRadius.circular(UnitLibraryCard.radius),
         onTap: widget.onTap,
         // 封面铺满整张卡片；不贴来源词条；名称与统计压在底部渐变上。
@@ -940,8 +942,8 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
             Positioned.fill(
               child: ValueListenableBuilder<int>(
                 // 0.9.74：只监听本单元库子树内的库，播放别的库不再重建这张卡。
-                valueListenable:
-                    WorkPlaysStore.libsListenable(unit.allBasics.map((b) => b.id)),
+                valueListenable: WorkPlaysStore.libsListenable(
+                    unit.allBasics.map((b) => b.id)),
                 // owner 2026-11-25：封面改动也走通知，不再靠卡片自己的
                 // setState——那份状态在页面重建时会丢。
                 builder: (_, __, ___) => ValueListenableBuilder<int>(
@@ -1072,7 +1074,9 @@ class _UnitCoverFill extends StatelessWidget {
     final t = tint;
     final fallback = Container(
       key: t == null ? null : const ValueKey('unit-cover-tint'),
-      color: t == null ? scheme.surfaceContainerHighest : Color(t).withValues(alpha: 0.55),
+      color: t == null
+          ? scheme.surfaceContainerHighest
+          : Color(t).withValues(alpha: 0.55),
       alignment: Alignment.center,
       child: Icon(fallbackIcon,
           size: 34,
@@ -1324,22 +1328,22 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
           title: Text(LibraryBadge.labelWithEmoji(
               LibraryBadge.stripIndex(unit.name), unit.id)),
           actions: [
-        const HomeAction(),
-        if (onMountAuthors != null && unit.rel.trim().isNotEmpty)
-          IconButton(
-            key: ValueKey('unit-author-mount-${unit.id}'),
-            tooltip: '作者文件夹挂载',
-            icon: const Icon(Icons.folder_shared_outlined),
-            onPressed: () => onMountAuthors(unit),
-          ),
-        if (onConfigureUnit != null && UnitLibraryCard.canConfigure(unit))
-          IconButton(
-            key: ValueKey('unit-crawler-${unit.id}'),
-            tooltip: '爬虫配置',
-            icon: const Icon(Icons.settings_ethernet),
-            onPressed: () => onConfigureUnit(unit),
-          ),
-      ]),
+            const HomeAction(),
+            if (onMountAuthors != null && unit.rel.trim().isNotEmpty)
+              IconButton(
+                key: ValueKey('unit-author-mount-${unit.id}'),
+                tooltip: '作者文件夹挂载',
+                icon: const Icon(Icons.folder_shared_outlined),
+                onPressed: () => onMountAuthors(unit),
+              ),
+            if (onConfigureUnit != null && UnitLibraryCard.canConfigure(unit))
+              IconButton(
+                key: ValueKey('unit-crawler-${unit.id}'),
+                tooltip: '爬虫配置',
+                icon: const Icon(Icons.settings_ethernet),
+                onPressed: () => onConfigureUnit(unit),
+              ),
+          ]),
       body: LayoutBuilder(builder: (c, cons) {
         // 内容区自己的约束即预热几何（`_pageViewport`）：此前拿整窗口，
         // AppBar 那一截被算成可用空间。
@@ -1348,89 +1352,92 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
           _schedulePrefetch();
         }
         return ScrollDecodeScope(
-        child: ListView(
-        padding: const EdgeInsets.only(bottom: 24),
-        children: [
-          // 进入单元库后不再重复显示自身卡片，直接从下级单元库/基础库开始。
-          if (unit.children.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 12, 16, 2),
-              child: Text('下级单元库',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            ),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: kLibGridPadding,
-              gridDelegate: kUnitLibGrid.delegate,
-              itemCount: unit.children.length,
-              itemBuilder: (c, i) {
-                final sub = unit.children[i];
-                final coverLib = sub.coverLib?.id ?? '';
-                return UnitLibraryCard(
-                  unit: sub,
-                  coverUrl: unitCoverOf?.call(sub) ?? '',
-                  coverUrlOf: unitCoverOf,
-                  headers: unitHeadersOf(sub, headersOf),
-                  starred: liveStars.contains(sub.id),
-                  onToggleStar: () => onToggleUnitStar(sub),
-                  onTap: () => onOpenUnit(sub),
-                  onConfigure: onConfigureUnit == null
-                      ? null
-                      : () => onConfigureUnit(sub),
-                  coverMenu: widget.coverMenuOf?.call(coverLib, sub.rel),
-                  onQuickRefresh: widget.refreshOf == null || coverLib.isEmpty
-                      ? null
-                      : () => widget.refreshOf!(coverLib, sub.rel),
-                  onSetCover: widget.coverMenuOf != null
-                      ? null
-                      : (widget.coverUploader == null || coverLib.isEmpty
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 24),
+            children: [
+              // 进入单元库后不再重复显示自身卡片，直接从下级单元库/基础库开始。
+              if (unit.children.isNotEmpty) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 2),
+                  child: Text('下级单元库',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                ),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: kLibGridPadding,
+                  gridDelegate: kUnitLibGrid.delegate,
+                  itemCount: unit.children.length,
+                  itemBuilder: (c, i) {
+                    final sub = unit.children[i];
+                    final coverLib = sub.coverLib?.id ?? '';
+                    return UnitLibraryCard(
+                      unit: sub,
+                      coverUrl: unitCoverOf?.call(sub) ?? '',
+                      coverUrlOf: unitCoverOf,
+                      headers: unitHeadersOf(sub, headersOf),
+                      starred: liveStars.contains(sub.id),
+                      onToggleStar: () => onToggleUnitStar(sub),
+                      onTap: () => onOpenUnit(sub),
+                      onConfigure: onConfigureUnit == null
                           ? null
-                          : () => _pickCover(coverLib, sub.rel)),
-                );
-              },
-            ),
-          ],
-          if (sorted.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Text('基础库',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-            ),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              padding: kLibGridPadding,
-              gridDelegate: kBasicLibGrid.delegate,
-              itemCount: sorted.length,
-              itemBuilder: (c, i) => BasicLibCard(
-                basic: sorted[i],
-                coverUrl: coverOf?.call(sorted[i]) ?? '',
-                coverUrlOf: coverOf,
-                headers: headersOf?.call(sorted[i].id) ?? const {},
-                unitLabel: unit.name,
-                unitKey: unit.id,
-                onTap: () => onTapBasic(sorted[i]),
-                coverMenu: widget.coverMenuOf == null
-                    ? null
-                    : widget.coverMenuOf!.call(
-                        sorted[i].id, ownerKey[sorted[i].id] ?? ''),
-                onQuickRefresh: widget.refreshOf == null
-                    ? null
-                    : () => widget.refreshOf!(
-                        sorted[i].id, ownerKey[sorted[i].id] ?? ''),
-                onSetCover: widget.coverMenuOf != null
-                    ? null
-                    : (widget.coverUploader == null
+                          : () => onConfigureUnit(sub),
+                      coverMenu: widget.coverMenuOf?.call(coverLib, sub.rel),
+                      onQuickRefresh:
+                          widget.refreshOf == null || coverLib.isEmpty
+                              ? null
+                              : () => widget.refreshOf!(coverLib, sub.rel),
+                      onSetCover: widget.coverMenuOf != null
+                          ? null
+                          : (widget.coverUploader == null || coverLib.isEmpty
+                              ? null
+                              : () => _pickCover(coverLib, sub.rel)),
+                    );
+                  },
+                ),
+              ],
+              if (sorted.isNotEmpty) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
+                  child: Text('基础库',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                ),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: kLibGridPadding,
+                  gridDelegate: kBasicLibGrid.delegate,
+                  itemCount: sorted.length,
+                  itemBuilder: (c, i) => BasicLibCard(
+                    basic: sorted[i],
+                    coverUrl: coverOf?.call(sorted[i]) ?? '',
+                    coverUrlOf: coverOf,
+                    headers: headersOf?.call(sorted[i].id) ?? const {},
+                    unitLabel: unit.name,
+                    unitKey: unit.id,
+                    onTap: () => onTapBasic(sorted[i]),
+                    coverMenu: widget.coverMenuOf == null
                         ? null
-                        : () => _pickCover(
-                            sorted[i].id, ownerKey[sorted[i].id] ?? '')),
-              ),
-            ),
-          ],
-        ],
-        ),
-      );
+                        : widget.coverMenuOf!
+                            .call(sorted[i].id, ownerKey[sorted[i].id] ?? ''),
+                    onQuickRefresh: widget.refreshOf == null
+                        ? null
+                        : () => widget.refreshOf!(
+                            sorted[i].id, ownerKey[sorted[i].id] ?? ''),
+                    onSetCover: widget.coverMenuOf != null
+                        ? null
+                        : (widget.coverUploader == null
+                            ? null
+                            : () => _pickCover(
+                                sorted[i].id, ownerKey[sorted[i].id] ?? '')),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
       }),
     );
   }
@@ -1491,8 +1498,8 @@ class _BasicLibCardState extends State<BasicLibCard> {
   /// owner 2026-11-25：与单元库卡片同一处状态（[UnitCoverStore]）。
   /// 原来这里也有一份私有覆盖，页面重建即丢——同一个 bug 的第二份拷贝。
   /// 键带连接标识（同 [UnitCoverStore.unitKey] 的理由）。
-  String get _coverKey => UnitCoverStore.basicKey(widget.basic.id,
-      serverId: widget.basic.serverId);
+  String get _coverKey =>
+      UnitCoverStore.basicKey(widget.basic.id, serverId: widget.basic.serverId);
 
   String _coverUrlNow() {
     final local = UnitCoverStore.rawOf(_coverKey);
@@ -1609,8 +1616,7 @@ class _BasicLibCardState extends State<BasicLibCard> {
                 if (widget.coverMenu != null || widget.onSetCover != null)
                   cardActionButton(
                     buttonKey: ValueKey('basic-cover-btn-${basic.id}'),
-                    tooltip:
-                        widget.coverMenu != null ? '封面设置' : '本地选图作封面',
+                    tooltip: widget.coverMenu != null ? '封面设置' : '本地选图作封面',
                     icon: Icons.image_outlined,
                     onPressed: _openCoverMenu,
                   ),
