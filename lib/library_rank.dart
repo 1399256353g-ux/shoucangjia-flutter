@@ -86,6 +86,43 @@ Map<String, dynamic> statsAuthors(dynamic raw) {
   return (plays: plays, drops: drops);
 }
 
+/// 排序规则（**唯一**）：指标分降序 → 播放量降序 → 库名升序 → id 升序。
+///
+/// 四级键里最后一级（id）保证唯一（[buildLibraryRank] 已按 id 去重），所以
+/// 结果与入参顺序无关；不要去掉 id 这一级——只到库名为止时，两个同名库
+/// （`(8) 🦶` 与 `(9) 🦶` 去序号后同名）名次会随服务端下发顺序变。
+///
+/// 0.9.319：这段比较器此前只存在于 [buildLibraryRank] 内部，页面切换指标时
+/// 只改了 `score` 的取值，**没有重新排序**——「总播放量」榜前几名切到
+/// 「总水滴数」后，右侧数字换成水滴数、左边名次仍是播放量的名次，两个字段
+/// 互相矛盾。现在排序独立出口，切指标直接复用同一套规则。
+int compareLibraryRank(LibraryRankRow a, LibraryRankRow b, String metric) {
+  final c = b.score(metric).compareTo(a.score(metric));
+  if (c != 0) return c;
+  final p = b.plays.compareTo(a.plays);
+  if (p != 0) return p;
+  final n = a.name.compareTo(b.name);
+  if (n != 0) return n;
+  return a.id.compareTo(b.id);
+}
+
+/// 按所选指标重新排名（不改变行本身，只改顺序与 `rank`）。
+List<LibraryRankRow> rankOrder(List<LibraryRankRow> rows, String metric) {
+  final sorted = [...rows]..sort((a, b) => compareLibraryRank(a, b, metric));
+  return [
+    for (var i = 0; i < sorted.length; i++)
+      LibraryRankRow(
+        id: sorted[i].id,
+        name: sorted[i].name,
+        plays: sorted[i].plays,
+        drops: sorted[i].drops,
+        online: sorted[i].online,
+        isDefault: sorted[i].isDefault,
+        rank: i + 1,
+      ),
+  ];
+}
+
 List<LibraryRankRow> buildLibraryRank({
   required List<Map<String, dynamic>> libs,
   required Map<String, Map<String, dynamic>> stats,
@@ -117,31 +154,6 @@ List<LibraryRankRow> buildLibraryRank({
       rank: 0,
     ));
   }
-  // 排序规则（**唯一**）：指标分降序 → 播放量降序 → 库名升序 → id 升序。
-  // 四级键里最后一级（id）保证唯一（上面已按 id 去重），所以结果与 libs 的
-  // 入参顺序无关；不要去掉 id 这一级——只到库名为止时，两个同名库
-  // （`(8) 🦶` 与 `(9) 🦶` 去序号后同名）名次会随服务端下发顺序变。
-  rows.sort((a, b) {
-    final c = b.score(metric).compareTo(a.score(metric));
-    if (c != 0) return c;
-    final p = b.plays.compareTo(a.plays);
-    if (p != 0) return p;
-    final n = a.name.compareTo(b.name);
-    if (n != 0) return n;
-    return a.id.compareTo(b.id);
-  });
-  final out = <LibraryRankRow>[];
-  for (var i = 0; i < rows.length; i++) {
-    final r = rows[i];
-    out.add(LibraryRankRow(
-      id: r.id,
-      name: r.name,
-      plays: r.plays,
-      drops: r.drops,
-      online: r.online,
-      isDefault: r.isDefault,
-      rank: i + 1,
-    ));
-  }
-  return out;
+  // 排序与名次只由 [rankOrder] 一处产出（与页面切指标时同一套规则）。
+  return rankOrder(rows, metric);
 }

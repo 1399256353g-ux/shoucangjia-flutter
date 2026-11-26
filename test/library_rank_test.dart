@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_rank.dart';
 
@@ -140,5 +142,75 @@ void main() {
     expect(m.keys, ['a']);
     expect(statsAuthors(null), isEmpty);
     expect(statsAuthors({'a': 1}), isEmpty);
+  });
+
+  test('切指标时名次跟着指标重排（名次与数字不能互相矛盾）', () {
+    final rows = buildLibraryRank(
+      libs: [
+        {'id': 'a', 'name': 'A', 'baseOk': true, 'indexOk': true},
+        {'id': 'b', 'name': 'B', 'baseOk': true, 'indexOk': true},
+      ],
+      stats: {
+        'a': {
+          'x': {'p': 100, 'dr': 1},
+        },
+        'b': {
+          'x': {'p': 10, 'dr': 50},
+        },
+      },
+      metric: 'play',
+    );
+    expect(rows.map((e) => e.id).toList(), ['a', 'b']);
+
+    // 只换指标、不重排 = 名次与右侧数字矛盾（这就是本轮修掉的形态）
+    final byDrop = rankOrder(rows, 'drop');
+    expect(byDrop.map((e) => e.id).toList(), ['b', 'a'],
+        reason: '水滴多的库排在前面');
+    expect(byDrop.map((e) => e.rank).toList(), [1, 2]);
+    // 数据本身不因重排而变
+    expect(byDrop.first.plays, 10);
+    expect(byDrop.first.drops, 50);
+    expect(byDrop.last.plays, 100);
+    // 再切回来仍是播放量顺序
+    expect(rankOrder(byDrop, 'play').map((e) => e.id).toList(), ['a', 'b']);
+  });
+
+  test('buildLibraryRank 与 rankOrder 用同一个比较器', () {
+    final libs = [
+      {'id': 'z', 'name': '同名', 'baseOk': true, 'indexOk': true},
+      {'id': 'a', 'name': '同名', 'baseOk': true, 'indexOk': true},
+    ];
+    final stats = {
+      'z': {
+        'x': {'p': 5, 'dr': 5},
+      },
+      'a': {
+        'x': {'p': 5, 'dr': 5},
+      },
+    };
+    for (final metric in ['play', 'drop']) {
+      final built = buildLibraryRank(libs: libs, stats: stats, metric: metric);
+      final reordered = rankOrder(built, metric);
+      expect(reordered.map((e) => e.id).toList(),
+          built.map((e) => e.id).toList(),
+          reason: '$metric：同一套规则重排不该换位');
+      // 已排名单再次按同名规则排序也必须稳定（id 是最后一级键）
+      expect(reordered.map((e) => e.id).toList(), ['a', 'z']);
+    }
+  });
+
+  test('页面切指标必须重排名次（不许只换数字）', () {
+    final main = File('lib/main.dart').readAsStringSync();
+    final start = main.indexOf('class _LibraryRankPageState');
+    final end = main.indexOf('class AuthorGridCard', start);
+    final body = main.substring(start, end);
+    expect(body.contains('rankOrder(rows, metric)'), isTrue,
+        reason: '切指标只改 metric 会留下「播放量第 1、水滴数却更少」的矛盾');
+    expect('rankOrder('.allMatches(body).length, greaterThanOrEqualTo(2),
+        reason: '两个 ChoiceChip 都要重排');
+    // 排序规则只有一份：页面不得自己写比较器
+    expect(body.contains('compareLibraryRank('), isFalse,
+        reason: '比较器只在 library_rank.dart');
+    expect(body.contains('.sort((a, b)'), isFalse);
   });
 }

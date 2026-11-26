@@ -143,12 +143,20 @@ void main() {
       expect(out.single.name, 'u9');
     });
 
-    test('lib/ 里不再有两份手写的 _filterBigs 去重排序', () {
-      final src = codeOfLib('lib/main.dart');
-      expect(src.contains('out.removeWhere((e) => !seen.add(e.id));'), isFalse,
+    test('去重排序只在 author_big_nodes；页面不再各写一份 _filterBigs', () {
+      final main = codeOfLib('lib/main.dart');
+      final opts = codeOfLib('lib/author_filter_options.dart');
+      expect(main.contains('out.removeWhere((e) => !seen.add(e.id));'), isFalse,
           reason: '推荐页的大库去重还在手写');
-      expect(src.contains('authorBigNodes('), isTrue,
-          reason: '两处 _filterBigs 都应转调 author_big_nodes.dart');
+      // 0.9.319：两页的 `_filterBigs` 都收进 `author_filter_options`，
+      // `main.dart` 不再直接调 `authorBigNodes`（否则又是「一处规则、两处调用」）。
+      expect(main.contains('authorBigNodes('), isFalse,
+          reason: '页面不该自己汇总筛选项');
+      expect(main.contains('List<AuthorBigNode> get _filterBigs'), isFalse,
+          reason: '两页各一份选项构造已经合并');
+      expect(opts.contains('authorBigNodes('), isTrue,
+          reason: '唯一汇总点必须转调 author_big_nodes.dart');
+      expect(main.contains('authorFilterOptionsFrom('), isTrue);
     });
   });
 

@@ -53,7 +53,7 @@ import 'cache_settings.dart';
 import 'app_settings.dart';
 import 'app_theme.dart';
 import 'author_filter.dart';
-import 'author_big_nodes.dart';
+import 'author_filter_options.dart';
 import 'author_drag.dart';
 import 'author_merge.dart';
 import 'author_mount_sheet.dart';
@@ -537,11 +537,16 @@ class LibMeta {
               cfg.u(
                   '/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}',
                   lib: lib),
-              headers: cfg.headers),
-          http.get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers),
+              // 地址按 `lib` 路由，鉴权头也必须按 `lib`（`cfg.headers` 是
+              // **当前库**那条连接的账号）：从另一个服务端的库进来时，两者
+              // 不同源就是拿 A 的密码去敲 B 的门（401），整棵库树退回空。
+              headers: cfg.headersFor(lib)),
+          http.get(cfg.u('/api/libraries', lib: lib),
+              headers: cfg.headersFor(lib)),
           http.get(cfg.u('/api/author_stats.json', lib: lib),
-              headers: cfg.headers),
-          http.get(cfg.u('/api/nodes', lib: lib), headers: cfg.headers),
+              headers: cfg.headersFor(lib)),
+          http.get(cfg.u('/api/nodes', lib: lib),
+              headers: cfg.headersFor(lib)),
         ]).timeout(const Duration(seconds: 10));
         if (rs[0].statusCode == 200 && rs[1].statusCode == 200) {
           final lj = jsonOf(rs[0]);
@@ -763,7 +768,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
   return _authorTypeCache.putIfAbsent(lib, () async {
     try {
       final reg = await http
-          .get(cfg.u('/api/libraries', lib: lib), headers: cfg.headers)
+          .get(cfg.u('/api/libraries', lib: lib), headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 12));
       if (reg.statusCode != 200) return <String, Set<String>>{};
       final lj = await http
@@ -771,7 +776,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
               cfg.u(
                   '/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}',
                   lib: lib),
-              headers: cfg.headers)
+              headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 12));
       if (lj.statusCode != 200) return <String, Set<String>>{};
       final regJson = jsonOf(reg);
@@ -801,7 +806,7 @@ Future<Map<String, Set<String>>> _typesFromLibIndex(
   try {
     final r = await http
         .get(cfg.u('/api/lib/$basicId/index.json', lib: lib),
-            headers: cfg.headers)
+            headers: cfg.headersFor(lib))
         .timeout(const Duration(seconds: 12));
     if (r.statusCode != 200) return <String, Set<String>>{};
     return authorTypesFromIndex(jsonOf(r));
@@ -823,7 +828,7 @@ void postStat(String type, String author, {String? lib}) {
   try {
     http
         .post(cfg.u('/api/stats', lib: lib),
-            headers: {...cfg.headers, 'Content-Type': 'application/json'},
+            headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
             body: jsonEncode({'type': type, 'author': author}))
         .ignore();
   } catch (_) {}
@@ -835,7 +840,7 @@ Future<Map<String, dynamic>?> fetchDropStatus(String id, {String? lib}) async {
   try {
     final r = await http
         .get(cfg.u('/api/drops?id=${Uri.encodeQueryComponent(id)}', lib: lib),
-            headers: cfg.headers)
+            headers: cfg.headersFor(lib))
         .timeout(const Duration(seconds: 8));
     final j = jsonOf(r);
     if (j is Map) {
@@ -7455,10 +7460,12 @@ class _RankPageState extends State<RankPage> {
     final n = firstScreenRowCount(
         viewportHeight: viewportHeight, rowExtent: kAuthorRankRowExtent);
     if (n <= 0) return;
-    // 行库：榜单「全部」时按该行自己的库，选了具体库时一律用选中库。
+    // 行库用于**路由**：决定地址走哪条连接、带哪份鉴权头。
     // 缩略图路由用**该行自己的库**，不用 `sel`：`sel` 是注册库 id，
     // 而头像路径 `/media/<基础库>/…` 里带的是基础库 id，拿注册库 id 去
     // 换地址会把它当成「未知库」再补一次前缀（同一张图 404）。
+    // 空行库回落当前库：绑定表里注册库与基础库都有条目（首页聚合时
+    // `buildBindings` 给两侧都写了 bindingEntry），所以这里不需要再换算。
     String libOf(Map e) {
       final own = '${e['lib'] ?? ''}'.trim();
       return own.isEmpty ? cfg.lib : own;
@@ -7740,27 +7747,41 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
       defaultId = '${j['default'] ?? ''}'.trim();
 
       final loaded = <String, Map<String, dynamic>>{};
-      var offline = 0;
-      for (final lib in list) {
-        final id = '${lib['id'] ?? ''}';
-        if (id.isEmpty) continue;
-        if (!libraryOnline(lib)) {
+      // 每个在线库要单独取一份 `authors.json` 统计。此前是**串行** await：
+      // N 个库就是 N 次往返（超时上限各 8s），库多时这一页要等十几秒，
+      // 而它们彼此完全独立。改有界并发（`concurrency.mapConcurrent`，与搜索
+      // 页同一个入口）；顺序不影响结果——`buildLibraryRank` 自己排序。
+      final want = <String>[
+        for (final lib in list)
+          if ('${lib['id'] ?? ''}'.isNotEmpty && libraryOnline(lib))
+            '${lib['id']}',
+      ];
+      var offline = list.length - want.length;
+      final pages = await mapConcurrent<String, Map<String, dynamic>?>(
+        want,
+        6,
+        (id) async {
+          try {
+            final sr = await http
+                .get(cfg.u('/api/author_stats.json', lib: id),
+                    // 地址按该库路由，鉴权头也必须按该库：`cfg.headers` 是
+                    // 当前库那条连接的账号，跨连接时会 401。
+                    headers: cfg.headersFor(id))
+                .timeout(const Duration(seconds: 8));
+            if (sr.statusCode != 200) return null;
+            return statsAuthors(jsonOf(sr));
+          } catch (_) {
+            return null;
+          }
+        },
+      );
+      for (var i = 0; i < want.length; i++) {
+        final st = pages[i];
+        if (st == null) {
           offline++;
           continue;
         }
-        try {
-          final sr = await http
-              .get(cfg.u('/api/author_stats.json', lib: id),
-                  headers: cfg.headers)
-              .timeout(const Duration(seconds: 8));
-          if (sr.statusCode != 200) {
-            offline++;
-            continue;
-          }
-          loaded[id] = statsAuthors(jsonOf(sr));
-        } catch (_) {
-          offline++;
-        }
+        loaded[want[i]] = st;
       }
 
       final ranked = buildLibraryRank(
@@ -7804,7 +7825,13 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
               selected: metric == 'play',
               onSelected: (_) {
                 if (metric == 'play') return;
-                setState(() => metric = 'play');
+                // 切指标必须**重新排名**：名次与右侧数字是同一条榜单的两个
+                // 字段，只换数字不换名次就会出现「播放量第 1、水滴数却比
+                // 第 3 名还少」。数据已经在内存里，不必重新请求。
+                setState(() {
+                  metric = 'play';
+                  rows = rankOrder(rows, metric);
+                });
               },
             ),
             const SizedBox(width: 8),
@@ -7813,7 +7840,10 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
               selected: metric == 'drop',
               onSelected: (_) {
                 if (metric == 'drop') return;
-                setState(() => metric = 'drop');
+                setState(() {
+                  metric = 'drop';
+                  rows = rankOrder(rows, metric);
+                });
               },
             ),
           ],
@@ -8551,7 +8581,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     _avLookup.add(key);
     try {
       final r = await http.get(cfg.u('/api/a/$idx.json', lib: lib),
-          headers: cfg.headers);
+          headers: cfg.headersFor(lib));
       if (r.statusCode != 200) return;
       final m = jsonOf(r);
       final pick = pickFallbackAvatar(avatarCandidatesFromWorks(
@@ -15577,53 +15607,25 @@ class _RecommendPageState extends State<RecommendPage> {
     });
   }
 
-  List<AuthorLibNode> get _filterBasics {
-    final out = <AuthorLibNode>[];
-    for (final b in meta?.filterBasics ?? const <BasicLib>[]) {
-      out.add(AuthorLibNode(
-          id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
+  /// 筛选面板选项：只由 `author_filter_options` 一处汇总（本页作用域＝当前库）。
+  AuthorFilterOptions get _options => _optionsOf(meta == null ? const [] : [meta!]);
+
+  AuthorFilterOptions _optionsOf(List<LibMeta> ms) => authorFilterOptionsFrom(
+        basics: [for (final m in ms) ...m.filterBasics],
+        units: [for (final m in ms) ...m.units],
+        tops: [for (final m in ms) ...m.tops],
+        bigNames: {for (final m in ms) ...m.bigNames},
+        unitNameOf: (id) => _unitNameIn(ms, id),
+      );
+
+  /// 单元库名称：先问定义了它的那份 meta（`secret` 这一层的名字来自
+  /// `TopNodeName`，不是节点自身字段，所以不能直接读 `u.name`）。
+  static String _unitNameIn(List<LibMeta> ms, String id) {
+    for (final m in ms) {
+      if (m.units.any((u) => u.id == id)) return m.unitNameOf(id);
     }
-    return authorLibNodes(out);
+    return '';
   }
-
-  List<AuthorBigNode> get _filterBigs =>
-      // 去重/回落/排序全部在 author_big_nodes.dart（与搜索页同一实现）。
-      authorBigNodes(_filterBasics,
-          nameOf: (id) => meta?.bigNames[id] ?? id);
-
-  Map<String, String> get _filterLibNames =>
-      {for (final b in _filterBasics) b.id: b.name};
-
-  Map<String, String> get _filterBigNames =>
-      {for (final b in _filterBigs) b.id: b.name};
-
-  /// T2：单元库筛选选项（含顶级 SECRET）。
-  List<AuthorLibNode> get _filterUnits {
-    final out = <AuthorLibNode>[];
-    final seen = <String>{};
-    for (final u in meta?.units ?? const <UnitLibrary>[]) {
-      if (!seen.add(u.id)) continue;
-      out.add(AuthorLibNode(id: u.id, name: meta!.unitNameOf(u.id)));
-    }
-    return authorLibNodes(out);
-  }
-
-  Map<String, String> get _filterUnitNames =>
-      {for (final u in _filterUnits) u.id: u.name};
-
-  /// P3：顶级节点（＝媒体库根）作一级筛选项。
-  List<AuthorLibNode> get _filterTops {
-    final out = <AuthorLibNode>[];
-    final seen = <String>{};
-    for (final t in meta?.tops ?? const <UnitLibrary>[]) {
-      if (t.id.isEmpty || !seen.add(t.id)) continue;
-      out.add(AuthorLibNode(id: t.id, name: t.name));
-    }
-    return authorLibNodes(out);
-  }
-
-  Map<String, String> get _filterTopNames =>
-      {for (final t in _filterTops) t.id: t.name};
 
   bool _matches(dynamic raw, AuthorFilterState f) {
     if (raw is! Map) return false;
@@ -15667,10 +15669,10 @@ class _RecommendPageState extends State<RecommendPage> {
     final res = await showAuthorFilterSheet(
       context: context,
       initial: authorFilter.value,
-      basics: _filterBasics,
-      bigs: _filterBigs,
-      units: _filterUnits,
-      tops: _filterTops,
+      basics: _options.basics,
+      bigs: _options.bigs,
+      units: _options.units,
+      tops: _options.tops,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => works.where((w) => _matches(w, f)).length,
     );
@@ -15714,7 +15716,7 @@ class _RecommendPageState extends State<RecommendPage> {
                     onOpen: _openFilter,
                     onClear: authorFilter.clearAll,
                     summary: authorFilter.value.isActive
-                        ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames, topNames: _filterTopNames)} · 命中 ${visible.length}/${works.length}'
+                        ? '${authorFilterSummary(authorFilter.value, _options)} · 命中 ${visible.length}/${works.length}'
                         : null,
                   ),
                   Expanded(
@@ -15953,66 +15955,23 @@ class _SearchPageState extends State<SearchPage> {
 
   // ---- J11：作者筛选（与总览/排行/推荐同一状态与组件） ----
 
-  List<AuthorLibNode> get _filterBasics {
-    final out = <AuthorLibNode>[];
-    for (final m in metas.values) {
-      for (final b in m.filterBasics) {
-        out.add(AuthorLibNode(
-            id: b.id, name: basicLibLabel(b, b.name), bigId: b.bigId));
-      }
+  /// 筛选面板选项：只由 `author_filter_options` 一处汇总（本页作用域＝全部库）。
+  AuthorFilterOptions get _options => _optionsOf(metas.values.toList());
+
+  AuthorFilterOptions _optionsOf(List<LibMeta> ms) => authorFilterOptionsFrom(
+        basics: [for (final m in ms) ...m.filterBasics],
+        units: [for (final m in ms) ...m.units],
+        tops: [for (final m in ms) ...m.tops],
+        bigNames: {for (final m in ms) ...m.bigNames},
+        unitNameOf: (id) => _unitNameIn(ms, id),
+      );
+
+  static String _unitNameIn(List<LibMeta> ms, String id) {
+    for (final m in ms) {
+      if (m.units.any((u) => u.id == id)) return m.unitNameOf(id);
     }
-    return authorLibNodes(out);
+    return '';
   }
-
-  List<AuthorBigNode> get _filterBigs =>
-      // 去重/回落/排序全部在 author_big_nodes.dart（与推荐页同一实现）：
-      // 此前这里手写 `seen.add` 与 `metas.values` 找名字，和推荐页的
-      // `removeWhere` + 单份 meta 是两套写法，同一库在两个页面可能显示不同名。
-      authorBigNodes(_filterBasics, nameOf: (id) {
-        for (final m in metas.values) {
-          final n = m.bigNames[id];
-          if (n != null && n.isNotEmpty) return n;
-        }
-        return id;
-      });
-
-  Map<String, String> get _filterLibNames =>
-      {for (final b in _filterBasics) b.id: b.name};
-
-  Map<String, String> get _filterBigNames =>
-      {for (final b in _filterBigs) b.id: b.name};
-
-  /// T2：单元库筛选选项（含顶级 SECRET）。
-  List<AuthorLibNode> get _filterUnits {
-    final out = <AuthorLibNode>[];
-    final seen = <String>{};
-    for (final m in metas.values) {
-      for (final u in m.units) {
-        if (!seen.add(u.id)) continue;
-        out.add(AuthorLibNode(id: u.id, name: m.unitNameOf(u.id)));
-      }
-    }
-    return authorLibNodes(out);
-  }
-
-  Map<String, String> get _filterUnitNames =>
-      {for (final u in _filterUnits) u.id: u.name};
-
-  /// P3：顶级节点（＝媒体库根）作一级筛选项（多库口径）。
-  List<AuthorLibNode> get _filterTops {
-    final out = <AuthorLibNode>[];
-    final seen = <String>{};
-    for (final m in metas.values) {
-      for (final t in m.tops) {
-        if (t.id.isEmpty || !seen.add(t.id)) continue;
-        out.add(AuthorLibNode(id: t.id, name: t.name));
-      }
-    }
-    return authorLibNodes(out);
-  }
-
-  Map<String, String> get _filterTopNames =>
-      {for (final t in _filterTops) t.id: t.name};
 
   bool _matchesFilter(Map<String, dynamic> e, AuthorFilterState f) {
     final w = e['w'];
@@ -16069,10 +16028,10 @@ class _SearchPageState extends State<SearchPage> {
     final res = await showAuthorFilterSheet(
       context: context,
       initial: authorFilter.value,
-      basics: _filterBasics,
-      bigs: _filterBigs,
-      units: _filterUnits,
-      tops: _filterTops,
+      basics: _options.basics,
+      bigs: _options.bigs,
+      units: _options.units,
+      tops: _options.tops,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => all.where((e) => _matchesFilter(e, f)).length,
     );
@@ -16142,7 +16101,7 @@ class _SearchPageState extends State<SearchPage> {
           onOpen: _openFilter,
           onClear: authorFilter.clearAll,
           summary: authorFilter.value.isActive
-              ? '${authorFilter.value.summary(basicNames: _filterLibNames, bigNames: _filterBigNames, unitNames: _filterUnitNames, topNames: _filterTopNames)} · 命中 ${res.length}/${all.length}'
+              ? '${authorFilterSummary(authorFilter.value, _options)} · 命中 ${res.length}/${all.length}'
               : null,
         ),
         if (loading)
@@ -17114,7 +17073,7 @@ class _AuthorPageState extends State<AuthorPage> {
     for (final lib in _libs) {
       try {
         final r = await http.get(cfg.u('/api/authors.json', lib: lib),
-            headers: cfg.headers);
+            headers: cfg.headersFor(lib));
         if (r.statusCode != 200) continue;
         final idx = jsonMapOf(r);
         // 服务端作者索引存在 `作者` / `@作者` 两种键；名字可能来自作品 `a`
@@ -17122,7 +17081,7 @@ class _AuthorPageState extends State<AuthorPage> {
         final info = authorInfoFromIndex(idx, widget.name);
         if (info == null) continue;
         final d = await http.get(cfg.u('/api/a/${info['i']}.json', lib: lib),
-            headers: cfg.headers);
+            headers: cfg.headersFor(lib));
         if (d.statusCode != 200) continue;
         final m = jsonOf(d);
         if (bio.isEmpty) bio = (m['bio'] ?? '').toString();
