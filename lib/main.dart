@@ -2711,6 +2711,17 @@ class LibBadges extends StatelessWidget {
   final Set<String> grayIds;
   // 等级词条（D–S），空串表示不显示
   final String grade;
+
+  /// 基础库词条（owner 2026-11-26）。
+  ///
+  /// 「基础库词条的出现是配合文件夹挂载机制的」——它回答的是「这个作者在这几个
+  /// 基础库里有目录」。层级上它是最末一级，只用于区分「同一作者分布在哪」，
+  /// 不参与单元库归属判定（那个仍由**最下级单元库**生成，旧规则不变）。
+  ///
+  /// 常态折叠：标记为 [LibEntryKind.basic] 的词条默认收进末尾的展开键里，
+  /// 避免播放页作者卡被撑长。
+  final List<BadgeChipSpec> basicChips;
+
   const LibBadges({
     super.key,
     required this.libIds,
@@ -2718,6 +2729,7 @@ class LibBadges extends StatelessWidget {
     this.names = const {},
     this.grayIds = const {},
     this.grade = '',
+    this.basicChips = const <BadgeChipSpec>[],
   });
 
   @override
@@ -2738,7 +2750,7 @@ class LibBadges extends StatelessWidget {
     // 0.9.291：绘制只有 `author_badge_row` 一处（`BadgeChipWrap`）；这里只把
     // 「去重后的 id」翻译成 `BadgeChipSpec`（颜色/层级/`+N`）——先前本处的
     // `Wrap` 与作者卡那组词条的 `Wrap` 是两份同写。
-    return BadgeChipWrap(
+    return CollapsibleBadgeWrap(
       chips: [
         for (var i = 0; i < labels.length; i++)
           BadgeChipSpec(
@@ -2758,6 +2770,7 @@ class LibBadges extends StatelessWidget {
             label: grade,
             color: AuthorGrade.colorForGrade(grade),
           ),
+        ...basicChips,
       ],
     );
   }
@@ -2860,12 +2873,36 @@ class UnitBadges extends StatelessWidget {
       if (ids.isEmpty) addUnit('secret', '');
     }
 
+    // owner 2026-11-26：基础库词条（配合文件夹挂载）。
+    //
+    // 只有「作者确实分布在多个来源」时才值得列——单库作者列出来只是把单元库
+    // 词条重复一遍。它是**最末一级**，与单元库词条各司其职：
+    //   单元库词条 → 由最下级单元库生成，回答「归哪个单元库」
+    //   基础库词条 → 回答「在这个单元库下的哪几个基础库有目录」
+    final basicChips = <BadgeChipSpec>[];
+    if (sources.length > 1) {
+      for (final basic in sources) {
+        final b = meta?.basicById(basic);
+        final nm = (b?.name ?? '').trim();
+        if (nm.isEmpty) continue;
+        basicChips.add(BadgeChipSpec(
+          label: nm,
+          // 基础库词条用该基础库自己的生效色（含分发链），层级固定 basic。
+          color: LibraryBadge.basicColorFor(
+              basic, _unitKeyOf(basic), order: meta?.unitOrder ?? const []),
+          unitId: _unitKeyOf(basic),
+          kind: LibEntryKind.basic,
+        ));
+      }
+    }
+
     return LibBadges(
       libIds: ids,
       order: meta?.unitOrder ?? const [],
       names: names,
       grayIds: gray,
       grade: grade,
+      basicChips: basicChips,
     );
   }
 }

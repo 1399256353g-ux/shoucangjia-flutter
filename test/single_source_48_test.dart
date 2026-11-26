@@ -127,7 +127,15 @@ void main() {
       final cls = main.indexOf('class LibBadges');
       expect(cls, greaterThan(0));
       final body = main.substring(cls, main.indexOf('class UnitBadges'));
-      expect(body.contains('BadgeChipWrap('), isTrue);
+      // 2026-11-26：词条行换成可折叠容器（基础库词条常态收纳）。
+      // 契约的意图不变——摆词条仍然只有 author_badge_row 一处实现：
+      //   · 这里只允许转发容器（BadgeChipWrap 或 CollapsibleBadgeWrap）
+      //   · 不得自己写间距
+      //   · 不得自己画 LibBadgeChip
+      final usesContainer = body.contains('BadgeChipWrap(') ||
+          body.contains('CollapsibleBadgeWrap(');
+      expect(usesContainer, isTrue,
+          reason: 'LibBadges 必须转发 author_badge_row 里的词条行容器');
       expect(body.contains('spacing: 3'), isFalse,
           reason: '词条间距只在 author_badge_row 一处');
       expect(body.contains('LibBadgeChip('), isFalse,

@@ -81,6 +81,149 @@ class BadgeChipWrap extends StatelessWidget {
   }
 }
 
+/// 可折叠的一排词条（owner 2026-11-26）。
+///
+/// 需求原文：
+/// > 「基础库词条的出现是配合文件夹挂载机制的，若在播放页作者卡等地方显示
+/// >   过长可留一个小展开显示按键，平日里可把基础库等词条隐藏起来……或者点
+/// >   媒体库词条显现所有下级词条也行」
+///
+/// 分层规则（**旧规则不变**）：
+///  - 媒体库词条：媒体库根
+///  - 单元库词条：仍由**最下级的单元库**生成（挂载归属那一层），不由上层冒充
+///  - 基础库词条：配合文件夹挂载，回答「这个作者在这几个基础库里有目录」
+///
+/// 显示策略：
+///  - 常态只显示媒体库 + 单元库两级（层级一眼可辨，不占地方）
+///  - 有基础库词条时，末尾给一个小展开键（`▾N`）
+///  - 点媒体库词条同样展开全部下级（两种入口，任一都能看到全部）
+class CollapsibleBadgeWrap extends StatefulWidget {
+  final List<BadgeChipSpec> chips;
+  final WrapAlignment alignment;
+
+  /// 初始是否展开。默认折叠——作者卡在播放页里空间有限。
+  final bool startExpanded;
+
+  const CollapsibleBadgeWrap({
+    super.key,
+    required this.chips,
+    this.alignment = WrapAlignment.start,
+    this.startExpanded = false,
+  });
+
+  @override
+  State<CollapsibleBadgeWrap> createState() => _CollapsibleBadgeWrapState();
+}
+
+class _CollapsibleBadgeWrapState extends State<CollapsibleBadgeWrap> {
+  late bool _expanded = widget.startExpanded;
+
+  @override
+  void didUpdateWidget(covariant CollapsibleBadgeWrap old) {
+    super.didUpdateWidget(old);
+    // 词条集合变了（换作品/换作者）：折叠回常态，避免上一张卡的展开状态串过去。
+    if (old.chips.length != widget.chips.length) {
+      _expanded = widget.startExpanded;
+    }
+  }
+
+  void _expand() {
+    if (_expanded) return;
+    setState(() => _expanded = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = widget.chips;
+    if (chips.isEmpty) return const SizedBox.shrink();
+
+    // 基础库词条是「可收纳」的那一级：它只为挂载服务，不参与层级辨识。
+    final basics = <BadgeChipSpec>[
+      for (final c in chips)
+        if (c.kind == LibEntryKind.basic) c,
+    ];
+    final visible = <BadgeChipSpec>[
+      for (final c in chips)
+        if (c.kind != LibEntryKind.basic) c,
+    ];
+    // 不能把卡片藏空：若去掉基础库后什么都不剩，就全部照常显示、不给展开键。
+    // （此前这里只是「补回显示」，却仍把 hasHidden 置真，于是出现
+    //  「全都已经显示了，还给一个展开键」的矛盾状态。）
+    final canFold = visible.isNotEmpty && basics.isNotEmpty;
+    final hasHidden = canFold && !_expanded;
+    final shown = <BadgeChipSpec>[
+      if (canFold && !_expanded) ...visible else ...chips,
+    ];
+    final hiddenCount = hasHidden ? basics.length : 0;
+
+    return Wrap(
+      spacing: 3,
+      runSpacing: 3,
+      alignment: widget.alignment,
+      children: [
+        for (final c in shown)
+          // 点媒体库词条＝展开全部下级（owner 提的第二种入口）。
+          c.kind == LibEntryKind.top && hasHidden
+              ? GestureDetector(
+                  onTap: _expand,
+                  child: LibBadgeChip(
+                    label: c.label,
+                    color: c.color,
+                    unitId: c.unitId,
+                    kind: c.kind,
+                  ),
+                )
+              : LibBadgeChip(
+                  label: c.label,
+                  color: c.color,
+                  unitId: c.unitId,
+                  kind: c.kind,
+                ),
+        if (hasHidden)
+          _BadgeExpandChip(count: hiddenCount, onTap: _expand),
+      ],
+    );
+  }
+}
+
+/// 折叠时在末尾显示的小展开键：`▾N`。
+///
+/// 尺寸比词条更小、无底纹，避免它自己被当成一个「词条」参与层级辨识。
+class _BadgeExpandChip extends StatelessWidget {
+  final int count;
+  final VoidCallback onTap;
+
+  const _BadgeExpandChip({required this.count, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '展开 $count 个基础库词条',
+      child: InkWell(
+        key: const ValueKey('badge-expand'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(kEntryRadius),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(kEntryRadius),
+            border: Border.all(
+                color: Colors.white.withValues(alpha: 0.22), width: 0.8),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.expand_more, size: 11, color: Colors.white70),
+            Text('$count',
+                style: const TextStyle(
+                    fontSize: 9, height: 1.2, color: Colors.white70)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 /// 一排作者词条：单元库（可选）+ 等级（可选）。两者都空时占位为零尺寸。
 class AuthorBadgeRow extends StatelessWidget {
   /// 单元库名称（可以带目录序号，渲染前统一 `stripIndex`）；空串不显示。
@@ -102,6 +245,9 @@ class AuthorBadgeRow extends StatelessWidget {
 
   final WrapAlignment alignment;
 
+  /// 额外词条（基础库词条等）。标记为 [LibEntryKind.basic] 的会被折叠收纳。
+  final List<BadgeChipSpec> extraChips;
+
   const AuthorBadgeRow({
     super.key,
     this.unitLabel = '',
@@ -110,14 +256,18 @@ class AuthorBadgeRow extends StatelessWidget {
     this.unitId = '',
     this.grade = '',
     this.alignment = WrapAlignment.center,
+    this.extraChips = const <BadgeChipSpec>[],
   });
 
   @override
   Widget build(BuildContext context) {
     final hasUnit = unitLabel.trim().isNotEmpty;
     final g = grade.trim();
-    if (!hasUnit && g.isEmpty) return const SizedBox.shrink();
-    return BadgeChipWrap(
+    if (!hasUnit && g.isEmpty && extraChips.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    // 播放页作者卡空间有限：基础库词条默认折进末尾的展开键（owner 2026-11-26）。
+    return CollapsibleBadgeWrap(
       alignment: alignment,
       chips: [
         if (hasUnit)
@@ -131,6 +281,7 @@ class AuthorBadgeRow extends StatelessWidget {
           ),
         if (g.isNotEmpty)
           BadgeChipSpec(label: g, color: AuthorGrade.colorForGrade(g)),
+        ...extraChips,
       ],
     );
   }
