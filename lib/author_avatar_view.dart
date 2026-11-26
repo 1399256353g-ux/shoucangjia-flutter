@@ -32,7 +32,7 @@ import 'package:flutter/material.dart';
 import 'author_avatar.dart' show AvatarLetterPlaceholder;
 import 'author_grid.dart' show avatarDecodeWidth;
 import 'cover_cache.dart' show DiziCache;
-import 'lib_cover.dart' show libOfMediaPath;
+import 'lib_cover.dart' show libOfMediaPath, libForMediaPath;
 import 'media_resize.dart' show kAvatarImageWidth, withImageWidth;
 
 /// 手动覆盖 + 调用方给的兜底路径 → 实际要请求的路径，以及它所属的库。
@@ -55,6 +55,15 @@ import 'media_resize.dart' show kAvatarImageWidth, withImageWidth;
   final own = libOfMediaPath(m);
   return (path: m, lib: own.isEmpty ? fallbackLib : own);
 }
+
+/// 已经有**最终路径**时，它所属的库（取不到用调用方给的库）。
+///
+/// 与 [resolveAvatarSource] 的区别：那条链还要在「手动覆盖 / 兜底」之间挑一个，
+/// 这里路径已经定了，只差「这条路径属于哪个库」——决定带哪个 `Authorization`。
+/// 播放页此前自己写 `libOfMediaPath(p).isEmpty ? _curLib : …`，是全 App 第三份
+/// 同义判断（封面解析里还有两份各自实现）。
+String avatarLibOf(String path, {String? fallbackLib}) =>
+    libForMediaPath(path, fallbackLib: fallbackLib);
 
 /// 画一个圆形作者头像：无图/加载中/失败都退到首字母占位（emoji 安全）。
 ///

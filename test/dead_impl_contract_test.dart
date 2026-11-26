@@ -405,8 +405,12 @@ void main() {
     test('作者热区点击只有一个处理函数（三处热区共用）', () {
       final main = File('lib/main.dart').readAsStringSync();
       expect(main.contains('void _authorTapOpen()'), isTrue);
-      expect('onTap: _authorTapOpen'.allMatches(main).length, 3,
-          reason: '头像 / 占位头像 / 作者名三处热区必须共用同一处理');
+      // 0.9.291：此前是 3 处——头像 / 占位头像 / 作者名各一个 GestureDetector。
+      // 头像与占位头像现由 `AuthorAvatarView` 自己决定画图还是画占位（同一个
+      // 组件、同一个热区），所以只剩「头像块 + 作者名」两处；占位不再另开热区，
+      // 也就不会出现「空头像时热区消失、点击穿透到舞台」那种分叉。
+      expect('onTap: _authorTapOpen'.allMatches(main).length, 2,
+          reason: '头像块 / 作者名两处热区必须共用同一处理（占位已在头像块内）');
       // 真实打开动作只剩处理函数内部那一次调用。
       expect('openAuthor();'.allMatches(main).length, 1);
     });

@@ -58,6 +58,7 @@ import 'author_mount_sheet.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
 import 'author_avatar_view.dart';
+import 'author_badge_row.dart';
 import 'author_filter_bar.dart';
 import 'author_filter_ui.dart';
 import 'author_grid.dart';
@@ -2624,12 +2625,13 @@ class LibBadges extends StatelessWidget {
     }
     // 配色顺序：全局单元库顺序优先（与基础库卡同源），没有时才用调用方的。
     final colorOrder = UnitBadgeRegistry.orderOr(order);
-    return Wrap(
-      spacing: 3,
-      runSpacing: 3,
-      children: [
+    // 0.9.291：绘制只有 `author_badge_row` 一处（`BadgeChipWrap`）；这里只把
+    // 「去重后的 id」翻译成 `BadgeChipSpec`（颜色/层级/`+N`）——先前本处的
+    // `Wrap` 与作者卡那组词条的 `Wrap` 是两份同写。
+    return BadgeChipWrap(
+      chips: [
         for (var i = 0; i < labels.length; i++)
-          LibBadgeChip(
+          BadgeChipSpec(
             label: labels[i],
             unitId: i < shown.length ? shown[i] : '',
             kind: i < shown.length
@@ -2642,7 +2644,7 @@ class LibBadges extends StatelessWidget {
                     order: colorOrder),
           ),
         if (grade.isNotEmpty)
-          LibBadgeChip(
+          BadgeChipSpec(
             label: grade,
             color: AuthorGrade.colorForGrade(grade),
           ),
@@ -3334,8 +3336,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     }
     // 删除记录可能来自其他单元库；`/media/<lib>/...` 里的 lib 必须原样保留，
     // 不能按当前库重新前缀，否则会 404 成空白缩略图。
-    final mediaLib = libOfMediaPath(path);
-    final lib = mediaLib.isEmpty ? cfg.lib : mediaLib;
+    final lib = libForMediaPath(path, fallbackLib: cfg.lib);
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: CachedNetworkImage(
@@ -5711,6 +5712,7 @@ class _LibraryPageState extends State<LibraryPage> {
         headersOf: ([lib]) => cfg.headersFor(lib ?? b.id),
         mediaUrlOf: (path, {lib}) => cfg.mediaUrl(path, lib: lib ?? b.id),
         sourceLabel: unit?.name ?? '',
+        sourceUnitId: unit?.id ?? '',
         sourceColor: unit == null
             ? LibraryBadge.gray
             : LibraryBadge.colorForUnit(unit.id,
@@ -9029,12 +9031,6 @@ class _PlayerPageState extends State<PlayerPage>
     return resolveAuthorAvatarPath(fallback: fb);
   }
 
-  /// 头像/兜底图归属的库：优先用媒体路径里的库 id，取不到再用当前库。
-  String _avatarLibFor(String path) {
-    final lib = libOfMediaPath(path);
-    return lib.isEmpty ? _curLib : lib;
-  }
-
   /// 把槽位上「已经发生过的」视频参数同步到页面状态。
   ///
   /// 预缓冲用 `open(play: false)`，首帧在切过去之前就解出来了：media_kit 的
@@ -12213,43 +12209,31 @@ class _PlayerPageState extends State<PlayerPage>
                     // B2：作者级头像索引异步到位后要重新解析，否则会一直显示人形占位。
                     ValueListenableBuilder<int>(
                       valueListenable: authorAvatarRevision,
-                      builder: (context, _, __) => avatarFor(w).isNotEmpty
-                          ? GestureDetector(
-                              // owner 2026-11-21：头像/作者名的点击必须由「显式热区」
-                              // 保证。默认 deferToChild 依赖子组件自己命中，图片还在
-                              // 加载（占位为空）或加载失败时中心像素没有可命中对象，
-                              // 点击会穿透到舞台被当成暂停——表现就是「点头像没反应」。
-                              behavior: HitTestBehavior.opaque,
-                              onTap: _authorTapOpen,
-                              child: ClipOval(
-                                  child: CachedNetworkImage(
-                                      cacheManager: DiziCache.manager,
-                                      // 播放页头像 38dp：取 200px 缩图即可。
-                                      // 兜底图可能来自作者所在的基础库，按图片自身
-                                      // 的库路由与鉴权，避免跨库 401 一直显示默认头像。
-                                      imageUrl: withImageWidth(
-                                          cfg.mediaUrl(avatarFor(w),
-                                              lib: _avatarLibFor(avatarFor(w))),
-                                          kAvatarImageWidth),
-                                      httpHeaders: cfg.headersFor(
-                                          _avatarLibFor(avatarFor(w))),
-                                      width: 38,
-                                      height: 38,
-                                      memCacheWidth: (38 *
-                                              MediaQuery.devicePixelRatioOf(
-                                                  context))
-                                          .round(),
-                                      fadeInDuration: Duration.zero,
-                                      fit: BoxFit.cover,
-                                      errorWidget: (_, __, ___) =>
-                                          const CircleAvatar(
-                                              radius: 19,
-                                              child: Icon(Icons.person)))))
-                          : GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: _authorTapOpen,
-                              child: const CircleAvatar(
-                                  radius: 19, child: Icon(Icons.person))),
+                      builder: (context, _, __) {
+                        final av = avatarFor(w);
+                        // 0.9.291：播放页这处曾是全 App **第三份**手写头像渲染
+                        // （38dp / 自算 memCacheWidth / 自己的错误占位），现在
+                        // 与作者总览、排行榜、作者主页、基础库页共用
+                        // `author_avatar_view` 的唯一绘制实现。
+                        return GestureDetector(
+                          // owner 2026-11-21：头像热区必须显式 opaque——图片
+                          // 还在加载（占位为空）时中心像素没有可命中对象，
+                          // 点击会穿透到舞台被当成暂停。
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _authorTapOpen,
+                          child: AuthorAvatarView(
+                            name: authorName,
+                            mediaPath: av,
+                            // 兜底图可能来自作者所在的基础库，按图片自身的库
+                            // 路由与鉴权，避免跨库 401 一直显示默认头像。
+                            lib: avatarLibOf(av, fallbackLib: _curLib),
+                            size: kAvatarPlayerSize,
+                            urlOf: (path, {String? lib}) =>
+                                cfg.mediaUrl(path, lib: lib),
+                            headersOf: ([String? lib]) => cfg.headersFor(lib),
+                          ),
+                        );
+                      },
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -16274,9 +16258,9 @@ class _AuthorPageState extends State<AuthorPage> {
             itemCount: cands.length,
             itemBuilder: (_, i) {
               final p = cands[i];
-              final l = libOfMediaPath(p).isEmpty
-                  ? (primaryLib.isEmpty ? null : primaryLib)
-                  : libOfMediaPath(p);
+              // 0.9.291：库归属判断只有 `libForMediaPath` 一处（同义写法
+              // 此前在本文件出现四份，四份各自决定兜底库）。
+              final l = libForMediaPath(p, fallbackLib: primaryLib);
               return InkWell(
                 onTap: () async {
                   // 批 A：`.avatars` 里的头像文件直接注册到服务端（跨设备）；
@@ -17005,8 +16989,7 @@ class _AuthorPageState extends State<AuthorPage> {
   void _showAvatar(BuildContext context) {
     final src = effectiveAv;
     if (src.isEmpty) return;
-    final srcLib =
-        libOfMediaPath(src).isEmpty ? primaryLib : libOfMediaPath(src);
+    final srcLib = libForMediaPath(src, fallbackLib: primaryLib);
     showDialog(
       context: context,
       barrierColor: Colors.black87,
@@ -17057,19 +17040,10 @@ class _AuthorPageState extends State<AuthorPage> {
                     const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(width: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Color(AuthorGrade.colorForGrade(grade))
-                  .withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(grade,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(AuthorGrade.colorForGrade(grade)))),
-          ),
+          // 0.9.291：作者主页收起栏的等级词条曾是**第三份手写**（圆角 4、
+          // 底色 18% 透明度、字号 11/w700），与其它页的等级词条不同。
+          // 现共用同一个组件：等级词条在全 App 只能有一种长相。
+          AuthorBadgeRow(grade: grade),
         ]),
       );
     }

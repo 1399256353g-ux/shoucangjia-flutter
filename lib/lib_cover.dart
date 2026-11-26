@@ -352,6 +352,24 @@ String libOfMediaPath(String p) {
   return parts.lib;
 }
 
+/// 同 [libOfMediaPath]，但取不到库段时回落到调用方给的库（常为当前库）。
+///
+/// 「取不到就用当前库」此前在 `main` 里写了**四份**：
+/// ```
+/// Cfg 的删除记录缩略图     libOfMediaPath(p).isEmpty ? cfg.lib : …
+/// 作者头像候选网格         libOfMediaPath(p).isEmpty ? primaryLib : …
+/// 头像放大查看             libOfMediaPath(src).isEmpty ? primaryLib : …
+/// 播放页信息区头像         libOfMediaPath(p).isEmpty ? _curLib : …
+/// ```
+/// 四份逻辑一样、只是“当前库”的来源不同。这个回退放在调用点寫，必然会有
+/// 一处忘记兜（—或反过来，把非媒体路径当成「属于当前库」带错了鉴权头）。
+/// 现在 `lib_cover` 里一行：取不到库段就返回 [fallbackLib]。
+String libForMediaPath(String path, {String? fallbackLib}) {
+  final own = libOfMediaPath(path);
+  if (own.isNotEmpty) return own;
+  return fallbackLib?.trim() ?? '';
+}
+
 /// 最后一级兜底：第一张作品的封面（只收图片）。
 ///
 /// 只在「自定义 / 爬虫 / 播放量最高」都拿不到可用图片时才被用到；

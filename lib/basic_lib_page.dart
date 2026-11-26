@@ -27,6 +27,7 @@ import 'work_card.dart';
 import 'work_forms.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
+import 'author_badge_row.dart';
 import 'library_badge.dart';
 import 'error_text.dart';
 
@@ -74,6 +75,14 @@ class BasicLibPage extends StatefulWidget {
   final String sourceLabel;
   final int sourceColor;
 
+  /// 所属单元库 id（仅用于词条的 emoji 后缀与层级外观）。
+  ///
+  /// 0.9.291：此前本页手写词条容器，既不显示 emoji、也不用
+  /// `LibraryBadge.decorationFor` 的层级边框/底纹，圆角更是 `circular(4)`
+  /// ——同一位作者在作者总览卡与基础库页作者卡上**词条长得不一样**
+  /// （同一张卡的两处渲染，属于本批要收的那一类）。
+  final String sourceUnitId;
+
   const BasicLibPage({
     super.key,
     required this.basic,
@@ -84,6 +93,7 @@ class BasicLibPage extends StatefulWidget {
     this.onPlay,
     this.sourceLabel = '',
     this.sourceColor = LibraryBadge.gray,
+    this.sourceUnitId = '',
   });
 
   @override
@@ -506,58 +516,20 @@ class _BasicLibPageState extends State<BasicLibPage>
                     name: name,
                   ),
                   const SizedBox(height: 6),
-                  // 词条：单元库（去序号）+ 作者等级，与作者总览卡同一套
-                  Wrap(
-                    spacing: 3,
-                    runSpacing: 3,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      if (widget.sourceLabel.isNotEmpty)
-                        Container(
-                          key: const ValueKey('basic-author-source'),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Color(widget.sourceColor),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            LibraryBadge.stripIndex(widget.sourceLabel),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 9,
-                              height: 1.3,
-                              color: Color(LibraryBadge.textColorOn(
-                                  widget.sourceColor)),
-                            ),
-                          ),
-                        ),
-                      Builder(builder: (_) {
-                        final g = AuthorGrade.fromStats(
-                            _authorStats[name],
-                            works: intOf(a['works']));
-                        return Container(
-                          key: const ValueKey('basic-author-grade'),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Color(AuthorGrade.colorForGrade(g)),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            g,
-                            style: TextStyle(
-                              fontSize: 9,
-                              height: 1.3,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
+                  // 词条：单元库（去序号）+ 作者等级，与作者总览卡**同一套渲染**
+                  // （0.9.291：此前这里是两个手写 Container—圆角 4、无 emoji、
+                  // 无层级边框、等级字重不同，于是同一作者在两页词条长得不一样）。
+                  // 数据来源仍是本页自己的 `sourceLabel` 与 `_authorStats`；
+                  // 可以统一的是渲染，不是每个作者属于哪个库。
+                  AuthorBadgeRow(
+                    unitLabel: widget.sourceLabel,
+                    unitColor: widget.sourceColor,
+                    unitId: widget.sourceUnitId,
+                    grade: AuthorGrade.fromStats(
+                        _authorStats[name],
+                        works: intOf(a['works'])),
                   ),
+                  const SizedBox(height: 4),
                   Expanded(
                     child: Center(
                       child: Text(name,

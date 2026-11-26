@@ -47,6 +47,13 @@ const double kAvatarHeaderSize = 64;
 /// 基础库页作者卡片上的头像边长（与作者总览一致）。
 const double kAvatarBasicAuthorSize = kAvatarGridSize;
 
+/// 播放页信息区（左下作者行）头像边长。
+///
+/// 0.9.291：这个 38 曾是播放页内联字面量，连解码宽度都是 `(38 * dpr).round()`
+/// ——没有走 `avatarDecodeWidth`，与其它四处的解码宽度规则不同，同一张头像
+/// 在播放页要按另一个尺寸再解码一次。
+const double kAvatarPlayerSize = 38;
+
 /// 排行榜一行（`AuthorRankTile` 的 `ListTile`）的实测逻辑高度。
 ///
 /// 0.9.289：首屏预热此前按 `firstScreenRowCount` 的默认 72 行高估算，实际
