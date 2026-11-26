@@ -139,13 +139,16 @@ void main() {
       expect(direct, 1, reason: '除图文原图外不得再自己建 provider');
     });
 
-    test('邻页渲染仍按 memCacheWidth 解码（与 thumbImageProvider 同义）', () {
+    test('0.9.293：邻页渲染与探比例都读同一个 PlayerImage', () {
       final main = _code('lib/main.dart');
       final i = main.indexOf('class _NeighborPageState');
       final body = main.substring(i, i + 3000);
-      expect(body.contains('memCacheWidth: widget.memCacheWidth'), isTrue);
-      expect(body.contains('thumbImageProvider('), isTrue,
-          reason: '探比例那一段必须复用同一构造函数');
+      expect(body.contains('widget.image.provider('), isTrue,
+          reason: '探比例必须向 PlayerImage 要 provider');
+      expect(body.contains('memCacheWidth: widget.image.decodeWidth'), isTrue);
+      expect(body.contains('widget.imageUrl'), isFalse,
+          reason: '邻页不再自己持有地址/头/宽度三个字段');
+      expect(body.contains('widget.memCacheWidth'), isFalse);
     });
   });
 

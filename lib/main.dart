@@ -44,6 +44,7 @@ import 'work_card_prefetch.dart';
 import 'work_cover.dart';
 import 'media_path.dart';
 import 'media_resize.dart';
+import 'player_image.dart';
 import 'rel_path.dart';
 import 'recommend_grid.dart';
 import 'horizontal_chip_bar.dart';
@@ -8234,21 +8235,47 @@ class _MediaRetryBox extends StatelessWidget {
   }
 }
 
+/// 邻页 widget 缓存的键。
+///
+/// 0.9.293：此前是手拼字符串 `'$i|${it['id']}|$lib|$cover|$memW'`，读取侧
+/// 又用 `indexOf('|')` + `substring` 手拆回索引——同一组数据的两种说法，
+/// 封面路径里一旦出现 `|` 就拆错。现在键是结构化对象，比较与取索引都由
+/// 编译器保证。
+class _NeighborKey {
+  const _NeighborKey({
+    required this.index,
+    required this.workId,
+    required this.image,
+  });
+
+  final int index;
+  final String workId;
+  final PlayerImage image;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _NeighborKey &&
+      other.index == index &&
+      other.workId == workId &&
+      other.image == image;
+
+  @override
+  int get hashCode => Object.hash(index, workId, image);
+}
+
 /// C：PageView 邻页（预载页）。独立 StatefulWidget，State 与已解码封面
 /// 在父级 setState 时保留；封面未就绪时用纯黑占位，绝不黑屏闪烁。
 class _NeighborPage extends StatefulWidget {
   const _NeighborPage({
     required this.index,
-    required this.imageUrl,
-    required this.headers,
-    required this.memCacheWidth,
+    required this.image,
     this.onAspect,
   });
 
   final int index;
-  final String imageUrl;
-  final Map<String, String> headers;
-  final int memCacheWidth;
+
+  /// 邻页封面的唯一参数来源（地址/鉴权头/解码宽度三项同源）。
+  final PlayerImage image;
 
   /// 封面解析出比例后回填给播放页缓存：滑到它之前比例就已就绪，
   /// 落页时不再有「先铺满、再留边」的重排。
@@ -8274,20 +8301,12 @@ class _NeighborPageState extends State<_NeighborPage> {
   }
 
   void _resolveAspect() {
-    if (widget.imageUrl.isEmpty) return;
+    if (widget.image.isEmpty) return;
     try {
       // 0.9.292：探比例必须与渲染用**同一个 provider 形状**。
-      // 旧写法是 `CachedNetworkImageProvider(url, maxWidth: w)`，而渲染走的是
-      // `CachedNetworkImage(memCacheWidth:)` —— octo_image 把它包成
-      // `ResizeImage(width: w, CachedNetworkImageProvider(url))`。两者的缓存键
-      // 不同（前者把 maxWidth 写进 provider 自己的 key），于是这一页只为量个
-      // 比例就多下一次、多解码一次。现在两边都是 `thumbImageProvider`。
-      final provider = thumbImageProvider(
-        widget.imageUrl,
-        decodeWidth: widget.memCacheWidth,
-        headers: widget.headers,
-        cacheManager: DiziCache.manager,
-      );
+      // 0.9.293：两边都直接向 `PlayerImage` 要 provider——地址、鉴权头、
+      // 解码宽度在构造那一刻就定死，不会「探比例一套、渲染另一套」。
+      final provider = widget.image.provider(cacheManager: DiziCache.manager);
       final listener = ImageStreamListener((info, _) {
         final img = info.image;
         if (!mounted || img.height <= 0) return;
@@ -8316,7 +8335,7 @@ class _NeighborPageState extends State<_NeighborPage> {
   @override
   Widget build(BuildContext context) {
     const fallback = ColoredBox(color: Colors.black);
-    if (widget.imageUrl.isEmpty) return fallback;
+    if (widget.image.isEmpty) return fallback;
     // 与播放页同一套判定：竖屏铺满、横板留边；用户手动覆盖优先。
     // 留边时黑底属于本页，滑动中整页一起位移，接缝是黑接黑。
     return ColoredBox(
@@ -8332,9 +8351,9 @@ class _NeighborPageState extends State<_NeighborPage> {
           return CachedNetworkImage(
             cacheManager: DiziCache.manager,
             // 滑动中的相邻页只是占位：720px 缩图足够，按屏幕宽度解码。
-            imageUrl: widget.imageUrl,
-            httpHeaders: widget.headers,
-            memCacheWidth: widget.memCacheWidth,
+            imageUrl: widget.image.url,
+            httpHeaders: widget.image.headers,
+            memCacheWidth: widget.image.decodeWidth,
             alignment: fill ? Alignment.topCenter : Alignment.center,
             fit: fill ? BoxFit.cover : BoxFit.contain,
             fadeInDuration: Duration.zero,
@@ -8648,7 +8667,7 @@ class _PlayerPageState extends State<PlayerPage>
 
   bool _taskbarMeasureScheduled = false;
   // C：邻页 widget 复用缓存：同一实例返回给 PageView，setState 时不重建。
-  final Map<String, Widget> _neighborPages = <String, Widget>{};
+  final Map<_NeighborKey, Widget> _neighborPages = <_NeighborKey, Widget>{};
 
   /// O3：iOS 启动 1.5 秒内未真正播放时只重开一次，避免循环重开。
   /// 起播守卫采样基准：调度守卫时的播放位置。iOS 上 `state.playing`
@@ -9271,27 +9290,22 @@ class _PlayerPageState extends State<PlayerPage>
     if (!mounted) return;
     if (_coverPrefetchFor == cur) return;
     _coverPrefetchFor = cur;
-    final memW = _posterDecodeWidth(context);
     final previewW =
         workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context));
     for (var d = -3; d <= 3; d++) {
       final i = cur + d;
       if (i < 0 || i >= widget.works.length) continue;
-      final it = _workAt(i);
-      final lib = _libFor(it);
-      // 与网格/海报同一个解析入口（th → 图文首图 → 抽帧），否则缺 th 的
-      // 视频在这里就被跳过，进页时底图照样是空的。
-      final cover = _posterCoverUrl(it, lib: lib);
-      if (cover.isEmpty) continue;
+      final img = _playerImageFor(i);
+      if (img.isEmpty) continue;
       if (d == 0) {
         // 当前条只要那张「网格尺寸」底图：它就是播放页海报的 placeholder，
         // 命中后首帧零等待；从作者页/深链直接进播放页时也能提前缓存。
         try {
           precacheImage(
             thumbImageProvider(
-              withImageWidth(cover, kWorkImageWidth),
+              withImageWidth(img.cover, kWorkImageWidth),
               decodeWidth: previewW,
-              headers: cfg.headersFor(lib),
+              headers: img.headers,
               cacheManager: DiziCache.manager,
             ),
             context,
@@ -9301,17 +9315,11 @@ class _PlayerPageState extends State<PlayerPage>
         continue;
       }
       try {
+        // 0.9.292/0.9.293：预载的键必须与 `_NeighborPage` 的渲染键相同。
+        // 现在两边都从同一个 `PlayerImage` 取三元组（地址/头/宽度），
+        // 不可能再出现「预载一个键、渲染另一个键」。
         precacheImage(
-          // 0.9.292：预载的键必须与 `_NeighborPage` 的渲染键相同。此前这里用
-          // `CachedNetworkImageProvider(maxWidth:)`，而邻页渲染是
-          // `CachedNetworkImage(memCacheWidth:)`（= `ResizeImage` 包一层），
-          // 缓存键不同——预载拉回来的图在真正滑入时仍然“没命中”，再下一次。
-          thumbImageProvider(
-            withImageWidth(cover, kPlayerImageWidth),
-            decodeWidth: memW,
-            headers: cfg.headersFor(lib),
-            cacheManager: DiziCache.manager,
-          ),
+          img.provider(cacheManager: DiziCache.manager),
           context,
           onError: (_, __) {},
         );
@@ -12112,10 +12120,8 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 是否已为某条作品建过邻页（决定图文落页时该用哪张「已解码」的底图）。
-  bool _neighborPageBuilt(int i) => _neighborPages.keys.any((k) {
-        final bar = k.indexOf('|');
-        return bar > 0 && k.substring(0, bar) == '$i';
-      });
+  bool _neighborPageBuilt(int i) =>
+      _neighborPages.keys.any((k) => k.index == i);
 
   /// 图文/单图作品落页的「零等待底图」。
   ///
@@ -12129,26 +12135,21 @@ class _PlayerPageState extends State<PlayerPage>
   ///  - 上下滑入：邻页的 1080px 版本刚刚显示过。
   /// 原图解码完成后由 CachedNetworkImage 自然覆盖（与视频海报同一套两级渲染）。
   Widget _picPreview(dynamic it, String path, {String? lib}) {
-    final cover = _posterCoverUrl(it);
-    if (cover.isEmpty) return const SizedBox.shrink();
+    final img = _playerImageFor(cur);
+    if (img.isEmpty) return const SizedBox.shrink();
     // 只有「底图就是当前这张」才铺，多图作品翻到第二张以后不能拿首图冒充。
     final pageUrl = cfg.mediaUrl(path, lib: lib);
-    if (withImageWidth(cover, kPlayerImageWidth) !=
-        withImageWidth(pageUrl, kPlayerImageWidth)) {
+    if (img.url != withImageWidth(pageUrl, kPlayerImageWidth)) {
       return const SizedBox.shrink();
     }
+    // 邻页已建 → 用邻页那张（帧尺寸、已解码）；否则退回作品卡的 440px 版本。
     final ImageProvider provider = _neighborPageBuilt(cur)
-        ? thumbImageProvider(
-            withImageWidth(cover, kPlayerImageWidth),
-            decodeWidth: _posterDecodeWidth(context),
-            headers: cfg.headersFor(lib),
-            cacheManager: DiziCache.manager,
-          )
+        ? img.provider(cacheManager: DiziCache.manager)
         : thumbImageProvider(
-            withImageWidth(cover, kWorkImageWidth),
+            withImageWidth(img.cover, kWorkImageWidth),
             decodeWidth:
                 workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
-            headers: cfg.headersFor(lib),
+            headers: img.headers,
             cacheManager: DiziCache.manager,
           );
     return Image(
@@ -12497,21 +12498,39 @@ class _PlayerPageState extends State<PlayerPage>
     });
   }
 
-  /// C：邻页封面页。按 index/封面/解码宽度缓存 widget 实例，
+  /// 播放页第 [i] 条作品的封面参数（地址/鉴权头/解码宽度）。
+  ///
+  /// 0.9.293：这五项此前各自展开——预载、邻页渲染、图文底图、舞台海报、
+  /// 裁切预览各拼一遍 `withImageWidth(cover, kPlayerImageWidth)` +
+  /// `cfg.headersFor(lib)` + `_posterDecodeWidth(context)`。现在只有这一处
+  /// 产 [PlayerImage]，任何一处写错都会立刻在本函数里体现，而不是悄悄
+  /// 变成「预载一个缓存键、渲染另一个缓存键」。
+  PlayerImage _playerImageFor(int i) {
+    final it = _workAt(i);
+    final lib = _libFor(it);
+    return PlayerImage(
+      cover: _posterCoverUrl(it, lib: lib),
+      lib: lib,
+      headers: cfg.headersFor(lib),
+      decodeWidth: _posterDecodeWidth(context),
+    );
+  }
+
+  /// C：邻页封面页。按作品/封面/解码宽度缓存 widget 实例，
   /// 播放页 setState 时返回同一实例，Element 直接跳过重建。
   Widget _neighborPageFor(int i) {
     final it = _workAt(i);
-    final lib = _libFor(it);
-    final cover = _posterCoverUrl(it, lib: lib);
-    final memW = _posterDecodeWidth(context);
-    // 预载页与正式海报必须用同一个 URL/宽度，否则切到这一页时又要重下。
-    final key = '$i|${it['id'] ?? ''}|$lib|$cover|$memW';
+    final img = _playerImageFor(i);
+    // 键里带作品 id：同一位置换了作品（续播追加、过滤变化）必须重建。
+    final key = _NeighborKey(
+      index: i,
+      workId: '${it['id'] ?? ''}',
+      image: img,
+    );
     return _neighborPages.putIfAbsent(key, () {
       return _NeighborPage(
         index: i,
-        imageUrl: cover.isEmpty ? '' : withImageWidth(cover, kPlayerImageWidth),
-        headers: cfg.headersFor(lib),
-        memCacheWidth: memW,
+        image: img,
         onAspect: (a) => _rememberCoverAspect(it, a),
       );
     });
@@ -12759,15 +12778,17 @@ class _PlayerPageState extends State<PlayerPage>
         );
       }
     }
-    final cover = _posterCoverUrl(w);
-    preview ??= cover.isEmpty
+    // 0.9.293：裁切预览与海报同源（同一张图、同一解码宽度），
+    // 因此点「裁切封面」时那张大图通常已解码完成，预览不空等。
+    final posterImg = PlayerImage(
+      cover: _posterCoverUrl(w),
+      lib: lib,
+      headers: cfg.headersFor(lib),
+      decodeWidth: _posterDecodeWidth(context),
+    );
+    preview ??= posterImg.isEmpty
         ? null
-        : thumbImageProvider(
-            withImageWidth(cover, kPlayerImageWidth),
-            decodeWidth: _posterDecodeWidth(context),
-            headers: cfg.headersFor(lib),
-            cacheManager: DiziCache.manager,
-          );
+        : posterImg.provider(cacheManager: DiziCache.manager);
     if (!mounted) return;
     if (preview == null) {
       await _applyCover(base);
@@ -14080,11 +14101,7 @@ class _PlayerPageState extends State<PlayerPage>
     );
     if (!broken) _scheduleTaskbarMeasure();
     // 邻页缓存只保留当前 ±2，避免滑动久后持有过多封面。
-    _neighborPages.removeWhere((k, _) {
-      final bar = k.indexOf('|');
-      final idx = bar < 0 ? -1 : (int.tryParse(k.substring(0, bar)) ?? -1);
-      return idx < cur - 2 || idx > cur + 2;
-    });
+    _neighborPages.removeWhere((k, _) => k.index < cur - 2 || k.index > cur + 2);
     return Focus(
       focusNode: focus,
       autofocus: true,
@@ -14271,7 +14288,9 @@ class _PlayerPageState extends State<PlayerPage>
                         // 只有黑色 → 「有声黑屏」在这条入口必然复现、在基础库
                         // 网格（作品都有 th）不复现。条件收敛到封面地址后，
                         // 有封面就一定先铺海报。
-                        final posterCover = _posterCoverUrl(it);
+                        // 0.9.293：海报的三项参数与邻页/预载/图文底图同源。
+                        final posterImg = _playerImageFor(cur);
+                        final posterCover = posterImg.cover;
                         return GestureDetector(
                           // 默认 deferToChild：只有子组件画到的像素才响应。
                           // 视频 contain 铺在中间时，四周黑边点下去没有任何
@@ -14346,12 +14365,9 @@ class _PlayerPageState extends State<PlayerPage>
                                         // 海报第一帧不空 → 起播不再露黑。
                                         placeholder: (_, __) =>
                                             _posterPreview(it, fit: fit),
-                                        imageUrl: withImageWidth(
-                                            posterCover, kPlayerImageWidth),
-                                        httpHeaders:
-                                            cfg.headersFor(_libFor(it)),
-                                        memCacheWidth:
-                                            _posterDecodeWidth(context),
+                                        imageUrl: posterImg.url,
+                                        httpHeaders: posterImg.headers,
+                                        memCacheWidth: posterImg.decodeWidth,
                                         alignment: fit == BoxFit.cover
                                             ? Alignment.topCenter
                                             : Alignment.center,
