@@ -5746,10 +5746,12 @@ class _LibraryPageState extends State<LibraryPage> {
     cfg.lib = '${l['id']}';
     cfg.libName = displayLibraryName('${l['id']}', '${l['name'] ?? ''}');
     final origin = serverOriginOf(l);
+    // 账号/密码：**没写这个键**才回落到当前连接（旧格式/离线快照）；
+    // 写了但为空串是有意的（该连接本来不需鉴权），不能当「缺失」处理。
     if (origin.base.isNotEmpty) {
       cfg.bindLibrary(cfg.lib, origin.base,
-          user: origin.user.isEmpty ? cfg.user : origin.user,
-          pass: origin.pass.isEmpty ? cfg.pass : origin.pass,
+          user: origin.hasUser ? origin.user : cfg.user,
+          pass: origin.hasPass ? origin.pass : cfg.pass,
           server: origin.id,
           label: origin.label);
     }

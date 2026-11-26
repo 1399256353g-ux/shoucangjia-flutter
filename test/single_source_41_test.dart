@@ -70,6 +70,26 @@ void main() {
       expect(o.isEmpty, isTrue);
     });
 
+    test('账号/密码：区分「没写这个键」与「写了空串」', () {
+      // 旧格式（离线快照）没有 _serverUser/_serverPass：应用当前连接的账号。
+      final legacy = serverOriginOf(const <String, dynamic>{
+        '_serverBase': 'http://a:8090',
+      });
+      expect(legacy.hasUser, isFalse);
+      expect(legacy.hasPass, isFalse);
+
+      // 写了但为空：这条连接确实不需要鉴权，不能回落到当前连接。
+      final anonymous = serverOriginOf(const <String, dynamic>{
+        '_serverBase': 'http://a:8090',
+        '_serverUser': '',
+        '_serverPass': '',
+      });
+      expect(anonymous.hasUser, isTrue);
+      expect(anonymous.hasPass, isTrue);
+      expect(anonymous.user, '');
+      expect(anonymous.pass, '');
+    });
+
     test('非 Map 输入给空来源，不抛异常', () {
       expect(serverOriginOf(null).isEmpty, isTrue);
       expect(serverOriginOf('x').isEmpty, isTrue);

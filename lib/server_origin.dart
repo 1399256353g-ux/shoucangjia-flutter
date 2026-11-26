@@ -28,12 +28,22 @@ class ServerOrigin {
   final String user;
   final String pass;
 
+  /// 账号/密码字段**是否存在于原始记录里**。
+  ///
+  /// `user` 无法区分「没写这个键」（旧格式，应用当前连接的账号）与
+  /// 「写了但是空串」（这条连接本来就不需要鉴权）。`_switchTo` 以前靠
+  /// `l['_serverUser'] ?? cfg.user` 区分这两件事，收口时不能把区别丢掉。
+  final bool hasUser;
+  final bool hasPass;
+
   const ServerOrigin({
     this.id = '',
     this.base = '',
     this.label = '',
     this.user = '',
     this.pass = '',
+    this.hasUser = false,
+    this.hasPass = false,
   });
 
   static const ServerOrigin empty = ServerOrigin();
@@ -55,6 +65,8 @@ ServerOrigin serverOriginOf(dynamic raw) {
     label: s(kServerLabelKey),
     user: s(kServerUserKey),
     pass: s(kServerPassKey),
+    hasUser: raw.containsKey(kServerUserKey),
+    hasPass: raw.containsKey(kServerPassKey),
   );
 }
 
