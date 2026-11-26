@@ -81,7 +81,8 @@ void main() {
           .listSync()
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))) {
-        final name = f.path.split('/').last;
+        // Windows CI 上的分隔符是 `\`，不能只按 `/` 拆。
+        final name = f.path.split(RegExp(r'[\\/]')).last;
         if (name == 'decode_plan.dart') continue;
         expect(_code(f.path).contains('int screenDecodeWidth('), isFalse,
             reason: '$name 又写了一份「按屏幕宽度解码」');
