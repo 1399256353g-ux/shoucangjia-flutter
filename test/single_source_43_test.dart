@@ -152,7 +152,11 @@ void main() {
       final view = _code('lib/unit_library_view.dart');
       expect(view.contains('decodeWidthForDisplay('), isFalse,
           reason: '卡片内联公式会让缓存键与预热分叉');
-      expect(RegExp(r'libCardDecodeWidthOf\(').allMatches(view).length, 5,
+      // 0.9.288：显示宽度与公式都收到网格规格——页面里不许再出现
+      // 「自己挑一个 220/260 再算解码宽度」的写法。
+      expect(RegExp(r'libCardDecodeWidthOf\(').hasMatch(view), isFalse,
+          reason: '解码宽度只允许经 LibGridSpec.decodeWidth');
+      expect(RegExp(r'\.decodeWidth\(').allMatches(view).length, 5,
           reason: '卡片 1 处 + 三页预热 4 处');
     });
 

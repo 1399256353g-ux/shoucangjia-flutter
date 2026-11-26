@@ -9,8 +9,9 @@ import 'http_json.dart';
 import 'http_error_text.dart';
 
 import 'cover_cache.dart';
-import 'decode_plan.dart';
+import 'card_metrics.dart';
 import 'grid_spec.dart';
+import 'work_card_prefetch.dart';
 import 'author_avatar.dart';
 import 'author_index.dart';
 import 'author_letter_bar.dart';
@@ -23,7 +24,6 @@ import 'stable_order.dart';
 import 'media_priority.dart';
 import 'media_resize.dart';
 import 'scroll_decode.dart';
-import 'thumb_prefetch.dart';
 import 'work_card.dart';
 import 'work_forms.dart';
 import 'work_cover.dart';
@@ -467,10 +467,12 @@ class _BasicLibPageState extends State<BasicLibPage>
         final scheme = Theme.of(c).colorScheme;
         return Material(
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.35),
-          borderRadius: BorderRadius.circular(12),
+          // 与作者总览卡同一个圆角（`card_metrics.kCardRadius`），
+          // 此前这里是第三份字面量 12。
+          borderRadius: BorderRadius.circular(kCardRadius),
           child: InkWell(
             key: ValueKey('basic-author-${a['id'] ?? i}'),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(kCardRadius),
             onTap: () => widget.onOpenAuthor(name),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
@@ -654,7 +656,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     Key? key,
     required BuildContext context,
     required String name,
-    double size = 58,
+    double size = kAvatarBasicAuthorSize,
   }) {
     final scheme = Theme.of(context).colorScheme;
     // 首字占位走 `author_avatar.avatarInitial`（唯一实现）：`characters.first`
@@ -776,26 +778,21 @@ class _BasicLibPageState extends State<BasicLibPage>
   void _prefetchFirstScreen() {
     if (!mounted || works.isEmpty) return;
     final mq = MediaQuery.of(context);
-    // 几何与 `_worksGrid` 的 delegate 同源（`kBasicWorkGrid`：页面 padding 是
-    // `EdgeInsets.all(10)`，上下各 10）。
-    final n = kBasicWorkGrid.prefetchCount(
-      mq.size,
-      padding: const EdgeInsets.all(10),
-    );
-    if (n <= 0) return;
-    // 与 `WorkCard` 用同一个解码宽度（decode_plan），缓存键一致才能命中。
-    final px = workCardDecodeWidth(mq.devicePixelRatio);
+    final shown = filtered;
     final headers = widget.headersOf(widget.basic.id);
-    prefetchThumbItems(
-      [
-        for (final w in filtered.take(n))
-          (
-            url: withImageWidth(_coverOf(w), kWorkImageWidth),
-            headers: headers,
-          ),
+    // 0.9.288：整条链（张数 → 封面 → w= → 解码宽度 → 入队）只有
+    // `work_card_prefetch.prefetchWorkCovers` 一处。本页只负责「取哪些作品」
+    // 与「带哪个库的鉴权头」。几何与 `_worksGrid` 的 delegate 同源
+    // （`kBasicWorkGrid`，页面 padding 是 `EdgeInsets.all(10)`）。
+    prefetchWorkCovers(
+      viewport: mq.size,
+      grid: kBasicWorkGrid,
+      padding: const EdgeInsets.all(10),
+      devicePixelRatio: mq.devicePixelRatio,
+      maxItems: shown.length,
+      items: [
+        for (final w in shown) (cover: _coverOf(w), headers: headers),
       ],
-      limit: n,
-      decodeWidth: px,
     );
   }
 

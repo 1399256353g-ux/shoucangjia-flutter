@@ -37,7 +37,9 @@ import 'breadcrumb.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
 import 'decode_plan.dart';
+import 'card_metrics.dart';
 import 'grid_spec.dart';
+import 'work_card_prefetch.dart';
 import 'layout_metric.dart';
 import 'work_cover.dart';
 import 'media_path.dart';
@@ -2726,9 +2728,10 @@ class UnitBadges extends StatelessWidget {
 
 /// 作者头像：作者总览、排行榜、作者主页共用一套尺寸/解码/占位规则。
 class AuthorAvatar extends StatelessWidget {
-  static const double gridSize = 58;
-  static const double rankSize = 42;
-  static const double headerSize = 64;
+  // 0.9.288：三个边长收到 `card_metrics`（尺寸表），本类只转发。
+  static const double gridSize = kAvatarGridSize;
+  static const double rankSize = kAvatarRankSize;
+  static const double headerSize = kAvatarHeaderSize;
 
   final String name;
   final String mediaPath;
@@ -7474,7 +7477,9 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
 /// 规格：圆角 12、高 170、头像 58、左上单元库词条 + 等级、
 /// 名称/统计/作品数各一行、文字一律单行省略，卡片尺寸不随内容变化。
 class AuthorGridCard extends StatelessWidget {
-  static const double radius = 12;
+  /// 与库卡片同一个圆角（`card_metrics.kCardRadius`）：作者总览卡与基础库页
+  /// 作者卡视觉上必须一致，此前 12 在两处各写一份。
+  static const double radius = kCardRadius;
 
   /// 卡片固定行高：唯一数字在 `grid_spec.kAuthorCardExtent`
   /// （页面 delegate 与首屏预热都从那里读）。
@@ -17683,34 +17688,30 @@ class _WorkGridState extends State<WorkGrid> {
     final works = widget.works;
     if (works.isEmpty) return;
     final mq = MediaQuery.of(context);
-    // 几何与 `_buildGrid` 的 delegate 同源（`kWorkGrid`）：180/2/3:4、无内边距。
-    final n = kWorkGrid.prefetchCount(mq.size, padding: EdgeInsets.zero);
-    if (n <= 0) return;
-    final px = workCardDecodeWidth(mq.devicePixelRatio);
-    // 网格可能跨库（收藏夹/搜索/推荐），headers 按作品各自的库取，
+    // 0.9.288：整条链只有 `work_card_prefetch.prefetchWorkCovers` 一处
+    // （与 `basic_lib_page` 共用）。本网格只负责「取哪些作品」与「按作品
+    // 各自的库取鉴权头」——收藏夹/搜索/推荐可能跨库，headers 必须随图走，
     // 与 `WorkCard.headers` 一致，缓存键才对得上。
-    prefetchThumbItems(
-      [
-        for (final w in works.take(n))
-          // `workCoverUrl` 没封面时返回空串；若塞进 `mediaUrl` 会拼出服务器
-          // 根地址——`withImageWidth('')` 也为空，交给预热入口排掉即可。
+    prefetchWorkCovers(
+      // 几何与 `_buildGrid` 的 delegate 同源（`kWorkGrid`）：180/2/3:4、无内边距。
+      viewport: mq.size,
+      grid: kWorkGrid,
+      padding: EdgeInsets.zero,
+      devicePixelRatio: mq.devicePixelRatio,
+      items: [
+        for (final w in works)
           (
-            url: withImageWidth(
-                workCoverUrl(
-                  w,
-                  lib: _libFor(w),
-                  urls: WorkCoverUrls.standard(
-                    mediaUrl: (path) => cfg.mediaUrl(path, lib: _libFor(w)),
-                    rawUrl: (path) =>
-                        cfg.u(path, lib: _libFor(w)).toString(),
-                  ),
-                ),
-                kWorkImageWidth),
+            cover: workCoverUrl(
+              w,
+              lib: _libFor(w),
+              urls: WorkCoverUrls.standard(
+                mediaUrl: (path) => cfg.mediaUrl(path, lib: _libFor(w)),
+                rawUrl: (path) => cfg.u(path, lib: _libFor(w)).toString(),
+              ),
+            ),
             headers: cfg.headersFor(_libFor(w)),
           ),
       ],
-      limit: n,
-      decodeWidth: px,
     );
   }
 

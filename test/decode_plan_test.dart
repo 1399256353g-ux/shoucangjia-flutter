@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/decode_plan.dart';
+import 'package:shoucangjia/grid_spec.dart';
 
 void main() {
   group('decodeWidthForDisplay', () {
@@ -34,11 +35,15 @@ void main() {
       expect(workCardDecodeWidth(4), kWorkCardMaxDecodeWidth);
     });
 
-    test('库卡片：与作品卡同为 220 × DPR，上限 660', () {
-      expect(libCardDecodeWidth(1), 220);
-      expect(libCardDecodeWidth(2), 440);
-      expect(libCardDecodeWidth(3), 660);
-      expect(libCardDecodeWidth(0), 220);
+    test('库卡片：显示宽度来自网格规格，公式只有一处', () {
+      // 0.9.288：`kLibCardDisplayWidth` / `libCardDecodeWidth()` 已删除——
+      // 「显示宽度」与「网格列宽」是同一个数字，不再各立一个名字。
+      expect(kUnitLibGrid.displayWidth, 260);
+      expect(kBasicLibGrid.displayWidth, 220);
+      expect(kUnitLibGrid.decodeWidth(2), 520);
+      expect(kBasicLibGrid.decodeWidth(2), 440);
+      expect(kBasicLibGrid.decodeWidth(1), 220);
+      expect(kBasicLibGrid.decodeWidth(0), 220);
     });
   });
 

@@ -23,6 +23,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+import 'decode_plan.dart';
 import 'thumb_prefetch.dart';
 
 /// 一类卡片网格的**唯一规格**。
@@ -62,6 +63,26 @@ class LibGridSpec {
     this.mainAxisExtent,
     this.prefetchScreens = 1,
   });
+
+  /// 卡片在**网格里的最大显示宽度**（逻辑像素）。
+  ///
+  /// 这就是 `maxCrossAxisExtent` 同一个数字的另一种说法：卡片铺满一格，
+  /// 所以「显示宽度」不会大于列上限。`decode_plan` 的解码宽度必须按它算，
+  /// 否则卡片渲染与首屏预热会得到两个缓存键（同一张封面解码两次）。
+  ///
+  /// 以前这个数在 `decode_plan.kLibCardDisplayWidth`(220) /
+  /// `unit_library_view.kUnitCardDisplayWidth`(260) 各写一遍，网格这边
+  /// 又有 220/260 —— 同一组数字的两套说法，改一处另一处不跟。
+  double get displayWidth => maxCrossAxisExtent;
+
+  /// 这类卡片的封面解码宽度（卡片渲染与首屏预热必须取同一个值）。
+  ///
+  /// 「显示宽度」与「解码宽度」两条规则各自只有一处实现：
+  /// 宽度来自本规格的 [displayWidth]，公式来自 `decode_plan.libCardDecodeWidthOf`。
+  /// 调用点不再写 `libCardDecodeWidthOf(220, mq.devicePixelRatio)` 这种
+  /// 「自己挑一个数字」的写法——那正是同一个值有两套说法的来源。
+  int decodeWidth(double devicePixelRatio) =>
+      libCardDecodeWidthOf(displayWidth, devicePixelRatio);
 
   /// 页面上真实使用的 delegate（参数与 [prefetchCount] 同源）。
   SliverGridDelegateWithMaxCrossAxisExtent get delegate =>

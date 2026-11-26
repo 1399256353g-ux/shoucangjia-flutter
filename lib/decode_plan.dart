@@ -21,16 +21,13 @@ import 'layout_metric.dart';
 /// 取上限做解码宽度，保证任何一屏都够清晰，同时全站只有一个值。
 const double kWorkCardDisplayWidth = 220;
 
-/// 库卡片（`BasicLibCard` / `UnitLibraryCard`）的最大显示宽度（逻辑像素）。
-///
-/// 基础库卡片 `maxCrossAxisExtent: 220`，单元库卡片 260，但封面铺满整卡、
-/// 信息压在底部；按 220 解码 + 3x 上限足够，再大只是浪费内存。
-const double kLibCardDisplayWidth = 220;
-
 /// 作品卡解码宽度上限（220dp × 3x）。
 const int kWorkCardMaxDecodeWidth = 660;
 
-/// 库卡片解码宽度上限（220dp × 3x）。
+/// 库卡片解码宽度的兜底上限（按 220dp × 3x；正常走「显示宽度 × 3」）。
+///
+/// 「显示宽度」本身不在这里：它就是网格规格的 `maxCrossAxisExtent`
+/// （`grid_spec.LibGridSpec.displayWidth`），同一个数字不再另立名字。
 const int kLibCardMaxDecodeWidth = 660;
 
 /// 显示尺寸 × 设备像素比 → 解码宽度（向上取整）。
@@ -76,9 +73,6 @@ int libCardDecodeWidthOf(double displayWidth, double devicePixelRatio) =>
       maxWidth: ceilDim(displayWidth * 3, fallback: kLibCardMaxDecodeWidth),
     );
 
-/// 库 / 单元库卡片封面统一解码宽度（卡片渲染与预热都必须用它）。
-int libCardDecodeWidth(double devicePixelRatio) =>
-    libCardDecodeWidthOf(kLibCardDisplayWidth, devicePixelRatio);
 
 /// 缩略图预取/解码的有界并发。
 ///

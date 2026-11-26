@@ -1,3 +1,4 @@
+import 'card_metrics.dart';
 import 'cover_cache.dart';
 import 'decode_plan.dart';
 import 'grid_spec.dart';
@@ -17,7 +18,9 @@ import 'package:flutter/material.dart';
 /// 所有页面（作者主页、作品页、收藏夹、搜索、基础库）都必须用这个组件，
 /// 不允许各自再写一套卡片。
 class WorkCard extends StatefulWidget {
-  static const double radius = 10;
+  /// 作品卡圆角：数字在 `card_metrics.kWorkCardRadius`（与库卡片 12 不同，
+  /// 作品卡更密、圆角更小，单独立名的独立决定）。
+  static const double radius = kWorkCardRadius;
 
   /// 卡片宽高比：唯一数字在 `grid_spec.kWorkGrid.aspectRatio`
   /// （页面 delegate 与首屏预热都从那里读）。

@@ -5,7 +5,7 @@ import 'api_url.dart';
 import 'cover_cache.dart';
 import 'cover_menu.dart';
 import 'cover_upload.dart';
-import 'decode_plan.dart';
+import 'card_metrics.dart';
 import 'grid_spec.dart';
 import 'lib_card_prefetch.dart';
 import 'library_badge.dart';
@@ -44,7 +44,10 @@ typedef LibRefreshOf = Future<String?> Function(String libId, String unitRel);
 // ---------------------------------------------------------------------------
 
 /// 库卡片圆角（单元库与基础库必须一致）。
-const double kLibCardRadius = 12;
+///
+/// 0.9.288：数字本身收到 `card_metrics.kCardRadius`——作者总览卡、
+/// 基础库页作者卡用的是同一个 12，此前三处各写一份。
+const double kLibCardRadius = kCardRadius;
 
 /// 库卡片网格外边距（主页 / 单元库页 / 星标页统一）。
 ///
@@ -72,9 +75,6 @@ const LinearGradient kLibCardGradient = LinearGradient(
   end: Alignment.bottomCenter,
   colors: [Color(0x00000000), Color(0xC7000000)],
 );
-
-/// 单元库卡片的显示宽度（网格 `maxCrossAxisExtent: 260`）。
-const double kUnitCardDisplayWidth = 260;
 
 /// P3：首页顶级单元库卡片上的词条色块边长（逻辑像素）。
 ///
@@ -469,7 +469,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
       viewport: mq.size,
       grid: kUnitLibGrid,
       padding: kLibGridPadding,
-      decodeWidth: libCardDecodeWidthOf(kUnitCardDisplayWidth, mq.devicePixelRatio),
+      decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
       items: [
         for (final u in units)
           (
@@ -575,10 +575,10 @@ class StarredEntryCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
       child: Material(
         color: Colors.amber.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(kCardRadius),
         child: InkWell(
           key: const ValueKey('starred-entry'),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(kCardRadius),
           onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
@@ -669,7 +669,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
       viewport: mq.size,
       grid: kUnitLibGrid,
       padding: kStarredGridPadding,
-      decodeWidth: libCardDecodeWidthOf(kUnitCardDisplayWidth, mq.devicePixelRatio),
+      decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
       items: [
         for (final u in units)
           (
@@ -740,12 +740,6 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
 /// 单元库卡片（大）：与基础库卡片同一形状/排版（圆角 [kLibCardRadius]、
 /// 满幅封面 + 底部渐变信息层），只比基础库卡片面积更大。
 class UnitLibraryCard extends StatefulWidget {
-  /// 卡片高度（略大于基础库卡片）。
-  static const double height = 150;
-
-  /// 封面缩略尺寸（略大于基础库卡片）。
-  static const double coverSize = 72;
-
   /// 与基础库卡片统一的圆角。
   static const double radius = kLibCardRadius;
 
@@ -938,7 +932,7 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                   valueListenable: UnitCoverStore.revision,
                   builder: (_, __, ___) => _UnitCoverFill(
                     key: ValueKey('unit-cover-${unit.id}'),
-                    displayWidth: kUnitCardDisplayWidth,
+                    grid: kUnitLibGrid,
                     url: _coverUrlNow(),
                     headers: widget.headers,
                     fallbackIcon: Icons.folder_copy_outlined,
@@ -1054,8 +1048,9 @@ class _UnitCoverFill extends StatelessWidget {
   final Map<String, String> headers;
   final IconData fallbackIcon;
 
-  /// 卡片的逻辑显示宽度（单元库 260 / 基础库 220），决定解码宽度。
-  final double displayWidth;
+  /// 卡片所属的网格规格（单元库 260 / 基础库 220）：显示宽度与解码宽度
+  /// 都从它取，不再自己存一个数字。
+  final LibGridSpec grid;
 
   /// P3：无封面时的占位底色（顶级单元库用词条色块，不用自动封面）。
   final int? tint;
@@ -1068,7 +1063,7 @@ class _UnitCoverFill extends StatelessWidget {
     required this.url,
     required this.headers,
     required this.fallbackIcon,
-    this.displayWidth = 220,
+    this.grid = kBasicLibGrid,
     this.tint,
     this.libId = '',
   });
@@ -1098,11 +1093,9 @@ class _UnitCoverFill extends StatelessWidget {
       httpHeaders: headers,
       // 0.9.119：按卡片真实显示宽度解码（单元库 260dp / 基础库 220dp），
       // 与首屏预热用同一个函数，同一张封面不会因解码宽度不同而二次解码。
-      // 0.9.286：公式收到 `decode_plan.libCardDecodeWidthOf`（唯一实现）。
-      memCacheWidth: libCardDecodeWidthOf(
-        displayWidth,
-        MediaQuery.devicePixelRatioOf(context),
-      ),
+      // 0.9.288：公式与显示宽度都收到网格规格（`LibGridSpec.decodeWidth`），
+      // 页面不再自己挑 220/260。
+      memCacheWidth: grid.decodeWidth(MediaQuery.devicePixelRatioOf(context)),
       fit: BoxFit.cover,
       fadeInDuration: Duration.zero,
       errorWidget: (_, __, ___) => fallback,
@@ -1250,7 +1243,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
       viewport: mq.size,
       grid: kUnitLibGrid,
       padding: kLibGridPadding,
-      decodeWidth: libCardDecodeWidthOf(kUnitCardDisplayWidth, mq.devicePixelRatio),
+      decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
       maxItems: 6,
       items: [
         for (final sub in unit.children)
@@ -1266,7 +1259,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
       viewport: mq.size,
       grid: kBasicLibGrid,
       padding: kLibGridPadding,
-      decodeWidth: libCardDecodeWidthOf(kLibCardDisplayWidth, mq.devicePixelRatio),
+      decodeWidth: kBasicLibGrid.decodeWidth(mq.devicePixelRatio),
       items: [
         for (final b in unit.basics)
           (
