@@ -254,7 +254,7 @@ String _sidOf(LibNode n) => n.serverId.trim();
 ///
 /// [nodes] 节点文件夹（可以是 bigLibraries + groups 的合集）。
 /// [basics] 基础库，`rel` 为相对库根的路径。
-/// [topName] 顶级单元库名称（默认取当前媒体库根目录名），顶级 id 为 [topId]。
+/// [topName] 顶级单元库名称（默认取库根目录名），顶级 id 为 [topId]。
 /// 返回顶级单元库；没有基础库时返回 null（整棵树在选择页消失）。
 UnitLibrary? buildUnitTree({
   required List<LibNode> nodes,

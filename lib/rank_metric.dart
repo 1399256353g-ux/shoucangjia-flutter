@@ -76,3 +76,7 @@ String rankDetailLine({
   if (works != null) parts.add('$works 作品');
   return parts.join(' · ');
 }
+
+/// 排行指标 → 数值类型文字。两个榜共用，不许在页面里另写一份。
+String rankMetricLabel(String metric) =>
+    metric == 'drop' ? '小水滴' : '播放量';

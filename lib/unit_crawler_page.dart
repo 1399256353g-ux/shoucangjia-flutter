@@ -29,6 +29,11 @@ class UnitCrawlerPage extends StatefulWidget {
   final String libId;
   final http.Client? client;
 
+  /// 「删除监测」入口（owner 2026-11-27：挪到每个单元库的爬虫配置页）。
+  ///
+  /// 为空表示当前环境没有这个入口（例如测试），此时条目不渲染。
+  final VoidCallback? onOpenDeletedMonitor;
+
   const UnitCrawlerPage({
     super.key,
     required this.unit,
@@ -36,6 +41,7 @@ class UnitCrawlerPage extends StatefulWidget {
     required this.headers,
     this.libId = '',
     this.client,
+    this.onOpenDeletedMonitor,
   });
 
   @override
@@ -218,6 +224,14 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                       libId: widget.libId,
                       client: widget.client,
                     ),
+                    // owner 2026-11-27：「删除监控页塞到对应单元库的爬虫配置
+                    // 页面下去，爬虫没有这个功能就显示不支持」。
+                    //
+                    // 删除监测的数据来自该单元库目录下的 `_deleted.log`，
+                    // 由该单元库自己的爬虫脚本写入——所以作用域就是本页的
+                    // 单元库，入口也只放在这里，不再在总设置页出现一份。
+                    if (widget.onOpenDeletedMonitor != null)
+                      _deletedMonitorTile(),
                     const Divider(height: 28),
                     // owner 2026-11-21：同步源选择并入每个单元库的爬虫设置，
                     // 不再保留设置页里的全局「同步源选择」入口。
@@ -360,6 +374,39 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
   String _scriptDir() {
     final p = path.isNotEmpty ? path : widget.unit.rel;
     return p.endsWith('/') ? '${p}crawler' : '$p/crawler';
+  }
+
+  /// owner 2026-11-27：「删除监测塞到对应单元库的爬虫配置页面下去，
+  /// 爬虫没有这个功能就显示不支持」。
+  ///
+  /// 判定复用本页唯一的 [`hasScript`]：没有脚本的单元库不会有
+  /// `_deleted.log`，入口置灰并写明原因，不再让用户点进去看空页。
+  Widget _deletedMonitorTile() {
+    final ok = hasScript;
+    return ListTile(
+      key: const ValueKey('unit-deleted-monitor'),
+      contentPadding: EdgeInsets.zero,
+      enabled: ok,
+      leading: Icon(ok ? Icons.delete_outline : Icons.delete_forever_outlined,
+          color: ok ? null : Colors.grey),
+      title: const Text('删除监测'),
+      subtitle: Text(
+        ok
+            ? '本单元库已删除 / 取消收藏的作品记录 · 只读日志，不动媒体'
+            : '该单元库没有爬虫脚本，因此不支持删除监测',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+            fontSize: 11, color: ok ? Colors.grey : Colors.orange),
+      ),
+      trailing: Icon(Icons.chevron_right,
+          color: ok ? null : Colors.grey.withValues(alpha: 0.4)),
+      // 页面不 import `main.dart`（那边已经 import 本文件，双向依赖会让
+      // `main` 的顶层单例在两个库之间形成环）。入口地址由调用方注入。
+      onTap: (ok && widget.onOpenDeletedMonitor != null)
+          ? widget.onOpenDeletedMonitor
+          : null,
+    );
   }
 
   Widget _scriptPicker() {

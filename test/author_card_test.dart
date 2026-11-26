@@ -98,14 +98,18 @@ void main() {
           works: 3,
           plays: 2000,
           drops: 4,
-          scoreText: '💧 4',
+          metric: 'drop',
+          score: 4,
           onTap: () {},
         ),
       ));
       expect(find.text('1'), findsOneWidget);
       expect(find.text('作者丙'), findsOneWidget);
       expect(find.text('播放 2000 · 水滴 4 · 3 作品'), findsOneWidget);
-      expect(find.text('💧 4'), findsOneWidget);
+      // 数值类型在数字**前面**且单独一行，数字本身不带 emoji（owner 2026-11-27）：
+      // 此前是 `💧 4`，宽度和纯数字不同，整列数字对不齐。
+      expect(find.text('小水滴'), findsOneWidget);
+      expect(find.text('4'), findsOneWidget);
       // score = 2000 + 40 + 6 → A
       expect(find.text('A'), findsWidgets);
       expect(find.text('SECRET'), findsOneWidget);

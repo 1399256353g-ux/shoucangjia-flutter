@@ -1,18 +1,20 @@
 import 'emoji_text.dart';
 
 /// 0.9.6 起：旧注册表（`/api/libraries`）里的「抖音收藏」不再作为展示文案。
-/// 库列表/标题里的名称统一走这里，旧条目按 id 显示为「当前媒体库」。
+///
+/// 旧实现把这条映射成「当前媒体库」——那是单库时代的措辞。现在主页多库并列、
+/// 没有任何一个库是「当前」的，这个词会让用户以为别的库没生效（owner
+/// 2026-11-27：「各个地方都要适应多媒体库管理」）。映射改为回落到库 id：
+/// 那是真实的标识，不带假的库状态。
 const String legacyDouyinName = '抖音收藏';
 
 /// 把库名规范成可展示文案：
 /// - 修掉破碎 emoji；
 /// - 空名回落到 id；
-/// - 旧版「抖音收藏」→「当前媒体库」（其它库若带同样字样则直接显示 id）。
+/// - 旧版「抖音收藏」→ 库 id（其它库带同样字样时同样回落到 id）。
 String displayLibraryName(String id, String? rawName) {
   final name = fixDisplayName('${rawName ?? ''}', fallback: id);
-  if (name.contains(legacyDouyinName)) {
-    return id == 'douyin' ? '当前媒体库' : id;
-  }
+  if (name.contains(legacyDouyinName)) return id;
   return name;
 }
 

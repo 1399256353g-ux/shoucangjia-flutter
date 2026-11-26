@@ -87,6 +87,7 @@ import 'library_refresh.dart';
 import 'library_revision.dart';
 import 'refresh_all.dart';
 import 'library_rank.dart';
+import 'rank_metric.dart';
 import 'lib_cover.dart';
 import 'loop_link.dart';
 import 'playback_prefs.dart';
@@ -1745,7 +1746,9 @@ class _SettingsPageState extends State<SettingsPage> {
             else if (isActive)
               const Padding(
                 padding: EdgeInsets.only(right: 6),
-                child: Text('当前',
+                // owner 2026-11-27：「主页多库并列，没有『当前』」——
+                // 这里指服务端注册表里的默认库，措辞统一为「默认」。
+                child: Text('默认',
                     style: TextStyle(fontSize: 11, color: Colors.green)),
               ),
             Switch(
@@ -1774,7 +1777,7 @@ class _SettingsPageState extends State<SettingsPage> {
             if (live) ...[
               TextButton(
                   onPressed: () => _activate(s),
-                  child: Text(isActive ? '当前连接' : '设为当前')),
+                  child: Text(isActive ? '默认连接' : '设为默认')),
               TextButton(
                   onPressed: testing.contains(s.id) ? null : () => _test(s),
                   child: Text(testing.contains(s.id) ? '测试中…' : '测试')),
@@ -3327,7 +3330,28 @@ class _BreadcrumbTabState extends State<_BreadcrumbTab> {
 }
 
 class DeletedMonitorPage extends StatefulWidget {
-  const DeletedMonitorPage({super.key});
+  /// owner 2026-11-27：「删除监控页塞到对应单元库的爬虫配置页面下去」。
+  ///
+  /// 传了单元库就只展示该单元库的记录（服务端 `lib` 是单元库目录名）。
+  /// 不传时保持原来的「聚合所有单元库」，供总览入口沿用。
+  final String unitRel;
+  final String unitName;
+
+  /// 该单元库所属连接的地址与凭据（跨连接场景不能错配）。
+  final String base;
+  final Map<String, String> headers;
+
+  /// 该单元库的第一个基础库 id；服务端按 `lib` 过滤记录时用它。
+  final String libId;
+
+  const DeletedMonitorPage({
+    super.key,
+    this.unitRel = '',
+    this.unitName = '',
+    this.base = '',
+    this.headers = const {},
+    this.libId = '',
+  });
   @override
   State<DeletedMonitorPage> createState() => _DeletedMonitorPageState();
 }
@@ -3336,6 +3360,22 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   DeletedReport report = DeletedReport.empty;
   bool loading = true;
   String? err;
+
+  /// 作用域：空串＝不按单元库过滤。
+  String get _scopeName => widget.unitName.trim().isEmpty
+      ? _basename(widget.unitRel)
+      : widget.unitName.trim();
+
+  static String _basename(String path) {
+    final s = path.replaceAll('\\', '/');
+    final i = s.lastIndexOf('/');
+    return (i >= 0 ? s.substring(i + 1) : s).trim();
+  }
+
+  String get _base => widget.base.isEmpty ? cfg.base : widget.base;
+
+  Map<String, String> get _headers =>
+      widget.headers.isEmpty ? cfg.headers : widget.headers;
 
   /// 作者头像索引（`/api/authors.json`）。删除记录的本地媒体通常已被清理，
   /// 服务端下发的记录里就没有 `th`/`cv`；此时按 `deleted_cover.dart` 的规则
@@ -3388,7 +3428,11 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   List<MapEntry<String, int>> get _topOptions {
     final counts = <String, int>{};
     final order = <String>[];
+    // 只在**当前作用域内的记录**里统计媒体库：从单元库页进来时，
+    // 记录已经只剩该单元库，顶部再出现别的媒体库词条就是坏导航。
+    final scope = _scopeName;
     for (final e in report.items) {
+      if (scope.isNotEmpty && e.libName.trim() != scope) continue;
       final t = _topOf(e);
       if (t.isEmpty) continue;
       if (!counts.containsKey(t)) order.add(t);
@@ -3410,12 +3454,18 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   }
 
   /// 当前筛选下要显示的记录。
-  List<DeletedEntry> get _visibleItems => topFilter.isEmpty
-      ? report.items
-      : [
-          for (final e in report.items)
-            if (_topOf(e) == topFilter) e
-        ];
+  ///
+  /// 两级：① 从单元库页进来时只看该单元库（服务端 `lib` 是单元库目录名）；
+  /// ② 再从顶部媒体库词条里收敛。第二级在单单元库作用域下通常没有选项。
+  List<DeletedEntry> get _visibleItems {
+    final scope = _scopeName;
+    return [
+      for (final e in report.items)
+        if ((scope.isEmpty || e.libName.trim() == scope) &&
+            (topFilter.isEmpty || _topOf(e) == topFilter))
+          e
+    ];
+  }
 
   /// 拉一次作者索引供预览图兜底；失败不影响列表（只是回落到占位图标）。
   Future<void> _loadAuthorIdx() async {
@@ -3437,7 +3487,8 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     setState(() => checking = true);
     try {
       final r = await http
-          .post(cfg.u('/api/deleted/check'), headers: cfg.headers)
+          .post(Uri.parse(joinApiUrl(_base, '/api/deleted/check')),
+              headers: _headers)
           .timeout(const Duration(seconds: 15));
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
@@ -3460,7 +3511,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       loading = true;
       err = null;
     });
-    // 读取链路：带当前库参数的正式地址 → 不带库参数 → 抖音库。
+    // 读取链路：带库参数的正式地址 → 不带库参数 → 该连接上的首个库。
     // 旧记录为空时先确认是「服务端确实没有」还是「请求落到了别的库」，
     // 不再把空列表直接当成「暂无删除记录」。
     final attempts = <Uri>[];
@@ -3468,12 +3519,15 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       if (!attempts.any((e) => e.toString() == u.toString())) attempts.add(u);
     }
 
-    if (cfg.base.isNotEmpty) {
-      addAttempt(cfg.u('/api/deleted.json'));
-      addAttempt(Uri.parse(joinApiUrl(cfg.base, '/api/deleted.json')));
-      if (cfg.lib != 'douyin') {
-        addAttempt(Uri.parse(
-            joinApiUrl(cfg.base, '/api/deleted.json', query: {'lib': 'douyin'})));
+    if (_base.isNotEmpty) {
+      if (widget.libId.isNotEmpty) {
+        addAttempt(Uri.parse(joinApiUrl(_base, '/api/deleted.json',
+            query: {'lib': widget.libId})));
+      }
+      addAttempt(Uri.parse(joinApiUrl(_base, '/api/deleted.json')));
+      if (cfg.lib.isNotEmpty && cfg.lib != widget.libId) {
+        addAttempt(Uri.parse(joinApiUrl(_base, '/api/deleted.json',
+            query: {'lib': cfg.lib})));
       }
     }
     DeletedReport best = DeletedReport.empty;
@@ -3482,7 +3536,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     for (final uri in attempts) {
       try {
         final r = await http
-            .get(uri, headers: cfg.headers)
+            .get(uri, headers: _headers)
             .timeout(const Duration(seconds: 12));
         if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
         dynamic raw;
@@ -3808,9 +3862,17 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final stats = DeletedStats.of(report.items);
+    // 计数与页头摘要都按**当前作用域**算：从单元库页进来时不该显示全库总数，
+    // 否则「共 320 条」下面只列 12 条，看着像丢记录。
+    final scopeItems = _visibleItems;
+    final stats = DeletedStats.of(scopeItems);
     return Scaffold(
-      appBar: AppBar(title: const Text('删除监测'), actions: [
+      appBar: AppBar(
+          // 从单元库进来看得出作用域，不然和总览页长得一样。
+          title: Text(widget.unitRel.isEmpty
+              ? '删除监测'
+              : '删除监测 · ${_scopeName}'),
+          actions: [
         IconButton(
             tooltip: '立即检测（爬虫扫描平台已删除作品）',
             onPressed: checking ? null : _runCheck,
@@ -3841,8 +3903,8 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                            '共 ${report.total} 条'
-                            '${report.items.length == report.total ? '' : '（展示 ${report.items.length}）'}'
+                            '共 ${scopeItems.length} 条'
+                            '${report.items.length == report.total ? '' : '（服务端共 ${report.total}）'}'
                             ' · ${stats.label}'
                             '${report.updatedLabel.isEmpty ? '' : ' · 日志更新 ${report.updatedLabel}'}'
                             '${report.lastDiscoveryLabel.isEmpty ? '' : ' · 最近同步发现 ${report.lastDiscoveryLabel}'}'
@@ -3862,7 +3924,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                       children: [
                         Center(
                           child: FilterChip(
-                              label: Text('全部媒体库 ${report.items.length}',
+                              label: Text('全部媒体库 ${scopeItems.length}',
                                   style: const TextStyle(fontSize: 12)),
                               selected: topFilter.isEmpty,
                               showCheckmark: false,
@@ -3884,7 +3946,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                           ),
                       ],
                     ),
-                  if (report.items.isEmpty)
+                  if (scopeItems.isEmpty)
                     Expanded(
                       child: Center(
                         child: Padding(
@@ -3899,14 +3961,18 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                                 color: Colors.grey),
                             const SizedBox(height: 10),
                             Text(
-                                report.total > 0
-                                    ? '服务端记录总数 ${report.total}，但未解析到条目'
-                                    : '暂无删除记录',
+                                // 单单元库作用域下「服务端记录总数 > 0」是常态
+                                // （别的库有记录），不能据此说「未解析到条目」。
+                                widget.unitRel.isNotEmpty
+                                    ? '该单元库暂无删除记录'
+                                    : (report.total > 0
+                                        ? '服务端记录总数 ${report.total}，但未解析到条目'
+                                        : '暂无删除记录'),
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(color: Colors.grey)),
                             const SizedBox(height: 6),
                             Text(
-                                report.total > 0
+                                (widget.unitRel.isEmpty && report.total > 0)
                                     ? '已自动回退读取链路仍为空，请点「刷新」重试。'
                                     : '平台删除/取消收藏的作品会按同步批次出现在这里。',
                                 textAlign: TextAlign.center,
@@ -5894,11 +5960,19 @@ class _LibraryPageState extends State<LibraryPage> {
       }
     }
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => UnitCrawlerPage(
+      builder: (c) => UnitCrawlerPage(
         unit: u,
         base: base,
         headers: headers,
         libId: u.basics.isNotEmpty ? u.basics.first.id : cfg.lib,
+        onOpenDeletedMonitor: () => Navigator.of(c).push(MaterialPageRoute(
+            builder: (_) => DeletedMonitorPage(
+                  unitRel: u.rel,
+                  unitName: u.name,
+                  base: base,
+                  headers: headers,
+                  libId: u.basics.isNotEmpty ? u.basics.first.id : cfg.lib,
+                ))),
       ),
     ));
   }
@@ -5969,7 +6043,7 @@ class _LibraryPageState extends State<LibraryPage> {
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('已将「${l['name']}」设为当前媒体库')));
+          .showSnackBar(SnackBar(content: Text('已将「${l['name']}」设为默认媒体库')));
       await load();
     } catch (e) {
       if (mounted) {
@@ -6210,14 +6284,17 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Widget _libTile(Map<String, dynamic> l) {
     final id = '${l['id']}';
-    final isCur = id == cfg.lib;
     final isDef = id == defaultId;
     final cr = mapOrNull(l['crawler']) ?? const <String, dynamic>{};
     final scripts = listOf(l['crawlerScripts']);
     return ListTile(
+      // owner 2026-11-27：「各个地方都要适应多媒体库管理」。
+      // 这个圆点原本标的是 `cfg.lib`（单库时代的「当前库」），但主页现在
+      // 多库并列、没有任何库是「当前」的；继续用它会让用户以为别的库
+      // 没在生效。改为标服务端注册表的**默认库**（与「设为默认媒体库」同一项）。
       leading: Icon(
-          isCur ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-          color: isCur ? Colors.amber : Colors.grey),
+          isDef ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          color: isDef ? Colors.amber : Colors.grey),
       title: Text(
           '${displayLibraryName('$id', '${l['name']}')}  ${isDef ? '★' : ''}'),
       subtitle: Column(
@@ -6259,14 +6336,16 @@ class _LibraryPageState extends State<LibraryPage> {
           if (v == 'delete') _delete(l);
         },
         itemBuilder: (_) => [
-          const PopupMenuItem(value: 'default', child: Text('设为当前媒体库')),
+          const PopupMenuItem(value: 'default', child: Text('设为默认媒体库')),
           const PopupMenuItem(value: 'crawler', child: Text('爬虫配置')),
           const PopupMenuItem(value: 'maint', child: Text('维护检查')),
           const PopupMenuItem(value: 'delete', child: Text('删除库（保留文件）')),
         ],
       ),
       onTap: () {
-        changed = changed || !isCur;
+        // 「点了另一个库 = 作用域变了」只用于决定返回时是否通知上级刷新，
+        // 不代表界面上还有「当前库」这个概念（圆点已改标默认库）。
+        changed = changed || id != cfg.lib;
         _switchTo(l);
       },
     );
@@ -6559,11 +6638,20 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                   : cfg.baseFor(libId);
               final headers = cfg.headersFor(libId);
               await Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => UnitCrawlerPage(
+                  builder: (c) => UnitCrawlerPage(
                         unit: u,
                         base: base,
                         headers: headers,
                         libId: libId,
+                        onOpenDeletedMonitor: () =>
+                            Navigator.of(c).push(MaterialPageRoute(
+                                builder: (_) => DeletedMonitorPage(
+                                      unitRel: u.rel,
+                                      unitName: u.name,
+                                      base: base,
+                                      headers: headers,
+                                      libId: libId,
+                                    ))),
                       )));
               load();
             }
@@ -6592,42 +6680,6 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                         style:
                             const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
-                  // owner 2026-11-27：「删除监控页塞到对应单元库的爬虫配置页面
-                  // 下去，爬虫没有这个功能就显示不支持」。
-                  //
-                  // 删除监测依赖爬虫扫描平台侧，所以入口跟爬虫设置放一起；
-                  // 一个脚本都没配时不可用，并直接说明原因。
-                  Builder(builder: (ctx) {
-                    final anyScript = withScripts > 0;
-                    return ListTile(
-                      key: const ValueKey('deleted-monitor-entry'),
-                      enabled: anyScript,
-                      leading: Icon(
-                          anyScript
-                              ? Icons.delete_outline
-                              : Icons.delete_forever_outlined,
-                          color: anyScript ? null : Colors.grey),
-                      title: const Text('删除监测'),
-                      subtitle: Text(
-                        anyScript
-                            ? '已删除 / 取消收藏的作品记录 · 只读日志，不动媒体'
-                            : '尚未配置任何爬虫脚本，删除监测不可用',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: anyScript ? Colors.grey : Colors.orange),
-                      ),
-                      trailing: Icon(Icons.chevron_right,
-                          color: anyScript
-                              ? null
-                              : Colors.grey.withValues(alpha: 0.4)),
-                      onTap: anyScript
-                          ? () => Navigator.of(ctx).push(MaterialPageRoute(
-                              builder: (_) => const DeletedMonitorPage()))
-                          : null,
-                    );
-                  }),
                   // owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库
                   // 的设置就归到对应的下面去」。
                   //
@@ -7433,6 +7485,14 @@ class _RankPageState extends State<RankPage> {
     final visible = _visibleRows;
     return Scaffold(
       appBar: AppBar(title: const Text('排行榜'), actions: [
+        // owner 2026-11-27：「多库排行放在作者总览页不该是排行榜页码」。
+        // 各库排行是排行榜的另一个维度（库 vs 作者），入口应在排行榜页内，
+        // 作者总览页只留作者相关动作。
+        IconButton(
+            tooltip: '各库排行',
+            onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LibraryRankPage())),
+            icon: const Icon(Icons.stacked_bar_chart)),
         IconButton(
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
         const HomeAction(),
@@ -7557,8 +7617,8 @@ class _RankPageState extends State<RankPage> {
                               works: intOf(e['works']),
                               plays: intOf(e['plays']),
                               drops: intOf(e['drops']),
-                              scoreText:
-                                  metric == 'drop' ? '💧 $score' : '$score',
+                              metric: metric,
+                              score: score,
                               onTap: name.isEmpty ? null : () => _open(name),
                             );
                           },
@@ -7709,9 +7769,6 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                           itemBuilder: (_, i) {
                             final r = rows[i];
                             final score = metric == 'drop' ? r.drops : r.plays;
-                            final sub = metric == 'drop'
-                                ? '播放 ${r.plays} · ${r.drops} 水滴'
-                                : '${r.plays} 播放 · ${r.drops} 水滴';
                             return ListTile(
                               contentPadding:
                                   const EdgeInsets.symmetric(horizontal: 4),
@@ -7748,18 +7805,21 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                                             color: Colors.lightBlueAccent)),
                                   ),
                               ]),
-                              subtitle: Text(sub,
+                              // 类型在前、数字在后；两项顺序不随指标变
+                              // （此前播放量榜是「N 播放」、水滴榜是「播放 N」，
+                              // 同一个数字切一次指标就换位置）。
+                              subtitle: Text(
+                                  rankDetailLine(
+                                      plays: r.plays, drops: r.drops),
                                   style: TextStyle(
                                       fontSize: 10,
                                       color: Theme.of(context)
                                           .colorScheme
                                           .onSurfaceVariant)),
-                              trailing: Text(
-                                  metric == 'drop' ? '💧 $score' : '$score',
-                                  style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.lightBlueAccent)),
+                              trailing: RankScoreCell(
+                                  label: rankMetricLabel(metric),
+                                  value: score,
+                                  color: Colors.lightBlueAccent),
                               onTap: () => Navigator.of(context).push(
                                   MaterialPageRoute(
                                       builder: (_) =>
@@ -8461,11 +8521,6 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('作者'), actions: [
         const HomeAction(),
-        IconButton(
-            tooltip: '各库排行',
-            onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const LibraryRankPage())),
-            icon: const Icon(Icons.stacked_bar_chart)),
         IconButton(
             tooltip: syncing ? '同步中…' : (hasScripts ? '立即同步作者' : '当前库未配置爬虫脚本'),
             onPressed: (syncing || !hasScripts) ? null : _syncAuthors,
