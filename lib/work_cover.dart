@@ -22,6 +22,34 @@ import 'media_path.dart';
 /// 留下了「多作品同封面」的错误结果；URL 带 `v=2` 可以让旧缓存整体失效。
 const String kWorkThumbVersion = '2';
 
+/// 一个库的「媒体地址 / 接口地址」两个解析入口（页面注入或全局 `cfg`）。
+typedef MediaUrlOf = String Function(String path, {String? lib});
+typedef RawUrlOf = Uri Function(String path, {String? lib});
+
+/// 某个库的作品封面地址拼装（**唯一入口**）。
+///
+/// `WorkCoverUrls.standard(mediaUrl: ..., rawUrl: ...)` 这段「把两个闭包
+/// 各自绑到同一个 lib 上」的写法，此前在四个地方逐字重复：
+///
+/// ```
+/// basic_lib_page._coverOf           widget.mediaUrlOf / widget.urlOf
+/// main._posterCoverUrl              cfg.mediaUrl / cfg.u
+/// main.WorkGrid._prefetchFirstScreen cfg.mediaUrl / cfg.u
+/// main.WorkGrid 卡片构建            cfg.mediaUrl / cfg.u
+/// ```
+///
+/// 四份里三份长得完全一样，第四份只是注入源不同。少写一个 `lib:` 就会让
+/// 跨库列表里的封面跑到当前库去取（→ 401 白图），而它们「各自都算对了」。
+WorkCoverUrls standardCoverUrls({
+  required String lib,
+  required MediaUrlOf mediaUrlOf,
+  required RawUrlOf urlOf,
+}) =>
+    WorkCoverUrls.standard(
+      mediaUrl: (path) => mediaUrlOf(path, lib: lib),
+      rawUrl: (path) => urlOf(path, lib: lib).toString(),
+    );
+
 /// 把路径解析成可访问地址的两个回调（便于单测，不依赖全局配置）。
 class WorkCoverUrls {
   /// 相对路径 → 绝对地址（媒体已带鉴权/服务器前缀）。

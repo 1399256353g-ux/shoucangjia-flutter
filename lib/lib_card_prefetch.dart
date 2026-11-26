@@ -32,6 +32,34 @@ import 'thumb_prefetch.dart';
 /// 一张待预热的库卡片：封面原始地址 + 该卡片的鉴权头。
 typedef LibCoverItem = ({String cover, Map<String, String> headers});
 
+/// 把一批库卡片解析成预热请求（纯逻辑：不排队、不联网，便于单测）。
+///
+/// 配额 [limit] 数的是**真正入队的张数**，与 [prefetchThumbItems] /
+/// `prefetchWorkCovers` 同一个语义：
+///  1. 先排掉空封面（未生成封面的新库）；
+///  2. 再按地址去重（同一张自定义封面 / 同名库出现在两处）；
+///  3. 只有真正要拉的那张才占用一个配额。
+///
+/// 此前这里是「每看一张卡片就 seen++」再与 n 比：首屏若有两张卡没封面，
+/// 预热就少拉两张**可见**封面，末尾那两张仍然逐张请求、先露底色。
+List<ThumbPrefetchItem> libCoverPrefetchRequests(
+  Iterable<LibCoverItem> items, {
+  required int limit,
+}) {
+  if (limit <= 0) return const <ThumbPrefetchItem>[];
+  final out = <ThumbPrefetchItem>[];
+  final enqueued = <String>{};
+  for (final it in items) {
+    if (out.length >= limit) break;
+    final cover = it.cover.trim();
+    if (cover.isEmpty) continue;
+    final url = withImageWidth(cover, kCardImageWidth);
+    if (!enqueued.add(url)) continue;
+    out.add((url: url, headers: it.headers));
+  }
+  return out;
+}
+
 /// 预热首屏可见的库卡片封面，返回实际排队的张数。
 ///
 /// - [viewport]：页面可用尺寸（`MediaQuery.sizeOf`）；
@@ -58,24 +86,10 @@ int prefetchLibCovers({
     screens: screens,
   );
   if (n <= 0) return 0;
-  final urls = <String>[];
-  final headers = <String, Map<String, String>>{};
-  for (final it in items) {
-    // 配额数的是**真正入队的张数**，与 `prefetchThumbItems` / `prefetchWorkCovers`
-    // 同一个语义。此前这里另有一个 `seen` 计数器，把「没有封面的卡片」也
-    // 记进 n：主页首屏若有两张卡没有封面（新库、封面还没生成），预热就少拉
-    // 两张**可见**封面，末尾那两张仍然逐张请求、先露底色。同一个参数名
-    // `limit` 在两处有两种含义，是这一批要收掉的那类分叉。
-    if (urls.length >= n) break;
-    final cover = it.cover.trim();
-    if (cover.isEmpty) continue;
-    final url = withImageWidth(cover, kCardImageWidth);
-    // 同一个封面地址出现在两张卡片上（同名库、同一张自定义封面）时只拉一次。
-    if (headers.containsKey(url)) continue;
-    urls.add(url);
-    headers[url] = it.headers;
-  }
-  if (urls.isEmpty) return 0;
+  final requests = libCoverPrefetchRequests(items, limit: n);
+  if (requests.isEmpty) return 0;
+  final urls = [for (final r in requests) r.url];
+  final headers = {for (final r in requests) r.url: r.headers};
   ThumbPrefetch.instance.run(
     urls,
     limit: urls.length,

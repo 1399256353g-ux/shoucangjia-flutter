@@ -21,7 +21,7 @@
 /// [LibGridSpec.prefetchCount]。数字只在这一张表里出现一次。
 library;
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 
 import 'decode_plan.dart';
 import 'thumb_prefetch.dart';
@@ -120,6 +120,28 @@ class LibGridSpec {
         maxItems: maxItems ?? maxPrefetch,
       );
 }
+
+/// 作品网格的**页面内边距**（唯一出口，页面 `GridView` 与首屏预热共用）。
+///
+/// `GridView` 不传 `padding` 时由 `ScrollView` 自己补上 `MediaQuery` 的
+/// 竖向安全区（顶部状态栏 / 底部手势条）。预热侧此前传 `EdgeInsets.zero`
+/// ——它算「首屏几行」时用的可用高度比真实排布多出安全区那一截，于是
+/// 末行预热到屏幕外、真正可见的那一行仍逐张请求。
+///
+/// 两处必须读同一个值：这个函数就是那个值。`padding` 显式写给网格之后，
+/// 网格不再走 `ScrollView` 的默认分支，安全区语义也由这里一次说清。
+EdgeInsets workGridPadding(BuildContext context) {
+  final p = MediaQuery.maybePaddingOf(context);
+  if (p == null) return EdgeInsets.zero;
+  return EdgeInsets.only(top: p.top, bottom: p.bottom);
+}
+
+/// 基础库页作品网格的页面内边距（页面 `GridView` 与首屏预热共用）。
+///
+/// 此前 `basic_lib_page` 把 `const EdgeInsets.all(10)` 写了两遍（网格一处、
+/// 预热一处），而注释里又用文字写了一遍「页面 padding 是 all(10)」：改一处
+/// 另一处不动，预热算出的行数就与真实排布不一样。
+const EdgeInsets kBasicWorkGridPadding = EdgeInsets.all(10);
 
 /// 单元库卡片（`UnitLibraryCard`）：`maxCrossAxisExtent: 260` / 间距 10 / 1.02。
 const LibGridSpec kUnitLibGrid = LibGridSpec(

@@ -370,16 +370,6 @@ String libForMediaPath(String path, {String? fallbackLib}) {
   return fallbackLib?.trim() ?? '';
 }
 
-/// 最后一级兜底：第一张作品的封面（只收图片）。
-///
-/// 只在「自定义 / 爬虫 / 播放量最高」都拿不到可用图片时才被用到；
-/// 视频路径（mp4/mov…）当封面只会一直渲染失败，因此直接判为无图。
-CoverHit resolveFirstWorkCover(String firstThumb) {
-  final fb = firstThumb.trim();
-  if (!isCoverImagePath(fb)) return (path: '', source: CoverSource.first);
-  return (path: fb, source: CoverSource.first);
-}
-
 /// 服务端下发的「手动封面」指针（`cover.u`）→ 可直接请求的绝对地址。
 ///
 /// 这段判定在三个地方各写了一遍（`main._topNodeCoverUrl`、

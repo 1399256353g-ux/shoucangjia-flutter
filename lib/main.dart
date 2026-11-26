@@ -114,7 +114,6 @@ import 'text_fit.dart';
 import 'esc_back.dart';
 import 'top_node.dart';
 import 'avatar_prefetch.dart';
-import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 import 'ui_auto_hide.dart';
 import 'ui_fade.dart';
@@ -9408,8 +9407,6 @@ class _PlayerPageState extends State<PlayerPage>
     if (!mounted) return;
     if (_coverPrefetchFor == cur) return;
     _coverPrefetchFor = cur;
-    final previewW =
-        workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context));
     for (var d = -3; d <= 3; d++) {
       final i = cur + d;
       if (i < 0 || i >= widget.works.length) continue;
@@ -9418,12 +9415,13 @@ class _PlayerPageState extends State<PlayerPage>
       if (d == 0) {
         // 当前条只要那张「网格尺寸」底图：它就是播放页海报的 placeholder，
         // 命中后首帧零等待；从作者页/深链直接进播放页时也能提前缓存。
+        // 与 `_posterPreview` 同一个入口（`gridImageProvider`）。
         try {
           precacheImage(
-            thumbImageProvider(
-              withImageWidth(img.cover, kWorkImageWidth),
-              decodeWidth: previewW,
+            gridImageProvider(
+              cover: img.cover,
               headers: img.headers,
+              devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
               cacheManager: DiziCache.manager,
             ),
             context,
@@ -12198,9 +12196,10 @@ class _PlayerPageState extends State<PlayerPage>
     return workCoverUrl(
       it,
       lib: l,
-      urls: WorkCoverUrls.standard(
-        mediaUrl: (path) => cfg.mediaUrl(path, lib: l),
-        rawUrl: (path) => cfg.u(path, lib: l).toString(),
+      urls: standardCoverUrls(
+        lib: l,
+        mediaUrlOf: cfg.mediaUrl,
+        urlOf: cfg.u,
       ),
     );
   }
@@ -12223,11 +12222,11 @@ class _PlayerPageState extends State<PlayerPage>
     final lib = _libFor(it);
     final align = fit == BoxFit.cover ? Alignment.topCenter : Alignment.center;
     return Image(
-      image: thumbImageProvider(
-        withImageWidth(cover, kWorkImageWidth),
-        decodeWidth:
-            workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
+      // 与 `WorkCard`、与 `_prefetchNeighborCovers` 同一个入口，缓存键才一致。
+      image: gridImageProvider(
+        cover: cover,
         headers: cfg.headersFor(lib),
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
         cacheManager: DiziCache.manager,
       ),
       fit: fit,
@@ -12260,14 +12259,14 @@ class _PlayerPageState extends State<PlayerPage>
     if (img.url != withImageWidth(pageUrl, kPlayerImageWidth)) {
       return const SizedBox.shrink();
     }
-    // 邻页已建 → 用邻页那张（帧尺寸、已解码）；否则退回作品卡的 440px 版本。
+    // 邻页已建 → 用邻页那张（帧尺寸、已解码）；否则退回作品卡的 440px 版本
+    // （`gridImageProvider`，与 `_posterPreview` / `_prefetchNeighborCovers` 同源）。
     final ImageProvider provider = _neighborPageBuilt(cur)
         ? img.provider(cacheManager: DiziCache.manager)
-        : thumbImageProvider(
-            withImageWidth(img.cover, kWorkImageWidth),
-            decodeWidth:
-                workCardDecodeWidth(MediaQuery.devicePixelRatioOf(context)),
+        : gridImageProvider(
+            cover: img.cover,
             headers: img.headers,
+            devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
             cacheManager: DiziCache.manager,
           );
     return Image(
@@ -17800,10 +17799,13 @@ class _WorkGridState extends State<WorkGrid> {
     // 各自的库取鉴权头」——收藏夹/搜索/推荐可能跨库，headers 必须随图走，
     // 与 `WorkCard.headers` 一致，缓存键才对得上。
     prefetchWorkCovers(
-      // 几何与 `_buildGrid` 的 delegate 同源（`kWorkGrid`）：180/2/3:4、无内边距。
+      // 几何与 `_buildGrid` 的 delegate / padding 同源（`kWorkGrid` +
+      // `workGridPadding`）：此前这里写 `EdgeInsets.zero`，而网格实际拿到
+      // 的是 `ScrollView` 自补安全区后的那一份——首屏行数多算，末行预热
+      // 的是屏幕外那张封面。
       viewport: mq.size,
       grid: kWorkGrid,
-      padding: EdgeInsets.zero,
+      padding: workGridPadding(context),
       devicePixelRatio: mq.devicePixelRatio,
       items: [
         for (final w in works)
@@ -17811,9 +17813,10 @@ class _WorkGridState extends State<WorkGrid> {
             cover: workCoverUrl(
               w,
               lib: _libFor(w),
-              urls: WorkCoverUrls.standard(
-                mediaUrl: (path) => cfg.mediaUrl(path, lib: _libFor(w)),
-                rawUrl: (path) => cfg.u(path, lib: _libFor(w)).toString(),
+              urls: standardCoverUrls(
+                lib: _libFor(w),
+                mediaUrlOf: cfg.mediaUrl,
+                urlOf: cfg.u,
               ),
             ),
             headers: cfg.headersFor(_libFor(w)),
@@ -17863,6 +17866,8 @@ class _WorkGridState extends State<WorkGrid> {
     final shown = _shown > total ? total : _shown;
     return GridView.builder(
       controller: _scroll,
+      // 与 `_prefetchFirstScreen` 的 `padding:` 同一个出口。
+      padding: workGridPadding(context),
       gridDelegate: kWorkGrid.delegate,
       itemCount: shown,
       itemBuilder: (_, i) {
@@ -17872,9 +17877,10 @@ class _WorkGridState extends State<WorkGrid> {
         final cover = workCoverUrl(
           w,
           lib: lib,
-          urls: WorkCoverUrls.standard(
-            mediaUrl: (path) => cfg.mediaUrl(path, lib: lib),
-            rawUrl: (path) => cfg.u(path, lib: lib).toString(),
+          urls: standardCoverUrls(
+            lib: lib,
+            mediaUrlOf: cfg.mediaUrl,
+            urlOf: cfg.u,
           ),
         );
         // G13：视频右下角显示时长，图文显示图片张数

@@ -30,8 +30,37 @@ library;
 import 'package:flutter/painting.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
-import 'media_resize.dart' show kPlayerImageWidth, withImageWidth;
+import 'media_resize.dart' show kPlayerImageWidth, kWorkImageWidth, withImageWidth;
+import 'decode_plan.dart' show workCardDecodeWidth;
 import 'thumb_image.dart';
+
+/// 作品卡尺寸的缩略图 [ImageProvider]（**唯一入口**）。
+///
+/// 与 [PlayerImage] 同一张图，但按**作品卡**的尺寸取（`kWorkImageWidth` +
+/// `workCardDecodeWidth`）——播放页的「零等待底图」用它。
+///
+/// 为什么需要第二个入口：播放页有两档大图，一档是「海报尺寸」
+/// （[PlayerImage]，`w=kPlayerImageWidth` + 屏幕宽 × DPR），一档是「作品卡尺寸」
+/// （网格里已经解码过的那张，命中就零等待）。它们必须是两个不同的地址，
+/// 否则底图就会顶掉高清图（同一个缓存键 → 海报永远停在 440px）。
+///
+/// 但**如何从 cover 得到作品卡 provider** 此前在 `_prefetchNeighborCovers`、
+/// `_posterPreview`、`_picPreview` 三处各展开一遍（各写一遍
+/// `withImageWidth(cover, kWorkImageWidth)` + `workCardDecodeWidth(dpr)` +
+/// 各自的 headers 来源），任何一处写错就是「预载一个键、渲染另一个键」。
+/// 现在只有这一个函数。
+ImageProvider gridImageProvider({
+  required String cover,
+  required Map<String, String> headers,
+  required double devicePixelRatio,
+  CacheManager? cacheManager,
+}) =>
+    thumbImageProvider(
+      cover.isEmpty ? '' : withImageWidth(cover, kWorkImageWidth),
+      decodeWidth: workCardDecodeWidth(devicePixelRatio),
+      headers: headers,
+      cacheManager: cacheManager,
+    );
 
 /// 播放页一张大图的**请求参数**：地址（已带 `w=`）、鉴权头、解码宽度。
 ///

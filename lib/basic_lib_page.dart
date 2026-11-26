@@ -745,7 +745,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     return ScrollDecodeScope(
       child: GridView.builder(
       controller: _worksScroll,
-      padding: const EdgeInsets.all(10),
+      padding: kBasicWorkGridPadding,
       gridDelegate: kBasicWorkGrid.delegate,
       itemCount: filtered.length + (loadingMore ? 1 : 0),
       itemBuilder: (c, i) {
@@ -775,9 +775,10 @@ class _BasicLibPageState extends State<BasicLibPage>
   String _coverOf(dynamic w) => workCoverUrl(
         w,
         lib: widget.basic.id,
-        urls: WorkCoverUrls.standard(
-          mediaUrl: (path) => widget.mediaUrlOf(path, lib: widget.basic.id),
-          rawUrl: (path) => widget.urlOf(path, lib: widget.basic.id).toString(),
+        urls: standardCoverUrls(
+          lib: widget.basic.id,
+          mediaUrlOf: widget.mediaUrlOf,
+          urlOf: widget.urlOf,
         ),
       );
 
@@ -791,12 +792,12 @@ class _BasicLibPageState extends State<BasicLibPage>
     final headers = widget.headersOf(widget.basic.id);
     // 0.9.288：整条链（张数 → 封面 → w= → 解码宽度 → 入队）只有
     // `work_card_prefetch.prefetchWorkCovers` 一处。本页只负责「取哪些作品」
-    // 与「带哪个库的鉴权头」。几何与 `_worksGrid` 的 delegate 同源
-    // （`kBasicWorkGrid`，页面 padding 是 `EdgeInsets.all(10)`）。
+    // 与「带哪个库的鉴权头」。几何与 `_worksGrid` 的 delegate / padding 同源
+    // （`kBasicWorkGrid` + `kBasicWorkGridPadding`）。
     prefetchWorkCovers(
       viewport: mq.size,
       grid: kBasicWorkGrid,
-      padding: const EdgeInsets.all(10),
+      padding: kBasicWorkGridPadding,
       devicePixelRatio: mq.devicePixelRatio,
       maxItems: shown.length,
       items: [
