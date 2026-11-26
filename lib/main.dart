@@ -38,9 +38,9 @@ import 'crash_guard.dart';
 import 'crash_reports_page.dart';
 import 'decode_plan.dart';
 import 'card_metrics.dart';
+import 'author_index.dart' show kAuthorGridPagePadding;
 import 'grid_spec.dart';
 import 'work_card_prefetch.dart';
-import 'layout_metric.dart';
 import 'work_cover.dart';
 import 'media_path.dart';
 import 'media_resize.dart';
@@ -3337,20 +3337,23 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     // 删除记录可能来自其他单元库；`/media/<lib>/...` 里的 lib 必须原样保留，
     // 不能按当前库重新前缀，否则会 404 成空白缩略图。
     final lib = libForMediaPath(path, fallbackLib: cfg.lib);
+    // 0.9.292：边长与解码宽度同源（原先 56 写三遍 + `memCacheWidth: 160` 内联）。
+    final ql = squareThumbDecodeWidth(
+        kDeletedThumbSize, MediaQuery.devicePixelRatioOf(context));
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: CachedNetworkImage(
         cacheManager: DiziCache.manager,
         imageUrl: cfg.mediaUrl(path, lib: lib),
         httpHeaders: cfg.headersFor(lib),
-        width: 56,
-        height: 56,
+        width: kDeletedThumbSize,
+        height: kDeletedThumbSize,
         fit: BoxFit.cover,
-        memCacheWidth: 160,
+        memCacheWidth: ql,
         fadeInDuration: Duration.zero,
         errorWidget: (_, __, ___) => Container(
-          width: 56,
-          height: 56,
+          width: kDeletedThumbSize,
+          height: kDeletedThumbSize,
           color: Colors.black26,
           child: const Icon(Icons.broken_image_outlined, size: 20),
         ),
@@ -7998,7 +8001,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     // 自己写一遍 150/10/10/170，页面 delegate 再写一遍，改一处就预热到屏幕外。
     final n = kAuthorGrid.prefetchCount(
       mq.size,
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+      // 0.9.292：与网格实际 `padding` 同一常量（`kAuthorGridPagePadding`）。
+      padding: kAuthorGridPagePadding,
     );
     if (n <= 0) return;
     // 0.9.289：整条链（空路径排掉 → 地址 → w= → 解码宽度 → 鉴权头）只有
@@ -8185,7 +8189,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                             // 卡片固定高度，GridView 自身虚拟化。
                             return GridView.builder(
                               controller: _scroll,
-                              padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                              padding: kAuthorGridPagePadding,
                               gridDelegate: kAuthorGrid.delegate,
                               itemCount: _shownLen,
                               itemBuilder: (_, i) => _authorCell(_ordered[i]),
@@ -8272,11 +8276,17 @@ class _NeighborPageState extends State<_NeighborPage> {
   void _resolveAspect() {
     if (widget.imageUrl.isEmpty) return;
     try {
-      final provider = CachedNetworkImageProvider(
+      // 0.9.292：探比例必须与渲染用**同一个 provider 形状**。
+      // 旧写法是 `CachedNetworkImageProvider(url, maxWidth: w)`，而渲染走的是
+      // `CachedNetworkImage(memCacheWidth:)` —— octo_image 把它包成
+      // `ResizeImage(width: w, CachedNetworkImageProvider(url))`。两者的缓存键
+      // 不同（前者把 maxWidth 写进 provider 自己的 key），于是这一页只为量个
+      // 比例就多下一次、多解码一次。现在两边都是 `thumbImageProvider`。
+      final provider = thumbImageProvider(
         widget.imageUrl,
+        decodeWidth: widget.memCacheWidth,
         headers: widget.headers,
         cacheManager: DiziCache.manager,
-        maxWidth: widget.memCacheWidth,
       );
       final listener = ImageStreamListener((info, _) {
         final img = info.image;
@@ -9292,11 +9302,15 @@ class _PlayerPageState extends State<PlayerPage>
       }
       try {
         precacheImage(
-          CachedNetworkImageProvider(
+          // 0.9.292：预载的键必须与 `_NeighborPage` 的渲染键相同。此前这里用
+          // `CachedNetworkImageProvider(maxWidth:)`，而邻页渲染是
+          // `CachedNetworkImage(memCacheWidth:)`（= `ResizeImage` 包一层），
+          // 缓存键不同——预载拉回来的图在真正滑入时仍然“没命中”，再下一次。
+          thumbImageProvider(
             withImageWidth(cover, kPlayerImageWidth),
+            decodeWidth: memW,
             headers: cfg.headersFor(lib),
             cacheManager: DiziCache.manager,
-            maxWidth: memW,
           ),
           context,
           onError: (_, __) {},
@@ -12037,13 +12051,13 @@ class _PlayerPageState extends State<PlayerPage>
   // Windows 上的 libmpv 重建输出并崩溃；尺寸过小时用纯黑占位。
   // 0.9.25：播放页海报按屏幕宽度解码（原图常见 2400×3600，整张进内存
   // 约 30MB，滑动时会明显卡顿甚至闪退）。
-  int _posterDecodeWidth(BuildContext c) {
-    final size = MediaQuery.sizeOf(c);
-    final dpr = MediaQuery.devicePixelRatioOf(c);
-    // `NaN.round()` 抛 `Unsupported operation`——窗口最小化/零约束的中间态
-    // 里 MediaQuery 可以是 NaN，那正好是这段注释要防的那个场景。
-    return roundDim(size.width * dpr, fallback: 360).clamp(360, 2160);
-  }
+  // 0.9.292：公式只有 `decode_plan.screenDecodeWidth` 一处（与图文原图
+  // `picView` 同源）——此前这里 `fallback: 360 / clamp(360,2160)`，那里
+  // `fallback: 1080 / 无上限`，同一张图在两个页面两个缓存键。
+  int _posterDecodeWidth(BuildContext c) => screenDecodeWidth(
+        viewportWidth: MediaQuery.sizeOf(c).width,
+        devicePixelRatio: MediaQuery.devicePixelRatioOf(c),
+      );
 
   /// 播放页封面地址：与网格卡片**同一个解析入口**。
   ///
@@ -12549,10 +12563,11 @@ class _PlayerPageState extends State<PlayerPage>
     final url = cfg.mediaUrl(path, lib: lib);
     final it = _workAt(cur);
     // 原图可能几千像素宽，按屏幕宽度解码，避免大图整张进内存导致卡顿/闪退。
-    final screenW = MediaQuery.sizeOf(context).width;
-    final decodeW = roundDim(
-      screenW * MediaQuery.devicePixelRatioOf(context),
-      fallback: 1080,
+    // 0.9.292：与视频海报同一个公式（`screenDecodeWidth`）——此前这里自己写
+    // `fallback: 1080` 且没有上限，宽屏/NaN 时会与海报分叉成两个缓存键。
+    final decodeW = screenDecodeWidth(
+      viewportWidth: MediaQuery.sizeOf(context).width,
+      devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
     );
     // G12：图片加载失败（弱网/文件损坏）给出重试，而不是空白
     Widget retryBox() => _MediaRetryBox(
@@ -16319,7 +16334,7 @@ class _AuthorPageState extends State<AuthorPage> {
                     fit: BoxFit.cover,
                     fadeInDuration: Duration.zero,
                     memCacheWidth: avatarDecodeWidth(
-                        displaySize: 96,
+                        displaySize: kAvatarCandidateSize,
                         devicePixelRatio:
                             MediaQuery.devicePixelRatioOf(context)),
                     errorWidget: (_, __, ___) => const ColoredBox(

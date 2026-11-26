@@ -58,6 +58,36 @@ int workCardDecodeWidth(double devicePixelRatio) => decodeWidthForDisplay(
       maxWidth: kWorkCardMaxDecodeWidth,
     );
 
+/// 「按屏幕宽度解码」的唯一公式（播放页海报 / 图文原图 / 邻页预载）。
+///
+/// 0.9.292：同一件事此前在本文件之外写了两遍——
+///
+/// ```
+/// main._posterDecodeWidth   roundDim(size.width * dpr, fallback: 360)
+///                           .clamp(360, 2160)
+/// main.picView              roundDim(size.width * dpr, fallback: 1080)   ← 无上限
+/// ```
+///
+/// 两者都是「一张原图按屏幕宽度解码」，只是兜底值和上限各写了一遍。
+/// 后果是可测量的：窗口宽度 × dpr > 2160 时，同一张图在播放页海报与图文页
+/// 得到两个不同的解码宽度；窗口尺寸取到 NaN（最小化/零约束）时一个兜到 360、
+/// 一个兜到 1080，缓存里又各存一份。
+///
+/// 上限 2160 是「4K 宽屏也不超过一张 2160px 宽的位图」——原图常见 2400×3600，
+/// 整张进内存约 30MB，滑动会卡顿甚至闪退（0.9.25 真机结论）。
+int screenDecodeWidth({
+  required double viewportWidth,
+  required double devicePixelRatio,
+  int minWidth = 360,
+  int maxWidth = 2160,
+}) {
+  final dpr =
+      (devicePixelRatio.isFinite && devicePixelRatio > 0) ? devicePixelRatio : 1.0;
+  final px = roundDim(viewportWidth * dpr, fallback: minWidth);
+  // `clamp` 对 NaN 返回 NaN 的取整会抛异常，所以先兜到 minWidth 再夹。
+  return px < minWidth ? minWidth : (px > maxWidth ? maxWidth : px);
+}
+
 /// 库卡片封面的解码宽度：按卡片**真实显示宽度**算（0.9.286）。
 ///
 /// 卡片（`_UnitCoverFill.memCacheWidth`）与首屏预热（`lib_card_prefetch`）
@@ -71,6 +101,19 @@ int libCardDecodeWidthOf(double displayWidth, double devicePixelRatio) =>
       displayWidth,
       devicePixelRatio,
       maxWidth: ceilDim(displayWidth * 3, fallback: kLibCardMaxDecodeWidth),
+    );
+
+/// 小方图（列表里的 56dp 缩略图这类）解码宽度：显示边长 × dpr，上限 3 倍。
+///
+/// 0.9.292：删除记录列表的缩略图以前把尺寸 56 写三遍、解码宽度内联成
+/// `memCacheWidth: 160`——160 既不是 56 × 2 也不是 56 × 3，而是在 2x 屏上
+/// 偏大、3x 屏上偏小的“中间数”。这类图没有卡片/头像语义，也不该借用
+/// `avatarDecodeWidth`（那个上限是 384，与边长无关）。
+int squareThumbDecodeWidth(double displaySize, double devicePixelRatio) =>
+    decodeWidthForDisplay(
+      displaySize,
+      devicePixelRatio,
+      maxWidth: ceilDim(displaySize * 3, fallback: 1),
     );
 
 

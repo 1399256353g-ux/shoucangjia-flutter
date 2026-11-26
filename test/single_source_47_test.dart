@@ -18,6 +18,14 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:shoucangjia/author_avatar_view.dart';
+import 'package:shoucangjia/author_index.dart'
+    show
+        basicAuthorGridPadding,
+        authorGridPadRight,
+        kAuthorGridPadLeft,
+        kAuthorGridPadRight,
+        kAuthorIndexBarWidth,
+        kAuthorIndexBarGap;
 import 'package:shoucangjia/card_metrics.dart';
 import 'package:shoucangjia/grid_spec.dart';
 import 'package:shoucangjia/player_controls.dart';
@@ -140,12 +148,22 @@ void main() {
       expect(body.contains('_tabs.index == 1'), isTrue);
     });
 
-    test('几何与真实网格同源（padding 用 authorGridPadRight，不用硬编码）', () {
+    test('几何与真实网格同源（padding 只来自 author_index 的同一份定义）', () {
       final basic = _code('lib/basic_lib_page.dart');
       final i = basic.indexOf('void _prefetchAuthors()');
       final body = basic.substring(i, i + 2000);
-      expect(body.contains('kAuthorGridPadLeft'), isTrue);
-      expect(body.contains('authorGridPadRight(hasIndexBar:'), isTrue);
+      // 0.9.292：预热与网格 `GridView.padding` 读同一个 `basicAuthorGridPadding`，
+      // 本页不再自己拼左/右/上下三个数（它仍是同一份定义里的 12/12）。
+      expect(body.contains('basicAuthorGridPadding(hasIndexBar:'), isTrue);
+      expect(body.contains('EdgeInsets.fromLTRB('), isFalse,
+          reason: '预热不得再自己拼内边距（与网格各写一份就会分叉）');
+      // 定义本身仍由 `authorGridPadRight` 决定右边缘（索引条让位）。
+      final pad = basicAuthorGridPadding(hasIndexBar: true);
+      expect(pad.left, kAuthorGridPadLeft);
+      expect(pad.right, authorGridPadRight(hasIndexBar: true));
+      expect(pad.right, kAuthorIndexBarWidth + kAuthorIndexBarGap);
+      expect(basicAuthorGridPadding(hasIndexBar: false).right,
+          kAuthorGridPadRight);
       // 右侧让出索引条后，预热列数才与真实排布一致。
       expect(kBasicAuthorGrid.maxCrossAxisExtent, 180);
     });

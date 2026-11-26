@@ -484,11 +484,7 @@ class _BasicLibPageState extends State<BasicLibPage>
           controller: _authorScroll,
           // 右侧让出索引条宽度（≥28dp）：字母条只占右边缘条带，
           // 但卡片不能被它压住，否则最后一列点击会被抢。
-          padding: EdgeInsets.fromLTRB(
-              kAuthorGridPadLeft,
-              12,
-              authorGridPadRight(hasIndexBar: letters.length > 1),
-              12),
+          padding: basicAuthorGridPadding(hasIndexBar: letters.length > 1),
           gridDelegate: kBasicAuthorGrid.delegate,
           itemCount: shown.length,
           itemBuilder: (c, i) {
@@ -693,11 +689,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     // `kBasicAuthorGrid` 与 `authorGridPadRight`，不自己挑数字。
     final n = kBasicAuthorGrid.prefetchCount(
       mq.size,
-      padding: EdgeInsets.fromLTRB(
-          kAuthorGridPadLeft,
-          12,
-          authorGridPadRight(hasIndexBar: hasIndexBar),
-          12),
+      padding: basicAuthorGridPadding(hasIndexBar: hasIndexBar),
     );
     if (n <= 0) return;
     String avOf(Map<String, dynamic> a) =>

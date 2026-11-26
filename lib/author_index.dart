@@ -12,6 +12,7 @@
 /// 这里只放纯逻辑，便于单测；排序与分页留给页面层。
 library;
 
+import 'package:flutter/painting.dart';
 import 'package:pinyin/pinyin.dart';
 
 import 'grid_geometry.dart';
@@ -179,6 +180,22 @@ const double kAuthorIndexBarGap = 6;
 double authorGridPadRight({required bool hasIndexBar}) => hasIndexBar
     ? kAuthorIndexBarWidth + kAuthorIndexBarGap
     : kAuthorGridPadRight;
+
+/// 作者总览页（`main` 作者 tab）网格的内边距。
+///
+/// 0.9.292：`GridView.padding` 与 `_prefetchAvatars` 的 `prefetchCount(padding:)`
+/// 必须拿到同一组数——预热按它算「首屏几列几行」。此前这两处各写一遍
+/// `fromLTRB(12, 4, 12, 16)`（外加列表页三处无关的同值），只要有人把网格
+/// 上边距从 4 改成 8，预热就会算多一行、去拉屏幕外的头像。
+const EdgeInsets kAuthorGridPagePadding =
+    EdgeInsets.fromLTRB(kAuthorGridPadLeft, 4, kAuthorGridPadRight, 16);
+
+/// 基础库页作者 tab 的网格内边距（上下各 12，右侧在索引条出现时让位）。
+///
+/// 同上：页面 `GridView.padding` 与 `_prefetchAuthorAvatars` 的预热几何同源。
+EdgeInsets basicAuthorGridPadding({required bool hasIndexBar}) =>
+    EdgeInsets.fromLTRB(
+        kAuthorGridPadLeft, 12, authorGridPadRight(hasIndexBar: hasIndexBar), 12);
 
 /// 作者网格中第 [index] 项对应的滚动偏移。
 ///

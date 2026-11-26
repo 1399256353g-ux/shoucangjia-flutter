@@ -202,12 +202,15 @@ void main() {
       // 取整（首屏张数收口到 `grid_spec`，解码宽度收口到
       // `decode_plan.libCardDecodeWidthOf`）；强行要求它 import 一个用不到的
       // 模块，只会让下一轮为了消 warning 再塞一个空引用。
+      //
+      // 0.9.292：`main.dart` 同理移除——播放页海报与图文原图的「按屏幕宽度
+      // 解码」已收到 `decode_plan.screenDecodeWidth`，删除记录缩略图收到
+      // `decode_plan.squareThumbDecodeWidth`，文件内不再有一次取整。
       for (final f in [
         'lib/recommend_grid.dart',
         'lib/thumb_prefetch.dart',
         'lib/home_top_bar.dart',
         'lib/decode_plan.dart',
-        'lib/main.dart',
       ]) {
         expect(_codeOf(f).contains("import 'layout_metric.dart';"), isTrue,
             reason: '$f 没有走统一取整出口');

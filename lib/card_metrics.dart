@@ -54,6 +54,22 @@ const double kAvatarBasicAuthorSize = kAvatarGridSize;
 /// 在播放页要按另一个尺寸再解码一次。
 const double kAvatarPlayerSize = 38;
 
+/// 作者「选一张作头像」弹窗的候选格边长。
+///
+/// 0.9.292：弹窗内容区固定 420dp、三列、间距 6 —— 每格实际 **136dp**；
+/// 而解码宽度当时写的是 `avatarDecodeWidth(displaySize: 96)`（一个内联的
+/// 「看起来差不多大」的数字）。后果不是样式不同，而是模糊：136dp 的格子
+/// 按 96dp 解码后放大 1.4 倍显示。格子边长现在立名，解码宽度仍走
+/// `avatarDecodeWidth`。
+const double kAvatarCandidateSize = 136;
+
+/// 删除记录列表里的缩略图边长（`main._deletedThumb`）。
+///
+/// 0.9.292：解码宽度当时是内联 `memCacheWidth: 160`，而图是 56dp——
+/// 56 × 3 = 168，160 比真实像素少 8。尺寸与解码宽度两处都内联，改一处
+/// 就会对不上（且 2x/3x 屏下 160 已经被放大）。
+const double kDeletedThumbSize = 56;
+
 /// 排行榜一行（`AuthorRankTile` 的 `ListTile`）的实测逻辑高度。
 ///
 /// 0.9.289：首屏预热此前按 `firstScreenRowCount` 的默认 72 行高估算，实际
