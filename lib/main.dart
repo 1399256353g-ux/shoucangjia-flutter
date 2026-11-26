@@ -2736,6 +2736,13 @@ class UnitBadges extends StatelessWidget {
   /// 作品条目里没有作者头像路径 `av`，无法按路径匹配）。
   final String basicId;
 
+  /// owner 2026-11-26：「分发词条你倒是贴到相应位置去啊，多挂载作者挂几个
+  /// 文件夹就贴几个到主页和卡片，像现在的单元库词条一样」。
+  ///
+  /// 同一作者分布在多个基础库时，说明他挂载了几处；词条就该一一列出，
+  /// 而不是只贴主库那一个。为空时退回 `basicId`（单来源）。
+  final List<String> basicIds;
+
   /// 没有单元库归属时显示的库 id / 库名。
   final String fallbackId;
   final String fallbackName;
@@ -2753,6 +2760,7 @@ class UnitBadges extends StatelessWidget {
     required this.fallbackId,
     required this.fallbackName,
     this.basicId = '',
+    this.basicIds = const <String>[],
     this.grade = '',
     this.unitLabels = const {},
     this.unitKeys = const {},
@@ -2776,26 +2784,48 @@ class UnitBadges extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final basic =
-        basicId.isNotEmpty ? basicId : (meta?.basicIdForPath(mediaPath) ?? '');
-    var unitId = _unitKeyOf(basic);
-    // 没有基础库归属时才按节点路径解析（旧数据 / 非基础库媒体）。
-    if (unitId.isEmpty && basic.isEmpty && mediaPath.isNotEmpty) {
-      unitId = meta?.unitIdFor(mediaPath) ?? '';
+    // owner 2026-11-26：按**全部来源基础库**贴词条，而不是只贴主库。
+    // 多挂几个文件夹就有几条来源，词条一一列出（与单元库词条同一形态）。
+    final sources = <String>[
+      for (final b in basicIds)
+        if (b.trim().isNotEmpty) b.trim(),
+    ];
+    if (sources.isEmpty && basicId.isNotEmpty) sources.add(basicId);
+
+    final ids = <String>[];
+    final names = <String, String>{...?meta?.unitNames};
+    final gray = <String>{};
+    void addUnit(String unitId, String basic) {
+      // 同一个单元库只在词条里出现一次：多来源可能同属一个单元库。
+      if (unitId.isEmpty) return;
+      if (ids.contains(unitId)) return;
+      ids.add(unitId);
+      if (unitId == 'secret') {
+        names[unitId] = TopNodeName.current;
+        gray.add(unitId);
+        return;
+      }
+      final label = _unitNameOf(basic, unitId);
+      if (label.isNotEmpty) names[unitId] = label;
     }
-    // 不再回退到「库名」词条（抖音收藏已废弃）；没有单元库归属就显示
-    // 顶级节点词条（名称来自媒体库根目录）。
-    final id = unitId.isEmpty ? 'secret' : unitId;
-    final label = unitId.isEmpty || unitId == 'secret'
-        ? TopNodeName.current
-        : _unitNameOf(basic, unitId);
-    final names = <String, String>{...?meta?.unitNames, id: label};
-    final gray = unitId.isEmpty || unitId == 'secret';
+
+    if (sources.isEmpty) {
+      // 没有来源基础库：按路径解析，仍不行就落到媒体库根词条。
+      var unitId = meta?.unitIdFor(mediaPath) ?? '';
+      if (unitId.isEmpty) unitId = 'secret';
+      addUnit(unitId, '');
+    } else {
+      for (final basic in sources) {
+        addUnit(_unitKeyOf(basic), basic);
+      }
+      if (ids.isEmpty) addUnit('secret', '');
+    }
+
     return LibBadges(
-      libIds: id.isEmpty ? const [] : <String>[id],
+      libIds: ids,
       order: meta?.unitOrder ?? const [],
       names: names,
-      grayIds: gray ? <String>{id} : const {},
+      grayIds: gray,
       grade: grade,
     );
   }
@@ -2869,6 +2899,11 @@ class AuthorBadges extends StatelessWidget {
   final String name;
   final String mediaPath;
   final String basicId;
+
+  /// owner 2026-11-26：作者分布在多个基础库（挂了几个文件夹）时，
+  /// 词条按**每个来源**各贴一条，而不是只贴主库那一个。
+  final List<String> basicIds;
+
   final String fallbackId;
   final String fallbackName;
   final int works;
@@ -2888,6 +2923,7 @@ class AuthorBadges extends StatelessWidget {
     required this.fallbackId,
     required this.fallbackName,
     this.basicId = '',
+    this.basicIds = const <String>[],
     this.works = 0,
     this.stats,
     this.unitLabels = const {},
@@ -2921,6 +2957,10 @@ class AuthorBadges extends StatelessWidget {
       meta: meta,
       mediaPath: mediaPath,
       basicId: _basicId,
+      // 多来源：显式传入优先；否则至少带主库，保持旧行为。
+      basicIds: basicIds.isNotEmpty
+          ? basicIds
+          : (_basicId.isEmpty ? const <String>[] : <String>[_basicId]),
       fallbackId: fallbackId,
       fallbackName: fallbackName,
       grade: AuthorGrade.fromStats(_stats, works: works),
@@ -17201,6 +17241,9 @@ class _AuthorPageState extends State<AuthorPage> {
                     name: widget.name,
                     mediaPath: displayAv,
                     fallbackId: primaryLib.isEmpty ? cfg.lib : primaryLib,
+                    // owner 2026-11-26：这个作者分布在几个基础库，就贴几条
+                    // 词条（他挂了几处文件夹一目了然），不再只贴主库一条。
+                    basicIds: _libs,
                     // 0.9.6：不再回退库名文案，无归属显示 SECRET
                     fallbackName: '',
                     works: works.length,

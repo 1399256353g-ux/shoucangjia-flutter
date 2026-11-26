@@ -611,12 +611,36 @@ class AuthorMounts {
   /// 需要展示「多库/多文件夹」信息：至少两处才有意义。
   bool get isMulti => items.length >= 2;
 
-  /// 该作者所在的单元库（去重，按出现顺序）。
+  /// 该作者所在的单元库（**已按祖先关系折叠**，按出现顺序）。
+  ///
+  /// owner 2026-11-26：「明明一个都没有跨，还显示跨了 2 个」。
+  ///
+  /// 实测确认的根因：作者的文件分别落在 `A` 与 `A/B` 时（B 是 A 的下级），
+  /// 旧实现把两者当成 2 个单元库 → 显示「跨 2 个单元库」，可他一步都没走出 A。
+  ///
+  /// 计数规则（这里定死，界面文案必须与它一致）：
+  /// 把 rel 按段比较，**祖先被后代覆盖**——若 X 是 Y 的前缀，只算 Y。
+  /// 折叠后剩几个，就是「跨了几个单元库」：
+  ///  - `A` + `A/B`            → 1 个（都在 A 里）
+  ///  - `A/B` + `A/C`          → 2 个（A 下面两个不同单元库）
+  ///  - `A/B` + `X/Y`          → 2 个（分属两棵子树）
+  ///
+  /// 不再用「先去重再数」——那正是把父子当成两处的原因。
   List<String> get units {
-    final out = <String>[];
+    final raw = <String>[];
     for (final i in items) {
-      final u = i.unitRel;
-      if (u.isEmpty || out.contains(u)) continue;
+      final u = i.unitRel.trim();
+      if (u.isEmpty || raw.contains(u)) continue;
+      raw.add(u);
+    }
+    if (raw.length <= 1) return raw;
+    // 段级前缀判定：用 `/` 边界，避免 `A/B` 误判成 `A/BC` 的祖先。
+    bool isAncestor(String a, String b) =>
+        b.length > a.length && b.startsWith('$a/');
+    final out = <String>[];
+    for (final u in raw) {
+      // u 被别的更深的 rel 包含 → 不算独立单元库。
+      if (raw.any((o) => isAncestor(u, o))) continue;
       out.add(u);
     }
     return out;

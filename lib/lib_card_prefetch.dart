@@ -60,10 +60,13 @@ int prefetchLibCovers({
   if (n <= 0) return 0;
   final urls = <String>[];
   final headers = <String, Map<String, String>>{};
-  var seen = 0;
   for (final it in items) {
-    if (seen >= n) break;
-    seen++;
+    // 配额数的是**真正入队的张数**，与 `prefetchThumbItems` / `prefetchWorkCovers`
+    // 同一个语义。此前这里另有一个 `seen` 计数器，把「没有封面的卡片」也
+    // 记进 n：主页首屏若有两张卡没有封面（新库、封面还没生成），预热就少拉
+    // 两张**可见**封面，末尾那两张仍然逐张请求、先露底色。同一个参数名
+    // `limit` 在两处有两种含义，是这一批要收掉的那类分叉。
+    if (urls.length >= n) break;
     final cover = it.cover.trim();
     if (cover.isEmpty) continue;
     final url = withImageWidth(cover, kCardImageWidth);
