@@ -677,9 +677,31 @@ class LibraryBadge {
 
   /// 单元库的 emoji 后缀：id 形式在主页（`node:rel`）与 LibMeta（`rel`）
   /// 之间不一致，两种形式都查；顶级 SECRET / 空 id 不显示。
+  /// 词条 emoji 后缀（**含向下分发**）。
+  ///
+  /// owner 2026-11-26：「媒体库和基础库词条还没有分发」。
+  ///
+  /// 实测（探针跑过）：顶级设 `🔥` 后，下级单元库/基础库拿到的都是空串——
+  /// 颜色有继承链，emoji 没有。同一层级的两项配置只有一半会分发，用户按
+  /// 颜色的行为预期去设 emoji，就会觉得「设了没反应」。
+  ///
+  /// 现按与颜色完全相同的口径：
+  ///  1. 本层设过 → 用自己的；
+  ///  2. 本层来源是「自动分配」→ 不继承（用户显式要求不要上级的）；
+  ///  3. 否则继承所属顶级单元库的 emoji。
+  ///
+  /// `secret`（无归属兜底）不参与继承：它不在任何媒体库下面。
   static String emojiFor(String unitId) {
     if (unitId.isEmpty || unitId == 'secret') return '';
-    return lookupByLibId(emoji, unitId) ?? '';
+    final own = lookupByLibId(emoji, unitId);
+    if (own != null && own.isNotEmpty) return own;
+    // 显式选了「自动分配」：不继承上级，避免与颜色语义分叉。
+    if (sourceFor(unitId) == BadgeColorSource.autoAssign) return '';
+    final topId = lookupByLibId(topOfUnit, unitId);
+    if (topId == null || relOf(topId) == relOf(unitId)) return '';
+    // 顶级自己若选了自动分配，同样不向下传。
+    if (sourceFor(topId) == BadgeColorSource.autoAssign) return '';
+    return lookupByLibId(emoji, topId) ?? '';
   }
 
   /// 词条展示文字：去序号后的名称 + 该库 emoji 后缀。
