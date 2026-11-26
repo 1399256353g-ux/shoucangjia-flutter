@@ -6,7 +6,8 @@ import 'cover_cache.dart';
 import 'cover_menu.dart';
 import 'cover_upload.dart';
 import 'decode_plan.dart';
-import 'layout_metric.dart';
+import 'grid_spec.dart';
+import 'lib_card_prefetch.dart';
 import 'library_badge.dart';
 import 'library_corner_badge.dart';
 import 'library_tree.dart';
@@ -17,8 +18,6 @@ import 'json_num.dart' show sumSat;
 import 'lib_refresh_button.dart';
 import 'scroll_decode.dart';
 import 'star_store.dart';
-import 'thumb_image.dart';
-import 'thumb_prefetch.dart';
 import 'text_clip.dart';
 import 'unit_cover_store.dart';
 import 'unit_library.dart';
@@ -47,9 +46,21 @@ typedef LibRefreshOf = Future<String?> Function(String libId, String unitRel);
 /// 库卡片圆角（单元库与基础库必须一致）。
 const double kLibCardRadius = 12;
 
-/// 库卡片网格外边距与卡片间距（主页 / 单元库页 / 星标页统一）。
+/// 库卡片网格外边距（主页 / 单元库页 / 星标页统一）。
+///
+/// 间距与列上限现在只在本文件的 [kUnitLibGrid] / [kBasicLibGrid] 里出现
+/// （`grid_spec.dart`），页面 delegate 与首屏预热读同一份规格：此前这里
+/// 还有 `kLibGridSpacing = 10`，与 `gridDelegate` 里的字面量 10 两处各写
+/// 一遍，改一处另一处不跟，预热张数与实际列数就对不上。
 const EdgeInsets kLibGridPadding = EdgeInsets.symmetric(horizontal: 12);
-const double kLibGridSpacing = 10;
+
+/// 星标页网格外边距：顶部与左右同主页，底部留 24（滚动到末尾不贴着任务栏）。
+///
+/// 单独定义是为了让「页面 padding」与「预热用的可用高度」读同一个值：
+/// 此前星标页的预热把上下内边距写成 `paddingY: 18`（注释写 (12+24)/2），
+/// 而网格自己是 `fromLTRB(12, 12, 12, 24)`——一处改成 one 个数字时
+/// 另一处不会跟，预热张数就默默偏离。
+const EdgeInsets kStarredGridPadding = EdgeInsets.fromLTRB(12, 12, 12, 24);
 
 /// 卡片底部在线/离线圆点色（owner 2026-11-25：绿点在线、红点离线，简约）。
 const Color kCardOnlineColor = Color(0xFF4CAF50);
@@ -64,19 +75,6 @@ const LinearGradient kLibCardGradient = LinearGradient(
 
 /// 单元库卡片的显示宽度（网格 `maxCrossAxisExtent: 260`）。
 const double kUnitCardDisplayWidth = 260;
-
-/// 单元库卡片解码宽度上限（260dp × 3x）。
-const int kUnitCardMaxDecodeWidth = 780;
-
-/// 单元库卡片封面解码宽度（卡片渲染与首屏预热必须共用）。
-///
-/// 基础库卡片是 220dp、单元库卡片是 260dp；两者共用 `_UnitCoverFill`，
-/// 以前统一按 220dp 解码，260dp 的单元库卡片在高 DPI 下被放大 ~18%。
-int unitCardDecodeWidth(double devicePixelRatio) => decodeWidthForDisplay(
-      kUnitCardDisplayWidth,
-      devicePixelRatio,
-      maxWidth: kUnitCardMaxDecodeWidth,
-    );
 
 /// P3：首页顶级单元库卡片上的词条色块边长（逻辑像素）。
 ///
@@ -454,47 +452,29 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
   /// 0.9.30：主页单元库首屏封面预热。
   ///
   /// 卡片封面按 480px 取图（服务端已预热），但首屏仍是逐张请求，卡片会先露
-  /// 底色/图标。数据一到就按网格几何预热首页可见的几张，provider 与
-  /// `_UnitCoverFill` 完全一致，失败交给卡片自己重试。
+  /// 底色/图标。数据一到就按网格几何预热首页可见的几张。
+  ///
+  /// 0.9.286：几何/去重/张数上限全部交给 `lib_card_prefetch`（唯一实现）。
+  /// 这里此前自己算了一遍 `firstScreenThumbCount`、自己排 URL、不去重，
+  /// 与星标页/单元库页各一份，三份的上下内边距还不一样。
   void _prefetchCovers() {
     if (!mounted) return;
     final units = widget.tree.children;
     if (units.isEmpty) return;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
-    final n = firstScreenThumbCount(
-      viewportWidth: mq.size.width,
-      viewportHeight: mq.size.height,
-      maxCrossAxisExtent: 260,
-      padding: kLibGridPadding.left,
-      crossSpacing: kLibGridSpacing,
-      mainSpacing: kLibGridSpacing,
-      aspectRatio: 1.02,
-      screens: 1,
-      maxItems: 8,
-    );
-    if (n <= 0) return;
-    final urls = <String>[];
-    final headers = <String, Map<String, String>>{};
-    for (final u in units.take(n)) {
-      final cover = widget.unitCoverOf?.call(u) ?? '';
-      if (cover.isEmpty) continue;
-      final url = withImageWidth(cover, kCardImageWidth);
-      urls.add(url);
-      headers[url] = unitHeadersOf(u, widget.headersOf);
-    }
-    if (urls.isEmpty) return;
-    // 与 `_UnitCoverFill` 共用同一个解码宽度（单元库卡片 260dp），缓存键一致才命中。
-    final px = unitCardDecodeWidth(mq.devicePixelRatio);
-    ThumbPrefetch.instance.run(
-      urls,
-      limit: n,
-      provider: (u) => thumbImageProvider(
-        u,
-        decodeWidth: px,
-        headers: headers[u] ?? const <String, String>{},
-        cacheManager: DiziCache.manager,
-      ),
+    prefetchLibCovers(
+      viewport: mq.size,
+      grid: kUnitLibGrid,
+      padding: kLibGridPadding,
+      decodeWidth: libCardDecodeWidthOf(kUnitCardDisplayWidth, mq.devicePixelRatio),
+      items: [
+        for (final u in units)
+          (
+            cover: widget.unitCoverOf?.call(u) ?? '',
+            headers: unitHeadersOf(u, widget.headersOf),
+          ),
+      ],
     );
   }
 
@@ -539,12 +519,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             padding: kLibGridPadding,
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 260,
-              mainAxisSpacing: kLibGridSpacing,
-              crossAxisSpacing: kLibGridSpacing,
-              childAspectRatio: 1.02,
-            ),
+            gridDelegate: kUnitLibGrid.delegate,
             itemCount: units.length,
             itemBuilder: (_, i) {
               final u = units[i];
@@ -688,42 +663,18 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
     if (!mounted || units.isEmpty) return;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
-    final n = firstScreenThumbCount(
-      viewportWidth: mq.size.width,
-      viewportHeight: mq.size.height,
-      maxCrossAxisExtent: 260,
-      // 与网格真实 padding `fromLTRB(12, 12, 12, 24)` 同源：上下合计 36。
-      paddingX: 12,
-      paddingY: 18,
-      crossSpacing: kLibGridSpacing,
-      mainSpacing: kLibGridSpacing,
-      aspectRatio: 1.02,
-      screens: 1,
-      maxItems: 8,
-    );
-    if (n <= 0) return;
-    final urls = <String>[];
-    final headers = <String, Map<String, String>>{};
-    for (final u in units.take(n)) {
-      final cover = widget.unitCoverOf?.call(u) ?? '';
-      if (cover.isEmpty) continue;
-      final url = withImageWidth(cover, kCardImageWidth);
-      if (urls.contains(url)) continue;
-      urls.add(url);
-      headers[url] = unitHeadersOf(u, widget.headersOf);
-    }
-    if (urls.isEmpty) return;
-    // 与 `_UnitCoverFill` 共用同一个解码宽度（单元库卡片 260dp），缓存键一致才命中。
-    final px = unitCardDecodeWidth(mq.devicePixelRatio);
-    ThumbPrefetch.instance.run(
-      urls,
-      limit: n,
-      provider: (u) => thumbImageProvider(
-        u,
-        decodeWidth: px,
-        headers: headers[u] ?? const <String, String>{},
-        cacheManager: DiziCache.manager,
-      ),
+    prefetchLibCovers(
+      viewport: mq.size,
+      grid: kUnitLibGrid,
+      padding: kStarredGridPadding,
+      decodeWidth: libCardDecodeWidthOf(kUnitCardDisplayWidth, mq.devicePixelRatio),
+      items: [
+        for (final u in units)
+          (
+            cover: widget.unitCoverOf?.call(u) ?? '',
+            headers: unitHeadersOf(u, widget.headersOf),
+          ),
+      ],
     );
   }
 
@@ -749,13 +700,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
             )
           : ScrollDecodeScope(
               child: GridView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 260,
-                mainAxisSpacing: kLibGridSpacing,
-                crossAxisSpacing: kLibGridSpacing,
-                childAspectRatio: 1.02,
-              ),
+              padding: kStarredGridPadding,
+              gridDelegate: kUnitLibGrid.delegate,
               itemCount: units.length,
               itemBuilder: (_, i) {
                 final u = units[i];
@@ -1150,11 +1096,10 @@ class _UnitCoverFill extends StatelessWidget {
       httpHeaders: headers,
       // 0.9.119：按卡片真实显示宽度解码（单元库 260dp / 基础库 220dp），
       // 与首屏预热用同一个函数，同一张封面不会因解码宽度不同而二次解码。
-      memCacheWidth: decodeWidthForDisplay(
+      // 0.9.286：公式收到 `decode_plan.libCardDecodeWidthOf`（唯一实现）。
+      memCacheWidth: libCardDecodeWidthOf(
         displayWidth,
         MediaQuery.devicePixelRatioOf(context),
-        // `NaN.ceil()` 抛异常；`displayWidth` 来自卡片布局，零约束时可为 NaN。
-        maxWidth: ceilDim(displayWidth * 3, fallback: kLibCardMaxDecodeWidth),
       ),
       fit: BoxFit.cover,
       fadeInDuration: Duration.zero,
@@ -1288,88 +1233,48 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
   /// 0.9.31：单元库页首屏封面预热。
   ///
   /// 进单元库后第一屏是下级单元库卡片与基础库卡片，两者此前都是逐张请求，
-  /// 会先露底色再出图。这里按两个网格各自的真实几何算张数，URL 与卡片
-  /// 用的是同一套解析（`unitCoverUrl` / `basicCoverUrl`），provider 与
-  /// `_UnitCoverFill` 完全一致（同 `w=480` + 同鉴权头 + 同 `DiziCache`），
-  /// 卡片渲染时直接命中缓存。失败交给卡片自己重试。
+  /// 会先露底色再出图。
+  ///
+  /// 0.9.286：两类卡片各走一次 `prefetchLibCovers`（唯一实现）。这里原来自已
+  /// 算两遍张数、写一个局部 `add()` 做去重，与另两个页面又各一份。
   void _prefetchCovers() {
     if (!mounted) return;
     final unit = widget.unit;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
-    final subUrls = <String>[];
-    final subHeaders = <String, Map<String, String>>{};
-    final basicUrls = <String>[];
-    final basicHeaders = <String, Map<String, String>>{};
 
-    void add(List<String> urls, Map<String, Map<String, String>> headers,
-        String raw, Map<String, String> h) {
-      final cover = raw.trim();
-      if (cover.isEmpty) return;
-      final url = withImageWidth(cover, kCardImageWidth);
-      if (headers.containsKey(url)) return;
-      urls.add(url);
-      headers[url] = h;
-    }
-
-    // 下级单元库卡片：260 / 1.02，一屏、上限 6。
-    final subN = firstScreenThumbCount(
-      viewportWidth: mq.size.width,
-      viewportHeight: mq.size.height,
-      maxCrossAxisExtent: 260,
-      padding: kLibGridPadding.left,
-      crossSpacing: kLibGridSpacing,
-      mainSpacing: kLibGridSpacing,
-      aspectRatio: 1.02,
-      screens: 1,
+    // 下级单元库卡片（260 / 1.02）。
+    prefetchLibCovers(
+      viewport: mq.size,
+      grid: kUnitLibGrid,
+      padding: kLibGridPadding,
+      decodeWidth: libCardDecodeWidthOf(kUnitCardDisplayWidth, mq.devicePixelRatio),
       maxItems: 6,
+      items: [
+        for (final sub in unit.children)
+          (
+            cover: widget.unitCoverOf?.call(sub) ?? '',
+            headers: unitHeadersOf(sub, widget.headersOf),
+          ),
+      ],
     );
-    if (subN > 0) {
-      for (final sub in unit.children.take(subN)) {
-        final cover = widget.unitCoverOf?.call(sub) ?? '';
-        add(subUrls, subHeaders, cover, unitHeadersOf(sub, widget.headersOf));
-      }
-    }
 
-    // 基础库卡片：220 / 0.92，一屏、上限 8（与 `BasicLibCard` 同一封面解析）。
-    final basicN = firstScreenThumbCount(
-      viewportWidth: mq.size.width,
-      viewportHeight: mq.size.height,
-      maxCrossAxisExtent: 220,
-      padding: kLibGridPadding.left,
-      crossSpacing: kLibGridSpacing,
-      mainSpacing: kLibGridSpacing,
-      aspectRatio: 0.92,
-      screens: 1,
-      maxItems: 8,
+    // 基础库卡片（220 / 0.92，与 `BasicLibCard` 同一条封面解析）。
+    prefetchLibCovers(
+      viewport: mq.size,
+      grid: kBasicLibGrid,
+      padding: kLibGridPadding,
+      decodeWidth: libCardDecodeWidthOf(kLibCardDisplayWidth, mq.devicePixelRatio),
+      items: [
+        for (final b in unit.basics)
+          (
+            cover: basicCoverUrl(b,
+                preset: widget.coverOf?.call(b) ?? '',
+                firstThumb: b.firstCover),
+            headers: widget.headersOf?.call(b.id) ?? const <String, String>{},
+          ),
+      ],
     );
-    if (basicN > 0) {
-      for (final b in unit.basics.take(basicN)) {
-        final cover = basicCoverUrl(b,
-            preset: widget.coverOf?.call(b) ?? '', firstThumb: b.firstCover);
-        add(basicUrls, basicHeaders, cover,
-            widget.headersOf?.call(b.id) ?? const <String, String>{});
-      }
-    }
-    // 两类卡片显示宽度不同（260 / 220），各自用自己的解码宽度预热，
-    // 与 `_UnitCoverFill` 传入的 `displayWidth` 一致，缓存键才对得上。
-    void prefetch(List<String> urls,
-        Map<String, Map<String, String>> headers, int px) {
-      if (urls.isEmpty) return;
-      ThumbPrefetch.instance.run(
-        urls,
-        limit: urls.length,
-        provider: (u) => thumbImageProvider(
-          u,
-          decodeWidth: px,
-          headers: headers[u] ?? const <String, String>{},
-          cacheManager: DiziCache.manager,
-        ),
-      );
-    }
-
-    prefetch(subUrls, subHeaders, unitCardDecodeWidth(mq.devicePixelRatio));
-    prefetch(basicUrls, basicHeaders, libCardDecodeWidth(mq.devicePixelRatio));
   }
 
   @override
@@ -1446,12 +1351,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               padding: kLibGridPadding,
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 260,
-                mainAxisSpacing: kLibGridSpacing,
-                crossAxisSpacing: kLibGridSpacing,
-                childAspectRatio: 1.02,
-              ),
+              gridDelegate: kUnitLibGrid.delegate,
               itemCount: unit.children.length,
               itemBuilder: (c, i) {
                 final sub = unit.children[i];
@@ -1490,12 +1390,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               padding: kLibGridPadding,
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 220,
-                mainAxisSpacing: kLibGridSpacing,
-                crossAxisSpacing: kLibGridSpacing,
-                childAspectRatio: 0.92,
-              ),
+              gridDelegate: kBasicLibGrid.delegate,
               itemCount: sorted.length,
               itemBuilder: (c, i) => BasicLibCard(
                 basic: sorted[i],

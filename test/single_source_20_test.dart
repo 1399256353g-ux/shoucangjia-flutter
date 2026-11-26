@@ -174,10 +174,14 @@ void main() {
   group('lib/ 内不再有「裸取整」闸口', () {
     test('布局类模块不得直接 .ceil()/.floor()/.round() 非守卫值', () {
       // 只钉「已经踩过的那几处」：这些都是非有限值能到的地方。
+      // 0.9.286 补上两个新模块（库卡片预热的几何入口、网格规格）：
+      // 它们算的也是「首屏几张」，一个坏视口尺寸同样能进来。
       const guarded = <String, String>{
         'lib/recommend_grid.dart': 'recommendVisibleCount',
         'lib/thumb_prefetch.dart': 'firstScreenThumbCount',
         'lib/home_top_bar.dart': 'topBarLayout',
+        'lib/grid_spec.dart': 'LibGridSpec.prefetchCount',
+        'lib/lib_card_prefetch.dart': 'prefetchLibCovers',
       };
       for (final e in guarded.entries) {
         final src = _codeOf(e.key);
@@ -193,12 +197,16 @@ void main() {
       expect(lm.contains('int floorDim('), isTrue);
       expect(lm.contains('int roundDim('), isTrue);
       // 其它文件必须 import 它，而不是各写一份 isFinite 三件套。
+      //
+      // 0.9.286：`unit_library_view.dart` 从这张表里移除——它已不再做任何
+      // 取整（首屏张数收口到 `grid_spec`，解码宽度收口到
+      // `decode_plan.libCardDecodeWidthOf`）；强行要求它 import 一个用不到的
+      // 模块，只会让下一轮为了消 warning 再塞一个空引用。
       for (final f in [
         'lib/recommend_grid.dart',
         'lib/thumb_prefetch.dart',
         'lib/home_top_bar.dart',
         'lib/decode_plan.dart',
-        'lib/unit_library_view.dart',
         'lib/main.dart',
       ]) {
         expect(_codeOf(f).contains("import 'layout_metric.dart';"), isTrue,

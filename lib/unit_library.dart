@@ -23,6 +23,7 @@ import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'media_path.dart';
+import 'node_key.dart';
 import 'server_origin.dart';
 import 'stable_order.dart';
 import 'rel_path.dart';
@@ -205,9 +206,12 @@ bool isPrefixOf(List<String> a, List<String> b) {
 /// 节点在「去重/父子/归属」三张表里的键：**连接 + rel**。
 ///
 /// 只写 rel 会让两台服务端的同名目录互相顶掉（见 [buildUnitTree] 步骤 1 的
-/// 实测），只写连接更不行。分隔符用 `\u0001`：rel 里可能出现 `|`、`:`、`/`，
-/// 但不会是控制字符，拼接后不会被两个不同 (连接, rel) 组合撞成同一个键。
-String _nodeKeyOf(String serverId, String rel) => '${serverId.trim()}\u0001$rel';
+/// 实测），只写连接更不行。
+///
+/// 拼装本体在 [nodeKey]（唯一实现）：这个字符串同时是封面表的键
+/// （`multi_server.unitCoverKey`），两处各写一份时只要有一处改了分隔符或
+/// trim 口径，封面就查不到节点、卡片退回默认图，而两边各自都「算对了」。
+String _nodeKeyOf(String serverId, String rel) => nodeKey(serverId, rel);
 
 /// 节点所属连接（trim 后）；空串表示旧格式/离线快照。
 String _sidOf(LibNode n) => n.serverId.trim();

@@ -61,12 +61,24 @@ int workCardDecodeWidth(double devicePixelRatio) => decodeWidthForDisplay(
       maxWidth: kWorkCardMaxDecodeWidth,
     );
 
-/// 库 / 单元库卡片封面统一解码宽度（卡片渲染与预热都必须用它）。
-int libCardDecodeWidth(double devicePixelRatio) => decodeWidthForDisplay(
-      kLibCardDisplayWidth,
+/// 库卡片封面的解码宽度：按卡片**真实显示宽度**算（0.9.286）。
+///
+/// 卡片（`_UnitCoverFill.memCacheWidth`）与首屏预热（`lib_card_prefetch`）
+/// 必须得到同一个数，否则缓存键不同、预热白拉一次再解码一次。此前两边各写
+/// 一份：卡片内联 `decodeWidthForDisplay(displayWidth, dpr, maxWidth:
+/// ceilDim(displayWidth*3, fallback: kLibCardMaxDecodeWidth))`，预热调
+/// `unitCardDecodeWidth` / `libCardDecodeWidth`——三份公式一致只是巧合，
+/// 改一处就分叉。
+int libCardDecodeWidthOf(double displayWidth, double devicePixelRatio) =>
+    decodeWidthForDisplay(
+      displayWidth,
       devicePixelRatio,
-      maxWidth: kLibCardMaxDecodeWidth,
+      maxWidth: ceilDim(displayWidth * 3, fallback: kLibCardMaxDecodeWidth),
     );
+
+/// 库 / 单元库卡片封面统一解码宽度（卡片渲染与预热都必须用它）。
+int libCardDecodeWidth(double devicePixelRatio) =>
+    libCardDecodeWidthOf(kLibCardDisplayWidth, devicePixelRatio);
 
 /// 缩略图预取/解码的有界并发。
 ///

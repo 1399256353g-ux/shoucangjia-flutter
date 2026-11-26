@@ -95,6 +95,7 @@ import 'header_collapse.dart';
 import 'work_card.dart';
 import 'work_key.dart';
 import 'multi_server.dart';
+import 'node_key.dart';
 import 'server_origin.dart';
 import 'playback_flow.dart';
 import 'playback_state.dart';
@@ -5319,9 +5320,11 @@ class _LibraryPageState extends State<LibraryPage> {
       // 补的那部分只认本条连接自己的指针（其它连接的 rel 与这里的节点无关）。
       final rels = <String>{
         ...marked.rels,
+        // 反向解析也走 `node_key`（唯一实现）：这里此前手写
+        // `k.startsWith('$markedSid\u0001')` + `k.indexOf('\u0001') + 1`——
+        // 两处各自假定分隔符是同一个字面量，改一处就静默漏掉全部指针。
         for (final k in treeCovers.keys)
-          if (k.startsWith('$markedSid\u0001'))
-            k.substring(k.indexOf('\u0001') + 1),
+          if (nodeKeyHasServer(k, markedSid)) nodeKeyRel(k),
       }.toList(growable: false)
         ..sort();
       final nodes = rels

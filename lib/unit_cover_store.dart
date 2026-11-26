@@ -24,6 +24,7 @@ library;
 import 'package:flutter/foundation.dart';
 
 import 'multi_server.dart' show normalizeUnitRel;
+import 'node_key.dart' show kNodeKeySep;
 
 class UnitCoverStore {
   /// 键 → 显示用封面地址（绝对 URL，已含鉴权/路由）。
@@ -38,7 +39,11 @@ class UnitCoverStore {
   static final ValueNotifier<int> revision = ValueNotifier<int>(0);
 
   /// 键的字段分隔符。rel 里可能出现 `|` `:` `/`，但不会是控制字符。
-  static const String _sep = '\u0001';
+  ///
+  /// 取自 `node_key.kNodeKeySep`（唯一常量）：这里此前自己写了一个
+  /// `'\u0001'` 字面量，与节点键/封面键是两份。两份都是控制字符，肉眼
+  /// 分不出差别，只在某个键被拼了两次时才炸。
+  static const String _sep = kNodeKeySep;
 
   /// 键的公共拼装口：`<命名空间>:<连接>␁<rel 或 id>`。
   ///

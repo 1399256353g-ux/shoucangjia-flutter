@@ -13,6 +13,7 @@ import 'dart:convert';
 
 import 'json_num.dart';
 import 'media_path.dart' show isMediaPath;
+import 'node_key.dart' show nodeKey;
 import 'rel_path.dart' show normalizeRelPath;
 import 'server_origin.dart';
 import 'text_fold.dart';
@@ -329,7 +330,7 @@ Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
 /// 与 [UnitCoverStore] 的键、`buildUnitTree` 的 `_nodeKeyOf` 同一套作用域：
 /// 「哪个连接下的哪个目录」才是唯一身份，rel 单独不唯一。
 String unitCoverKey(String serverId, String rel) =>
-    '${serverId.trim()}\u0001${normalizeUnitRel(rel)}';
+    nodeKey(serverId, normalizeUnitRel(rel));
 
 /// 从一棵 v2 树的三个节点数组里收集封面指针，键带连接（见 [unitCoverKey]）。
 ///
