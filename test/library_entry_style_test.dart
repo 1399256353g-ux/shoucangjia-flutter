@@ -12,7 +12,8 @@ void main() {
     await LibraryBadge.load();
   });
 
-  test('默认外观：四层级圆角一致，边框与底纹逐级递减', () {
+  test('默认外观：三层级圆角一致，边框与底纹逐级递减', () {
+    final kinds = LibEntryKind.values;
     final decos = [
       for (final k in LibEntryKind.values) LibraryBadge.decorationFor(k, 0xFF336699)
     ];
@@ -23,9 +24,36 @@ void main() {
     expect(radii.length, 1);
     expect(radii.first, kEntryRadius);
 
-    final widths = [for (final d in decos) (d.border as Border).top.width];
-    expect(widths[0] > widths[1], isTrue); // 顶级 > 单元库
+    // 边框不在 decoration 里（那样会挤占布局），走 borderFor 单独叠加。
+    final widths = [
+      for (final k in kinds)
+        (LibraryBadge.borderFor(k)! as Border).top.width
+    ];
+    expect(widths[0] > widths[1], isTrue); // 媒体库 > 单元库
     expect(widths[1] > widths[2], isTrue); // 单元库 > 基础库
+    // owner 2026-11-26：边框颜色可调，默认三档颜色也要不同。
+    final colors = [
+      for (final k in kinds) (LibraryBadge.borderFor(k)! as Border).top.color
+    ];
+    expect(colors.toSet().length, greaterThan(1),
+        reason: '三种词条的边框颜色应能区分，不能全一样');
+  });
+
+  // owner 2026-11-26：「叫你不要动词条占用面积的大小，调粗边框占用不就变大了」
+  // ——边框必须走 foregroundDecoration（不参与布局），否则加粗会挤占内容盒。
+  test('边框粗细不参与布局：加粗后词条尺寸不变', () {
+    final widths = <double>[];
+    for (final k in LibEntryKind.values) {
+      LibraryBadge.entryStyle[k] =
+          LibraryBadge.styleFor(k).copyWith(borderWidth: 3.0);
+      widths.add((LibraryBadge.borderFor(k)! as Border).top.width);
+    }
+    expect(widths.every((w) => w == 3.0), isTrue);
+    // decoration 本身不得再带 border（带了就会挤占内容）
+    for (final k in LibEntryKind.values) {
+      expect(LibraryBadge.decorationFor(k, 0xFF336699).border, isNull,
+          reason: '边框必须走 foregroundDecoration，decoration 里带 border 会撑大词条');
+    }
   });
 
   test('改边框粗细只影响该层级，且不改圆角', () {
@@ -34,12 +62,12 @@ void main() {
         LibraryBadge.styleFor(LibEntryKind.unit).copyWith(borderWidth: 2.4);
     final after = LibraryBadge.decorationFor(LibEntryKind.unit, 0xFF336699);
 
-    expect((after.border as Border).top.width, closeTo(2.4, 1e-9));
+    expect((LibraryBadge.borderFor(LibEntryKind.unit)! as Border).top.width,
+        closeTo(2.4, 1e-9));
     expect((after.borderRadius as BorderRadius).topLeft.x, kEntryRadius);
     // 其它层级不受影响
-    final topDeco =
-        LibraryBadge.decorationFor(LibEntryKind.top, 0xFF336699);
-    expect((topDeco.border as Border).top.width,
+    expect(
+        (LibraryBadge.borderFor(LibEntryKind.top)! as Border).top.width,
         closeTo(topWidthBefore, 1e-9));
   });
 

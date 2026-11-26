@@ -42,7 +42,7 @@ class BadgeChipSpec {
     required this.label,
     required this.color,
     this.unitId = '',
-    this.kind = LibEntryKind.other,
+    this.kind = LibEntryKind.unit,
   });
 }
 

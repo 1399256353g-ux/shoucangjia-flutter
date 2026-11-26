@@ -92,18 +92,22 @@ void main() {
         LibraryBadge.colorFor('TOP/MID'));
   });
 
-  test('词条层级判定：顶级 / 单元库 / 其它', () {
+  test('词条层级判定：只有媒体库 / 单元库 / 基础库三档', () {
     final root = _tree();
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
     expect(LibraryBadge.entryKindOfUnit('TOP'), LibEntryKind.top);
     expect(LibraryBadge.entryKindOfUnit('TOP/MID'), LibEntryKind.unit);
     expect(LibraryBadge.entryKindOfUnit('OTHER'), LibEntryKind.top);
-    expect(LibraryBadge.entryKindOfUnit('secret'), LibEntryKind.other);
-    expect(LibraryBadge.entryKindOfUnit(''), LibEntryKind.other);
-    expect(LibraryBadge.entryKindOfUnit('未知库'), LibEntryKind.other);
+    // owner 2026-11-26：删掉 `other` 档（「其它（作者卡等）」没人知道控制哪里）。
+    // 无归属词条按「单元库」画，不再单列一档。
+    expect(LibraryBadge.entryKindOfUnit('secret'), LibEntryKind.unit);
+    expect(LibraryBadge.entryKindOfUnit(''), LibEntryKind.unit);
+    expect(LibraryBadge.entryKindOfUnit('未知库'), LibEntryKind.unit);
+    expect(LibEntryKind.values.length, 3,
+        reason: '词条层级只有三种，多一档就是用户理解不了的设置项');
   });
 
-  test('四层级词条外观：圆角与内边距一致，只有边框/底纹不同', () {
+  test('三层级词条外观：圆角与内边距一致，只有边框/底纹不同', () {
     final kinds = LibEntryKind.values;
     final decos = [
       for (final k in kinds) LibraryBadge.decorationFor(k, 0xFF336699)
@@ -113,8 +117,11 @@ void main() {
       for (final d in decos) (d.borderRadius as BorderRadius).topLeft.x
     };
     expect(radii.length, 1);
-    // 边框宽度两两不同（顶级最粗、基础库最细）
-    final widths = [for (final d in decos) (d.border as Border).top.width];
+    // 边框宽度两两不同（媒体库最粗、基础库最细）。
+    // 边框不在 decoration 里（会挤占布局），从 borderFor 取。
+    final widths = [
+      for (final k in kinds) (LibraryBadge.borderFor(k)! as Border).top.width
+    ];
     expect(widths[0] > widths[1], isTrue);
     expect(widths[1] > widths[2], isTrue);
     // 底纹透明度各不相同

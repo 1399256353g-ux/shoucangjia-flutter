@@ -1999,7 +1999,6 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       LibEntryKind.top: '媒体库',
       LibEntryKind.unit: '单元库',
       LibEntryKind.basic: '基础库（末梢）',
-      LibEntryKind.other: '其它（作者卡等）',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2007,9 +2006,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
           child: Text(
-              '四种词条的圆角、内边距、字号固定一致，只能调边框粗细、'
-              '边框深浅与底纹浓度（颜色仍在下方按库设置）。'
-              '调完即时生效，也可单层级恢复默认。',
+              '三种词条（媒体库 / 单元库 / 基础库）的圆角、内边距、字号固定一致，'
+              '只能调边框粗细、边框颜色、边框深浅与底纹浓度'
+              '（词条底色仍在下方按库设置）。'
+              '边框加粗只改视觉、不改变词条占位。调完即时生效，也可单层级恢复默认。',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
         for (final kind in LibEntryKind.values)
@@ -2058,12 +2058,17 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     );
   }
 
-  /// 只给三个参数（边宽 / 边框透明 / 底纹）；没有圆角与尺寸入口。
+  /// 边宽 / 边框颜色 / 边框透明 / 底纹；圆角与尺寸没有入口（形状固定）。
+  ///
+  /// owner 2026-11-26：「边框颜色调不了」——此前边框色写死在代码里
+  /// （顶级白、其余黑），只能调粗细和透明度。现在可选颜色。
   Future<EntryStyle?> _showEntryStyleDialog(
       LibEntryKind kind, String label, EntryStyle initial) async {
     var w = initial.borderWidth;
     var ba = initial.borderAlpha;
     var fa = initial.fillAlpha;
+    var bc = initial.borderColor ??
+        (kDefaultEntryStyle[kind]?.borderColor ?? 0xFFFFFFFF);
     return showDialog<EntryStyle>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -2072,6 +2077,38 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             _sliderRow('边框粗细', w, 0, 3, 31, (v) => setDlg(() => w = v),
                 '${w.toStringAsFixed(1)}dp'),
+            // 边框颜色：与词条底色用的同一套色板，点一下即预览。
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 2),
+                child: Text('边框颜色',
+                    style: const TextStyle(
+                        fontSize: 12, color: Colors.grey)),
+              ),
+            ),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final c in LibraryBadge.palette)
+                GestureDetector(
+                  onTap: () => setDlg(() => bc = c),
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      color: Color(c),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: bc == c ? Colors.lightBlueAccent : Colors.black26,
+                        width: bc == c ? 2.5 : 1,
+                      ),
+                    ),
+                    child: bc == c
+                        ? const Icon(Icons.check,
+                            size: 15, color: Colors.white)
+                        : null,
+                  ),
+                ),
+            ]),
             _sliderRow('边框深浅', ba, 0, 1, 20, (v) => setDlg(() => ba = v),
                 '${(ba * 100).round()}%'),
             _sliderRow('底纹浓度', fa, 0, 1, 20, (v) => setDlg(() => fa = v),
@@ -2094,7 +2131,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 child: const Text('默认')),
             FilledButton(
                 onPressed: () => Navigator.of(ctx).pop(EntryStyle(
-                    borderWidth: w, borderAlpha: ba, fillAlpha: fa)),
+                    borderWidth: w,
+                    borderAlpha: ba,
+                    fillAlpha: fa,
+                    borderColor: bc)),
                 child: const Text('确定')),
           ],
         ),
@@ -2706,7 +2746,7 @@ class LibBadges extends StatelessWidget {
             unitId: i < shown.length ? shown[i] : '',
             kind: i < shown.length
                 ? LibraryBadge.entryKindOfUnit(shown[i])
-                : LibEntryKind.other,
+                : LibEntryKind.unit,
             color: (labels[i].startsWith('+') ||
                     (i < shown.length && grayIds.contains(shown[i])))
                 ? LibraryBadge.gray

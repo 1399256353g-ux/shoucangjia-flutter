@@ -6,6 +6,7 @@ import 'package:flutter/material.dart'
     show
         Border,
         BorderRadius,
+        BoxBorder,
         BoxDecoration,
         BuildContext,
         Color,
@@ -29,20 +30,23 @@ import 'lib_id.dart';
 import 'prefs_json.dart';
 import 'contrast.dart';
 
-/// P1：词条层级。四种词条**形状与尺寸完全一致**，差异只在边框/底纹，
-/// 保证「层级一眼可辨、位置与排版不动」。
+/// 词条层级：**只有三种**（媒体库 / 单元库 / 基础库）。
+///
+/// owner 2026-11-26：「我总共不就说了 4 种词条吗，没用赶紧删了」——
+/// 原来是 top/unit/basic/other 四种，其中 `other`（作者卡等非库语境）没有
+/// 任何用户可理解的含义，设置页里那条「其它（作者卡等）」也没人知道在控制
+/// 哪里。已删除；没有归属的词条按「单元库」处理，不再单列一档。
+///
+/// 三种词条**形状与尺寸完全一致**，差异靠边框粗细/颜色与底纹浓度区分。
 enum LibEntryKind {
-  /// 顶级单元库（连接的媒体库根）：实线粗边框 + 轻微底纹。
+  /// 媒体库（连接的根）：最粗边框 + 最亮边框色 + 最浓底纹。
   top,
 
-  /// 中间层单元库：实线细边框。
+  /// 中间层单元库：中等边框。
   unit,
 
-  /// 末梢基础库：虚线（用浅色描边模拟）+ 无底纹。
+  /// 末梢基础库：最细边框 + 最淡底纹。
   basic,
-
-  /// 其它（作者卡、非库语境）：无边框。
-  other,
 }
 
 /// 词条圆角：四种层级共用，**不可调**（形状一致是硬约束）。
@@ -62,10 +66,16 @@ class EntryStyle {
   /// 底纹不透明度（0–1），即词条底色浓度。
   final double fillAlpha;
 
+  /// 边框颜色（ARGB）。owner 2026-11-26：「边框颜色调不了」——此前边框色
+  /// 写死在代码里（顶级白、其余黑），用户只能调粗细和透明度，没法调颜色。
+  /// 现在可调；null 表示用该层级的默认色。
+  final int? borderColor;
+
   const EntryStyle({
     required this.borderWidth,
     required this.borderAlpha,
     required this.fillAlpha,
+    this.borderColor,
   });
 
   /// 边框粗细（0–3）。非有限值归 0——`NaN.clamp(0,3)` 实测返回 **3.0**，
@@ -76,17 +86,25 @@ class EntryStyle {
   /// 不透明度（0–1），统一走 [unitFraction]。
   static double clampA(double v) => unitFraction(v);
 
-  EntryStyle copyWith({double? borderWidth, double? borderAlpha, double? fillAlpha}) =>
+  EntryStyle copyWith(
+          {double? borderWidth,
+          double? borderAlpha,
+          double? fillAlpha,
+          int? borderColor,
+          bool clearBorderColor = false}) =>
       EntryStyle(
         borderWidth: clampW(borderWidth ?? this.borderWidth),
         borderAlpha: clampA(borderAlpha ?? this.borderAlpha),
         fillAlpha: clampA(fillAlpha ?? this.fillAlpha),
+        borderColor:
+            clearBorderColor ? null : (borderColor ?? this.borderColor),
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'w': borderWidth,
         'ba': borderAlpha,
         'fa': fillAlpha,
+        if (borderColor != null) 'bc': borderColor,
       };
 
   /// 容错解析：缺失或非法字段保留 [fallback] 的对应值。
@@ -95,10 +113,16 @@ class EntryStyle {
     final w = doubleOrNull(v['w']);
     final ba = doubleOrNull(v['ba']);
     final fa = doubleOrNull(v['fa']);
+    // `bc` 缺失时必须是 fallback 的边框色，不能用 0 当哨兵：合法的黑色
+    // 边框也是 0x00000000 之外的值，而「没有 bc 字段」与「bc 写了 0」在
+    // intOf 下都得到 0，会把默认白边悄悄变成黑边。
+    final hasBc = v.containsKey('bc');
+    final bc = hasBc ? intOf(v['bc']) : null;
     return EntryStyle(
       borderWidth: clampW(w ?? fallback.borderWidth),
       borderAlpha: clampA(ba ?? fallback.borderAlpha),
       fillAlpha: clampA(fa ?? fallback.fillAlpha),
+      borderColor: (bc == null || bc == 0) ? fallback.borderColor : bc,
     );
   }
 
@@ -107,20 +131,42 @@ class EntryStyle {
       other is EntryStyle &&
       other.borderWidth == borderWidth &&
       other.borderAlpha == borderAlpha &&
-      other.fillAlpha == fillAlpha;
+      other.fillAlpha == fillAlpha &&
+      other.borderColor == borderColor;
 
   @override
-  int get hashCode => Object.hash(borderWidth, borderAlpha, fillAlpha);
+  int get hashCode =>
+      Object.hash(borderWidth, borderAlpha, fillAlpha, borderColor);
 }
 
-/// 四层级默认外观：边框从「顶级亮粗边」递减到「基础库极浅细边」，
-/// 底纹浓度同样递减。顺序不可倒置，否则层级一眼分不出。
+/// 三层级默认外观。
+///
+/// owner 2026-11-26：「各种词条区分不够明显，改方案」。
+///
+/// 旧的差异只有 1.2 / 0.8 / 0.5 的边框粗细，三档挤在一起，同屏几乎看不出；
+/// 边框色还写死成「顶级白、其余黑」，跟底色接近时等于没有边框。
+///
+/// 新方案从**三个维度同时拉开**，任一眼都能分：
+///  1. 边框粗细：2.0 / 1.3 / 0.8（差一倍以上）
+///  2. 边框色：白 / 浅灰 / 极浅灰（与底色形成明确描边，且可自行调色）
+///  3. 底纹浓度：0.96 / 0.90 / 0.80（逐级变透）
 const Map<LibEntryKind, EntryStyle> kDefaultEntryStyle =
     <LibEntryKind, EntryStyle>{
-  LibEntryKind.top: EntryStyle(borderWidth: 1.2, borderAlpha: 0.85, fillAlpha: 0.94),
-  LibEntryKind.unit: EntryStyle(borderWidth: 0.8, borderAlpha: 0.35, fillAlpha: 0.90),
-  LibEntryKind.basic: EntryStyle(borderWidth: 0.5, borderAlpha: 0.18, fillAlpha: 0.86),
-  LibEntryKind.other: EntryStyle(borderWidth: 0.5, borderAlpha: 0.25, fillAlpha: 0.92),
+  LibEntryKind.top: EntryStyle(
+      borderWidth: 2.0,
+      borderAlpha: 0.95,
+      fillAlpha: 0.96,
+      borderColor: 0xFFFFFFFF),
+  LibEntryKind.unit: EntryStyle(
+      borderWidth: 1.3,
+      borderAlpha: 0.70,
+      fillAlpha: 0.90,
+      borderColor: 0xFFE2E8F0),
+  LibEntryKind.basic: EntryStyle(
+      borderWidth: 0.8,
+      borderAlpha: 0.45,
+      fillAlpha: 0.80,
+      borderColor: 0xFFCBD5E1),
 };
 
 /// 库词条（作者卡片左上角）的配色与标签逻辑。
@@ -286,10 +332,13 @@ class LibraryBadge {
   /// 绕过 copyWith，渲染时也不会出现负边宽或超范围透明度。
   static EntryStyle styleFor(LibEntryKind kind) {
     final s = entryStyle[kind] ?? kDefaultEntryStyle[kind]!;
+    // borderColor 必须一起带出来：漏掉它会让 `styleFor == kDefaultEntryStyle`
+    // 永远不成立（默认白边被丢成 null），「恢复默认」与「是否自定义」都失灵。
     return EntryStyle(
       borderWidth: EntryStyle.clampW(s.borderWidth),
       borderAlpha: EntryStyle.clampA(s.borderAlpha),
       fillAlpha: EntryStyle.clampA(s.fillAlpha),
+      borderColor: s.borderColor,
     );
   }
 
@@ -458,20 +507,27 @@ class LibraryBadge {
   ///
   /// 边框粗细与底纹浓度可在「设置 → 自定义 → 库词条配色」里按层级调整；
   /// 圆角与内边距**不可调**，形状尺寸永远一致。
+  /// 词条的边框（用 `foregroundDecoration` 叠加，**不占布局**）。
+  ///
+  /// 返回 null 表示不画（厚度为 0）。
+  static BoxBorder? borderFor(LibEntryKind kind) {
+    final st = styleFor(kind);
+    if (st.borderWidth <= 0) return null;
+    final base = Color(st.borderColor ??
+        (kDefaultEntryStyle[kind]?.borderColor ?? 0xFF000000));
+    return Border.all(
+        color: base.withValues(alpha: st.borderAlpha), width: st.borderWidth);
+  }
+
   static BoxDecoration decorationFor(LibEntryKind kind, int argb) {
     final st = styleFor(kind);
-    // 边框色沿用层级默认（顶级亮边 / 其余深边），只让用户调粗细与透明度。
-    final base = switch (kind) {
-      LibEntryKind.top => const Color(0xFFFFFFFF),
-      LibEntryKind.unit => const Color(0xFF000000),
-      LibEntryKind.basic => const Color(0xFF000000),
-      LibEntryKind.other => const Color(0xFF000000),
-    };
-    final borderColor = base.withValues(alpha: st.borderAlpha);
+    // 边框不在这里画。owner 2026-11-26：「叫你不要动词条占用面积的大小，调粗
+    // 边框占用不就变大了吗」——`border:` 会**向内挤占**内容盒，边框一变粗
+    // 文字可用宽度就变小，词条看起来被撑大/换行。边框改由 [borderFor]
+    // 配合 `foregroundDecoration` 叠加，只改变视觉、**不改变占位**。
     return BoxDecoration(
       color: Color(argb).withValues(alpha: st.fillAlpha),
       borderRadius: BorderRadius.circular(kEntryRadius),
-      border: Border.all(color: borderColor, width: st.borderWidth),
     );
   }
 
@@ -494,8 +550,10 @@ class LibraryBadge {
   }
 
   static LibEntryKind entryKindOfUnit(String unitId) {
-    if (unitId.isEmpty || unitId == 'secret') return LibEntryKind.other;
-    if (lookupByLibId(topOfUnit, unitId) == null) return LibEntryKind.other;
+    // owner 2026-11-26：删掉 `other` 后，没有归属的词条按「单元库」画——
+    // 它本来就是库级词条，不该单独占一档用户无法理解的层级。
+    if (unitId.isEmpty || unitId == 'secret') return LibEntryKind.unit;
+    if (lookupByLibId(topOfUnit, unitId) == null) return LibEntryKind.unit;
     return isTopSelf(unitId) ? LibEntryKind.top : LibEntryKind.unit;
   }
 
@@ -859,7 +917,7 @@ class LibBadgeChip extends StatelessWidget {
       required this.label,
       required this.color,
       this.unitId = '',
-      this.kind = LibEntryKind.other});
+      this.kind = LibEntryKind.unit});
 
   @override
   Widget build(BuildContext context) {
@@ -875,10 +933,15 @@ class LibBadgeChip extends StatelessWidget {
     final text = label.startsWith('+')
         ? label
         : LibraryBadge.labelWithEmoji(LibraryBadge.stripIndex(label), unitId);
-    // 层级差异只由 LibraryBadge.decorationFor 决定（形状/尺寸统一，只改边框底纹）。
+    // 层级差异只由 LibraryBadge 的外观决定（形状/尺寸统一，只改边框底纹）。
+    // 边框走 foregroundDecoration：加粗只影响视觉，**不改变词条占位**。
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: LibraryBadge.decorationFor(kind, color),
+      foregroundDecoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(kEntryRadius),
+        border: LibraryBadge.borderFor(kind),
+      ),
       child: Text(
         text,
         maxLines: 1,
