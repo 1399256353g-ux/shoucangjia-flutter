@@ -53,6 +53,8 @@ void main() {
           reason: '播放页不得再自己圆形裁剪头像');
       expect(body.contains('Icons.person'), isFalse,
           reason: '占位已统一为首字母，不再用人形图标');
+      expect(body.contains('name: authorLabel'), isTrue,
+          reason: '占位首字符必须用剥过 `@` 的名字，否则画出一个 `@`');
     });
 
     test('头像边长 38 只有一处，且与解码宽度规则同源', () {

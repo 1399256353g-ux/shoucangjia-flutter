@@ -12222,7 +12222,9 @@ class _PlayerPageState extends State<PlayerPage>
                           behavior: HitTestBehavior.opaque,
                           onTap: _authorTapOpen,
                           child: AuthorAvatarView(
-                            name: authorName,
+                            // 必须传剥过 `@` 的名字：占位取首字符，传
+                            // `@张三` 会画出 `@`（不剥前缀的第二份解析）。
+                            name: authorLabel,
                             mediaPath: av,
                             // 兜底图可能来自作者所在的基础库，按图片自身的库
                             // 路由与鉴权，避免跨库 401 一直显示默认头像。
