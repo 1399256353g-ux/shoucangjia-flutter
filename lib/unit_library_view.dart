@@ -5,6 +5,7 @@ import 'api_url.dart';
 import 'cover_cache.dart';
 import 'cover_menu.dart';
 import 'cover_upload.dart';
+import 'card_action_button.dart';
 import 'card_metrics.dart';
 import 'grid_spec.dart';
 import 'lib_card_prefetch.dart';
@@ -961,8 +962,8 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
             ),
             // 与基础库卡片一致的右上角操作区（封面 / 爬虫配置 / 星标）。
             Positioned(
-              top: 6,
-              right: 6,
+              top: kCardActionInset,
+              right: kCardActionInset,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (widget.onQuickRefresh != null)
                   LibQuickRefreshButton(
@@ -970,39 +971,24 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                     onRefresh: widget.onQuickRefresh,
                   ),
                 if (widget.coverMenu != null)
-                  IconButton(
-                    key: ValueKey('unit-cover-btn-${unit.id}'),
+                  cardActionButton(
+                    buttonKey: ValueKey('unit-cover-btn-${unit.id}'),
                     tooltip: '封面设置',
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints:
-                        const BoxConstraints.tightFor(width: 30, height: 30),
-                    icon: const Icon(Icons.image_outlined),
+                    icon: Icons.image_outlined,
                     onPressed: _openCoverMenu,
                   )
                 else if (widget.onSetCover != null)
-                  IconButton(
-                    key: ValueKey('unit-cover-btn-${unit.id}'),
+                  cardActionButton(
+                    buttonKey: ValueKey('unit-cover-btn-${unit.id}'),
                     tooltip: '本地选图作封面',
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints:
-                        const BoxConstraints.tightFor(width: 30, height: 30),
-                    icon: const Icon(Icons.image_outlined),
+                    icon: Icons.image_outlined,
                     onPressed: widget.onSetCover,
                   ),
                 if (showCrawler)
-                  IconButton(
-                    key: ValueKey('unit-crawler-${unit.id}'),
+                  cardActionButton(
+                    buttonKey: ValueKey('unit-crawler-${unit.id}'),
                     tooltip: '爬虫配置',
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints:
-                        const BoxConstraints.tightFor(width: 30, height: 30),
-                    icon: const Icon(Icons.settings_ethernet),
+                    icon: Icons.settings_ethernet,
                     onPressed: widget.onConfigure,
                   ),
                 if (widget.onToggleStar != null)
@@ -1559,8 +1545,8 @@ class _BasicLibCardState extends State<BasicLibCard> {
           ),
           if (widget.coverMenu != null || widget.onSetCover != null)
             Positioned(
-              top: 6,
-              right: 6,
+              top: kCardActionInset,
+              right: kCardActionInset,
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (widget.onQuickRefresh != null)
                   LibQuickRefreshButton(
@@ -1568,24 +1554,19 @@ class _BasicLibCardState extends State<BasicLibCard> {
                     onRefresh: widget.onQuickRefresh,
                   ),
                 if (widget.coverMenu != null || widget.onSetCover != null)
-                  IconButton(
-                    key: ValueKey('basic-cover-btn-${basic.id}'),
+                  cardActionButton(
+                    buttonKey: ValueKey('basic-cover-btn-${basic.id}'),
                     tooltip:
                         widget.coverMenu != null ? '封面设置' : '本地选图作封面',
-                    iconSize: 18,
-                    visualDensity: VisualDensity.compact,
-                    padding: EdgeInsets.zero,
-                    constraints:
-                        const BoxConstraints.tightFor(width: 30, height: 30),
-                    icon: const Icon(Icons.image_outlined),
+                    icon: Icons.image_outlined,
                     onPressed: _openCoverMenu,
                   ),
               ]),
             )
           else if (widget.onQuickRefresh != null)
             Positioned(
-              top: 6,
-              right: 6,
+              top: kCardActionInset,
+              right: kCardActionInset,
               child: LibQuickRefreshButton(
                 libId: basic.id,
                 onRefresh: widget.onQuickRefresh,

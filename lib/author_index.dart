@@ -176,6 +176,24 @@ const double kAuthorGridPadRight = 12;
 const double kAuthorIndexBarWidth = 28;
 const double kAuthorIndexBarGap = 6;
 
+/// 是否显示右侧首字母索引条：**唯一判定**。
+///
+/// 只有 1 个字母时索引条没有意义（点了也不移动），所以门槛是「≥2 个不同
+/// 字母」。这条判定此前在 `basic_lib_page` 里写了**四遍**：
+///
+/// ```
+/// GridView.padding   basicAuthorGridPadding(hasIndexBar: letters.length > 1)
+/// Stack 里的条带     if (letters.length > 1) Positioned(...)
+/// 点字母跳转         _jumpToAuthorLetter(..., letters.length > 1)
+/// 首屏头像预热       final hasIndexBar = authorIndexLetters(...).length > 1
+/// ```
+///
+/// 四处都「各自算得出同一个答案」，所以不报错也没有第二份实现可对比；
+/// 但只要有一处改了门槛（比如改成 `>= 2` 之外的判断，或某处拿未过滤的
+/// 全量作者算），就会出现「条带画出来了但网格没让位」（最后一列被压住、
+/// 点击被抢）或反过来「网格白让了 34dp」。现在只有一个名字。
+bool authorIndexBarVisible(List<String> letters) => letters.length > 1;
+
 /// 作者网格右侧内边距：[hasIndexBar] 时给字母条让位。
 double authorGridPadRight({required bool hasIndexBar}) => hasIndexBar
     ? kAuthorIndexBarWidth + kAuthorIndexBarGap

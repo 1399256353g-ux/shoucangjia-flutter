@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'author_index.dart' show kAuthorIndexBarWidth;
 import 'haptics.dart';
 
 /// 右侧竖排首字母索引条（owner 2026-11-22 / 2026-11-23 补滑动）。
@@ -20,12 +21,27 @@ import 'haptics.dart';
 /// 垂直居中，字母增减时从中心向上下对称扩展。
 const double kAuthorLetterRowHeight = 13;
 
+/// 放大字母浮层（HUD）的边长（dp）。
+///
+/// 与索引条是两件事，所以单独立名而不是复用：浮层是**覆盖内容**的展示层，
+/// 尺寸只由「一眼能看清 + 不吃卡片点击」决定，与固定行高 13 无关。
+/// 此前这个 84 在 `_LetterHud` 的 `width` / `height` 各写一遍，圆角 16 与
+/// 字号 44 也是同样「看起来配得上」的内联数字——改一处另外几处不跟，
+/// 方块变长条或字号溢出。
+const double kAuthorLetterHudSize = 84;
+
+/// 放大字母浮层的圆角（dp）。
+const double kAuthorLetterHudRadius = 16;
+
+/// 放大字母浮层的字号（sp）。
+const double kAuthorLetterHudFontSize = 44;
+
 class AuthorLetterBar extends StatefulWidget {
   const AuthorLetterBar({
     super.key,
     required this.letters,
     required this.onLetter,
-    this.width = 28,
+    this.width = kAuthorIndexBarWidth,
     this.hudHideDelay = const Duration(milliseconds: 400),
     this.keyPrefix,
   });
@@ -38,7 +54,6 @@ class AuthorLetterBar extends StatefulWidget {
   /// 每个字母文本的 key 前缀（如 `basic-author-index-`），供 widget 测试定位。
   final String? keyPrefix;
 
-  /// 手指纵向位移 → 第几个字母；非法输入返回 -1。
   /// 手指纵向位移 → 第几个字母；非法输入返回 -1。
   ///
   /// owner 2026-11-25：字母改为「固定行高 + 整体居中」后，不能再按
@@ -197,23 +212,24 @@ class _LetterHud extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Positioned(
-      left: 28,
+      // 浮层贴在索引条右侧：起点就是索引条宽度（同一个常量，不再写 28）。
+      left: kAuthorIndexBarWidth,
       top: 0,
       bottom: 0,
       child: IgnorePointer(
         child: Center(
           child: Container(
-            width: 84,
-            height: 84,
+            width: kAuthorLetterHudSize,
+            height: kAuthorLetterHudSize,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.45),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(kAuthorLetterHudRadius),
             ),
             child: Text(
               letter,
               style: const TextStyle(
-                fontSize: 44,
+                fontSize: kAuthorLetterHudFontSize,
                 fontWeight: FontWeight.w700,
                 color: Colors.white,
               ),

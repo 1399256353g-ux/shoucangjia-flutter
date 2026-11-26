@@ -471,6 +471,9 @@ class _BasicLibPageState extends State<BasicLibPage>
     final shown = _shownAuthors;
     final letters = authorIndexLetters(_authorShownKeys);
     final starts = authorGroupStarts(_authorShownKeys);
+    // 索引条是否可见只有 `authorIndexBarVisible` 一处判定：网格内边距、
+    // 条带本身、点字母跳转三处都读它，不会出现「条带画了但网格没让位」。
+    final hasIndexBar = authorIndexBarVisible(letters);
     return Column(children: [
       _authorSearchBar(),
       Expanded(
@@ -499,7 +502,7 @@ class _BasicLibPageState extends State<BasicLibPage>
           controller: _authorScroll,
           // 右侧让出索引条宽度（≥28dp）：字母条只占右边缘条带，
           // 但卡片不能被它压住，否则最后一列点击会被抢。
-          padding: basicAuthorGridPadding(hasIndexBar: letters.length > 1),
+          padding: basicAuthorGridPadding(hasIndexBar: hasIndexBar),
           gridDelegate: kBasicAuthorGrid.delegate,
           itemCount: shown.length,
           itemBuilder: (c, i) {
@@ -567,12 +570,12 @@ class _BasicLibPageState extends State<BasicLibPage>
         );
           },
         ),
-            if (letters.length > 1)
+            if (hasIndexBar)
               Positioned(
                 right: 0,
                 top: 0,
                 bottom: 0,
-                width: 28,
+                width: kAuthorIndexBarWidth,
                 child: _authorIndexBar(letters, starts, cons.maxWidth),
               ),
           ]);
@@ -631,8 +634,8 @@ class _BasicLibPageState extends State<BasicLibPage>
       keyPrefix: 'basic-author-index-',
       letters: letters,
       width: kAuthorIndexBarWidth,
-      onLetter: (l) =>
-          _jumpToAuthorLetter(l, starts, viewportWidth, letters.length > 1),
+      // 条带已经只在可见时挂载（`authorIndexBarVisible`），这里不再重复判定。
+      onLetter: (l) => _jumpToAuthorLetter(l, starts, viewportWidth, true),
     );
   }
 
@@ -703,7 +706,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     final viewport = _authorsViewport;
     if (viewport == null) return;
     final mq = MediaQuery.of(context);
-    final hasIndexBar = authorIndexLetters(_authorShownKeys).length > 1;
+    final hasIndexBar = authorIndexBarVisible(authorIndexLetters(_authorShownKeys));
     // 几何与 `_authorsView` 的 delegate / padding 同源：只读
     // `kBasicAuthorGrid` 与 `basicAuthorGridPadding`，不自己挑数字。
     final n = kBasicAuthorGrid.prefetchCount(
