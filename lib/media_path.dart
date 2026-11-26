@@ -108,6 +108,34 @@ String? mediaRelOrNull(String path) {
   return p.substring(7);
 }
 
+/// 把 `/media/<lib>/<相对路径>` 拆成「库段 + 其余」（**唯一实现**）。
+///
+/// 「取第一段当库 id」这件事此前写了三遍，每遍都自带一个 `indexOf('/')`
+/// 和三行切片：
+///
+/// ```
+/// lib_cover.libOfMediaPath         取库段（封面/删除记录/头像的路由依据）
+/// main.Cfg.media                   判断「这条路径已经带了已知库段吗」
+/// main.authorPrefixOfMedia         去掉库段后取作者目录前缀
+/// ```
+///
+/// 三份里只要有一份对「没有第二段」的处理不同，同一份路径就会在封面解析里
+/// 认得出库、在媒体拼接里认不出（于是被再前缀一次 → 404）。
+///
+/// 返回 null = 不是媒体路径；`rel` 为空 = 只有库段没有文件段。
+({String lib, String rel})? mediaLibSplitOrNull(String path) {
+  final rest = mediaRelOrNull(path);
+  // `/media/` 后面什么都没有时不算「有库段」：与 `isMediaPath('/media/')`
+  // 的旧口径保持一致（那里也返回 true，但取库段的调用方一律按未命中处理）。
+  if (rest == null || rest.isEmpty) return null;
+  final at = rest.indexOf('/');
+  final seg = at < 0 ? rest : rest.substring(0, at);
+  return (
+    lib: decodeComponentOrRaw(seg),
+    rel: at < 0 ? '' : rest.substring(at + 1),
+  );
+}
+
 /// `/media/` 之后的路径段；不是媒体路径返回空串（需要区分时用 [mediaRelOrNull]）。
 String mediaRel(String path) => mediaRelOrNull(path) ?? '';
 
@@ -127,20 +155,88 @@ String decodeComponentOrRaw(String s) {
   }
 }
 
-/// 媒体路径是否指向视频文件（按扩展名，忽略查询串与片段）。
+/// 媒体类型（**唯一分类表**）。
 ///
-/// **唯一定义**：此前 `work_cover.isVideoPath` 与 `work_forms.chapterIsImage`
-/// 各写了一份视频扩展名清单，两份的成员不同（后者少了 mkv/avi）——
-/// 同一个 `.mkv` 章节在「封面选取」里算视频、在「合集章节排序」里算图片，
-/// 会被排到图片章节末尾。视频格式只在这里列一次。
+/// 服务端 `gen_lib_index.py` 只有三张表：`VIDEO_EXT` / `IMAGE_EXT` /
+/// `AUDIO_EXT`，索引里一个文件算视频、图片还是音频都由它决定。客户端此前
+/// 把同一件事写成了**四份互不相等的清单**：
+///
+/// ```
+/// media_path.kVideoExts        6 种（缺 ts/wmv/3gp/flv）
+/// playback_error._kRedactExts 视频 7 种（多 ts）、图片 8 种（多 avif）
+/// cover_ext.kCoverImageExts    7 种（多 heic，缺 avif）
+/// author_avatar.kAvatarImageExts 7 种（多 avif，缺 heic/heif）
+/// ```
+///
+/// 后果不是「显示差一点」，而是**同一份文件在不同页面走不同分支**：
+/// 服务端下发的 `.ts` 视频在网格里不算视频（进不了播放分支、只当封面候选
+/// 再被剔除 → 卡片全是底色），`.avif` 头像能显示却不能当封面。
+///
+/// 三张表必须以服务端为准；各调用点只允许用下面的谓词，不得再列清单。
+/// 「服务端能吃这个格式吗」（缩图/头像注册只收四种）是**另一条规则**，
+/// 在 `cover_ext.kCoverExts`，别混进来。
 const List<String> kVideoExts = <String>[
   '.mp4',
   '.mov',
   '.m4v',
-  '.webm',
   '.mkv',
+  '.webm',
   '.avi',
+  '.ts',
+  '.wmv',
+  '.3gp',
+  '.flv',
 ];
+
+/// 图片扩展名（与服务端 `IMAGE_EXT` 同源，含 heic/heif/avif）。
+const List<String> kImageExts = <String>[
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.bmp',
+  '.avif',
+];
+
+/// 音频扩展名（与服务端 `AUDIO_EXT` 同源）。
+const List<String> kAudioExts = <String>[
+  '.mp3',
+  '.m4a',
+  '.aac',
+  '.wav',
+  '.flac',
+  '.ogg',
+];
+
+/// 媒体文件的类别。`other` 表示「不是服务端认识的媒体文件」（目录、txt…）。
+enum MediaKind { video, image, audio, other }
+
+/// 按扩展名给媒体分类（**唯一实现**，忽略 `?query` 与 `#fragment`）。
+///
+/// 判定顺序与三张表无关：先剥后缀、再比末段。用 `endsWith` 而不是
+/// `split('.')`，因为文件名里可以有点（`a.b.mp4`）而目录名里可以有扩展名
+/// （`x.mp4/` 只是名字，真正的文件另有后缀）。
+MediaKind mediaKindOf(String path) {
+  final l = stripMediaSuffix(path).toLowerCase();
+  if (l.isEmpty) return MediaKind.other;
+  bool has(List<String> exts) => exts.any(l.endsWith);
+  if (has(kVideoExts)) return MediaKind.video;
+  if (has(kImageExts)) return MediaKind.image;
+  if (has(kAudioExts)) return MediaKind.audio;
+  return MediaKind.other;
+}
+
+/// 是否服务端认识的媒体文件（视频 / 图片 / 音频任一）。
+///
+/// 播放失败日志的脱敏边界用它：这里判错一位，整段路径连同文件名就会留在
+/// 日志里（AGENTS.md：文件名不上传、不进模型）。
+bool isMediaFilePath(String path) => mediaKindOf(path) != MediaKind.other;
+
+/// 是否图片（可渲染成封面/头像）。
+bool isImageMediaPath(String path) => mediaKindOf(path) == MediaKind.image;
 
 /// 去掉地址里的 `?query` 与 `#fragment`，只保留路径本体（**唯一实现**）。
 ///
@@ -202,14 +298,7 @@ String stripMediaSuffix(String p) {
   return (path: s, query: '', fragment: '');
 }
 
-bool isVideoMediaPath(String p) {
-  final l = stripMediaSuffix(p).toLowerCase();
-  if (l.isEmpty) return false;
-  for (final ext in kVideoExts) {
-    if (l.endsWith(ext)) return true;
-  }
-  return false;
-}
+bool isVideoMediaPath(String p) => mediaKindOf(p) == MediaKind.video;
 
 /// 路径是否指向 GIF 动图（**唯一定义**，忽略 `?query` 与 `#fragment`）。
 ///

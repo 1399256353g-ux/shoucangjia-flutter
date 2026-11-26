@@ -13,7 +13,6 @@
 library;
 
 import 'api_url.dart';
-import 'media_priority.dart';
 import 'cover_ext.dart';
 import 'media_path.dart';
 import 'text_clip.dart';
@@ -162,6 +161,77 @@ class CoverPick {
   bool get isEmpty => path.isEmpty;
 }
 
+/// 封面候选来源，**声明顺序就是优先级（高 → 低）**。
+///
+/// owner 的口径只有一条链：手动指定 > 自定义 `_cover/` > 爬虫封面 `cv` >
+/// 本机播放量最高 > 首张作品图。这条链此前在四处各写一遍（`pickBasicCover` /
+/// `pickUnitCover` / `main._basicCoverUrl` / `main._unitCoverUrl`），
+/// 每处的「顺序」和「哪几种参与」都略有不同——所以会出现「单元库卡片显示了、
+/// 基础库卡片没显示」这类只在某个入口复现的灰卡。
+///
+/// 现在顺序只在这一张表里；[resolveCover] 是唯一走表的人。
+enum CoverSource { manual, custom, crawler, best, first }
+
+const List<CoverSource> kCoverSourceOrder = <CoverSource>[
+  CoverSource.manual,
+  CoverSource.custom,
+  CoverSource.crawler,
+  CoverSource.best,
+  CoverSource.first,
+];
+
+/// 封面解析结果：路径 + 命中来源（都没命中时路径为空、来源为 `first`）。
+typedef CoverHit = ({String path, CoverSource source});
+
+/// 按 [kCoverSourceOrder] 取第一个可用候选（**唯一实现**）。
+///
+/// - [manualUrl]：服务端 `cover.u`（完整媒体路径，路由由调用方按它自己的库段决定）
+/// - [rel] + [version] + [ext]：自定义封面文件 `<rel>/_cover/<version>.<ext>`
+/// - [crawlerThumb]：爬虫抓到的封面（`cv`）
+/// - [bestThumb]：本机播放量最高的作品封面
+/// - [firstThumb]：服务端下发的首张作品封面（`fc`）
+///
+/// 只有图片类路径能当封面（`isCoverImagePath` 已含 heic/avif 等可渲染格式）；
+/// 视频路径一律跳过，否则卡片会对着一个永远渲染不出来的 mp4 转圈。
+CoverHit resolveCover({
+  String manualUrl = '',
+  String rel = '',
+  String version = '',
+  String ext = 'jpg',
+  String crawlerThumb = '',
+  String bestThumb = '',
+  String firstThumb = '',
+  bool ignoreManual = false,
+  bool ignoreCustom = false,
+}) {
+  for (final src in kCoverSourceOrder) {
+    switch (src) {
+      case CoverSource.manual:
+        final m = ignoreManual ? '' : manualUrl.trim();
+        if (m.isNotEmpty) return (path: m, source: src);
+        break;
+      case CoverSource.custom:
+        final c =
+            ignoreCustom ? '' : coverImageRel(rel, version, ext: ext);
+        if (c.isNotEmpty) return (path: c, source: src);
+        break;
+      case CoverSource.crawler:
+        final c = crawlerThumb.trim();
+        if (isCoverImagePath(c)) return (path: c, source: src);
+        break;
+      case CoverSource.best:
+        final b = bestThumb.trim();
+        if (isCoverImagePath(b)) return (path: b, source: src);
+        break;
+      case CoverSource.first:
+        final f = firstThumb.trim();
+        if (isCoverImagePath(f)) return (path: f, source: src);
+        break;
+    }
+  }
+  return (path: '', source: CoverSource.first);
+}
+
 /// 媒体路径统一成 `/media/<lib>/<相对路径>`：
 ///  - 已带 `/media/` 前缀（服务端索引下发的 `th`）原样返回；
 ///  - 相对路径按库前缀补齐（与 `Cfg.media` 规则一致）；
@@ -253,16 +323,13 @@ String coverUrlOf(dynamic raw) {
 /// 的封面/删除记录/头像全部解析不到连接，退回当前库 → 请求打错服务器。
 /// 与 `serverAvatarFileFromPath` 的解码口径保持一致（同一规则不允许两份）。
 String libOfMediaPath(String p) {
-  // `/media/` 之后的尾部与「是否媒体路径」在同一个出口里给出（`mediaRelOrNull`
-  // 自己 trim）——旧写法先 `p.trim()` 判定、再对**原串** `substring(7)`，
-  // 前导空白/制表符时库段少一个字符。
-  final rest = mediaRelOrNull(p);
-  if (rest == null) return '';
-  final at = rest.indexOf('/');
-  if (at <= 0) return '';
-  final seg = rest.substring(0, at);
-  // 非法百分号编码：原样返回，让调用方按「未命中」处理，不抛异常。
-  return decodeComponentOrRaw(seg);
+  // 「取库段」只有 `media_path.mediaLibSplitOrNull` 一处实现的本文件不再
+  // 自己 `indexOf('/')` + 切片（`Cfg.media` 与 `authorPrefixOfMedia` 也转发它）：
+  // 三份里只要有一份对「没有文件段」处理不同，同一份路径就会在封面解析里
+  // 认得出库、在媒体拼接里认不出（被再前缀一次 → 404）。
+  final parts = mediaLibSplitOrNull(p);
+  if (parts == null || parts.rel.isEmpty) return '';
+  return parts.lib;
 }
 
 /// 最后一级兜底：第一张作品的封面（只收图片）。
@@ -275,11 +342,9 @@ CoverPick pickFirstWorkCover(String firstThumb) {
   return CoverPick(fb);
 }
 
-/// 基础库封面：
-///  - 有自定义版本 → `_cover/<version>.<ext>`；
-///  - 否则取本机播放量最高的作品缩略图（[bestThumb]，由 WorkPlaysStore 提供）；
-///  - 再退到第一张作品的封面（[firstThumb]）；
-///  - 都没有 → 空（显示默认图）。
+/// 基础库封面：按 [kCoverSourceOrder]（自定义 → 爬虫 → 最高播放 → 首张作品）。
+///
+/// 只保留签名兼容的转发：顺序本体在 [resolveCover]。
 CoverPick pickBasicCover({
   required String rel,
   String bestThumb = '',
@@ -297,11 +362,10 @@ CoverPick pickBasicCover({
       ext: ext,
     );
 
-/// 单元库（上级文件夹）封面：
-///  - 有自定义版本 → `_cover/<version>.<ext>`；
-///  - 否则取子树内本机播放量最高的作品缩略图（[bestThumb]，整棵子树合并）；
-///  - 再退到子树里第一张作品的封面（[firstThumb]）；
-///  - 都没有 → 空（显示默认图）。
+/// 单元库（上级文件夹）封面：与基础库同一条优先级链。
+///
+/// 两者只有「为什么 bestThumb 是这一张」不同（单元库是整棵子树合并，
+/// 基础库是本库），**取图优先级完全相同**。
 CoverPick pickUnitCover({
   required String rel,
   String bestThumb = '',
@@ -319,12 +383,12 @@ CoverPick pickUnitCover({
       ext: ext,
     );
 
-/// 基础库与单元库共用的**唯一**取图实现。
+/// 基础库与单元库共用的取图实现：**转发 [resolveCover]**，不自己写顺序。
 ///
-/// 两者只有「为什么 bestThumb 是这一张」不同（单元库是整棵子树合并，
-/// 基础库是本库），**取图优先级完全相同**：自定义 → 爬虫/最高播放 →
-/// 第一张作品。此前这里有两份逐字相同的实现；改一处忘一处会让同一张封面
-/// 在两个入口上优先级不一致（典型现象：单元库卡片显示了，基础库卡片没显示）。
+/// 旧实现里这里自己按「自定义 → `pickCoverPath(爬虫,最高)` → 首张」三步走，
+/// 而 `main._basicCoverUrl` / `main._unitCoverUrl` 又各自写了一遍同样的顺序
+/// （外加服务端 `cover.u` 那一级），四处各一份——任何一处漏一级，那个入口的
+/// 卡片就是灰的。现在顺序只在 [kCoverSourceOrder] 里出现一次。
 CoverPick _pickLibCover({
   required String rel,
   String bestThumb = '',
@@ -333,10 +397,14 @@ CoverPick _pickLibCover({
   String version = '',
   String ext = 'jpg',
 }) {
-  final custom = coverImageRel(rel, version, ext: ext);
-  if (custom.isNotEmpty) return CoverPick(custom, custom: true);
-  final pick = pickCoverPath(crawler: crawlerThumb, auto: bestThumb);
-  if (pick.isNotEmpty) return CoverPick(pick);
-  // 高优先级来源都不可用时的兜底：第一张作品的封面（仅图片）。
-  return pickFirstWorkCover(firstThumb);
+  final hit = resolveCover(
+    rel: rel,
+    version: version,
+    ext: ext,
+    crawlerThumb: crawlerThumb,
+    bestThumb: bestThumb,
+    firstThumb: firstThumb,
+  );
+  if (hit.path.isEmpty) return const CoverPick.none();
+  return CoverPick(hit.path, custom: hit.source == CoverSource.custom);
 }

@@ -9,7 +9,7 @@
 library;
 
 import 'package:flutter/material.dart';
-import 'media_path.dart' show isGifMediaPath, stripMediaSuffix;
+import 'media_path.dart' show isGifMediaPath, isImageMediaPath;
 import 'work_safety.dart';
 
 /// 头像候选图。`width/height` 未知时填 0（列表接口通常不给尺寸）。
@@ -143,24 +143,13 @@ List<AvatarCandidate> avatarCandidatesFromWorks(Iterable<Map> works) {
   return out;
 }
 
-/// 可当头像/封面的图片扩展名（含服务端缩图参数前的原始名）。
-const List<String> kAvatarImageExts = <String>[
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.webp',
-  '.gif',
-  '.bmp',
-  '.avif',
-];
-
 /// 路径是否指向图片：去掉 `?w=200` 之类的查询串后再判断扩展名。
 /// 非图片（视频、文本、无扩展名）一律返回 false，避免把 mp4 当头像去请求。
-bool isAvatarImagePath(String path) {
-  final p = stripMediaSuffix(path).toLowerCase();
-  if (p.isEmpty) return false;
-  return kAvatarImageExts.any(p.endsWith);
-}
+///
+/// 0.9.281：本文件原先自己列了一张 7 项的表（多 avif、少 heic/heif），
+/// 与服务端 `IMAGE_EXT` 和 `cover_ext.kCoverImageExts` 都不同宽——
+/// `.heic` 头像在这里被剔掉、`.avif` 在封面那边被剔掉。现在转发唯一分类表。
+bool isAvatarImagePath(String path) => isImageMediaPath(path);
 
 /// 播放页作者头像的兜底图路径（纯逻辑，便于单测）。
 ///

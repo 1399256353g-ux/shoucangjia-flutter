@@ -247,9 +247,13 @@ String hostLabelOf(String serverBase) {
 ///  1. 调用方解析好的 [customUrl]（主页/单元库页的完整封面链）；
 ///  2. owner 手动设置且已解析到当前服务器的封面（零散调用处只能拿相对
 ///     媒体路径时，用节点自带 serverBase 拼）；
-///  3. 自定义 `_cover/<version>.<ext>`；
-///  4. 子树内「App 播放量最高」作品的封面（含下级单元库）；
-///  5. 空串 → 卡片回退默认图标。
+///  3–5. 自定义 `_cover/<version>` → **爬虫封面 `cv`** → 最高播放作品 → 首张作品
+///     （顺序本体在 `lib_cover.kCoverSourceOrder`，本函数不再自己排）。
+///
+/// 0.9.281：这里此前**漏了爬虫一级**——`main._unitCoverUrl` 自己写了一版
+/// `crawlerOfUnit()`，而卡片直连的 `unitCoverUrl` 没有，于是同一张单元库卡
+/// 在首页（走 main）有封面、在单元库页（走本函数）是灰的。两级现在共用
+/// `resolveCover`。
 String unitCoverUrl(
   UnitLibrary unit, {
   String customUrl = '',
@@ -269,24 +273,34 @@ String unitCoverUrl(
     }
   }
   final top = topPlayedInUnit(unit);
-  final pick = pickUnitCover(
+  // 爬虫封面：子树里第一个有 `cv` 的基础库（与 `main._unitCoverUrl` 同口径）。
+  String crawlerOfUnit() {
+    for (final b in unit.allBasics) {
+      final cv = b.crawlerCover.trim();
+      if (cv.isNotEmpty) return cv;
+    }
+    return '';
+  }
+
+  final hit = resolveCover(
     rel: unit.rel,
     version: ignoreManual ? '' : unit.node.coverVersion,
     ext: unit.node.coverExt,
+    crawlerThumb: crawlerOfUnit(),
     bestThumb: top?.thumb ?? '',
     // 首张作品封面始终作为「最后一级」传入：有播放记录但那张记录的缩略图
     // 不可用（视频路径/空）时，仍能落到库内第一张作品的图上，而不是空白卡片。
     firstThumb: firstThumb,
   );
-  if (pick.isEmpty) return '';
+  if (hit.path.isEmpty) return '';
   final basics = unit.allBasics;
   final basic = top?.basic ?? (basics.isEmpty ? null : basics.first);
   if (basic == null) return '';
-  if (thumbUrlOf != null) return thumbUrlOf(basic, pick.path);
+  if (thumbUrlOf != null) return thumbUrlOf(basic, hit.path);
   final base = basic.serverBase.trim().isNotEmpty
       ? basic.serverBase
       : unit.node.serverBase;
-  return absoluteMediaUrl(base, lib: basic.id, path: pick.path);
+  return absoluteMediaUrl(base, lib: basic.id, path: hit.path);
 }
 
 /// 单元库卡片的鉴权头：媒体按基础库路由，用子树第一个基础库的连接。
@@ -314,7 +328,8 @@ String basicCoverUrl(BasicLib basic,
   final fb = firstThumb.trim().isNotEmpty ? firstThumb : basic.firstCover;
   // 服务端把自定义封面写在「库根/_cover/」，而 `/media/<库id>/` 已指向库根；
   // 再拼 rel 会变成 `<rel>/_cover/...` → 404（实测 2026-11-21）。
-  final pick = pickBasicCover(
+  // 顺序本体在 `lib_cover.kCoverSourceOrder`（`main._basicCoverUrl` 同一条）。
+  final hit = resolveCover(
     rel: '',
     version: ignoreCustom ? '' : basic.coverVersion,
     ext: basic.coverExt,
@@ -322,8 +337,8 @@ String basicCoverUrl(BasicLib basic,
     bestThumb: top?.thumb ?? '',
     firstThumb: fb,
   );
-  if (pick.isEmpty) return '';
-  return absoluteMediaUrl(basic.serverBase, lib: basic.id, path: pick.path);
+  if (hit.path.isEmpty) return '';
+  return absoluteMediaUrl(basic.serverBase, lib: basic.id, path: hit.path);
 }
 
 /// L5 卡片体系：单元库卡片 > 基础库卡片 > 作品卡片（尺寸递减）。

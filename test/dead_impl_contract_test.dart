@@ -450,16 +450,20 @@ void main() {
     });
 
     test('封面扩展名两条规则各只有一处定义', () {
+      // 0.9.281：可显示的图片白名单收口到 `media_path.kImageExts`
+      // （与服务端 `IMAGE_EXT` 同源）；`cover_ext.kCoverImageExts` 只是引用它。
+      // 因此 `'.heic'` 只允许出现在 media_path.dart 一处。
       final offenders = libDartFiles()
-          .where((f) => !f.path.endsWith('cover_ext.dart'))
+          .where((f) => !f.path.endsWith('media_path.dart'))
           .where((f) => f.readAsStringSync().contains("'.heic'"))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '可显示图片白名单又抄了一份：$offenders');
       final src = libSourceAll();
       // 规则 A（能否渲染）与规则 B（能否存成版本）是两个不同集合，都必须只剩一处。
-      expect(
-          RegExp(r"const List<String> kCoverImageExts").allMatches(src).length,
+      expect(RegExp(r"const List<String> kImageExts").allMatches(src).length,
+          1);
+      expect(RegExp(r"const List<String> kCoverImageExts").allMatches(src).length,
           1);
       expect(
           RegExp(r"const List<String> kCoverExts").allMatches(src).length, 1);
@@ -1349,9 +1353,17 @@ void main() {
       // 0.9.233：解码本身收口到 `media_path.decodeComponentOrRaw`（非法百分号
       // 原样返回，不抛 ArgumentError）。断言「解码发生过」仍成立，但检查点从
       // 内联的 `Uri.decodeComponent(...)` 改为唯一实现的调用。
+      // 0.9.233：解码本身收口到 `media_path.decodeComponentOrRaw`（非法百分号
+      // 原样返回，不抛 ArgumentError）。0.9.281：连「取第一段当库 id」也收口到
+      // `media_path.mediaLibSplitOrNull`——libOfMediaPath 与 `Cfg.media` 曾经
+      // 各写一份 `indexOf('/')` + 切片。现在检查点是「转发唯一出口」，
+      // 解码发生在那个出口内部。
       final cover = codeOf('lib/lib_cover.dart');
-      expect(cover.contains('decodeComponentOrRaw(seg)'), isTrue,
-          reason: 'libOfMediaPath 又不解码库段了（与 media() 的编码不对称）');
+      expect(cover.contains('mediaLibSplitOrNull('), isTrue,
+          reason: 'libOfMediaPath 又自己切库段了（与 media() 各一份）');
+      final mp = codeOf('lib/media_path.dart');
+      expect(mp.contains('decodeComponentOrRaw(seg)'), isTrue,
+          reason: 'mediaLibSplitOrNull 不解码库段了（与 media() 的编码不对称）');
       // 两处「媒体路径 → 库 id」的实现必须都解码：本文件与头像注册表。
       final avatar = codeOf('lib/author_avatar_store.dart');
       expect(avatar.contains('decodeComponentOrRaw(parts[0])'), isTrue,

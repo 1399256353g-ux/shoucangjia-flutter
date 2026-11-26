@@ -1,4 +1,4 @@
-import 'media_path.dart' show stripMediaSuffix;
+import 'media_path.dart' show isMediaFilePath;
 import 'text_clip.dart';
 
 /// G12：播放失败分类与提示文案。
@@ -97,27 +97,12 @@ PlaybackFailure withTransportStatus(PlaybackFailure f, int? status) {
 /// 不用「第一个空格」当终点，就是因为媒体文件名里带空格是常态；也不用
 /// 「整行都是路径」——那会把冒号后面的错误措辞（`Protocol not supported`）
 /// 一起吃掉，导致失败原因丢失。
-const List<String> _kRedactExts = <String>[
-  'jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'heic', 'avif',
-  'mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'ts',
-  'm4a', 'mp3', 'aac', 'flac', 'wav',
-];
-
-bool _looksLikeMediaFile(String token) {
-  // 后缀剥除走 `media_path.stripMediaSuffix`（唯一实现）。旧写法在这里
-  // 自己写了一遍 `split(RegExp(r'[?&#]'))`——**先按字符集切、只看第一段**，
-  // 与唯一实现「先切 `?` 再切 `#`」在片段里带 `?` 时结论不同：
-  // `/m/a.mp4#t=1?x=2` 两者恰好都对，但 `/m/a.mp4#poster#x` 这类多片段地址
-  // 旧写法取到的第一段是 `/m/a.mp4`（对），而 `/m/a.mp4?f#x` 旧写法把
-  // `?f` 与 `#x` 都当分隔符、仍取到路径本体——差别不大，真正的问题是
-  // **同一规则第三份实现**：`stripMediaSuffix` 改了（比如加 `;` 参数剥离），
-  // 这里不会跟着变，脱敏边界就会漏判一段文件名。
-  final base = stripMediaSuffix(token).toLowerCase();
-  for (final e in _kRedactExts) {
-    if (base.endsWith('.$e')) return true;
-  }
-  return false;
-}
+///
+/// 0.9.281：原先本文件自己列了第三张扩展名表（视频多 `ts`、图片多 `avif`），
+/// 与 `media_path` / `cover_ext` / `author_avatar` 都不同宽。脱敏边界判错
+/// 一位，整段路径连同文件名就会留在日志里（AGENTS.md 红线）。现在转发
+/// 唯一分类表 `media_path.isMediaFilePath`。
+bool _looksLikeMediaFile(String token) => isMediaFilePath(token);
 
 bool _redactBoundaryOk(String s, int at) {
   if (at == 0) return true;

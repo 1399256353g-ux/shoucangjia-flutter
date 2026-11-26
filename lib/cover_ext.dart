@@ -18,13 +18,16 @@
 /// 让它反过来依赖 `lib_cover` 会形成环。两条规则单独放这里，谁都可以引。
 library;
 
-import 'media_path.dart' show stripMediaSuffix;
+import 'media_path.dart' show isImageMediaPath, kImageExts, stripMediaSuffix;
 import 'rel_path.dart' show lastRelName;
 
 /// 规则 A：可以当作封面**渲染**的扩展名（含服务端索引里出现的图片格式）。
-const List<String> kCoverImageExts = <String>[
-  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.heic'
-];
+///
+/// 0.9.281：成员表移到 `media_path.kImageExts`（与服务端 `IMAGE_EXT` 同源），
+/// 这里只是同一张表的引用。此前本文件列 7 种（有 heic、缺 avif），
+/// `author_avatar.kAvatarImageExts` 列 7 种（有 avif、缺 heic），
+/// `playback_error` 又列第三份——同一份 `.avif` 封面「能显示」但「不能当封面」。
+const List<String> kCoverImageExts = kImageExts;
 
 /// 规则 B：可以作为封面**版本文件**保存的扩展名（服务端只落这四种）。
 const List<String> kCoverExts = <String>['jpg', 'jpeg', 'png', 'webp'];
@@ -100,10 +103,7 @@ String? coverExtInName(String raw) {
 /// 完全能加载。后缀剥除走 [stripMediaSuffix]（与 `isVideoMediaPath`
 /// 同一条规则，不再两份）。
 bool isCoverImagePath(String p) {
-  final l = stripMediaSuffix(p).toLowerCase();
-  if (l.isEmpty) return false;
-  for (final e in kCoverImageExts) {
-    if (l.endsWith(e)) return true;
-  }
-  return false;
+  // 判定转发 `media_path.isImageMediaPath`（唯一分类表）：这里再列一遍
+  // 循环，就等于给同一张表写了第二个解析器。
+  return isImageMediaPath(p);
 }

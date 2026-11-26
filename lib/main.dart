@@ -326,20 +326,11 @@ class Cfg {
       final rel = path.replaceFirst(RegExp(r'^/+'), '');
       return '/media/${Uri.encodeComponent(l)}/$rel';
     }
-    // `/media/` 尾部走 `mediaRelOrNull`（自身 trim）：前缀判定与切片同一个出口。
+    // `/media/` 尾部走 `mediaLibSplitOrNull`（前缀判定、切片、库段解码与
+    // `lib_cover.libOfMediaPath` / `authorPrefixOfMedia` 同一个出口）；未知
+    // 首段要连带它自己一起重新前缀，所以这里还需要原始 rest 拼回去。
     final rest = mediaRelOrNull(path)!;
-    // 已带库段的媒体路径是自描述的：`/media/lib-012/...` 的库段就是
-    // 服务端路由依据（gallery_server 先看第一段是不是库 id）。
-    // 若再套当前库会得到 `/media/<当前库>/lib-012/...`，服务端把
-    // `lib-012` 当普通子目录拼进当前库根 → 404。主页单元库封面走的正是
-    // `cv` 下发的 `/media/lib-0xx/...`，默认库是 `douyin`，因此长期 404、
-    // 卡片只显示默认图标。已知库段一律原样保留。
-    final slash = rest.indexOf('/');
-    final head = slash >= 0 ? rest.substring(0, slash) : rest;
-    // 库段可能是**百分号编码**的（本函数下面自己就写 `Uri.encodeComponent(l)`），
-    // 而绑定表键是解码后的库 id。不归一就永远匹配不上，已带库段的路径会被
-    // 再前缀一次，变成 `/media/<当前库>/%E4%B8%AD%E6%96%87/...` → 必然 404。
-    final headId = decodeComponentOrRaw(head);
+    final headId = mediaLibSplitOrNull(path)!.lib;
     if (headId.isNotEmpty &&
         (_bindings.containsKey(headId) || headId == l)) {
       return path;
@@ -1199,14 +1190,11 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
 /// K2：从作品媒体路径推断作者目录前缀（VID/PIC 之前的段）。
 /// 路径形如 `/media/<lib>/<rel>`，先去掉 `/media/` 与库 id 再取前缀。
 String authorPrefixOfMedia(String path) {
-  // 去 `/media/<lib>/` 前缀走 `lib_cover` 的既有出口（内部同样是
-  // `mediaRelOrNull` + 取第一段）；本文件不再手写 `substring(7)`。
+  // 去 `/media/<lib>/` 前缀走 `media_path.mediaLibSplitOrNull`（唯一实现，
+  // 连百分号解码一起做完）；本文件不手写 `substring(7)` + `indexOf('/')`。
   var p = path.trim();
-  final rest = mediaRelOrNull(p);
-  if (rest != null) {
-    final at = rest.indexOf('/');
-    if (at > 0) p = rest.substring(at + 1);
-  }
+  final split = mediaLibSplitOrNull(p);
+  if (split != null && split.rel.isNotEmpty) p = split.rel;
   // 拆分走 `rel_path.dart` 唯一实现：`A\\B` 与 `A/B` 必须是同一组段，
   // 否则「移动到文件夹」的作者前缀算不出候选，跟同一作者在别的库里的
   // 表现对不上。
@@ -5062,7 +5050,10 @@ class _LibraryPageState extends State<LibraryPage> {
     // owner 2026-11-21：基础库的封面在「库根/_cover/」下，而 cfg.mediaUrl 的
     // `/media/<库id>/` 已经指向库根；再拼 rel 会变成 `<rel>/_cover/...` → 404。
     // 实测：不带 rel 的地址返回 200 image/jpeg。
-    final pick = pickBasicCover(
+    // 顺序本体只有 `lib_cover.kCoverSourceOrder`（`basicCoverUrl` 同一条）：
+    // 旧写法在本函数里把「自定义 → 爬虫 → 最高播放 → 首张」再排了一遍，
+    // 还多一条「挑不出来就直接用 cv」的补丁。
+    final hit = resolveCover(
       rel: '',
       version: b.coverVersion,
       ext: b.coverExt,
@@ -5071,20 +5062,15 @@ class _LibraryPageState extends State<LibraryPage> {
       // G：没手动封面、没播放数据时用服务端下发的第一张作品封面。
       firstThumb: b.firstCover,
     );
-    if (pick.isEmpty) {
-      // 兜底：只要服务端给了爬虫封面（cv），就直接用它，避免任何挑选逻辑
-      // 把封面吞掉后卡片一直显示默认图。
-      final cv = b.crawlerCover.trim();
-      if (cv.isEmpty) {
-        // 诊断：区分「服务端没下发 cv」和「下发了但拼接失败」。
-        CrashLog.instance.record(
-          '封面缺失 ${b.id} cv=(空) rel=${b.rel}',
-          kind: 'cover',
-        );
-      }
-      return cv.isEmpty ? '' : cfg.mediaUrl(cv, lib: b.id);
+    if (hit.path.isEmpty) {
+      // 诊断：区分「服务端没下发 cv」和「下发了但拼接失败」。
+      CrashLog.instance.record(
+        '封面缺失 ${b.id} cv=${b.crawlerCover.trim().isEmpty ? '(空)' : '(有)'} rel=${b.rel}',
+        kind: 'cover',
+      );
+      return '';
     }
-    return cfg.mediaUrl(pick.path, lib: b.id);
+    return cfg.mediaUrl(hit.path, lib: b.id);
   }
 
   /// 0.9.9 自动生成规则：单元库取整棵子树里本机播放量最高的基础库。
@@ -5493,9 +5479,16 @@ class _LibraryPageState extends State<LibraryPage> {
       final url = cfg.mediaUrl(pick, lib: ownLib.isEmpty ? null : ownLib);
       if (url.isNotEmpty) return url;
     }
-    final custom = coverImageRel(u.rel, u.node.coverVersion, ext: u.node.coverExt);
-    if (custom.isEmpty) return '';
-    return cfg.mediaUrl(custom, lib: u.allBasics.isEmpty ? null : u.allBasics.first.id);
+    // 第二级（自定义 `_cover/`）也走 `resolveCover`：只取前两级（manual 已在上
+    // 面处理，这里关掉 crawler/best/first），避免这段顺序成为第三份手写链。
+    final hit = resolveCover(
+      rel: u.rel,
+      version: u.node.coverVersion,
+      ext: u.node.coverExt,
+    );
+    if (hit.path.isEmpty) return '';
+    return cfg.mediaUrl(hit.path,
+        lib: u.allBasics.isEmpty ? null : u.allBasics.first.id);
   }
 
   /// L5-C：单元库封面。
