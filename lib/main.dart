@@ -95,6 +95,7 @@ import 'header_collapse.dart';
 import 'work_card.dart';
 import 'work_key.dart';
 import 'multi_server.dart';
+import 'server_origin.dart';
 import 'playback_flow.dart';
 import 'playback_state.dart';
 import 'pic_zoom.dart';
@@ -5206,7 +5207,7 @@ class _LibraryPageState extends State<LibraryPage> {
         for (final raw in listOf(treeJson['basicLibraries'])) {
           if (raw is! Map) continue;
           final id = '${raw['id'] ?? ''}'.trim();
-          final s = byBase['${raw['_serverBase'] ?? ''}'];
+          final s = byBase[serverOriginOf(raw).base];
           if (id.isEmpty || s == null) continue;
           // 绑定记录的字段集合只有 multi_server.dart 的 bindingEntry 一处定义。
           bindings[id] = bindingEntry(s);
@@ -5470,8 +5471,7 @@ class _LibraryPageState extends State<LibraryPage> {
       ext: u.node.coverExt,
     );
     if (hit.path.isEmpty) return '';
-    return cfg.mediaUrl(hit.path,
-        lib: u.allBasics.isEmpty ? null : u.allBasics.first.id);
+    return cfg.mediaUrl(hit.path, lib: u.coverLib?.id);
   }
 
   /// L5-C：单元库封面。
@@ -5745,13 +5745,13 @@ class _LibraryPageState extends State<LibraryPage> {
   Future<void> _switchTo(Map<String, dynamic> l) async {
     cfg.lib = '${l['id']}';
     cfg.libName = displayLibraryName('${l['id']}', '${l['name'] ?? ''}');
-    final sb = '${l['_serverBase'] ?? ''}';
-    if (sb.isNotEmpty) {
-      cfg.bindLibrary(cfg.lib, sb,
-          user: '${l['_serverUser'] ?? cfg.user}',
-          pass: '${l['_serverPass'] ?? cfg.pass}',
-          server: '${l['_serverId'] ?? ''}',
-          label: '${l['_serverLabel'] ?? ''}');
+    final origin = serverOriginOf(l);
+    if (origin.base.isNotEmpty) {
+      cfg.bindLibrary(cfg.lib, origin.base,
+          user: origin.user.isEmpty ? cfg.user : origin.user,
+          pass: origin.pass.isEmpty ? cfg.pass : origin.pass,
+          server: origin.id,
+          label: origin.label);
     }
     await savePrefString('lib', cfg.lib);
     await savePrefString('lib_bindings_v1', encodeBindings(cfg._bindings));
@@ -5762,7 +5762,7 @@ class _LibraryPageState extends State<LibraryPage> {
   Future<void> _setDefault(Map<String, dynamic> l) async {
     try {
       final id = '${l['id']}';
-      final sb = '${l['_serverBase'] ?? ''}';
+      final sb = serverOriginOf(l).base;
       final r = await http.post(_u('/api/libraries/default', id, sb),
           headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
           body: jsonEncode({'id': l['id']}));
@@ -5797,7 +5797,7 @@ class _LibraryPageState extends State<LibraryPage> {
     if (ok != true) return;
     try {
       final id = '${l['id']}';
-      final sb = '${l['_serverBase'] ?? ''}';
+      final sb = serverOriginOf(l).base;
       final r = await http.post(_u('/api/libraries/delete', id, sb),
           headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
           body: jsonEncode({'id': l['id']}));
@@ -6029,8 +6029,8 @@ class _LibraryPageState extends State<LibraryPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11, color: Colors.grey)),
-          if ('${l['_serverLabel'] ?? ''}'.isNotEmpty)
-            Text('连接：${l['_serverLabel']}',
+          if (serverOriginOf(l).label.isNotEmpty)
+            Text('连接：${serverOriginOf(l).label}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),

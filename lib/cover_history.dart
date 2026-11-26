@@ -16,6 +16,7 @@ import 'lib_cover.dart'
     show normalizeCoverVersionName, normalizeCoverExt, coverVersionFileName;
 
 import 'http_error_text.dart';
+import 'cover_admin.dart' show coverScopeBody;
 
 /// `_cover/` 里的一个历史版本。
 class CoverVersion {
@@ -177,12 +178,11 @@ Future<CoverActionResult> restoreCoverVersion({
         .post(
           url,
           headers: {...headers, 'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'lib': libId,
-            if (unitRel.isNotEmpty) 'unitRel': unitRel,
-            'v': v,
-            'e': e,
-          }),
+          body: jsonEncode(coverScopeBody(
+            lib: libId,
+            unitRel: unitRel,
+            extra: <String, dynamic>{'v': v, 'e': e},
+          )),
         )
         .timeout(const Duration(seconds: 15));
     if (r.statusCode != 200) {
@@ -218,11 +218,11 @@ Future<CoverActionResult> clearCustomCover({
         .post(
           url,
           headers: {...headers, 'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'lib': libId,
-            if (unitRel.isNotEmpty) 'unitRel': unitRel,
-            'hard': hard,
-          }),
+          body: jsonEncode(coverScopeBody(
+            lib: libId,
+            unitRel: unitRel,
+            extra: <String, dynamic>{'hard': hard},
+          )),
         )
         .timeout(const Duration(seconds: 15));
     if (r.statusCode != 200) {

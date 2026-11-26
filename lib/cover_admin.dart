@@ -11,6 +11,38 @@
 library;
 
 import 'http_error_text.dart';
+import 'multi_server.dart' show normalizeUnitRel;
+
+/// 封面接口（upload / restore / clear）请求体的唯一拼装口。
+///
+/// 作用域字段只有这一对：`lib`（封面文件所在的**基础库** id）与非空的
+/// `unitRel`（表示单元库封面，指针落在服务端的 `unit-covers.json`）。
+/// 此前这四行在三个文件里各写一遍：
+///
+/// ```
+/// cover_upload.uploadCoverBytes   {'lib': libId, if (unitRel.isNotEmpty) 'unitRel': unitRel, 'data': ...}
+/// cover_history.restoreCoverVersion 同上（+ v / e）
+/// cover_history.clearCustomCover    同上（+ hard）
+/// ```
+///
+/// 三份都是「有 unitRel 才带这个键」，但只要有一份改成「总是带」（空串也带），
+/// 服务端 `unitRelKey('')` 得到空串——`rel` 为空就走进「基础库封面」分支，
+/// 而客户端以为自己在操作单元库：写进 `_cover/current` 的指针会改掉整库封面。
+///
+/// `unitRel` 在这里就归一（与服务端 `unitRelKey` 同一套规则），保证请求里的键、
+/// 服务端落盘的键、客户端 `UnitCoverStore` 的键是同一个字符串。
+Map<String, dynamic> coverScopeBody({
+  required String lib,
+  String unitRel = '',
+  Map<String, dynamic> extra = const <String, dynamic>{},
+}) {
+  final rel = normalizeUnitRel(unitRel);
+  return <String, dynamic>{
+    'lib': lib.trim(),
+    if (rel.isNotEmpty) 'unitRel': rel,
+    ...extra,
+  };
+}
 
 /// 封面作用域：基础库封面（`_cover/`）与单元库封面（`unit-covers.json` 指针）。
 ///

@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'json_num.dart';
 import 'media_path.dart' show isMediaPath;
 import 'rel_path.dart' show normalizeRelPath;
+import 'server_origin.dart';
 import 'text_fold.dart';
 
 class ServerConn {
@@ -241,14 +242,18 @@ class ServerLibraries {
 }
 
 /// 给库/树节点补上来源连接字段，便于切换时路由到正确的 IP。
-Map<String, dynamic> _tag(Map raw, ServerConn s) => {
-      ...Map<String, dynamic>.from(raw),
-      '_serverId': s.id,
-      '_serverBase': s.base,
-      '_serverLabel': s.cardLabel,
-      '_serverUser': s.user,
-      '_serverPass': s.pass,
-    };
+///
+/// 五个键的拼装只有 `server_origin.withServerOrigin` 一处（读取侧是
+/// `serverOriginOf`）：键名此前在一处写、五处读，改名或补 trim 时
+/// 同一条记录在不同页面就会变成两种身份。
+Map<String, dynamic> _tag(Map raw, ServerConn s) => withServerOrigin(
+      raw,
+      id: s.id,
+      base: s.base,
+      label: s.cardLabel,
+      user: s.user,
+      pass: s.pass,
+    );
 
 /// 聚合已注册库：按库 id 去重，先出现的连接优先。
 List<Map<String, dynamic>> mergeRegisteredLibraries(
@@ -382,7 +387,7 @@ Map<String, Map<String, String>> buildBindings({
   final out = <String, Map<String, String>>{};
   for (final l in libraries) {
     final id = '${l['id'] ?? ''}'.trim();
-    final sid = '${l['_serverId'] ?? ''}'.trim();
+    final sid = serverOriginOf(l).id;
     if (id.isEmpty || sid.isEmpty) continue;
     final s = byId[sid];
     if (s == null) continue;

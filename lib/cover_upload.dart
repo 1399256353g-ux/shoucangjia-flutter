@@ -139,11 +139,11 @@ Future<CoverUploadResult> uploadCoverBytes({
     r = await http.post(
       Uri.parse(url),
       headers: {...headers, 'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'lib': libId,
-        if (unitRel.isNotEmpty) 'unitRel': unitRel,
-        'data': base64Encode(bytes),
-      }),
+      body: jsonEncode(coverScopeBody(
+        lib: libId,
+        unitRel: unitRel,
+        extra: <String, dynamic>{'data': base64Encode(bytes)},
+      )),
     );
   } catch (e) {
     return const CoverUploadResult(false, '上传失败：网络异常，请检查连接后重试');

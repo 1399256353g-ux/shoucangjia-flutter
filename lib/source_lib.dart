@@ -2,6 +2,7 @@ import 'disk_name.dart';
 import 'index_prefix.dart';
 import 'media_path.dart';
 import 'rel_path.dart';
+import 'server_origin.dart';
 import 'stable_order.dart';
 
 /// 作者来源词条（J9）的纯逻辑：
@@ -98,16 +99,17 @@ List<BasicLibRef> basicsUnderBase(
     final rel = relUnderBase(basePath, path);
     if (rel.isEmpty) continue;
     final name = diskNameOf(rel, rawName, where: 'BasicLibRef');
+    final origin = serverOriginOf(e);
     out.add(BasicLibRef(
         id: id,
         name: name,
         rel: rel,
         bigId: bigId,
         path: path,
-        firstCover: '${e['fc'] ?? ''}'.trim(),
-        serverId: '${e['_serverId'] ?? ''}'.trim(),
-        serverBase: '${e['_serverBase'] ?? ''}'.trim(),
-        serverLabel: '${e['_serverLabel'] ?? ''}'.trim()));
+        firstCover: firstWorkCoverOf(e),
+        serverId: origin.id,
+        serverBase: origin.base,
+        serverLabel: origin.label));
   }
   // 同一个 rel 下可能有两条基础库记录（服务端重复注册、或两台服务端都
   // 下发了同一个 rel 且都没带连接标识）。同名之间没有次序依据，`List.sort`

@@ -23,6 +23,7 @@ import 'library_badge.dart';
 import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'media_path.dart';
+import 'server_origin.dart';
 import 'stable_order.dart';
 import 'rel_path.dart';
 import 'top_node.dart';
@@ -102,6 +103,23 @@ class UnitLibrary {
   /// 整棵子树的基础库数量。
   int get basicCount =>
       basics.length + children.fold(0, (n, c) => n + c.basicCount);
+
+  /// 这张卡片的「代表基础库」——封面文件、鉴权头、索引重建都挂在它身上。
+  ///
+  /// 判定只有这一处：「子树里第一个基础库」。此前同一个表达式写了六遍
+  /// （`unit_library_view` 5 处 + `main` 1 处），其中三处只取 `.id`、三处
+  /// 要整个对象；只要有一处改成「取有封面的那个」，同一张卡就会出现
+  /// 「封面来自 A 库、鉴权用 B 库」——请求打到另一台服务器，必然 404。
+  ///
+  /// 空子树返回 null，由调用方决定显不显示封面按钮。
+  BasicLib? get coverLib {
+    if (basics.isNotEmpty) return basics.first;
+    for (final c in children) {
+      final hit = c.coverLib;
+      if (hit != null) return hit;
+    }
+    return null;
+  }
 
   bool get isEmpty => basicCount == 0;
 
@@ -431,6 +449,7 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
     }
     if (rel.isEmpty) return;
     final name = '${raw['name'] ?? ''}'.trim();
+    final origin = serverOriginOf(raw);
     out.add(LibNode(
       id: '${raw['id'] ?? rel}'.trim(),
       rel: rel,
@@ -439,9 +458,9 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
       coverVersion: coverPointerOf(raw['cover']).version,
       coverExt: coverPointerOf(raw['cover']).ext,
       coverUrl: coverUrlOf(raw['cover']),
-      serverId: '${raw['_serverId'] ?? ''}'.trim(),
-      serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
-      serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
+      serverId: origin.id,
+      serverBase: origin.base,
+      serverLabel: origin.label,
     ));
   }
 

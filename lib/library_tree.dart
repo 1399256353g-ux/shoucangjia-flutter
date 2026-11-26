@@ -1,6 +1,7 @@
 import 'disk_name.dart';
 import 'json_num.dart';
 import 'lib_cover.dart';
+import 'server_origin.dart';
 import 'source_lib.dart';
 
 // 「大库 / 基础库」两级选择模型（纯函数，便于单测）。
@@ -136,6 +137,7 @@ class LibraryTree {
       final id = '${raw['id'] ?? ''}'.trim();
       if (id.isEmpty) continue;
       final relRaw = '${raw['rel'] ?? ''}'.trim();
+      final origin = serverOriginOf(raw);
       basics.add(BasicLib(
         id: id,
         name: diskNameOf(relRaw, '${raw['name'] ?? id}'.trim(),
@@ -147,10 +149,10 @@ class LibraryTree {
         coverVersion: coverPointerOf(raw['cover']).version,
         coverExt: coverPointerOf(raw['cover']).ext,
         crawlerCover: '${raw['cv'] ?? ''}'.trim(),
-        firstCover: '${raw['fc'] ?? ''}'.trim(),
-        serverId: '${raw['_serverId'] ?? ''}'.trim(),
-        serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
-        serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
+        firstCover: firstWorkCoverOf(raw),
+        serverId: origin.id,
+        serverBase: origin.base,
+        serverLabel: origin.label,
       ));
     }
 
@@ -159,6 +161,7 @@ class LibraryTree {
       if (raw is! Map) continue;
       final id = '${raw['id'] ?? ''}'.trim();
       if (id.isEmpty) continue;
+      final origin = serverOriginOf(raw);
       bigs.add(BigLib(
         id: id,
         name: '${raw['name'] ?? id}'.trim(),
@@ -166,9 +169,9 @@ class LibraryTree {
         authors: _num(raw['authors']),
         works: _num(raw['works']),
         basics: basics.where((b) => b.bigId == id).toList(growable: false),
-        serverId: '${raw['_serverId'] ?? ''}'.trim(),
-        serverBase: '${raw['_serverBase'] ?? ''}'.trim(),
-        serverLabel: '${raw['_serverLabel'] ?? ''}'.trim(),
+        serverId: origin.id,
+        serverBase: origin.base,
+        serverLabel: origin.label,
       ));
     }
     if (bigs.isEmpty) return null;

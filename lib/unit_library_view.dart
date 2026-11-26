@@ -548,8 +548,8 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
             itemCount: units.length,
             itemBuilder: (_, i) {
               final u = units[i];
-              final coverLib =
-                  u.allBasics.isNotEmpty ? u.allBasics.first.id : '';
+              // 「代表基础库」只有 `UnitLibrary.coverLib` 一处判定。
+              final coverLib = u.coverLib?.id ?? '';
               // P3：首页卡片＝顶级单元库卡片。只用 owner 设过的封面，
               // 未设则用该顶级单元库的词条色块占位，不再拿作品图冒充库封面。
               // 顶级卡片色块：与设置页/词条同一条链（colorForUnit 已内含
@@ -759,8 +759,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
               itemCount: units.length,
               itemBuilder: (_, i) {
                 final u = units[i];
-                final coverLib =
-                    u.allBasics.isNotEmpty ? u.allBasics.first.id : '';
+                final coverLib = u.coverLib?.id ?? '';
                 return UnitLibraryCard(
                   unit: u,
                   coverUrl: widget.unitCoverOf?.call(u) ?? '',
@@ -996,9 +995,7 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                     headers: widget.headers,
                     fallbackIcon: Icons.folder_copy_outlined,
                     tint: widget.topCard ? widget.fallbackTint : null,
-                    libId: unit.allBasics.isNotEmpty
-                        ? unit.allBasics.first.id
-                        : '',
+                    libId: unit.coverLib?.id ?? '',
                   ),
                 ),
               ),
@@ -1049,9 +1046,7 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
               child: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (widget.onQuickRefresh != null)
                   LibQuickRefreshButton(
-                    libId: unit.allBasics.isNotEmpty
-                        ? unit.allBasics.first.id
-                        : unit.id,
+                    libId: unit.coverLib?.id ?? unit.id,
                     onRefresh: widget.onQuickRefresh,
                   ),
                 if (widget.coverMenu != null)
@@ -1460,8 +1455,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
               itemCount: unit.children.length,
               itemBuilder: (c, i) {
                 final sub = unit.children[i];
-                final coverLib =
-                    sub.allBasics.isNotEmpty ? sub.allBasics.first.id : '';
+                final coverLib = sub.coverLib?.id ?? '';
                 return UnitLibraryCard(
                   unit: sub,
                   coverUrl: unitCoverOf?.call(sub) ?? '',
