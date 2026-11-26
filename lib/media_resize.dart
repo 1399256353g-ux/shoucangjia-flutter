@@ -23,6 +23,37 @@ const int kAvatarImageWidth = 200;
 const int kPlayerImageWidth = 1080;
 
 final RegExp _imageExt = RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false);
+
+/// 查询串里一个 `k=v` 段的解析结果（**读写共用的唯一实现**）。
+///
+/// 此前「这是不是 `w`」「这个宽度能不能用」各写了两遍：
+///  - 写侧 `_queryWithWidth` 里两个闭包 `isWidthKey` / `usable`；
+///  - 读侧 `requestedImageWidth` 循环里又写一遍同样的 `indexOf('=')` + `int.tryParse`。
+///
+/// 两份对同一段字符给出不同结论的时代已经过去，但**只要还留两份就还会分叉**：
+/// 例如哪天写侧允许 `w=480.0`（截断成整数），读侧仍会判「不可用」，于是
+/// 「加了宽度的请求」被同一规则的另一半判成「没加」，原图在缓存里存 14 天。
+///
+/// 规则：键名去空白、忽略大小写等于 `w`；值必须能**整体**解析成正整数。
+({bool isWidthKey, int? width}) widthParamOf(String segment) {
+  final t = segment.trim();
+  final eq = t.indexOf('=');
+  final key = (eq < 0 ? t : t.substring(0, eq)).trim().toLowerCase();
+  if (key != 'w') return (isWidthKey: false, width: null);
+  if (eq < 0) return (isWidthKey: true, width: null);
+  final n = int.tryParse(t.substring(eq + 1).trim());
+  return (isWidthKey: true, width: (n != null && n > 0) ? n : null);
+}
+
+/// 查询串里第一个可用宽度；没有返回 null（读侧唯一出口）。
+int? widthInQuery(String query) {
+  if (query.isEmpty) return null;
+  for (final t in query.split('&')) {
+    final w = widthParamOf(t).width;
+    if (w != null) return w;
+  }
+  return null;
+}
 /// 查询串 → 「带上本次宽度」的查询串（**唯一实现**）。
 ///
 /// 旧写法是 `RegExp(r'(?:^|&)w=\d+(?:&|$)')`，只认「半角 `w=` + 至少一位数字」。
@@ -41,17 +72,9 @@ final RegExp _imageExt = RegExp(r'\.(jpe?g|png|webp)$', caseSensitive: false);
 String _queryWithWidth(String query, int width) {
   if (query.isEmpty) return 'w=$width';
   final parts = query.split('&');
-  bool isWidthKey(String t) {
-    final eq = t.indexOf('=');
-    return (eq < 0 ? t : t.substring(0, eq)).trim().toLowerCase() == 'w';
-  }
-
-  bool usable(String t) {
-    final eq = t.indexOf('=');
-    if (eq < 0) return false;
-    final n = int.tryParse(t.substring(eq + 1).trim());
-    return n != null && n > 0;
-  }
+  // 键名与值都交给 [widthParamOf]（读写同一个实现）。
+  bool isWidthKey(String t) => widthParamOf(t).isWidthKey;
+  bool usable(String t) => widthParamOf(t).width != null;
 
   final widthIdx = <int>[];
   for (var i = 0; i < parts.length; i++) {
@@ -99,15 +122,9 @@ int? requestedImageWidth(String raw) {
   // 一遍「先找 `#`、截断、再在截断结果里找 `?`」，与写侧 `withImageWidth`
   // 是第二份。两份一起改才不会出现「写的时候认、读的时候不认」。
   final query = splitMediaSuffix(url).query;
-  if (query.isEmpty) return null;
-  for (final t in query.split('&')) {
-    final eq = t.indexOf('=');
-    if (eq < 0) continue;
-    if (t.substring(0, eq).trim().toLowerCase() != 'w') continue;
-    final n = int.tryParse(t.substring(eq + 1).trim());
-    if (n != null && n > 0) return n;
-  }
-  return null;
+  // 键名/值的判定走 [widthInQuery]（与写侧 `_queryWithWidth` 共用
+  // `widthParamOf`）。此前这里是同一段 `indexOf('=')` + `tryParse` 的第二份。
+  return widthInQuery(query);
 }
 
 /// 只给「图片静态路径」加 `w=`：

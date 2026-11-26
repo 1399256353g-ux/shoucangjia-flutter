@@ -141,7 +141,13 @@ import 'unit_fraction.dart';
 
 /// `encodeMediaPath` 的唯一实现在 `media_path.dart`；main.dart 继续转发，
 /// 免得既有 import 点（含测试）全部改路径。
-export 'media_path.dart' show encodeMediaPath, isApiMediaPath, isAbsoluteMediaUrl;
+export 'media_path.dart'
+    show
+        encodeMediaPath,
+        isApiMediaPath,
+        isAbsoluteMediaUrl,
+        isProtocolRelativeUrl,
+        resolveProtocolRelative;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -301,6 +307,12 @@ class Cfg {
     final l = lib ?? this.lib;
     final path = p.trim();
     if (path.isEmpty) return path;
+    // 网络地址（带协议的绝对地址 / 协议相对的 `//cdn/x.jpg`）都不补库前缀。
+    // 协议相对地址在这里就按当前库的服务器协议补全：`mediaUrl` 会再前置
+    // `baseFor`，不补就会拼出 `http://nas:8090//cdn/x.jpg`。
+    if (isProtocolRelativeUrl(path)) {
+      return resolveProtocolRelative(baseFor(l), path);
+    }
     if (isAbsoluteMediaUrl(path)) return path;
     // 服务端接口地址（`/api/thumb/<lib>/<id>` 等）不是媒体文件：
     // 扫描器会把这类地址直接写进作品的 `th`，若再套 `/media/<lib>/` 就变成

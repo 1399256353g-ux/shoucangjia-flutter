@@ -38,6 +38,44 @@ bool isAbsoluteMediaUrl(String path) {
   return p.startsWith('http://') || p.startsWith('https://');
 }
 
+/// **协议相对**地址（`//cdn.example.com/x.jpg`）？
+///
+/// 浏览器地址栏与部分 CDN 会把同域不同协议的外链写成这样。它和
+/// [isAbsoluteMediaUrl] 是**两件事**：前者没写协议、后者写了。此前只判了后者，
+/// 于是协议相对地址被当成库内相对路径补齐：
+///
+/// ```
+/// isAbsoluteMediaUrl('//cdn/x.jpg')            -> false        ← 实测
+/// libraryMediaPath('lib', '//cdn/x.jpg')       -> '/media/lib/cdn/x.jpg'  ← 实测
+/// ```
+///
+/// 服务端按这个路径找不到文件，爬虫封面永远 404、卡片只剩底色。判定单独一个
+/// 出口，拼地址时统一由 [resolveProtocolRelative] 补协议——**不要**各处
+/// `startsWith('//')`。
+bool isProtocolRelativeUrl(String path) {
+  final p = path.trim();
+  return p.length > 2 && p.startsWith('//');
+}
+
+/// 网络地址（绝对 或 协议相对）：调用方不应再补 `/media/<lib>/` 前缀。
+bool isNetworkMediaUrl(String path) =>
+    isAbsoluteMediaUrl(path) || isProtocolRelativeUrl(path);
+
+/// 把协议相对地址补成绝对地址：协议取自 [base]（解析不出时回落 `https`）。
+///
+/// `//cdn/x.jpg` + `http://nas:8090` → `http://cdn/x.jpg`。
+/// 非协议相对地址原样返回（幂等），调用方可以无条件调用。
+String resolveProtocolRelative(String base, String path) {
+  final p = path.trim();
+  if (!isProtocolRelativeUrl(p)) return p;
+  // 只取协议名，而且**必须带 `://`**：`nas:8090` 里的 `nas:` 是主机名而不是
+  // 协议（只判 `^([A-Za-z]+):` 会把它当成协议，拼出 `nas://cdn/x.jpg`——
+  // 语法合法、永远连不上）。取不到就回落 `https`。
+  final m = RegExp(r'^([A-Za-z][A-Za-z0-9+.-]*)://').firstMatch(base.trim());
+  final scheme = (m?.group(1) ?? 'https').toLowerCase();
+  return '$scheme:$p';
+}
+
 /// 服务端**接口**地址（`/api/thumb/<lib>/<id>` 等），不是媒体文件。
 ///
 /// 扫描器会把这类地址写进作品的 `th`/`fc`，若再套 `/media/<lib>/` 就变成

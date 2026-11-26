@@ -172,7 +172,11 @@ String libraryMediaPath(String lib, String path) {
   // 绝对地址是自描述的：爬虫封面（`cv`）可能直接是 `http(s)://…` 的外链。
   // 再补 `/media/<lib>/` 会拼出 `…/media/lib/http://cdn/x.jpg`，服务端把
   // `http:` 当库内子目录，必然 404。绝对地址原样返回。
-  if (isAbsoluteMediaUrl(p)) return p;
+  //
+  // 协议相对地址（`//cdn/x.jpg`）同理——旧写法只判了带协议的，于是它被当成
+  // 库内相对路径补成 `/media/lib/cdn/x.jpg`，爬虫封面永远 404。判定走
+  // `media_path.isNetworkMediaUrl`（绝对 + 协议相对的唯一出口）。
+  if (isNetworkMediaUrl(p)) return p;
   // 服务端接口地址（`th` 被扫描器写成 `/api/thumb/<lib>/<id>`）：它不是媒体
   // 文件，套 `/media/<lib>/` 会变成 `/media/lib-019/api/thumb/...`，服务端把
   // `api` 当库内子目录 → 404，卡片就永远只有底色。原样返回，交给
@@ -197,7 +201,9 @@ String absoluteMediaUrl(
   required String path,
 }) {
   final b = baseForJoin(base);
-  final p = libraryMediaPath(lib, path);
+  // 协议相对地址先按服务器协议补全，再走绝对地址分支（那段负责路径转义）；
+  // 否则 `'$b$p'` 会拼出 `http://nas:8090//cdn/x.jpg`。
+  final p = resolveProtocolRelative(b, libraryMediaPath(lib, path));
   if (b.isEmpty || p.isEmpty) return '';
   // 绝对地址自带前缀（不补服务器）但**路径部分仍然要转义**：`encodeMediaPath`
   // 对绝对地址一律原样返回是为了避免重复编码，所以这里只把路径段交给它，
