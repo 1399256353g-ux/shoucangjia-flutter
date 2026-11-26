@@ -57,6 +57,7 @@ import 'author_big_nodes.dart';
 import 'author_drag.dart';
 import 'author_merge.dart';
 import 'author_mount_sheet.dart';
+import 'author_dir_filter.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
 import 'author_avatar_view.dart';
@@ -16645,6 +16646,11 @@ class _AuthorPageState extends State<AuthorPage> {
   /// owner 2026-11-24：顶级单元库（＝媒体库根）作为一级筛选维度。
   /// 只有该作者的作品跨越多于一个顶级单元库时才出现这一行。
   String topFilter = '';
+  /// owner 2026-11-27：按挂载的作者文件夹筛选。
+  /// 取值为 `<库>\u0001<@目录>`（[AuthorDirOption.key]）；空串 = 全部目录。
+  String dirFilter = '';
+  /// 目录筛选项缓存：只在 `_refreshFilter` 重算，build 不重扫作品。
+  List<({AuthorDirOption option, int count})> _dirChoices = const [];
   List filteredWorks = [];
   Map<String, int> typeCounts = {};
   String primaryLib = '';
@@ -17041,6 +17047,8 @@ class _AuthorPageState extends State<AuthorPage> {
     // 重新拉取时来源筛选归零：库可能增减，旧选择不一定还成立。
     libFilter = '';
     topFilter = '';
+    // 同上：目录可能被合并/拆分/移动，旧的目录选择不一定还存在。
+    dirFilter = '';
     // 各库作品先分别收齐，再统一交给 mergeAuthorWorks 合并。
     //
     // 之前这里是「边拉边用 seen 集合去重」——与 author_merge.dart 里那份
@@ -17386,6 +17394,17 @@ class _AuthorPageState extends State<AuthorPage> {
       ];
     }
     // 再按来源库（跨库同名作者合并后的筛选）。
+    // owner 2026-11-27：目录筛选放在来源库之前——目录本身已带库信息，
+    // 先按目录收敛后剩下的来源库选项只会是同一批。
+    final dir = _dirFilterOption;
+    if (dir != null) {
+      scoped = filterWorksByAuthorDir(
+        scoped,
+        lib: dir.lib,
+        authorDir: dir.authorDir,
+        fallbackLib: primaryLib,
+      );
+    }
     final byLib = filterWorksByLib(
       scoped,
       lib: libFilter,
@@ -17393,6 +17412,35 @@ class _AuthorPageState extends State<AuthorPage> {
     );
     filteredWorks = filterWorksByType(byLib, typeFilter);
     typeCounts = workTypeCounts(works);
+    // 目录筛选项与上面同一轮重算：作品集合变了（合并/拆分/刷新）才重扫一次。
+    final dirs = authorDirOptionsOfWorks(works, fallbackLib: primaryLib);
+    _dirChoices = dirs.length > 1 ? dirs : const [];
+  }
+
+  /// 当前选中的目录筛选项（未选/已失效 → null）。
+  AuthorDirOption? get _dirFilterOption {
+    final want = dirFilter.trim();
+    if (want.isEmpty) return null;
+    for (final o in _dirChoices) {
+      if (o.option.key == want) return o.option;
+    }
+    return null;
+  }
+
+  /// 是否横跨多个库（决定目录词条带不带库名前缀）。
+  bool get _dirsSpanLibs {
+    final libs = <String>{};
+    for (final o in _dirChoices) {
+      libs.add(o.option.lib);
+    }
+    return libs.length > 1;
+  }
+
+  /// 目录词条文案：`[库名 · ]@目录 条数`。
+  String _dirLabel(AuthorDirOption o, int count, {required bool showLib}) {
+    if (!showLib) return '${o.authorDir} $count';
+    final lib = o.lib.isEmpty ? '未知库' : libLabel(o.lib);
+    return '$lib · ${o.authorDir} $count';
   }
 
   /// 作品 → 所属顶级单元库 id；拿不到返回空串（不猜）。
@@ -17463,6 +17511,19 @@ class _AuthorPageState extends State<AuthorPage> {
     if (libFilter == lib) return;
     setState(() {
       libFilter = lib;
+      _refreshFilter();
+    });
+  }
+
+  /// 目录筛选（库 + `@目录`）：空串 = 全部目录。
+  ///
+  /// 换目录时把来源库选择归零：目录已经限定了库，留着旧的库选择会出现
+  /// 「点了目录还是空列表」而两个选中词条互相矛盾。
+  void _setDirFilter(String key) {
+    if (dirFilter == key) return;
+    setState(() {
+      dirFilter = key;
+      libFilter = '';
       _refreshFilter();
     });
   }
@@ -17743,6 +17804,43 @@ class _AuthorPageState extends State<AuthorPage> {
                               selected: topFilter == o.key,
                               showCheckmark: false,
                               onSelected: (_) => _setTopFilter(o.key)),
+                        ),
+                      ),
+                  ],
+                ),
+              // owner 2026-11-27：按挂载的作者文件夹筛选。
+              //
+              // 合并后的作者把各目录的作品并成一列，「这条来自哪个目录」
+              // 界面上原本没有出口。作者只挂一处（常态）时整行不出现。
+              if (_dirChoices.isNotEmpty)
+                HorizontalChipBar(
+                  key: const ValueKey('author-dir-filter'),
+                  height: 42,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  children: [
+                    Center(
+                      child: FilterChip(
+                          label: Text('全部文件夹 ${works.length}',
+                              style: const TextStyle(fontSize: 12)),
+                          selected: _dirFilterOption == null,
+                          showCheckmark: false,
+                          onSelected: (_) => _setDirFilter('')),
+                    ),
+                    for (final o in _dirChoices)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Center(
+                          child: FilterChip(
+                              key: ValueKey('author-dir-${o.option.key}'),
+                              // 多库时才带库名前缀：两个库各有一个同名
+                              // `@目录` 时，两条一模一样的词条点哪个都像错的。
+                              label: Text(
+                                  _dirLabel(o.option, o.count,
+                                      showLib: _dirsSpanLibs),
+                                  style: const TextStyle(fontSize: 12)),
+                              selected: dirFilter == o.option.key,
+                              showCheckmark: false,
+                              onSelected: (_) => _setDirFilter(o.option.key)),
                         ),
                       ),
                   ],

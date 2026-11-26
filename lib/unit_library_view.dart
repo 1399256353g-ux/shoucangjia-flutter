@@ -635,11 +635,22 @@ class StarredUnitsPage extends StatefulWidget {
 class _StarredUnitsPageState extends State<StarredUnitsPage> {
   late List<UnitLibrary> units = List<UnitLibrary>.from(widget.units);
 
+  /// 星标页网格自己的约束（0.9.313）。
+  ///
+  /// 此前预热拿 `MediaQuery.size`（整个窗口）当网格可用空间，而网格上压着
+  /// AppBar：按窗口算出的张数偏多，末行预热的是屏幕外那张封面。现在几何
+  /// 与排布同源——网格自己的 `LayoutBuilder`，尺寸未到时不预热。
+  Size? _gridViewport;
+
   @override
   void initState() {
     super.initState();
     // 0.9.32：星标页首屏封面预热。网格几何与主页单元库卡片一致，
     // 只预热一屏，provider/鉴权头与 `UnitLibraryCard` 完全相同。
+    _schedulePrefetch();
+  }
+
+  void _schedulePrefetch() {
     WidgetsBinding.instance.addPostFrameCallback((_) => _prefetchCovers());
   }
 
@@ -655,10 +666,14 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
 
   void _prefetchCovers() {
     if (!mounted || units.isEmpty) return;
+    // 尺寸未知（首帧还没经过 `LayoutBuilder`）时先不预热：拿窗口顶替一次
+    // 就再也不会被纠正，多拉的正是屏幕外那一行。
+    final viewport = _gridViewport;
+    if (viewport == null) return;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
     prefetchLibCovers(
-      viewport: mq.size,
+      viewport: viewport,
       grid: kUnitLibGrid,
       padding: kStarredGridPadding,
       decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
@@ -675,6 +690,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
   void _toggle(UnitLibrary u) {
     setState(() => units.removeWhere((e) => e.id == u.id));
     widget.onToggleUnitStar(u);
+    // 少一张卡就少一行预热目标；重算一次，不留指向已移除卡片的请求。
+    _schedulePrefetch();
   }
 
   @override
@@ -693,7 +710,13 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
               ),
             )
           : ScrollDecodeScope(
-              child: GridView.builder(
+              child: LayoutBuilder(builder: (c, cons) {
+                // 网格自己的约束既是排布依据，也是预热的几何来源。
+                if (cons.biggest != _gridViewport) {
+                  _gridViewport = cons.biggest;
+                  _schedulePrefetch();
+                }
+                return GridView.builder(
               padding: kStarredGridPadding,
               gridDelegate: kUnitLibGrid.delegate,
               itemCount: units.length,
@@ -723,7 +746,8 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                       : () => widget.onConfigureUnit!(u),
                 );
               },
-              ),
+                );
+              }),
             ),
     );
   }
@@ -1169,6 +1193,13 @@ class UnitLibraryPage extends StatefulWidget {
 }
 
 class _UnitLibraryPageState extends State<UnitLibraryPage> {
+  /// 本页内容区（AppBar 之下）的可用尺寸（0.9.313）。
+  ///
+  /// 两类卡片都在一个 `ListView` 里（网格 `shrinkWrap`），它们的「首屏」是
+  /// 这块内容区的首屏。此前预热拿 `MediaQuery.size`（整个窗口）——比真实
+  /// 可用高度多出一个 AppBar，算出的张数偏多，末行预热的是屏幕外那张。
+  Size? _pageViewport;
+
   @override
   void initState() {
     super.initState();
@@ -1209,12 +1240,16 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
   void _prefetchCovers() {
     if (!mounted) return;
     final unit = widget.unit;
+    // 尺寸未知（首帧还没经过 `LayoutBuilder`）时不预热：拿窗口顶替一次
+    // 就再也不会被纠正。
+    final viewport = _pageViewport;
+    if (viewport == null) return;
     final mq = MediaQuery.maybeOf(context);
     if (mq == null) return;
 
     // 下级单元库卡片（260 / 1.02）。
     prefetchLibCovers(
-      viewport: mq.size,
+      viewport: viewport,
       grid: kUnitLibGrid,
       padding: kLibGridPadding,
       decodeWidth: kUnitLibGrid.decodeWidth(mq.devicePixelRatio),
@@ -1230,7 +1265,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
 
     // 基础库卡片（220 / 0.92，与 `BasicLibCard` 同一条封面解析）。
     prefetchLibCovers(
-      viewport: mq.size,
+      viewport: viewport,
       grid: kBasicLibGrid,
       padding: kLibGridPadding,
       decodeWidth: kBasicLibGrid.decodeWidth(mq.devicePixelRatio),
@@ -1305,7 +1340,14 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
             onPressed: () => onConfigureUnit(unit),
           ),
       ]),
-      body: ScrollDecodeScope(
+      body: LayoutBuilder(builder: (c, cons) {
+        // 内容区自己的约束即预热几何（`_pageViewport`）：此前拿整窗口，
+        // AppBar 那一截被算成可用空间。
+        if (cons.biggest != _pageViewport) {
+          _pageViewport = cons.biggest;
+          _schedulePrefetch();
+        }
+        return ScrollDecodeScope(
         child: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
@@ -1388,7 +1430,8 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
           ],
         ],
         ),
-      ),
+      );
+      }),
     );
   }
 }

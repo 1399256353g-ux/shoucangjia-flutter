@@ -37,6 +37,7 @@ class AuthorFilterState {
   /// J10 旧维度：基础库/大库（保留以兼容历史数据与测试）。
   final Set<String> basics;
   final Set<String> bigs;
+
   /// L5 新维度：单元库（作者总览/推荐/排行统一按此筛选）。
   final Set<String> units;
 
@@ -170,10 +171,12 @@ class AuthorFilterState {
     Map<String, String> topNames = const {},
   }) {
     final parts = <String>[
-      if (tops.isNotEmpty) _namesPart('顶级节点', tops, topNames),
+      // 0.9.313：界面上不再出现「顶级节点」「大库」这类内部叫法。
+      // 一级 = 每个连接的库根 → 「媒体库」；旧 `bigs` 只剩历史筛选。
+      if (tops.isNotEmpty) _namesPart('媒体库', tops, topNames),
       if (units.isNotEmpty) _namesPart('单元库', units, unitNames),
       if (basics.isNotEmpty) _namesPart('基础库', basics, basicNames),
-      if (bigs.isNotEmpty) _namesPart('媒体库', bigs, bigNames),
+      if (bigs.isNotEmpty) _namesPart('历史分组', bigs, bigNames),
       if (grades.isNotEmpty)
         '等级 ${['S', 'A', 'B', 'C', 'D'].where(grades.contains).join('/')}',
       if (types.isNotEmpty)
@@ -195,8 +198,7 @@ String _namesPart(String label, Set<String> ids, Map<String, String> names) {
 }
 
 /// 把基础库 id/名称/大库 id 组装成节点列表，按 rel/名称稳定排序。
-List<AuthorLibNode> authorLibNodes(
-    Iterable<AuthorLibNode> nodes) {
+List<AuthorLibNode> authorLibNodes(Iterable<AuthorLibNode> nodes) {
   final seen = <String>{};
   final out = <AuthorLibNode>[];
   for (final n in nodes) {

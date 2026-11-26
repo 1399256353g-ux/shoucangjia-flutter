@@ -78,7 +78,7 @@ void main() {
     expect(meta.topIdFor('T9/unknown'), '');
   });
 
-  testWidgets('筛选面板把顶级节点排在最前，选中后收敛', (t) async {
+  testWidgets('筛选面板把媒体库（库根）排在最前，选中后收敛', (t) async {
     AuthorFilterState? out;
     await t.pumpWidget(MaterialApp(
       home: Builder(
@@ -111,9 +111,9 @@ void main() {
     await t.tap(find.text('open'));
     await t.pumpAndSettle();
 
-    expect(find.text('顶级节点（媒体库）'), findsOneWidget);
+    expect(find.text('媒体库'), findsOneWidget);
     // 顶级节点分区排在单元库分区之前
-    final topY = t.getTopLeft(find.text('顶级节点（媒体库）')).dy;
+    final topY = t.getTopLeft(find.text('媒体库')).dy;
     final unitY = t.getTopLeft(find.text('单元库')).dy;
     expect(topY, lessThan(unitY));
 

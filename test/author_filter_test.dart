@@ -259,11 +259,10 @@ void main() {
       expect(g.tops, isEmpty);
     });
 
-    test('摘要优先显示顶级节点，名称缺省回落 id', () {
+    test('摘要优先显示媒体库（库根），名称缺省回落 id', () {
       final f = AuthorFilterState(tops: {'T1', 'T2'});
       // 按「解析后的名称」排序（缺省回落 id），与单元库/基础库口径一致。
-      expect(
-          f.summary(topNames: const {'T1': '甲'}), '顶级节点 T2/甲');
+      expect(f.summary(topNames: const {'T1': '甲'}), '媒体库 T2/甲');
       expect(AuthorFilterState().summary(), '未筛选');
     });
   });

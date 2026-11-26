@@ -62,7 +62,33 @@ class _AuthorFilterSheet extends StatefulWidget {
 }
 
 class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
-  late AuthorFilterState f = widget.initial;
+  late AuthorFilterState f = _migrateLegacyBigs(widget.initial);
+
+  /// 把旧的「大库」选择并进「单元库」维度（0.9.313）。
+  ///
+  /// 背景：`bigs` 是单库时代的维度（服务端 `big_id`），而它的 id 就是第一层
+  /// 单元库 id——同一个节点在两个下拉里各出现一次，名字还一个叫「媒体库
+  /// （旧分组）」、一个叫「单元库」。用户看到两个都能选，选了其中一个另一个
+  /// 仍是未选，以为是两件事。
+  ///
+  /// 现在只有一个维度：面板打开时把仍然有效的旧选择搬进 [units]，
+  /// 搬不动的（节点已从树里消失）留在 `bigs` 里照旧生效——不能因为改名
+  /// 就让一个看不见的条件继续过滤列表。
+  AuthorFilterState _migrateLegacyBigs(AuthorFilterState initial) {
+    final state = initial.copy();
+    if (state.bigs.isEmpty) return state;
+    final knownUnits = {for (final u in widget.units) u.id};
+    final moved = <String>[];
+    for (final id in state.bigs.toList()) {
+      if (!knownUnits.contains(id)) continue;
+      moved.add(id);
+    }
+    for (final id in moved) {
+      state.bigs.remove(id);
+      state.units.add(id);
+    }
+    return state;
+  }
 
   void _toggle(void Function() fn) => setState(fn);
 
@@ -76,8 +102,8 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
             child: Text(title,
-                style: const TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600)),
+                style:
+                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
           ),
           Wrap(spacing: 8, runSpacing: 8, children: chips),
         ],
@@ -111,7 +137,9 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
     ];
     final bigChips = [
       for (final b in widget.bigs)
-        _chip(b.name, f.bigs.contains(b.id), () => f.toggleBig(b.id)),
+        // 已被单元库维度接管的大库不再画一次（同一个节点两个词条）。
+        if (!{for (final u in widget.units) u.id}.contains(b.id))
+          _chip(b.name, f.bigs.contains(b.id), () => f.toggleBig(b.id)),
     ];
     final basicChips = [
       for (final b in widget.basics)
@@ -136,12 +164,10 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
             child: Row(children: [
               const Expanded(
                   child: Text('作者筛选',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold))),
               TextButton.icon(
-                onPressed: f.isActive
-                    ? () => _toggle(f.clear)
-                    : null,
+                onPressed: f.isActive ? () => _toggle(f.clear) : null,
                 icon: const Icon(Icons.filter_alt_off, size: 16),
                 label: const Text('一键清空'),
               ),
@@ -153,9 +179,16 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _section('顶级节点（媒体库）', topChips),
+                  // owner 2026-11-27：「不要使用出现这种不名所以让用户迷惑的
+                  // 文字描述」。旧名「顶级节点（媒体库）」与「媒体库（旧分组）」
+                  // 说的是同一棵树上的两个不同层级，用户无从分辨：
+                  //   一级 = 每个连接的库根 → 「媒体库」
+                  //   二级往下 = 节点文件夹   → 「单元库」
+                  _section('媒体库', topChips),
                   _section('单元库', unitChips),
-                  _section('媒体库（旧分组）', bigChips),
+                  // 旧 `big_id` 分组已并入单元库维度；只有搬不动的历史选择
+                  // （节点已不在树里）还会出现在这里，标题写明它是什么。
+                  _section('其他历史筛选', bigChips),
                   _section('基础库', basicChips),
                   _section('作者等级', gradeChips),
                   _section('作品类型', typeChips),

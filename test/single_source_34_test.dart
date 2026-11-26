@@ -179,8 +179,11 @@ void main() {
         basicNames: {'b1': '库一', 'b2': '库二'},
         bigNames: {'g1': '媒体'},
       );
+      // 0.9.313：一级（每个连接的库根）在界面上就叫「媒体库」，旧 `bigs`
+      // 维度只剩「历史分组」，不再有「顶级节点」「媒体库（旧分组）」两个
+      // 让用户分不清的说法。
       expect(text,
-          '顶级节点 乙/甲 · 单元库 单元 · 基础库 库一/库二 · 媒体库 媒体 · 等级 S/A · 视频');
+          '媒体库 乙/甲 · 单元库 单元 · 基础库 库一/库二 · 历史分组 媒体 · 等级 S/A · 视频');
       // 五次结果必须逐字相同（旧写法裸 sort，同名之间会换位）
       for (var i = 0; i < 5; i++) {
         expect(
@@ -196,7 +199,7 @@ void main() {
 
     test('名字缺失回落 id，空筛选写「未筛选」', () {
       final st = AuthorFilterState(tops: {'zzz'}, units: {'aaa'});
-      expect(st.summary(), '顶级节点 zzz · 单元库 aaa');
+      expect(st.summary(), '媒体库 zzz · 单元库 aaa');
       expect(AuthorFilterState().summary(), '未筛选');
     });
   });
