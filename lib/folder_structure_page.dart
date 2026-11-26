@@ -15,7 +15,9 @@ import 'error_text.dart';
 import 'load_error_view.dart';
 
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
-/// 供 owner 指定「节点文件夹」（单元库）。顶级单元库＝当前媒体库根（名称取根目录名）。
+/// 供 owner 指定「节点文件夹」（单元库）。
+/// 术语：本页（结构设置）是唯一使用「顶级单元库」的地方，它指当前媒体库的根节点，
+/// 名称取该媒体库根目录名；界面其它位置一律称「媒体库」。
 ///
 /// 数据：`GET /api/folders` → { root, top:{name,rel}, folders:[{rel,name,depth,authors,isNode,dirs}] }
 /// 保存：`POST /api/nodes` body {nodes:[rel,...]}
@@ -627,7 +629,9 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
                         child: Text(
-                            '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。顶级单元库是当前媒体库的根节点，名称取该媒体库根目录名；接入多个媒体库时，每个库各有自己的顶级单元库。'
+                            '点目录行或右侧开关，把目录设为「节点文件夹」（单元库）。'
+                            '顶级单元库＝当前媒体库的根节点，名称取该媒体库根目录名；'
+                            '接入多个媒体库时，每个库各有自己的顶级单元库。'
                             '「基础库」目录固定排除，不能设为节点。',
                             style: TextStyle(fontSize: 11, color: Colors.grey)),
                       ),

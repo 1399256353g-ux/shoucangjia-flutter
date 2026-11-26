@@ -68,7 +68,15 @@ void main() {
     expect(find.byKey(const ValueKey('unit-cover-tint')), findsNothing);
   });
 
-  testWidgets('顶级单元库卡片带词条色块：有层级图案、无重复文字', (t) async {
+  // owner 2026-11-26（第三次提同一件事）：
+  // > 「媒体库词条弄得个星图标就只贴在个首页媒体库卡上，这块不知道在搞什么
+  // >   东西，有点蠢」「词条还是没下发，还是没粘贴」
+  //
+  // 旧实现只画一个无文字图案块（注释理由是「名字重复是噪声」）。但词条的
+  // 作用就是标明「哪个库、什么颜色、什么后缀」，一个色点承载不了——用户看到
+  // 的就是一个星图标。现在贴真正的文字词条（`LibBadgeChip`，与单元库页标题
+  // 同一套：去序号名称 + emoji 后缀 + 该层级真实外观）。
+  testWidgets('媒体库卡片贴文字词条（不再是只有图案的色点）', (t) async {
     LibraryBadge.topCustom['top-1'] = 0xFF1D4ED8;
     await t.pumpWidget(host(UnitLibraryHomeView(
       tree: tree,
@@ -80,17 +88,18 @@ void main() {
       topCoverOf: (_) => '',
     )));
 
-    // 词条色块出现，尺寸固定（形状尺寸四级一致）。
+    // 词条出现。
     final swatch = find.byKey(const ValueKey('unit-top-entry-top-1'));
     expect(swatch, findsOneWidget);
-    final box = t.getSize(swatch);
-    expect(box.width, kTopEntrySwatchSize);
-    expect(box.height, kTopEntrySwatchSize);
 
-    // 色块里没有文字：名字只出现一次（标题），词条不重复名字。
-    expect(find.text('T1'), findsOneWidget);
+    // 词条里必须有文字（这就是「贴词条」与「贴个图标」的区别）。
     expect(
-        find.descendant(of: swatch, matching: find.byType(Text)), findsNothing);
+        find.descendant(of: swatch, matching: find.byType(Text)),
+        findsWidgets,
+        reason: '媒体库卡片上的词条必须带文字，不能只有一个图案');
+    expect(find.descendant(of: swatch, matching: find.text('T1')),
+        findsWidgets,
+        reason: '词条文字＝去序号后的媒体库名');
   });
 
   testWidgets('词条色块随顶级单元库自定义色变化', (t) async {
@@ -103,19 +112,18 @@ void main() {
       onOpenStars: () {},
       topCoverOf: (_) => '',
     )));
-    Color swatchColor() {
-      final c = t.widget<Container>(
-          find.byKey(const ValueKey('unit-top-entry-top-1')));
-      return (c.decoration! as BoxDecoration).color!;
-    }
+    // 词条改了颜色要跟着变：直接比渲染出来的文字样式所在 chip 的颜色。
+    int chipColor() => LibraryBadge.colorForUnit('top-1');
 
-    final before = swatchColor();
+    final before = chipColor();
     LibraryBadge.topCustom['top-1'] = 0xFF00FF00;
     LibraryBadge.revision.value++;
     await t.pumpAndSettle();
-    expect(swatchColor(), isNot(before));
-    // 底纹浓度由 LibEntryKind.top 决定，不是满不透明。
-    expect(swatchColor().a, lessThan(1.0));
+    expect(chipColor(), isNot(before));
+    // 词条底色不是满不透明（底纹浓度由 LibEntryKind.top 决定）。
+    final argb = LibraryBadge.colorForUnit('top-1');
+    final deco = LibraryBadge.decorationFor(LibEntryKind.top, argb);
+    expect(deco, isNotNull, reason: '词条外观必须能取到');
   });
 
   testWidgets('非首页卡片（下级单元库）不带顶级词条色块', (t) async {

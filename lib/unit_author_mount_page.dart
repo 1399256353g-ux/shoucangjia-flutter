@@ -74,7 +74,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     if (_unitRel.trim().isEmpty) {
       setState(() {
         loading = false;
-        err = '顶级单元库没有可挂载的作者文件夹';
+        err = '媒体库没有可挂载的作者文件夹';
       });
       return;
     }

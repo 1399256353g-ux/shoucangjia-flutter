@@ -148,7 +148,7 @@ class LibraryBadge {
 
   static void _bump() => revision.value++;
 
-  /// P1：顶级单元库（媒体库根）词条色。与单元库/基础库的自定义色分开存：
+  /// P1：媒体库词条色。与单元库/基础库的自定义色分开存：
   /// 顶级色是**向下继承**的默认值，单元库/基础库自己设了色才覆盖它。
   static const String topPrefsKey = 'lib_top_colors_v1';
 
@@ -266,7 +266,7 @@ class LibraryBadge {
   /// 用户在设置里为某个库自定义的颜色；id -> ARGB。
   static final Map<String, int> custom = <String, int>{};
 
-  /// 顶级单元库（媒体库根）自定义色；topId -> ARGB。
+  /// 媒体库自定义色；topId -> ARGB。
   static final Map<String, int> topCustom = <String, int>{};
 
   /// P1：基础库（末梢）词条自定义色；basicId -> ARGB。

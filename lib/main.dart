@@ -1844,7 +1844,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   /// 0.9.9：词条配色按**单元库**（作者来源词条）配置，不再按旧注册库。
   List<UnitLibrary> units = const [];
 
-  /// P1：顶级单元库（媒体库根）与末梢基础库各一组，配合向下继承。
+  /// P1：媒体库与末梢基础库各一组，配合向下继承。
   List<UnitLibrary> tops = const [];
   List<BasicLib> basics = const [];
 
@@ -1899,7 +1899,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             if (u.id != 'secret') ...u.basics
         ];
         // P2：按顶级单元库分组（结构归组）。子单元库顺序按树深度优先；
-        // 不属于任何顶级单元库的单元库归入「其它」。
+        // 不属于任何媒体库的单元库归入「其它」。
         unitsByTop.clear();
         basicsByTop.clear();
         final grouped = <String>{};
@@ -1962,7 +1962,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Text(
-                        '词条按三层组织：顶级单元库（媒体库根）设色后向下继承给其下所有'
+                        '词条按三层组织：媒体库设色后向下继承给其下所有'
                         '单元库/基础库；单元库可各自覆盖；基础库自己的颜色优先级最高。'
                         '分发规则：只有末梢单元库（没有下级单元库）的设色会向下分发，'
                         '非末梢单元库的设色只作用于本层，作品/作者仍取末梢或继承色。'
@@ -1973,7 +1973,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   _entryStyleSection(),
                   const SizedBox(height: 8),
                   const _SectionHeader('按媒体库设置词条色'),
-                  // P2：按顶级单元库分类——每个媒体库根一节，展开就是它的
+                  // P2：按媒体库分类——每个媒体库根一节，展开就是它的
                   // 单元库与基础库；不依赖任何名称文本，只按树结构归组。
                   for (final t in tops) _topSection(t),
                   if (tops.isEmpty && units.isEmpty)
@@ -1984,7 +1984,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                           style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ),
                   if (otherUnits.isNotEmpty || otherBasics.isNotEmpty) ...[
-                    const _SectionHeader('其它（不属于任何顶级单元库）'),
+                    const _SectionHeader('其它（不属于任何媒体库）'),
                     for (final u in otherUnits) _libTile(u),
                     for (final b in otherBasics) _basicTile(b),
                   ],
@@ -1996,7 +1996,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   /// P2：一个顶级单元库的分组——它自己的词条、下级单元库、基础库。
   Widget _entryStyleSection() {
     const labels = <LibEntryKind, String>{
-      LibEntryKind.top: '顶级单元库（媒体库根）',
+      LibEntryKind.top: '媒体库',
       LibEntryKind.unit: '单元库',
       LibEntryKind.basic: '基础库（末梢）',
       LibEntryKind.other: '其它（作者卡等）',
@@ -2163,7 +2163,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('顶级单元库 · ${LibraryBadge.stripIndex(name)}',
+                    Text('媒体库 · ${LibraryBadge.stripIndex(name)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -4126,14 +4126,14 @@ class CustomizationHubPage extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.sell_outlined),
           title: const Text('库词条配色'),
-          subtitle: const Text('按顶级单元库分类 · 向下继承 · 末梢才分发'),
+          subtitle: const Text('按媒体库分类 · 向下继承 · 末梢才分发'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const LibraryBadgeColorsPage())),
         ),
         ListTile(
           leading: const Icon(Icons.workspaces_outline),
           title: const Text('库角标'),
-          subtitle: const Text('顶级单元库 / 单元库 / 基础库的图案与颜色 · 立即生效'),
+          subtitle: const Text('媒体库 / 单元库 / 基础库的图案与颜色 · 立即生效'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const CornerBadgeSettingsPage())),
         ),
@@ -4627,7 +4627,7 @@ class CornerBadgeSettingsPage extends StatefulWidget {
 
 class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
   static const _kindLabels = <LibBadgeKind, String>{
-    LibBadgeKind.top: '顶级单元库（媒体库根）',
+    LibBadgeKind.top: '媒体库',
     LibBadgeKind.unit: '单元库（中间层）',
     LibBadgeKind.basic: '基础库（末梢）',
     LibBadgeKind.other: '其它（非库语境）',
