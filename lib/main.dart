@@ -7176,12 +7176,16 @@ class _RankPageState extends State<RankPage> {
     if (!mounted) return;
     final visibleRows = _visibleRows;
     if (visibleRows.isEmpty) return;
+    // 列表自己的高度（`_listViewportHeight`），不是窗口：上方还有周期条
+    // 与说明行，按窗口算会把屏幕外的一行也预热进来。首帧前不预热。
+    final viewportHeight = _listViewportHeight;
+    if (viewportHeight == null) return;
     final mq = MediaQuery.of(context);
     // 行步进来自尺寸表：此前这里用 `firstScreenRowCount` 的默认 72 行高，
     // 实测 `AuthorRankTile` 是 67 + 1dp 分隔线 = 68 —— 预热多算约 7%，
     // 最后一行取的是屏幕外的头像。
     final n = firstScreenRowCount(
-        viewportHeight: mq.size.height, rowExtent: kAuthorRankRowExtent);
+        viewportHeight: viewportHeight, rowExtent: kAuthorRankRowExtent);
     if (n <= 0) return;
     // 行库：榜单「全部」时按该行自己的库，选了具体库时一律用选中库。
     String libOf(Map e) =>
@@ -7198,6 +7202,18 @@ class _RankPageState extends State<RankPage> {
       headersOf: cfg.headersFor,
     );
   }
+
+  /// 榜单列表自己的可用高度（0.9.300）。
+  ///
+  /// 此前预热用 `MediaQuery.size.height`（整窗口），而列表上压着 AppBar +
+  /// 周期条（46）+ 说明行（约 24）：按窗口算出的行数偏多，末行预热的是
+  /// 屏幕外那张头像。高度现在来自列表自己的 `LayoutBuilder`。
+  /// 榜单列表自己的可用高度（0.9.300）。
+  ///
+  /// 此前预热用 `MediaQuery.size.height`（整窗口），而列表上压着 AppBar +
+  /// 周期条（46）+ 说明行（约 24）：按窗口算出的行数偏多，末行预热的是
+  /// 屏幕外那张头像。高度现在来自列表自己的 `LayoutBuilder`。
+  double? _listViewportHeight;
 
   Map<String, dynamic> _rowMap(dynamic e) =>
       e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{};
@@ -7302,7 +7318,15 @@ class _RankPageState extends State<RankPage> {
         ),
         // owner 2026-11-19：去掉顶部筛选栏，榜单直接展示全部作者。
         Expanded(
-          child: loading
+          // 列表自己的约束即预热几何（`_listViewportHeight`）。
+          child: LayoutBuilder(builder: (context, cons) {
+            if (cons.maxHeight != _listViewportHeight) {
+              _listViewportHeight = cons.maxHeight;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _prefetchRankAvatars();
+              });
+            }
+            return loading
               ? const Center(child: CircularProgressIndicator())
               : err != null
                   ? LoadErrorView(
@@ -7356,7 +7380,8 @@ class _RankPageState extends State<RankPage> {
                               onTap: name.isEmpty ? null : () => _open(name),
                             );
                           },
-                        ),
+                        );
+          }),
         ),
       ]),
     );
@@ -7792,6 +7817,14 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   final Map<String, LibMeta> metas = {};
   String sort = 'plays';
 
+  /// 作者网格自己的可用尺寸（0.9.300）。
+  ///
+  /// 此前首屏头像预热用 `MediaQuery.size`（整个窗口），而网格上压着
+  /// AppBar + 排序条 + 计数行（约 100dp）——按窗口算出的行数偏多，末行预热
+  /// 的是屏幕外那张头像（白拉一次请求）。尺寸现在来自网格自己的
+  /// `LayoutBuilder`：预热与排布同一份约束。
+  Size? _gridViewport;
+
   Future<void> _loadSort() async {
     try {
       final sp = await SharedPreferences.getInstance();
@@ -8109,11 +8142,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// 不再先出首字母占位再逐张替换。只预热有 `av` 的作者，失败由卡片自己重试。
   void _prefetchAvatars() {
     if (!mounted || _ordered.isEmpty) return;
+    // 网格还没排过（首帧前）不预热：拿窗口尺寸顶替一次就会多拉一整行，
+    // 而且再也不会被纠正。尺寸一到手 LayoutBuilder 会重排预热。
+    final viewport = _gridViewport;
+    if (viewport == null) return;
     final mq = MediaQuery.of(context);
     // 几何全部来自 `kAuthorGrid`（与页面 delegate 同一份规格）：此前这里
     // 自己写一遍 150/10/10/170，页面 delegate 再写一遍，改一处就预热到屏幕外。
     final n = kAuthorGrid.prefetchCount(
-      mq.size,
+      viewport,
       // 0.9.292：与网格实际 `padding` 同一常量（`kAuthorGridPagePadding`）。
       padding: kAuthorGridPagePadding,
     );
@@ -8253,7 +8290,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
       ]),
       body: loading
-          ? const WorkGridSkeleton(count: 18)
+          // 作者总览的网格是 `kAuthorGrid`（150 / 间距 10 / 固定行高 170），
+          // 骨架此前按作品网格（180 / 2 / 3:4）铺——加载完成时列数与行高
+          // 一起变，整屏重排。骨架必须与被它盖住的那页同一份几何。
+          ? const WorkGridSkeleton(
+              count: 18, grid: kAuthorGrid, padding: kAuthorGridPagePadding)
           : err != null
               ? LoadErrorView(
                   message: '加载失败：$err',
@@ -8303,13 +8344,24 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                         : Builder(builder: (context) {
                             // 分页渲染：首屏一页（60），滚动到底自动追加；
                             // 卡片固定高度，GridView 自身虚拟化。
-                            return GridView.builder(
-                              controller: _scroll,
-                              padding: kAuthorGridPagePadding,
-                              gridDelegate: kAuthorGrid.delegate,
-                              itemCount: _shownLen,
-                              itemBuilder: (_, i) => _authorCell(_ordered[i]),
-                            );
+                            // 网格自己的约束即预热几何（`_gridViewport`）。
+                            return LayoutBuilder(builder: (context, cons) {
+                              if (cons.biggest != _gridViewport) {
+                                _gridViewport = cons.biggest;
+                                // 帧后发：不在 build 里启动图片请求。
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  if (mounted) _prefetchAvatars();
+                                });
+                              }
+                              return GridView.builder(
+                                controller: _scroll,
+                                padding: kAuthorGridPagePadding,
+                                gridDelegate: kAuthorGrid.delegate,
+                                itemCount: _shownLen,
+                                itemBuilder: (_, i) => _authorCell(_ordered[i]),
+                              );
+                            });
                           }),
                   ),
                 ]),
@@ -17620,18 +17672,46 @@ class SkeletonBlock extends StatelessWidget {
   }
 }
 
-// 网格骨架：与 WorkGrid 相同的网格密度，用于收藏夹/作者页首屏
+// 网格骨架：**与真实网格同一份几何**（0.9.300 · 第七十三批）。
+//
+// 此前这里写死 `EdgeInsets.all(12)` 与 `kWorkGrid`：
+//
+// ```
+// 骨架  GridView(padding: EdgeInsets.all(12),       delegate: kWorkGrid)
+// 真网格 GridView(padding: workGridPadding(context), delegate: kWorkGrid)  ← 竖向安全区
+// ```
+//
+// 手机上有 24–80dp 的竖向安全区，于是「加载完成」那一刻整屏卡片向下跳一截、
+// 列宽也变（all(12) 的左右 12 vs 真网格左右 0 + 安全区），不是渐入而是一次重排。
+// 两处都「各自算得出一个内边距」，所以既不报错也没有第二份实现可对比。
+//
+// 现在骨架屏收两个参数：网格规格与页面内边距，默认值就是作品网格 + 真实网格
+// 用的那个 `workGridPadding`；作者总览页传 `kAuthorGrid`（骨架必须与被它盖住的
+// 那页同一个网格，否则加载完成时列数/行高一起变）。
 class WorkGridSkeleton extends StatelessWidget {
   final int count;
-  const WorkGridSkeleton({super.key, this.count = 18});
+
+  /// 骨架要模仿的网格规格；默认作品网格。
+  final LibGridSpec grid;
+
+  /// 页面内边距；为空时用作品网格的真实内边距（[workGridPadding]）。
+  final EdgeInsets? padding;
+
+  const WorkGridSkeleton({
+    super.key,
+    this.count = 18,
+    this.grid = kWorkGrid,
+    this.padding,
+  });
 
   @override
   Widget build(BuildContext context) {
     return _SkeletonPulse(
       child: GridView.builder(
         physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(12),
-        gridDelegate: kWorkGrid.delegate,
+        // 与 `WorkGrid._buildGrid` 同一个出口：骨架屏不得自己挑内边距。
+        padding: padding ?? workGridPadding(context),
+        gridDelegate: grid.delegate,
         itemCount: count,
         itemBuilder: (_, __) => const SkeletonBlock(radius: BorderRadius.zero),
       ),
@@ -17742,6 +17822,18 @@ class _WorkGridState extends State<WorkGrid> {
 
   /// 已经为哪一份作品列表预热过首屏封面（按列表实例判定，避免每帧重复发起）。
   List<dynamic>? _prefetchedFor;
+
+  /// 网格自己的可用尺寸（0.9.300）。
+  ///
+  /// 此前预热拿 `MediaQuery.size`（整个窗口）：作者主页的网格上面压着
+  /// AppBar + 可折起的信息头 + 几条筛选条，实际可用高度常只有窗口的
+  /// 六成——按窗口算「两屏」就会多预热四成看不见的封面（每张都要真发一次
+  /// 请求），而「算出来多少」和「真实排多少」两处各自都算得通，所以不报错。
+  ///
+  /// 现在尺寸来自网格自己的 `LayoutBuilder`：预热与排布同一份约束。
+  /// 布局阶段只写字段、不 `setState`（与作者页头部测量同一做法）。
+  Size? _gridViewport;
+
   @override
   void initState() {
     super.initState();
@@ -17783,7 +17875,9 @@ class _WorkGridState extends State<WorkGrid> {
     if (!mounted) return;
     final works = widget.works;
     if (works.isEmpty || identical(_prefetchedFor, works)) return;
-    _prefetchedFor = works;
+    // 尺寸未知（首帧还没经过 `LayoutBuilder`）时先不预热，也不记「已预热」：
+    // 否则会用窗口尺寸顶替一次，再也不会被纠正。
+    if (_gridViewport == null) return;    _prefetchedFor = works;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _prefetchFirstScreen();
@@ -17793,6 +17887,10 @@ class _WorkGridState extends State<WorkGrid> {
   void _prefetchFirstScreen() {
     final works = widget.works;
     if (works.isEmpty) return;
+    // 网格尺寸未知（首帧前）不预热：拿窗口尺寸顶替一次就会多拉一整行，
+    // 而且 `_prefetchedFor` 已经记下「这份列表预热过了」，再也不会被纠正。
+    final viewport = _gridViewport;
+    if (viewport == null) return;
     final mq = MediaQuery.of(context);
     // 0.9.288：整条链只有 `work_card_prefetch.prefetchWorkCovers` 一处
     // （与 `basic_lib_page` 共用）。本网格只负责「取哪些作品」与「按作品
@@ -17803,7 +17901,9 @@ class _WorkGridState extends State<WorkGrid> {
       // `workGridPadding`）：此前这里写 `EdgeInsets.zero`，而网格实际拿到
       // 的是 `ScrollView` 自补安全区后的那一份——首屏行数多算，末行预热
       // 的是屏幕外那张封面。
-      viewport: mq.size,
+      // 网格自己的尺寸，不是窗口尺寸：作者主页/搜索页的网格上方还有整块
+      // 头部与筛选条，按窗口算会把屏幕外的一整行也预热进来。
+      viewport: viewport,
       grid: kWorkGrid,
       padding: workGridPadding(context),
       devicePixelRatio: mq.devicePixelRatio,
@@ -17864,6 +17964,19 @@ class _WorkGridState extends State<WorkGrid> {
     }
     final total = works.length;
     final shown = _shown > total ? total : _shown;
+    // 网格自己的约束既是排布依据，也是预热的几何来源（`_gridViewport`）。
+    return LayoutBuilder(builder: (context, cons) {
+      final size = cons.biggest;
+      if (size != _gridViewport) {
+        _gridViewport = size;
+        // 首帧尺寸到手后才排预热；这里只登记，帧后执行。
+        _schedulePrefetch();
+      }
+      return _gridContent(context, works, shown);
+    });
+  }
+
+  Widget _gridContent(BuildContext context, List<dynamic> works, int shown) {
     return GridView.builder(
       controller: _scroll,
       // 与 `_prefetchFirstScreen` 的 `padding:` 同一个出口。

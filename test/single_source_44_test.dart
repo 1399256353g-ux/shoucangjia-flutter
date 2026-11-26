@@ -258,10 +258,22 @@ void main() {
       // 作者页 / 作品网格 / 骨架屏都必须转发规格表。
       final main = _code('lib/main.dart');
       expect(RegExp(r'kAuthorGrid\.delegate').hasMatch(main), isTrue);
-      expect(RegExp(r'kWorkGrid\.delegate').allMatches(main).length,
-          greaterThanOrEqualTo(2),
-          reason: 'WorkGrid 与 WorkGridSkeleton 都应转发 kWorkGrid');
-      final page = _code('lib/basic_lib_page.dart');
+      expect(RegExp(r'padding: workGridPadding\(context\)').hasMatch(main),
+          isTrue,
+          reason: '作品网格与骨架屏都读同一个内边距出口');
+      // 0.9.300：骨架屏不再写死 `kWorkGrid`——它改成收一个网格规格
+      // （默认作品网格），因为作者总览页的骨架必须模仿 `kAuthorGrid`，
+      // 否则加载完成时列数与行高一起变。
+      expect(RegExp(r'this\.grid = kWorkGrid').hasMatch(main), isTrue,
+          reason: '骨架屏默认仍转发 kWorkGrid');
+      expect(RegExp(r'gridDelegate: grid\.delegate').hasMatch(main), isTrue,
+          reason: '骨架屏必须转发传入的网格规格');
+      // 骨架屏内部不得再写死内边距：`padding: padding ?? workGridPadding(context)`
+      // 是唯一写法（其它页面自己的 `EdgeInsets.all(12)` 与骨架屏无关）。
+      final skeleton = main.substring(main.indexOf('class WorkGridSkeleton'));
+      final skeletonBody = skeleton.substring(0, skeleton.indexOf('class _AuthorPageSkeleton'));
+      expect(skeletonBody.contains('EdgeInsets.all('), isFalse,
+          reason: '骨架屏不得自己挑内边距（会与真实网格跳一下）');      final page = _code('lib/basic_lib_page.dart');
       expect(RegExp(r'kBasicWorkGrid\.delegate').hasMatch(page), isTrue);
       expect(RegExp(r'kBasicAuthorGrid\.delegate').hasMatch(page), isTrue);
       // 作者卡片与作品卡片的宽高比也不得再次写死。

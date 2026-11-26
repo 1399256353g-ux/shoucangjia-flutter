@@ -138,6 +138,15 @@ class _BasicLibPageState extends State<BasicLibPage>
   /// 「卡片快速刷新」第 4 步：本库索引被重建后，作品/作者都回到第一页重拉。
   late final ValueNotifier<int> _libRev = ValueNotifier<int>(0);
 
+  /// 作品网格 / 作者网格自己的可用尺寸（0.9.300）。
+  ///
+  /// 此前两个预热入口都拿 `MediaQuery.size`（整个窗口）：本页网格上方压着
+  /// TabBar + 搜索框/筛选行，实际可用高度常只有窗口的七成——按窗口算两屏
+  /// 就会多拉一整行看不见的封面/头像。预热的几何必须是网格自己的约束。
+  /// 布局阶段只写字段、不 `setState`（与作者页头部测量同一做法）。
+  Size? _worksViewport;
+  Size? _authorsViewport;
+
   void _onLibDataChanged() {
     final v = LibDataRevision.revisionOf(widget.basic.id);
     if (v == _libRev.value) return;
@@ -466,6 +475,12 @@ class _BasicLibPageState extends State<BasicLibPage>
       _authorSearchBar(),
       Expanded(
         child: LayoutBuilder(builder: (c, cons) {
+          // 作者网格自己的约束即预热几何（`_authorsViewport`）：此前预热拿窗口
+          // 尺寸，而本页上方还有 TabBar 与搜索框，多算一整行。
+          if (cons.biggest != _authorsViewport) {
+            _authorsViewport = cons.biggest;
+            _scheduleAuthorPrefetch();
+          }
           if (shown.isEmpty) {
             return Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -683,12 +698,16 @@ class _BasicLibPageState extends State<BasicLibPage>
     if (!mounted || authors.isEmpty) return;
     final shown = _shownAuthors;
     if (shown.isEmpty) return;
+    // 网格还没排过（首帧）/窗口尺寸未知时不预热：拿窗口尺寸顶替一次就会
+    // 多拉一整行，而且再也不会被纠正。尺寸一到手 LayoutBuilder 会重排预热。
+    final viewport = _authorsViewport;
+    if (viewport == null) return;
     final mq = MediaQuery.of(context);
     final hasIndexBar = authorIndexLetters(_authorShownKeys).length > 1;
     // 几何与 `_authorsView` 的 delegate / padding 同源：只读
-    // `kBasicAuthorGrid` 与 `authorGridPadRight`，不自己挑数字。
+    // `kBasicAuthorGrid` 与 `basicAuthorGridPadding`，不自己挑数字。
     final n = kBasicAuthorGrid.prefetchCount(
-      mq.size,
+      viewport,
       padding: basicAuthorGridPadding(hasIndexBar: hasIndexBar),
     );
     if (n <= 0) return;
@@ -743,31 +762,43 @@ class _BasicLibPageState extends State<BasicLibPage>
   Widget _worksGrid(List<dynamic> filtered) {
     // 滚动时收紧缩略图预取并发（默认 4 → 2），停下立刻恢复。
     return ScrollDecodeScope(
-      child: GridView.builder(
-      controller: _worksScroll,
-      padding: kBasicWorkGridPadding,
-      gridDelegate: kBasicWorkGrid.delegate,
-      itemCount: filtered.length + (loadingMore ? 1 : 0),
-      itemBuilder: (c, i) {
-        if (i >= filtered.length) {
-          return const Center(
-              child: SizedBox(
-                  width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2)));
+      // 网格自己的约束既是排布依据，也是预热的几何来源（`_worksViewport`）。
+      child: LayoutBuilder(builder: (context, cons) {
+        if (cons.biggest != _worksViewport) {
+          _worksViewport = cons.biggest;
+          // 帧后发：不在 build 里启动图片请求。
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _prefetchFirstScreen();
+          });
         }
-        final w = filtered[i];
-        final cover = _coverOf(w);
-        return WorkCard(
-          key: ValueKey('basic-work-${w is Map ? w['id'] : i}'),
-          title: w is Map ? '${w['ti'] ?? ''}' : '',
-          typeLabel: _typeLabel(_workType(w)),
-          coverUrl: cover,
-          headers: widget.headersOf(widget.basic.id),
-          onTap:
-              widget.onPlay == null ? null : () => widget.onPlay!(filtered, i),
+        return GridView.builder(
+          controller: _worksScroll,
+          padding: kBasicWorkGridPadding,
+          gridDelegate: kBasicWorkGrid.delegate,
+          itemCount: filtered.length + (loadingMore ? 1 : 0),
+          itemBuilder: (c, i) {
+            if (i >= filtered.length) {
+              return const Center(
+                  child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2)));
+            }
+            final w = filtered[i];
+            final cover = _coverOf(w);
+            return WorkCard(
+              key: ValueKey('basic-work-${w is Map ? w['id'] : i}'),
+              title: w is Map ? '${w['ti'] ?? ''}' : '',
+              typeLabel: _typeLabel(_workType(w)),
+              coverUrl: cover,
+              headers: widget.headersOf(widget.basic.id),
+              onTap: widget.onPlay == null
+                  ? null
+                  : () => widget.onPlay!(filtered, i),
+            );
+          },
         );
-      },
-      ),
+      }),
     );
   }
 
@@ -787,6 +818,9 @@ class _BasicLibPageState extends State<BasicLibPage>
   /// 因此卡片渲染时直接命中缓存，不再先空白再逐张请求。
   void _prefetchFirstScreen() {
     if (!mounted || works.isEmpty) return;
+    // 同上：尺寸未知（首帧前）不预热，等 `_worksGrid` 的 LayoutBuilder 报尺寸。
+    final viewport = _worksViewport;
+    if (viewport == null) return;
     final mq = MediaQuery.of(context);
     final shown = filtered;
     final headers = widget.headersOf(widget.basic.id);
@@ -795,7 +829,9 @@ class _BasicLibPageState extends State<BasicLibPage>
     // 与「带哪个库的鉴权头」。几何与 `_worksGrid` 的 delegate / padding 同源
     // （`kBasicWorkGrid` + `kBasicWorkGridPadding`）。
     prefetchWorkCovers(
-      viewport: mq.size,
+      // 网格自己的尺寸（`_worksViewport`），不是窗口：上方还有 TabBar 与
+      // 筛选行，按窗口算会把屏幕外的一整行也预热进来。
+      viewport: viewport,
       grid: kBasicWorkGrid,
       padding: kBasicWorkGridPadding,
       devicePixelRatio: mq.devicePixelRatio,
