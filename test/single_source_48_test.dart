@@ -105,7 +105,11 @@ void main() {
   group('作者词条只有一套渲染（0.9.291）', () {
     test('词条绘制只在 author_badge_row，两个调用方都转发', () {
       final row = _code('lib/author_badge_row.dart');
-      expect(row.contains('class BadgeChipWrap'), isTrue);
+      // 0.9.312：`BadgeChipWrap`（不可折叠的那一份）已删除——lib/ 里零调用点，
+      // 只有这条断言还在认它，属于「测试证明一个不存在的 UI」。
+      // 契约意图不变：词条容器只有 author_badge_row 一处。
+      expect(row.contains('class BadgeChipWrap'), isFalse);
+      expect(row.contains('class CollapsibleBadgeWrap'), isTrue);
       expect(row.contains('class BadgeChipSpec'), isTrue);
       expect(row.contains('class AuthorBadgeRow'), isTrue);
       // 唯一画词条的地方：`LibBadgeChip`。
@@ -132,8 +136,7 @@ void main() {
       //   · 这里只允许转发容器（BadgeChipWrap 或 CollapsibleBadgeWrap）
       //   · 不得自己写间距
       //   · 不得自己画 LibBadgeChip
-      final usesContainer = body.contains('BadgeChipWrap(') ||
-          body.contains('CollapsibleBadgeWrap(');
+      final usesContainer = body.contains('CollapsibleBadgeWrap(');
       expect(usesContainer, isTrue,
           reason: 'LibBadges 必须转发 author_badge_row 里的词条行容器');
       expect(body.contains('spacing: 3'), isFalse,

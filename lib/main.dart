@@ -3377,6 +3377,25 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   Map<String, String> get _headers =>
       widget.headers.isEmpty ? cfg.headers : widget.headers;
 
+  /// 按记录所属基础库取鉴权头（0.9.312）。
+  ///
+  /// 从单元库进来时（[widget.headers] 非空）必须**固定用该单元库所属连接**：
+  /// 同一台 NAS 上多个服务端各有一套账号，删除记录只属于当前单元库，
+  /// 按 `cfg.headersFor(lib)` 走会落到「默认注册库」那条连接上——密码不同
+  /// 就是 401，密码相同也只是运气好。只有总览入口（无作用域）才按库路由。
+  Map<String, String> _headersFor(String libId) {
+    if (widget.headers.isNotEmpty) return widget.headers;
+    return cfg.headersFor(libId);
+  }
+
+  /// 作用域内要读的元数据库 id：单元库自己的第一个基础库。
+  ///
+  /// 0.9.312：`LibMeta.load(cfg.lib)` 在多服务端下读的是**默认注册库**那棵树
+  /// ——从另一个服务端的单元库进来时，它给不出这台服务端的基础库→单元库映射，
+  /// 「当前媒体库」词条于是整排消失（记录明明都带 libId）。
+  String get _metaLib =>
+      widget.libId.trim().isNotEmpty ? widget.libId.trim() : cfg.lib;
+
   /// 作者头像索引（`/api/authors.json`）。删除记录的本地媒体通常已被清理，
   /// 服务端下发的记录里就没有 `th`/`cv`；此时按 `deleted_cover.dart` 的规则
   /// 退回作者头像，列表才不会整列「图片不可用」。
@@ -3410,9 +3429,9 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
   /// 拉一次库树，供「顶级单元库」筛选把基础库映射到媒体库根。
   Future<void> _loadMeta() async {
-    if (cfg.base.isEmpty) return;
+    if (_base.isEmpty || _metaLib.isEmpty) return;
     try {
-      final m = await LibMeta.load(cfg.lib);
+      final m = await LibMeta.load(_metaLib);
       if (!mounted) return;
       setState(() => _meta = m);
     } catch (_) {}
@@ -3472,10 +3491,11 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
   /// 拉一次作者索引供预览图兜底；失败不影响列表（只是回落到占位图标）。
   Future<void> _loadAuthorIdx() async {
-    if (cfg.base.isEmpty) return;
+    if (_base.isEmpty) return;
     try {
       final r = await http
-          .get(cfg.u('/api/authors.json'), headers: cfg.headers)
+          .get(Uri.parse(joinApiUrl(_base, '/api/authors.json')),
+              headers: _headers)
           .timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) return;
       final j = jsonOf(r);
@@ -3629,7 +3649,10 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   /// 单击整行：用 `libId`+`workId` 打开作品；作品不在本地索引时给明确提示，
   /// 不再像以前那样把「打开作品」错做成「进作者页」。
   Future<void> _openDeletedWork(DeletedEntry e) async {
-    final uri = deletedWorkUri(cfg.base, e);
+    // 0.9.312：地址必须走该记录所属连接。此前用全局 `cfg.base`——从另一个
+    // 服务端的单元库进来时，请求打到了默认注册库那台机器上，作品明明在本地
+    // 也只会得到 404，界面照样提示「未同步到本地」。
+    final uri = deletedWorkUri(_base, e);
     if (uri == null) {
       _toast(kDeletedNotLocalMessage);
       return;
@@ -3637,7 +3660,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     final lib = e.libId.trim().isEmpty ? cfg.lib : e.libId.trim();
     try {
       final r = await http
-          .get(uri, headers: cfg.headersFor(lib))
+          .get(uri, headers: _headersFor(lib))
           .timeout(const Duration(seconds: 10));
       if (!mounted) return;
       if (r.statusCode == 404) {
@@ -3696,9 +3719,9 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     if (e.libId.trim().isNotEmpty) body['lib'] = e.libId.trim();
     try {
       final r = await http
-          .post(syncRetryUri(cfg.base),
+          .post(syncRetryUri(_base),
               headers: {
-                ...cfg.headers,
+                ..._headersFor(e.libId.trim()),
                 'Content-Type': 'application/json',
               },
               body: jsonEncode(body))

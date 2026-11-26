@@ -23,6 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'error_text.dart';
+import 'author_file_picker.dart';
 import 'http_json.dart';
 import 'load_error_view.dart';
 import 'unit_author_groups.dart';
@@ -138,6 +139,20 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       }
     }
     return f.authorDir;
+  }
+
+  /// 基础库 id → 显示名（分支标题）。
+  ///
+  /// 只在本单元库的基础库表里找；找不到就回落 id——分支标题是导航信息，
+  /// 宁可显示 id 也不要显示空标题。
+  String _libLabelOf(String lib) {
+    for (final b in widget.unit.allBasics) {
+      if (b.id == lib) {
+        final n = b.name.trim();
+        if (n.isNotEmpty) return n;
+      }
+    }
+    return lib;
   }
 
   Future<void> _send(UnitAuthorRequest req) async {
@@ -340,26 +355,31 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
               const SizedBox(height: 8),
               Flexible(
                 child: SingleChildScrollView(
-                  child: Column(children: [
-                    for (final f in available)
-                      CheckboxListTile(
-                        key: ValueKey('uag-pick-${f.key}'),
-                        dense: true,
-                        value: picked.contains(f.key),
-                        title: Text(_labelOf(f),
-                            style: const TextStyle(fontSize: 13)),
-                        subtitle: Text(f.lib,
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.grey)),
-                        onChanged: (v) => setD(() {
-                          if (v == true) {
-                            picked.add(f.key);
-                          } else {
-                            picked.remove(f.key);
-                          }
-                        }),
-                      ),
-                  ]),
+                  // owner 2026-11-27：候选按基础库分叉展开（树枝），
+                  // 不再把几十个库几百个目录平铺成一列。
+                  child: AuthorFilePicker(
+                    leafKeyPrefix: 'uag-pick',
+                    files: available,
+                    picked: picked,
+                    labelOf: _libLabelOf,
+                    subtitleOf: (f) => _labelOf(f) == f.authorDir ? '' : _labelOf(f),
+                    onToggle: (f, on) => setD(() {
+                      if (on) {
+                        picked.add(f.key);
+                      } else {
+                        picked.remove(f.key);
+                      }
+                    }),
+                    onToggleBranch: (branch, on) => setD(() {
+                      for (final f in branch) {
+                        if (on) {
+                          picked.add(f.key);
+                        } else {
+                          picked.remove(f.key);
+                        }
+                      }
+                    }),
+                  ),
                 ),
               ),
               TextField(
@@ -413,23 +433,28 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
               const SizedBox(height: 8),
               Flexible(
                 child: SingleChildScrollView(
-                  child: Column(children: [
-                    for (final f in g.files)
-                      CheckboxListTile(
-                        key: ValueKey('uag-split-${f.key}'),
-                        dense: true,
-                        value: picked.contains(f.key),
-                        title: Text(_labelOf(f),
-                            style: const TextStyle(fontSize: 13)),
-                        onChanged: (v) => setD(() {
-                          if (v == true) {
-                            picked.add(f.key);
-                          } else {
-                            picked.remove(f.key);
-                          }
-                        }),
-                      ),
-                  ]),
+                  child: AuthorFilePicker(
+                    leafKeyPrefix: 'uag-split',
+                    files: g.files,
+                    picked: picked,
+                    labelOf: _libLabelOf,
+                    onToggle: (f, on) => setD(() {
+                      if (on) {
+                        picked.add(f.key);
+                      } else {
+                        picked.remove(f.key);
+                      }
+                    }),
+                    onToggleBranch: (branch, on) => setD(() {
+                      for (final f in branch) {
+                        if (on) {
+                          picked.add(f.key);
+                        } else {
+                          picked.remove(f.key);
+                        }
+                      }
+                    }),
+                  ),
                 ),
               ),
               TextField(
@@ -506,26 +531,28 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
               const SizedBox(height: 8),
               Flexible(
                 child: SingleChildScrollView(
-                  child: Column(children: [
-                    for (final f in pool)
-                      CheckboxListTile(
-                        key: ValueKey('uag-setfiles-${f.key}'),
-                        dense: true,
-                        value: picked.contains(f.key),
-                        title: Text(_labelOf(f),
-                            style: const TextStyle(fontSize: 13)),
-                        subtitle: Text(f.lib,
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.grey)),
-                        onChanged: (v) => setD(() {
-                          if (v == true) {
-                            picked.add(f.key);
-                          } else {
-                            picked.remove(f.key);
-                          }
-                        }),
-                      ),
-                  ]),
+                  child: AuthorFilePicker(
+                    leafKeyPrefix: 'uag-setfiles',
+                    files: pool,
+                    picked: picked,
+                    labelOf: _libLabelOf,
+                    onToggle: (f, on) => setD(() {
+                      if (on) {
+                        picked.add(f.key);
+                      } else {
+                        picked.remove(f.key);
+                      }
+                    }),
+                    onToggleBranch: (branch, on) => setD(() {
+                      for (final f in branch) {
+                        if (on) {
+                          picked.add(f.key);
+                        } else {
+                          picked.remove(f.key);
+                        }
+                      }
+                    }),
+                  ),
                 ),
               ),
               TextField(

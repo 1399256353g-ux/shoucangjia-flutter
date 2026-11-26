@@ -31,7 +31,8 @@ import 'library_badge.dart';
 ///
 /// 两条入口（作者卡那组「单元库+等级」与 `main.LibBadges` 那组「多个库 id」）
 /// 在这里之后不再各写一遍容器：配色、层级、`+N` 都先算成 [BadgeChipSpec]，
-/// 绘制只剩 [BadgeChipWrap] 一处。
+/// 绘制只剩 [CollapsibleBadgeWrap] 一处（0.9.312 删掉了零调用点的
+/// `BadgeChipWrap`——它只是「不可折叠」这个从未被使用的选项）。
 class BadgeChipSpec {
   final String label;
   final int color;
@@ -44,41 +45,6 @@ class BadgeChipSpec {
     this.unitId = '',
     this.kind = LibEntryKind.unit,
   });
-}
-
-/// 把一组词条排成一行（`Wrap` 间距 3/3）。
-///
-/// 0.9.291：`main.LibBadges` 与 `AuthorBadgeRow` 此前各写一个 `Wrap` + 各自的
-/// `LibBadgeChip` 列表。两份只要有一处改了间距或补了「最多几个」的规则，
-/// 同一排词条在两个页面就不一样宽——而它们本来就该长得一模一样。
-class BadgeChipWrap extends StatelessWidget {
-  final List<BadgeChipSpec> chips;
-  final WrapAlignment alignment;
-
-  const BadgeChipWrap({
-    super.key,
-    required this.chips,
-    this.alignment = WrapAlignment.start,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (chips.isEmpty) return const SizedBox.shrink();
-    return Wrap(
-      spacing: 3,
-      runSpacing: 3,
-      alignment: alignment,
-      children: [
-        for (final c in chips)
-          LibBadgeChip(
-            label: c.label,
-            color: c.color,
-            unitId: c.unitId,
-            kind: c.kind,
-          ),
-      ],
-    );
-  }
 }
 
 /// 可折叠的一排词条（owner 2026-11-26）。

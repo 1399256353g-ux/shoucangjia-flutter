@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'author_file_picker.dart';
 import 'error_text.dart';
 import 'http_error_text.dart';
 import 'http_json.dart';
@@ -101,6 +102,19 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
         loading = false;
       });
     }
+  }
+
+  /// 基础库 id → 显示名（分支标题）。
+  ///
+  /// 名称来源是 `/api/author/mounts` 的 `items[].libName`：本面板只拿到这一个
+  /// 接口的数据，不能像单元库页那样查 `LibMeta`。拿不到就用 id。
+  String _libLabelOf(String lib) {
+    for (final i in mounts.items) {
+      if (i.lib != lib) continue;
+      final n = i.libName.trim();
+      if (n.isNotEmpty) return n;
+    }
+    return lib;
   }
 
   /// 把该单元库内的全部来源合并成一组。
@@ -207,26 +221,30 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
               Flexible(
                 child: SingleChildScrollView(
                   child: Column(children: [
-                    for (final f in pool)
-                      CheckboxListTile(
-                        key: ValueKey('ams-setfiles-${f.key}'),
-                        dense: true,
-                        value: picked.contains(f.key),
-                        title: Text(f.authorDir,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 13)),
-                        subtitle: Text(f.lib,
-                            style: const TextStyle(
-                                fontSize: 10, color: Colors.grey)),
-                        onChanged: (v) => setD(() {
-                          if (v == true) {
+                    // owner 2026-11-27：与单元库挂载页同一个多选控件——
+                    // 候选按基础库分叉展开，两处不再各写一份平铺列表。
+                    AuthorFilePicker(
+                      leafKeyPrefix: 'ams-setfiles',
+                      files: pool,
+                      picked: picked,
+                      labelOf: _libLabelOf,
+                      onToggle: (f, on) => setD(() {
+                        if (on) {
+                          picked.add(f.key);
+                        } else {
+                          picked.remove(f.key);
+                        }
+                      }),
+                      onToggleBranch: (branch, on) => setD(() {
+                        for (final f in branch) {
+                          if (on) {
                             picked.add(f.key);
                           } else {
                             picked.remove(f.key);
                           }
-                        }),
-                      ),
+                        }
+                      }),
+                    ),
                   ]),
                 ),
               ),
