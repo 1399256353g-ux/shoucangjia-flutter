@@ -15666,13 +15666,15 @@ class _RecommendPageState extends State<RecommendPage> {
       await _loadMeta();
     }
     if (!mounted) return;
+    // 汇总一次，四个维度与摘要共用（getter 每次调用都会重新汇总并排序）。
+    final opts = _options;
     final res = await showAuthorFilterSheet(
       context: context,
       initial: authorFilter.value,
-      basics: _options.basics,
-      bigs: _options.bigs,
-      units: _options.units,
-      tops: _options.tops,
+      basics: opts.basics,
+      bigs: opts.bigs,
+      units: opts.units,
+      tops: opts.tops,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => works.where((w) => _matches(w, f)).length,
     );
@@ -15694,6 +15696,8 @@ class _RecommendPageState extends State<RecommendPage> {
   @override
   Widget build(BuildContext context) {
     final visible = _visibleWorks;
+    // 摘要要四张名称表；getter 每次调用都会重新汇总 + 排序，这里取一次。
+    final opts = _options;
     return Scaffold(
       appBar: AppBar(title: const Text('推荐'), actions: [
         const HomeAction(),
@@ -15716,7 +15720,7 @@ class _RecommendPageState extends State<RecommendPage> {
                     onOpen: _openFilter,
                     onClear: authorFilter.clearAll,
                     summary: authorFilter.value.isActive
-                        ? '${authorFilterSummary(authorFilter.value, _options)} · 命中 ${visible.length}/${works.length}'
+                        ? '${authorFilterSummary(authorFilter.value, opts)} · 命中 ${visible.length}/${works.length}'
                         : null,
                   ),
                   Expanded(
@@ -16025,13 +16029,14 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _openFilter() async {
     await _ensureTypes();
     if (!mounted) return;
+    final opts = _options;
     final res = await showAuthorFilterSheet(
       context: context,
       initial: authorFilter.value,
-      basics: _options.basics,
-      bigs: _options.bigs,
-      units: _options.units,
-      tops: _options.tops,
+      basics: opts.basics,
+      bigs: opts.bigs,
+      units: opts.units,
+      tops: opts.tops,
       grades: const ['S', 'A', 'B', 'C', 'D'],
       count: (f) => all.where((e) => _matchesFilter(e, f)).length,
     );
@@ -16041,6 +16046,7 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
+    final opts = _options;
     final base = authorFilter.value.isActive
         ? all.where((e) => _matchesFilter(e, authorFilter.value)).toList()
         : all;
@@ -16101,7 +16107,7 @@ class _SearchPageState extends State<SearchPage> {
           onOpen: _openFilter,
           onClear: authorFilter.clearAll,
           summary: authorFilter.value.isActive
-              ? '${authorFilterSummary(authorFilter.value, _options)} · 命中 ${res.length}/${all.length}'
+              ? '${authorFilterSummary(authorFilter.value, opts)} · 命中 ${res.length}/${all.length}'
               : null,
         ),
         if (loading)

@@ -174,4 +174,17 @@ void main() {
           reason: '四处分开求值 = 每个 build 汇总四遍并排序四遍');
     });
   });
+
+  group('一个 build 只汇总一次', () {
+    test('两页的 build 与打开面板都先取一次 opts', () {
+      final src = fileText('lib/main.dart');
+      // build 里先取一次，摘要与面板都用它
+      expect('final opts = _options;'.allMatches(src).length,
+          greaterThanOrEqualTo(3),
+          reason: '推荐页 build、搜索页 build、两处 _openFilter');
+      // 不再有「每个参数各求值一次」的写法
+      expect(src.contains('basics: _options.basics'), isFalse);
+      expect(src.contains('summary(basicNames: _options'), isFalse);
+    });
+  });
 }
