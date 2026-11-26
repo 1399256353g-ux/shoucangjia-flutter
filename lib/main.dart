@@ -42,6 +42,7 @@ import 'author_index.dart' show kAuthorGridPagePadding;
 import 'grid_spec.dart';
 import 'work_card_prefetch.dart';
 import 'work_cover.dart';
+import 'work_lib.dart';
 import 'media_path.dart';
 import 'media_resize.dart';
 import 'player_image.dart';
@@ -3474,12 +3475,12 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       if (ws is List) {
         for (final w in ws) {
           if (w is Map) {
-            list.add({...Map<String, dynamic>.from(w), '_lib': lib});
+            list.add(withWorkLib(w, lib));
           }
         }
       }
       if (list.isEmpty) {
-        list.add({...Map<String, dynamic>.from(work), '_lib': lib});
+        list.add(withWorkLib(work, lib));
       }
       var start = intOf(m['index']);
       start = start.clamp(0, list.length - 1);
@@ -3856,7 +3857,7 @@ String recommendWorkKey(dynamic w) {
   if (w is! Map) return '';
   final id = '${w['id'] ?? ''}';
   if (id.isEmpty) return '';
-  final lib = '${w['_lib'] ?? ''}';
+  final lib = workLibTag(w);
   return lib.isEmpty ? id : '$lib|$id';
 }
 
@@ -7035,7 +7036,7 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
   final av = '${e['avatar'] ?? ''}';
   if (basic.isEmpty) basic = m?.basicIdForPath(av) ?? '';
   if (basic.isEmpty) {
-    final l = '${e['_lib'] ?? ''}';
+    final l = workLibTag(e);
     if (m?.basicById(l) != null) basic = l;
   }
   var unit =
@@ -7939,7 +7940,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         final v = mapOrNull(e.value);
         if (v == null) continue;
         final ls = stringsOf(v['libs']);
-        auMap[e.key] = {...v, '_lib': ls.isNotEmpty ? ls.first : cfg.lib};
+        // 0.9.293：写入侧原来在五处各写一遍；这里是唯一「没有 libs 时兜到
+        // 当前库」的一处，保留语义但走同一个写入函数。
+        auMap[e.key] =
+            withWorkLib(v, ls.isNotEmpty ? ls.first : cfg.lib);
         if (ls.isNotEmpty) auLibs[e.key] = ls;
       }
       dynamic sj;
@@ -8080,7 +8084,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     prefetchAvatarItems(
       [
         for (final e in _ordered.take(n))
-          (path: '${e.value['av'] ?? ''}', lib: '${e.value['_lib'] ?? cfg.lib}'),
+          (
+            path: '${e.value['av'] ?? ''}',
+            lib: workLibOf(e.value, fallback: cfg.lib)
+          ),
       ],
       limit: n,
       displaySize: AuthorAvatar.gridSize,
@@ -8158,7 +8165,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   Widget _authorCell(MapEntry<String, Map<String, dynamic>> e) {
     final av = '${e.value['av'] ?? ''}';
-    final lib = '${e.value['_lib'] ?? cfg.lib}';
+    final lib = workLibOf(e.value, fallback: cfg.lib);
     final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
 
     // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位
@@ -8813,9 +8820,11 @@ class _PlayerPageState extends State<PlayerPage>
   PicZoom _pinchStartZoom = PicZoom.initial;
   Offset _pinchStartFocal = Offset.zero;
   bool _pinching = false;
-  // 每条作品可带 _lib（跨库列表），否则用本页 lib，最后回退当前库
+  // 每条作品可带 _lib（跨库列表），否则用本页 lib，最后回退当前库。
+  // 0.9.293：这个三段兜底与 `WorkGrid._libFor` 此处逐字符相同；现在两者
+  // 都转发 `work_lib.workLibOf`（唯一的兜底语义出处）。
   String _libFor(dynamic w) =>
-      '${(w is Map ? w['_lib'] : null) ?? widget.lib ?? cfg.lib}';
+      workLibOf(w, fallback: widget.lib ?? cfg.lib);
 
   /// G20：安全取作品。列表里意外出现非 Map 条目时用空 Map 顶部，
   /// 让该条显示「作品不可用」占位，而不是让整页 build 抛异常。
@@ -15045,7 +15054,7 @@ class _RecommendPageState extends State<RecommendPage> {
     for (final w in listOf(j is Map ? j['works'] : null)) {
       if (w is! Map) continue;
       final m = Map<String, dynamic>.from(w);
-      out.add({...m, '_lib': '${m['_lib'] ?? cfg.lib}'});
+      out.add(withWorkLib(m, workLibOf(m, fallback: cfg.lib)));
       if (out.length >= n) break;
     }
     return out;
@@ -15186,7 +15195,7 @@ class _RecommendPageState extends State<RecommendPage> {
     // 作品条目直接带 `_bid`（基础库 id）时优先用它，否则按路径反查；
     // 再不行用条目自带的 `_lib`（基础库页/单库数据源）。
     var basic = '${w['_bid'] ?? ''}';
-    final libId = '${w['_lib'] ?? ''}';
+    final libId = workLibTag(w);
     if (basic.isEmpty) basic = meta?.basicIdForPath(av) ?? '';
     if (basic.isEmpty && meta?.basicById(libId) != null) basic = libId;
     final unit = basic.isEmpty
@@ -15459,7 +15468,7 @@ class _SearchPageState extends State<SearchPage> {
     authorWorkCount.clear();
     for (final e in out) {
       final w = e['w'];
-      final key = '${e['_lib']}|${w is Map ? w['a'] ?? '' : ''}';
+      final key = '${workLibTag(e)}|${w is Map ? w['a'] ?? '' : ''}';
       authorWorkCount[key] = (authorWorkCount[key] ?? 0) + 1;
     }
     setState(() {
@@ -15567,7 +15576,9 @@ class _SearchPageState extends State<SearchPage> {
   bool _matchesFilter(Map<String, dynamic> e, AuthorFilterState f) {
     final w = e['w'];
     if (w is! Map) return false;
-    final lib = '${e['_lib']}';
+    // 0.9.293：`'${e['_lib']}'` 在字段缺失时会得到字面量 "null"——比空串
+    // 更难发现（`metas['null']` 取不到，静默退化成「无元数据」）。
+    final lib = workLibTag(e);
     final meta = metas[lib];
     final av = '${w['av'] ?? ''}';
     final author = '${w['a'] ?? ''}';
@@ -15723,7 +15734,7 @@ class _SearchPageState extends State<SearchPage> {
                           if (e['w'] is Map)
                             {
                               ...mapOrNull(e['w'])!,
-                              '_lib': '${e['_lib']}',
+                              '_lib': workLibTag(e),
                               '_bid': '${e['_bid'] ?? ''}',
                             }
                       ],
@@ -16672,7 +16683,7 @@ class _AuthorPageState extends State<AuthorPage> {
         // 本库作品打上 `_lib` 后整批交给合并器；去重与顺序由它保证。
         perLib.add([
           for (final w in listOf(m is Map ? m['works'] : null))
-            if (w is Map) {...Map<String, dynamic>.from(w), '_lib': lib},
+            if (w is Map) withWorkLib(w, lib),
         ]);
         postStat('visit', widget.name, lib: lib);
       } catch (_) {}
@@ -16719,8 +16730,7 @@ class _AuthorPageState extends State<AuthorPage> {
       .where((e) => e.isNotEmpty)
       .toList();
 
-  String _libOfWork(dynamic w) =>
-      '${(w is Map ? w['_lib'] : null) ?? primaryLib}';
+  String _libOfWork(dynamic w) => workLibOf(w, fallback: primaryLib);
 
   Map<String, dynamic>? _workById(String id) {
     for (final w in works) {
@@ -17007,7 +17017,7 @@ class _AuthorPageState extends State<AuthorPage> {
     if (m == null) return '';
     var basic = '${raw['_bid'] ?? ''}'.trim();
     if (basic.isEmpty) {
-      final libId = '${raw['_lib'] ?? ''}'.trim();
+      final libId = workLibTag(raw);
       if (libId.isNotEmpty && m.basicById(libId) != null) basic = libId;
     }
     final av = '${raw['av'] ?? ''}'.trim();
@@ -17791,7 +17801,7 @@ class _WorkGridState extends State<WorkGrid> {
   }
 
   String _libFor(dynamic w) =>
-      '${(w is Map ? w['_lib'] : null) ?? widget.lib ?? cfg.lib}';
+      workLibOf(w, fallback: widget.lib ?? cfg.lib);
 
   @override
   Widget build(BuildContext context) {

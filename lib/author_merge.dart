@@ -9,6 +9,8 @@
 /// 真实数据仍由调用方按库拉取（磁盘结构完全不改）。
 library;
 
+import 'work_lib.dart';
+
 /// 参与合并的来源库数量（空/重复一律不计）。
 int authorLibCount(Iterable<String> libs) {
   final set = <String>{};
@@ -63,9 +65,7 @@ List<Map<String, dynamic>> filterWorksByLib(
   for (final w in works) {
     if (w is! Map) continue;
     final m = Map<String, dynamic>.from(w);
-    var l = '${m['_lib'] ?? ''}'.trim();
-    if (l.isEmpty) l = fallbackLib.trim();
-    if (l == want) out.add(m);
+    if (workLibOf(m, fallback: fallbackLib) == want) out.add(m);
   }
   return out;
 }
@@ -79,8 +79,7 @@ List<MapEntry<String, int>> libFilterOptions(
   final order = <String>[];
   for (final w in works) {
     if (w is! Map) continue;
-    var l = '${w['_lib'] ?? ''}'.trim();
-    if (l.isEmpty) l = fallbackLib.trim();
+    final l = workLibOf(w, fallback: fallbackLib);
     if (l.isEmpty) continue;
     if (!counts.containsKey(l)) order.add(l);
     counts[l] = (counts[l] ?? 0) + 1;
