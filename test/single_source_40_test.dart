@@ -59,6 +59,12 @@ BasicLib _basic(String id, String rel, {String crawlerCover = '', String firstCo
       firstCover: firstCover,
     );
 
+/// 取文件名（跨平台）。Windows 上 `File.path` 用反斜杠，
+/// `split('/').last` 会拿到 `lib\media_path.dart`——「跳过 media_path
+/// 自己」的守卫因此失效，它被自己判成违规：同一提交 Android/iOS 全绿、
+/// Windows 却红 4 条。产品代码无关，纯粹是测试写法不可移植。
+String _fileName(File f) => f.uri.pathSegments.last;
+
 void main() {
   group('作品键只有一处拼装', () {
     test('观看记录 / 播放量 / workKey 三处逐字一致', () {
@@ -86,7 +92,7 @@ void main() {
     test('契约：键的拼装只允许出现在 work_key.dart', () {
       final offenders = <String>[];
       for (final f in _libFiles()) {
-        final name = f.path.split('/').last;
+        final name = _fileName(f);
         if (name == 'work_key.dart') continue;
         final src = _code(name);
         // 裸拼 `'$l/$i'`（或同形表达式）是这条规则的第二份。

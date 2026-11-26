@@ -57,6 +57,12 @@ BasicLib _basic(String id, String rel,
       coverVersion: coverVersion,
     );
 
+/// 取文件名（跨平台）。Windows 上 `File.path` 用反斜杠，
+/// `split('/').last` 会拿到 `lib\media_path.dart`——「跳过 media_path
+/// 自己」的守卫因此失效，它被自己判成违规：同一提交 Android/iOS 全绿、
+/// Windows 却红 4 条。产品代码无关，纯粹是测试写法不可移植。
+String _fileName(File f) => f.uri.pathSegments.last;
+
 void main() {
   group('媒体类型只有一张分类表（与服务端三张表同源）', () {
     test('视频：服务端会下发的 .ts/.wmv/.3gp/.flv 也算视频', () {
@@ -116,7 +122,7 @@ void main() {
     test('分类表只允许出现在 media_path（四份旧表不得复活）', () {
       final offenders = <String>[];
       for (final f in _libFiles()) {
-        final name = f.path.split('/').last;
+        final name = _fileName(f);
         if (name == 'media_path.dart') continue;
         final src = _code(name);
         // 旧四处各留一张成员表：任何一处再出现 4 个以上扩展名字面量就算复活。
@@ -171,7 +177,7 @@ void main() {
     test('契约：取第一段的写法只有 media_path 一处', () {
       final offenders = <String>[];
       for (final f in _libFiles()) {
-        final name = f.path.split('/').last;
+        final name = _fileName(f);
         if (name == 'media_path.dart') continue;
         final src = _code(name);
         if (src.contains('mediaRelOrNull(') && src.contains("indexOf('/')")) {
@@ -284,7 +290,7 @@ void main() {
       expect(decl, greaterThanOrEqualTo(2), reason: '声明与使用都应在 lib_cover');
       final offenders = <String>[];
       for (final f in _libFiles()) {
-        final name = f.path.split('/').last;
+        final name = _fileName(f);
         if (name == 'lib_cover.dart') continue;
         final src = _code(name);
         // 手写「自定义 → 爬虫 → 最高播放 → 首张」的顺序，特征是同时提到
