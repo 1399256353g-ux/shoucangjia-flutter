@@ -13,6 +13,7 @@ import 'dart:convert';
 
 import 'json_num.dart';
 import 'media_path.dart' show isMediaPath;
+import 'rel_path.dart' show normalizeRelPath;
 import 'text_fold.dart';
 
 class ServerConn {
@@ -350,15 +351,12 @@ void _collectUnitCovers(
 
 /// 单元库 rel 归一化——与服务端 `unitRelKey` 同一套规则：
 /// `\` 与 `/` 等价，去空段与 `.`，`..` 原样保留（由校验层拒绝）。
-String normalizeUnitRel(String rel) {
-  final out = <String>[];
-  for (final raw in rel.split(RegExp(r'[\\/]+'))) {
-    final s = raw.trim();
-    if (s.isEmpty || s == '.') continue;
-    out.add(s);
-  }
-  return out.join('/');
-}
+///
+/// 转调 `rel_path.normalizeRelPath`（唯一实现）：本函数原先逐字复制了那段
+/// `split(RegExp(r'[\\/]+'))` 循环，是同一规则的**第二份**。两份一旦分叉，
+/// 封面键（[unitCoverKey]）与树节点键（`_nodeKeyOf`）会用不同的 rel 去查同一张表，
+/// 表现就是「设了封面、返回界面又没了」——而界面两处各看各的都对。
+String normalizeUnitRel(String rel) => normalizeRelPath(rel);
 
 /// 单条绑定记录的唯一拼装口。
 ///

@@ -107,12 +107,24 @@ String joinRel(String a, String b) =>
 /// 自定义封面目录的相对路径：`<rel>/_cover`。
 String coverDirRel(String rel) => joinRel(rel, kCoverDir);
 
+/// 某版本封面的**文件名**：`<version>.<ext>`（不带目录）。
+///
+/// `cover_history.CoverVersion.fileName` 与 [coverImageRel] 此前各拼一遍
+/// `'$v.$ext'`：前者用来去重与做 widget key，后者用来拼请求路径。两份拼法
+/// 一旦差一个点或少一次 `normalizeCoverExt`，历史面板里那一项就点不动
+/// （key 对得上、请求的文件名对不上）。
+String coverVersionFileName(String version, {String ext = 'jpg'}) {
+  final v = normalizeCoverVersion(version);
+  if (v.isEmpty) return '';
+  return '$v.${normalizeCoverExt(ext)}';
+}
+
 /// 某版本封面的相对路径：`<rel>/_cover/<version>.<ext>`。
 /// 版本非法时返回空串。
 String coverImageRel(String rel, String version, {String ext = 'jpg'}) {
-  final v = normalizeCoverVersion(version);
-  if (v.isEmpty) return '';
-  return joinRel(coverDirRel(rel), '$v.${normalizeCoverExt(ext)}');
+  final name = coverVersionFileName(version, ext: ext);
+  if (name.isEmpty) return '';
+  return joinRel(coverDirRel(rel), name);
 }
 
 /// 从 `libraries.json` 的原始条目读取封面指针。

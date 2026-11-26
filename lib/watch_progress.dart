@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_json.dart';
+import 'work_key.dart';
 
 /// SharedPreferences 键：整个观看记录表存在一个 JSON 字符串里。
 const String kWatchProgressPrefsKey = 'watch_progress_v1';
@@ -77,12 +78,12 @@ class WatchProgress {
 }
 
 /// 生成作品观看记录的存储键；作品 id 为空时返回空串（调用方应跳过）。
-String watchProgressKey({required String lib, required String id}) {
-  final i = id.trim();
-  if (i.isEmpty) return '';
-  final l = lib.trim();
-  return l.isEmpty ? i : '$l/$i';
-}
+///
+/// 拼装只有 `work_key.workKey` 一处：三份逐字相同的实现里，任何一份先被
+/// 改动（例如把 `lib` 也 trim／不 trim）都会让观看记录与播放量落到不同的键上，
+/// 表现为「播放进度记得、封面却按未播放算」。本文件只转发。
+String watchProgressKey({required String lib, required String id}) =>
+    workKey(lib: lib, id: id);
 
 /// 位置是否已看完：剩余不足 [kWatchedTailMs] 或进度 ≥ [kWatchedFraction]。
 bool watchedDone({required int positionMs, required int durationMs}) {

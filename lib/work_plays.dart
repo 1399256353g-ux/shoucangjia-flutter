@@ -14,6 +14,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_json.dart';
+import 'work_key.dart';
 
 const String kWorkPlaysPrefsKey = 'work_plays_v2';
 
@@ -21,12 +22,13 @@ const String kWorkPlaysPrefsKey = 'work_plays_v2';
 const int kWorkPlaysLimit = 3000;
 
 /// 记录键：`库/作品id`；任一为空时返回空串（调用方跳过）。
-String workPlaysKey({required String lib, required String id}) {
-  final i = id.trim();
-  if (i.isEmpty) return '';
-  final l = lib.trim();
-  return l.isEmpty ? i : '$l/$i';
-}
+///
+/// 键的拼装**只有** `work_key.workKey` 一处实现：此前本文件、
+/// `watch_progress.watchProgressKey`、`work_key.workKey` 各写了一遍同样的
+/// 三行（`continue_watching` 的表曾经存成 `A /1` 就是这个规则分叉的产物——
+/// 同一个作品在续播表里查不到播放记录）。这里只转发。
+String workPlaysKey({required String lib, required String id}) =>
+    workKey(lib: lib, id: id);
 
 /// 单条播放记录：次数 + 最近一次播放的缩略图（相对库根的媒体路径）。
 class WorkPlay {

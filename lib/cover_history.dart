@@ -12,7 +12,8 @@ import 'package:http/http.dart' as http;
 
 import 'media_path.dart';
 import 'http_json.dart';
-import 'lib_cover.dart' show normalizeCoverVersionName, normalizeCoverExt;
+import 'lib_cover.dart'
+    show normalizeCoverVersionName, normalizeCoverExt, coverVersionFileName;
 
 import 'http_error_text.dart';
 
@@ -42,7 +43,10 @@ class CoverVersion {
   });
 
   /// 版本 + 扩展名，用于去重与比较。
-  String get fileName => '$version.$ext';
+  ///
+  /// 拼装只有 `lib_cover.coverVersionFileName` 一处（与 `coverImageRel` 同源）：
+  /// 此前这里自己写 `'$version.$ext'`，与请求路径的拼法各写一遍。
+  String get fileName => coverVersionFileName(version, ext: ext);
 }
 
 /// 单条版本 JSON → [CoverVersion]；非法条目返回 null。

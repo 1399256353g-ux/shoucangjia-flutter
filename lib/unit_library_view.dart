@@ -13,6 +13,7 @@ import 'library_tree.dart';
 import 'lib_cover.dart';
 import 'media_resize.dart';
 import 'home_action.dart';
+import 'json_num.dart' show sumSat;
 import 'lib_refresh_button.dart';
 import 'scroll_decode.dart';
 import 'star_store.dart';
@@ -190,22 +191,47 @@ class LibCardInfo extends StatelessWidget {
   }
 }
 
-/// 单元库子树里「本机播放量最高且有缩略图」的作品：所属基础库 + 次数 + 缩略图。
-/// 同分按缩略图路径升序，结果稳定；没有则 null。
-({BasicLib basic, int count, String thumb})? topPlayedInUnit(UnitLibrary unit) {
-  ({BasicLib basic, int count, String thumb})? best;
+/// 子树里**本机播放量最高**的基础库（按该库全部作品次数之和，饱和求和）。
+///
+/// 「哪个基础库播得最多」此前有两份实现且**结论不同**：
+///  - `main._topPlayedBasic` 用 `sumSat(次数)`（整库累计）；
+///  - `unit_library_view.topPlayedInUnit` 只取**单条作品**的最大次数。
+///
+/// 两者在「A 库两条各 5 次、B 库一条 7 次」时给出不同答案，于是同一张
+/// 单元库卡片在首页（走 main）与单元库页（走 view）显示两张不同的封面——
+/// 而两边都“算对了”，只是用了两个问题。
+///
+/// 口径按 `media_priority.dart` 文件头写的那条：单元库取**播放量最高的基础库**，
+/// 再取该基础库的封面。全部为 0（或没有记录）时返回 null，由调用方决定兜底。
+BasicLib? topPlayedBasicOf(UnitLibrary unit) {
+  BasicLib? best;
+  var bestPlays = 0;
   for (final b in unit.allBasics) {
-    for (final v in WorkPlaysStore.countsFor(b.id).values) {
-      final th = v.thumb.trim();
-      if (th.isEmpty || v.count <= 0) continue;
-      if (best == null ||
-          v.count > best.count ||
-          (v.count == best.count && th.compareTo(best.thumb) < 0)) {
-        best = (basic: b, count: v.count, thumb: th);
-      }
+    // 饱和求和：prefs 里一条写成 int 上限的记录会让 `max+max` 回绕成负数，
+    // 该基础库被当成「没播过」——封面从「最高播放」退化成首张图。
+    final plays =
+        sumSat(WorkPlaysStore.countsFor(b.id).values.map((p) => p.count));
+    if (plays > bestPlays) {
+      bestPlays = plays;
+      best = b;
     }
   }
   return best;
+}
+
+/// 单元库子树里「本机播放量最高且有缩略图」的作品：所属基础库 + 次数 + 缩略图。
+///
+/// 基础库的选择走 [topPlayedBasicOf]（与 `main._unitCoverUrl` 同一个答案），
+/// 缩略图取该库里 `topPlayed` 选出的那一张（图文优先、同分更新）。
+/// 该缩略图不可用（空/非图片）时返回 null，调用方继续走下一级。
+({BasicLib basic, int count, String thumb})? topPlayedInUnit(UnitLibrary unit) {
+  final basic = topPlayedBasicOf(unit);
+  if (basic == null) return null;
+  final counts = WorkPlaysStore.countsFor(basic.id);
+  final best = topPlayed(counts);
+  final th = best?.thumb.trim() ?? '';
+  if (th.isEmpty) return null;
+  return (basic: basic, count: best!.count, thumb: th);
 }
 
 /// 从服务端 base 里取出可读的主机标注（`192.168.2.4:8090`）。
@@ -273,20 +299,13 @@ String unitCoverUrl(
     }
   }
   final top = topPlayedInUnit(unit);
-  // 爬虫封面：子树里第一个有 `cv` 的基础库（与 `main._unitCoverUrl` 同口径）。
-  String crawlerOfUnit() {
-    for (final b in unit.allBasics) {
-      final cv = b.crawlerCover.trim();
-      if (cv.isNotEmpty) return cv;
-    }
-    return '';
-  }
-
   final hit = resolveCover(
     rel: unit.rel,
     version: ignoreManual ? '' : unit.node.coverVersion,
     ext: unit.node.coverExt,
-    crawlerThumb: crawlerOfUnit(),
+    // 爬虫封面：子树里第一个有 `cv` 的基础库。扫描本体在
+    // `UnitLibrary.firstCrawlerCover`（与 `main._unitCoverUrl` 同一处）。
+    crawlerThumb: unit.firstCrawlerCover,
     bestThumb: top?.thumb ?? '',
     // 首张作品封面始终作为「最后一级」传入：有播放记录但那张记录的缩略图
     // 不可用（视频路径/空）时，仍能落到库内第一张作品的图上，而不是空白卡片。

@@ -118,6 +118,32 @@ class UnitLibrary {
         for (final c in children) ...c.allBasics,
       ];
 
+  /// 子树里**第一个**带爬虫封面（`cv`）的基础库所给的封面路径；没有则空串。
+  ///
+  /// 「子树里第一个非空 `cv`」这条扫描此前写了三遍：`main._unitCoverUrl` 里的
+  /// `crawlerOfUnit()`、`unit_library_view.unitCoverUrl` 里的同名闭包、以及
+  /// 测试各自搭的一套。三份里任何一份先被改动，同一张单元库卡在首页与
+  /// 单元库页就会拿到不同的爬虫封面（或一份有、一份灰）。现在只有这一处。
+  String get firstCrawlerCover {
+    for (final b in allBasics) {
+      final cv = b.crawlerCover.trim();
+      if (cv.isNotEmpty) return cv;
+    }
+    return '';
+  }
+
+  /// 子树里**第一个**带首张作品封面（`fc`）的基础库：基础库 id + 封面路径。
+  ///
+  /// 与 [firstCrawlerCover] 同一条「第一个非空」规则；`main._firstFcOfUnit`
+  /// 目前是它的第二份拷贝（还额外承担「这张图该按哪个库路由」的返回值）。
+  ({String lib, String path})? get firstWorkCover {
+    for (final b in allBasics) {
+      final fc = b.firstCover.trim();
+      if (fc.isNotEmpty) return (lib: b.id, path: fc);
+    }
+    return null;
+  }
+
   /// 查找子树里的单元库（按 id）。
   UnitLibrary? findById(String id) {
     if (node.id == id) return this;

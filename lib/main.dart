@@ -5074,22 +5074,10 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   /// 0.9.9 自动生成规则：单元库取整棵子树里本机播放量最高的基础库。
-  BasicLib? _topPlayedBasic(UnitLibrary u) {
-    BasicLib? best;
-    var bestPlays = -1;
-    for (final b in u.allBasics) {
-      // 饱和求和：本机计数正常不会溢出，但 `WorkPlaysStore` 的表是从
-      // SharedPreferences 读回来的，手改/迁移坏数据写成 int 上限时
-      // `max + max = -2`（实测），该基础库会被当成「没播过」，
-      // 单元库封面会从「播放量最高作品」退化成首张图。
-      final plays = sumSat(WorkPlaysStore.countsFor(b.id).values.map((p) => p.count));
-      if (plays > bestPlays) {
-        bestPlays = plays;
-        best = b;
-      }
-    }
-    return best;
-  }
+  /// 判定只有 `unit_library_view.topPlayedBasicOf` 一处（与单元库页卡片同一个
+  /// 答案）：此前本函数用「整库次数之和」、卡片那边用「单条作品最大次数」，
+  /// 同一个单元库在两个页面会给出不同的「最高播放基础库」。
+  BasicLib? _topPlayedBasic(UnitLibrary u) => topPlayedBasicOf(u);
 
   Uri _u(String path, [String? lib, String? atBase]) {
     // 第十四批：拼接规则统一在 api_url（补协议、去尾斜杠、path 带 `?` 用 `&`）。
@@ -5444,13 +5432,8 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   /// G：单元库子树里第一个非空的 `fc`（第一张作品封面）。
-  ({String lib, String path})? _firstFcOfUnit(UnitLibrary u) {
-    for (final b in u.allBasics) {
-      final fc = b.firstCover.trim();
-      if (fc.isNotEmpty) return (lib: b.id, path: fc);
-    }
-    return null;
-  }
+  /// 「第一个非空」只有 `UnitLibrary.firstWorkCover` 一处实现。
+  ({String lib, String path})? _firstFcOfUnit(UnitLibrary u) => u.firstWorkCover;
 
   /// P3：顶级单元库卡片的连接状态。只按节点自带的连接标识查当前连接表，
   /// 不看任何目录名文本；查不到就不显示（不猜）。
@@ -5504,19 +5487,14 @@ class _LibraryPageState extends State<LibraryPage> {
     // owner 2026-11-21：单元库以前只传 firstThumb（服务端 `fc`，常指向视频），
     // 从没把「爬虫封面 cv」传进来 —— 而 cv 才是真正有图片的那条链路。
     // 这就是单元库卡片长期灰着的原因。
-    String crawlerOfUnit() {
-      for (final b in u.allBasics) {
-        final cv = b.crawlerCover.trim();
-        if (cv.isNotEmpty) return cv;
-      }
-      return '';
-    }
-
+    // 爬虫封面：整棵子树里第一个非空 `cv`，扫描本体在 `UnitLibrary.firstCrawlerCover`
+    // （`unit_library_view.unitCoverUrl` 走同一个属性）。
+    final top = _topPlayedBasic(u);
     final custom = pickUnitCover(
         rel: u.rel,
         version: u.node.coverVersion,
         ext: u.node.coverExt,
-        crawlerThumb: crawlerOfUnit(),
+        crawlerThumb: u.firstCrawlerCover,
         firstThumb: _firstFcOfUnit(u)?.path ?? '');
     if (!custom.isEmpty) {
       // 子树第一张作品封面按所属基础库路由；自定义 `_cover/` 保持原解析。
@@ -5528,7 +5506,6 @@ class _LibraryPageState extends State<LibraryPage> {
     }
     // 自动生成：整棵子树里本机播放量最高的基础库，走该基础库完整封面链
     // （手动 > 爬虫 > 自动），并按基础库所属连接解析媒体地址。
-    final top = _topPlayedBasic(u);
     if (top != null) {
       final fallback = _basicCoverUrl(top);
       if (fallback.isNotEmpty) return fallback;
