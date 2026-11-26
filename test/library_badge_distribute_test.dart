@@ -66,9 +66,14 @@ void main() {
         0xFF00AA55);
   });
 
-  test('非末梢单元库设色只作用本层，不分发给下级基础库', () {
+  // owner 2026-11-27：「上级结构生成的词条要分发给下级啊，305 还没搞定」。
+  //
+  // 旧规则是「非末梢单元库设色只作用本层」，用户明确要求改成**逐级向下分发**：
+  // 从直接上级开始一级级往上找第一个设过色的那层。这条测试因此反转。
+  test('中间层单元库设色要分发给下级基础库（规则已改）', () {
     final root = _tree();
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
+    LibraryBadge.parentOfUnit.addAll(parentOfUnitIds(root));
     LibraryBadge.leafUnits.addAll(leafUnitIds(root));
 
     LibraryBadge.topCustom['TOP'] = 0xFF112233;
@@ -77,12 +82,12 @@ void main() {
 
     // 本层词条用它自己的色
     expect(LibraryBadge.colorForUnit('TOP/MID'), 0xFFFF0000);
-    // 但它下面的基础库不吃这个色，继续继承顶级单元库色
+    // 它下面的基础库现在应该吃中间层这个色（而不是跳回顶级）
     expect(LibraryBadge.basicColorFor('basic-under-mid', 'TOP/MID'),
-        0xFF112233);
-    // 更深的末梢基础库同样只吃顶级继承色
+        0xFFFF0000);
+    // 更深的末梢基础库同样逐级上行拿到最近的设色层
     expect(LibraryBadge.basicColorFor('basic-under-leaf', 'TOP/MID/LEAF'),
-        0xFF112233);
+        0xFFFF0000);
   });
 
   test('基础库自己的自定义色仍然优先级最高（高于末梢分发）', () {

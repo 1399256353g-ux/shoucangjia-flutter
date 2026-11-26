@@ -4,9 +4,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart'
     show
+        Alignment,
         Border,
         BorderRadius,
         BoxBorder,
+        BoxConstraints,
         BoxDecoration,
         BuildContext,
         Color,
@@ -15,6 +17,7 @@ import 'package:flutter/material.dart'
         FontWeight,
         StatelessWidget,
         Text,
+        TextAlign,
         TextOverflow,
         TextStyle,
         ValueListenableBuilder,
@@ -379,6 +382,12 @@ class LibraryBadge {
   /// 只做数据查询，不在这里解析目录名。
   static final Map<String, String> topOfUnit = <String, String>{};
 
+  /// 单元库 → **直接上级**单元库。分发链逐级上行要靠它（`topOfUnit` 只到根）。
+  ///
+  /// owner 2026-11-27：「上级结构生成的词条要分发给下级啊」——中间层单元库
+  /// 设的色此前无处可传：查询方只能一下跳到媒体库根，中间那层被跳过。
+  static final Map<String, String> parentOfUnit = <String, String>{};
+
   /// P1：单元库 id → 是否末梢（没有下级单元库）。同样由注册表从树结构填入。
   /// 分发规则：**只有末梢单元库的词条向下分发**给它的基础库/作品/作者；
   /// 非末梢单元库自定义色只作用于自己这一层，不参与分发。
@@ -480,8 +489,21 @@ class LibraryBadge {
       // 声明了自定义但没有值（被清过）：回落到自动配色，不留一个空壳状态。
       return autoColorOf(unitId, order: order);
     }
-    // 默认：继承所属顶级单元库的词条色（顶级设过、且它自己没有选「自动分配」）。
-    // 自己就是顶级时不存在「继承自己」，直接走自动配色。
+    // owner 2026-11-27：「上级结构生成的词条要分发给下级啊」。
+    //
+    // 从**直接上级**开始逐级上行，第一个设过色的那层就是分发源。
+    // 此前只有「末梢分发 / 否则直达媒体库根」两种走法，中间层单元库
+    // （有下级、自己也设了色）的色谁都拿不到——下级跳过它直达根。
+    var cursor = lookupByLibId(parentOfUnit, unitId) ?? '';
+    final visited = <String>{relOf(unitId)};
+    while (cursor.isNotEmpty && visited.add(relOf(cursor))) {
+      if (sourceFor(cursor) != BadgeColorSource.autoAssign) {
+        final color = lookupByLibId(custom, cursor) ?? topColorFor(cursor);
+        if (color != null) return color;
+      }
+      cursor = lookupByLibId(parentOfUnit, cursor) ?? '';
+    }
+    // 再退到媒体库根（顶级设过、且它自己没有选「自动分配」）。
     final topId = lookupByLibId(topOfUnit, unitId);
     if (topId != null && relOf(topId) != relOf(unitId)) {
       final inherited = topEntryColor(topId, order: order);
@@ -578,15 +600,25 @@ class LibraryBadge {
     if (src == BadgeColorSource.fixedCustom) {
       return autoColorOf(basicId.isEmpty ? unitId : basicId, order: order);
     }
-    // P1 分发规则：上级单元库自定义色只有它是末梢时才分发到这里；
-    // 非末梢单元库只影响自己那层，基础库继续继承顶级单元库色。
-    if (unitId.isNotEmpty && !canDistribute(unitId)) {
+    // owner 2026-11-27：分发链要**逐级上行**，不能一下跳到媒体库根。
+    //
+    // 旧实现只有「末梢单元库才分发，否则直接取媒体库根色」。中间层单元库
+    // （有下级、自己也设了色）的色因此谁都拿不到：下级跳过它、直达根。
+    // 现在从直接上级开始一级级往上找，第一个设过自定义色的就是分发源；
+    // 一路都没有才落到媒体库根/自动配色。
+    var cursor = unitId;
+    final visited = <String>{};
+    while (cursor.isNotEmpty && visited.add(relOf(cursor))) {
+      final color = lookupByLibId(custom, cursor) ?? topColorFor(cursor);
+      if (color != null) return color;
+      cursor = lookupByLibId(parentOfUnit, cursor) ?? '';
+    }
+    if (unitId.isNotEmpty) {
       final topId = lookupByLibId(topOfUnit, unitId);
       final inherited = topId == null ? null : topEntryColor(topId, order: order);
       if (inherited != null) return inherited;
-      return colorForUnit(unitId, order: order, allowCustom: false);
     }
-    return colorForUnit(unitId, order: order);
+    return colorForUnit(unitId, order: order, allowCustom: false);
   }
 
   /// 本层是否真有「生效中的」自定义色。
@@ -936,7 +968,15 @@ class LibBadgeChip extends StatelessWidget {
     // 层级差异只由 LibraryBadge 的外观决定（形状/尺寸统一，只改边框底纹）。
     // 边框走 foregroundDecoration：加粗只影响视觉，**不改变词条占位**。
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      // owner 2026-11-26：「词条里的文字要放在词条区域的中央，现在是更偏向
+      // 靠在下边的」。
+      //
+      // 根因：`height: 1.25` 会在字号上方留出额外行距，而容器只有
+      // `vertical: 1` 的固定内边距，那点行距把文字整体压向底部。
+      // 现在用 `Center` 让文字在盒子里垂直居中，行距不再参与定位。
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      constraints: const BoxConstraints(minHeight: 15),
+      alignment: Alignment.center,
       decoration: LibraryBadge.decorationFor(kind, color),
       foregroundDecoration: BoxDecoration(
         borderRadius: BorderRadius.circular(kEntryRadius),
@@ -946,9 +986,10 @@ class LibBadgeChip extends StatelessWidget {
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
         style: TextStyle(
           fontSize: 9,
-          height: 1.25,
+          height: 1.05,
           fontWeight: FontWeight.w600,
           color: Color(LibraryBadge.textColorOn(color)),
         ),

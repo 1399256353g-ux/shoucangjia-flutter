@@ -14352,6 +14352,9 @@ class _PlayerPageState extends State<PlayerPage>
             screenHeight: viewSize.height,
             taskbarHeight: _taskbarHNow,
             fullscreen: fs,
+            // owner 2026-11-27（win）：非全屏进度条在任务栏上方，会压住画面。
+            // 把条带高度一并让出，画面底边贴到条带上沿，一像素都不重叠。
+            progressStripHeight: kScrubHotZoneHeight,
           );
     // T：进度层贴在本页舞台底边（PageView 子页 Stack 内）；作者/标题信息行
     // 在进度层上方避让，避免压住进度条。
@@ -18148,19 +18151,45 @@ class _WorkGridState extends State<WorkGrid> {
             Positioned(
               top: 6,
               right: 6,
-              child: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: selected
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.black45,
-                  border: Border.all(color: Colors.white70, width: 1.5),
+              // owner 2026-11-26：「多选作品打开后为什么点击对应作品右上角的
+              // 那个圆圈内区域不能选中该作品，点击作品卡本身其他地方是有效的」。
+              //
+              // 根因：这个圆圈只是个装饰 `Container`，没有任何点击处理。它盖在
+              // 卡片之上，点到它就落在圆圈上、事件不会传给下面卡片的 `onTap`，
+              // 于是「点圆圈没反应，点别处有效」。
+              //
+              // 现在圆圈自己接点击；同时把命中区放大到 ≥44dp（视觉仍是 22dp），
+              // 手指不用瞄准一个小圆点。
+              child: GestureDetector(
+                key: ValueKey('work-select-circle-$wid'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => widget.onToggleSelect?.call(wid),
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 6, right: 6),
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: selected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.black45,
+                          border:
+                              Border.all(color: Colors.white70, width: 1.5),
+                        ),
+                        child: selected
+                            ? const Icon(Icons.check,
+                                size: 15, color: Colors.white)
+                            : null,
+                      ),
+                    ),
+                  ),
                 ),
-                child: selected
-                    ? const Icon(Icons.check, size: 15, color: Colors.white)
-                    : null,
               ),
             ),
           if (selected)

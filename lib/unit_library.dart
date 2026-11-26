@@ -725,6 +725,36 @@ Map<String, String> unitKeyByBasic(UnitLibrary root) {
 ///
 /// 作者卡、基础库卡、播放页信息行都必须从这里取词条，禁止各自解析，
 /// 否则会出现「作者词条是基础库、基础库词条是单元库」的不一致。
+/// 单元库 id → **直接上级**单元库 id（媒体库根没有上级，不出现在表里）。
+///
+/// owner 2026-11-27：
+/// > 「上级结构生成的词条要分发给下级啊，305 还没搞定」
+///
+/// 此前只有 `topOfUnit`（一路跳到媒体库根），中间层单元库设的色要分发到下级
+/// 时无路可走：查询方只能直接跳到媒体库根，于是「中间层设了色，下级拿不到」。
+/// 分发链需要逐级上行，这一层是缺的那一环。
+///
+/// 键与 `topOfUnit` 同一份等价键规则（`rel` / `node:rel` 都登记）。
+Map<String, String> parentOfUnitIds(UnitLibrary root) {
+  final out = <String, String>{};
+  void walk(UnitLibrary u, String parent) {
+    if (parent.isNotEmpty) {
+      for (final f in idFormsOf(u.id)) {
+        out[f] = parent;
+      }
+      out['node:${u.rel}'] = parent;
+    }
+    for (final c in u.children) {
+      walk(c, u.id);
+    }
+  }
+
+  for (final c in root.children) {
+    walk(c, '');
+  }
+  return out;
+}
+
 /// P1：单元库 id → 顶级单元库 id（顶级单元库＝媒体库根，向下继承词条色）。
 ///
 /// 判定只看树结构：根的直接子节点就是各连接的媒体库根；SECRET 自身没有
@@ -824,6 +854,10 @@ class UnitBadgeRegistry {
     LibraryBadge.leafUnits
       ..clear()
       ..addAll(leafUnitIds(root));
+    // 直接上级：分发链逐级上行要用（owner 2026-11-27）。
+    LibraryBadge.parentOfUnit
+      ..clear()
+      ..addAll(parentOfUnitIds(root));
   }
 
   static String labelFor(String basicId) => labels[basicId] ?? '';

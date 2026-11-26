@@ -160,10 +160,22 @@ double stageBottomInset({
   required double screenHeight,
   required double taskbarHeight,
   bool fullscreen = false,
+  /// 进度条命中条带高度（非全屏时它在任务栏**上方**，会压住画面）。
+  ///
+  /// owner 2026-11-27（win 版）：
+  /// > 「把非全屏下作品显示区域移到紧贴进度条的上方，进度条不挡任何作品显示
+  /// >   面积，几个像素宽度也不行，进度条展开时没有要求」
+  ///
+  /// 此前这里只减掉任务栏高度，进度条（28dp 热区条带）盖在画面底部几十像素上，
+  /// 而且热区还会吞掉画面下沿的点击。现在把条带高度一并让出来：舞台底边正好
+  /// 落在条带上沿，画面任何像素都不与进度条重叠。
+  /// 展开态（气泡）不额外预留——owner 明确说「展开时没有要求」。
+  double progressStripHeight = 0,
 }) {
   if (screenHeight <= 0 || fullscreen) return 0;
   final bar = taskbarHeight > 0 ? taskbarHeight : 0.0;
-  return bar.clamp(0.0, screenHeight).toDouble();
+  final strip = progressStripHeight > 0 ? progressStripHeight : 0.0;
+  return (bar + strip).clamp(0.0, screenHeight).toDouble();
 }
 
 /// T：舞台内进度层距舞台底边的距离（底部安全区 + 少量内边距）。
