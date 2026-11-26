@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'library_badge.dart';
 import 'json_num.dart';
 
 import 'package:flutter/material.dart';
@@ -157,7 +158,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('爬虫配置 · ${widget.unit.name}'),
+        // owner 2026-11-26：库名要跟「省略序号」开关走，与卡片/词条同一口径。
+        // 这里原来直接贴 widget.unit.name，目录名带 `(1) ` 前缀就原样显示了。
+        title: Text('爬虫配置 · ${LibraryBadge.stripIndex(widget.unit.name)}'),
         actions: [
           const HomeAction(),
           TextButton(

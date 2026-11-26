@@ -27,6 +27,16 @@ class DeletedEntry {
   /// 删除记录行跳转作品时要带着它去 `/api/work.json` 精确查找。
   final String libId;
 
+  /// 作品目录的本地绝对路径（服务端 `local` 字段）。
+  ///
+  /// owner 2026-11-26：「删除监测页点记录进不了作品，全部提示未同步到本地」。
+  ///
+  /// 根因：删除记录里的 `id` 是抖音 19 位 aweme_id，而本地索引的作品 id 是
+  /// `g` + sha1(库+相对路径) 的哈希——两套体系永远对不上，只按 id 查必然 404。
+  /// 服务端 2026-11-25 已支持按 `path` 反查索引，但客户端**根本没解析这个
+  /// 字段**，所以那条通路一直是空的。
+  final String localPath;
+
   /// 三态（服务端下发 `st`）：
   /// - `deleted` 已删除：平台已删除/不可见，且**本地曾落地**（才计入「已删除」）；
   /// - `failed` 抓取失败：本地从未落地（`本地` 路径不存在），可重试；
@@ -44,6 +54,7 @@ class DeletedEntry {
     required this.cover,
     this.libName = '',
     this.libId = '',
+    this.localPath = '',
     this.stateRaw = '',
   });
 
@@ -69,7 +80,12 @@ class DeletedEntry {
     return parts.join(' · ');
   }
 
-  DeletedEntry copyWith({String? libName, String? libId, String? stateRaw}) => DeletedEntry(
+  DeletedEntry copyWith(
+          {String? libName,
+          String? libId,
+          String? localPath,
+          String? stateRaw}) =>
+      DeletedEntry(
         at: at,
         author: author,
         date: date,
@@ -80,6 +96,7 @@ class DeletedEntry {
         cover: cover,
         libName: libName ?? this.libName,
         libId: libId ?? this.libId,
+        localPath: localPath ?? this.localPath,
         stateRaw: stateRaw ?? this.stateRaw,
       );
 }
@@ -154,10 +171,14 @@ class DeletedStats {
 /// 行点击「打开作品」的请求地址（`libId` 为空时交给服务端用默认库查）。
 Uri? deletedWorkUri(String base, DeletedEntry e) {
   final id = e.workId.trim();
-  if (baseForJoin(base).isEmpty || id.isEmpty) return null;
+  final path = e.localPath.trim();
+  // id 与 path 至少有一个才可能查到：短视频 id 与本地作品 id 本就不同体系，
+  // 只有 path 能可靠反查（服务端 workByAbsPath）。
+  if (baseForJoin(base).isEmpty || (id.isEmpty && path.isEmpty)) return null;
   final lib = e.libId.trim();
   return apiUri(base, '/api/work.json', query: {
-    'id': id,
+    if (id.isNotEmpty) 'id': id,
+    if (path.isNotEmpty) 'path': path,
     if (lib.isNotEmpty) 'lib': lib,
   });
 }
@@ -285,6 +306,7 @@ DeletedReport parseDeletedReport(dynamic raw, {String source = ''}) {
         cover: '${e['th'] ?? ''}',
         libName: '${e['lib'] ?? ''}',
         libId: '${e['libId'] ?? ''}',
+        localPath: '${e['local'] ?? e['path'] ?? ''}',
         stateRaw: '${e['st'] ?? ''}',
       ));
     }

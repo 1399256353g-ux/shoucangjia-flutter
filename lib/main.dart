@@ -1375,6 +1375,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final Map<String, bool> testOk = {};
   final Set<String> testing = {};
 
+
   @override
   void initState() {
     super.initState();
@@ -1852,6 +1853,13 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   final Map<String, List<UnitLibrary>> unitsByTop = <String, List<UnitLibrary>>{};
   final Map<String, List<BasicLib>> basicsByTop = <String, List<BasicLib>>{};
   List<UnitLibrary> otherUnits = const [];
+
+  /// owner 2026-11-26：「防止页面显示条目过多……默认将媒体库下所有词条
+  /// 自定义设置条目隐藏，点击展开后再进行分别设置」。
+  ///
+  /// 默认空集合＝全部折叠。键用顶级单元库 id 而不是名字：名字会变，
+  /// 带序号时同一个库还可能有两种写法，用名字做键会出现「展开又自己收起来」。
+  final Set<String> expandedTopSections = <String>{};
   List<BasicLib> otherBasics = const [];
   LibMeta? meta;
   bool loading = true;
@@ -2114,31 +2122,90 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     final subUnits = unitsByTop[top.id] ?? const <UnitLibrary>[];
     final subBasics = basicsByTop[top.id] ?? const <BasicLib>[];
     final name = top.name.isEmpty ? top.id : top.name;
+    final expanded = expandedTopSections.contains(top.id);
+    // 折叠时也要能看出「这个媒体库设过什么」：按本组内已自定义的条目数
+    // 给一句摘要，不展开也能判断要不要进去改。
+    final customized = <String>[
+      if (LibraryBadge.topColorFor(top.id) != null) '本库',
+      for (final u in subUnits)
+        if (LibraryBadge.customColorFor(u.id) != null) u.name,
+      for (final b in subBasics)
+        if (LibraryBadge.basicCustom[b.id] != null) b.name,
+    ];
+    final emojiCount = <String>[
+      if (LibraryBadge.emojiFor(top.id).isNotEmpty) top.id,
+      for (final u in subUnits)
+        if (LibraryBadge.emojiFor(u.id).isNotEmpty) u.id,
+      for (final b in subBasics)
+        if (LibraryBadge.emojiFor(b.id).isNotEmpty) b.id,
+    ].length;
+    final summary = customized.isEmpty && emojiCount == 0
+        ? '未自定义 · 点开设置'
+        : '已自定义 ${customized.length} 项'
+            '${emojiCount > 0 ? ' · 后缀 $emojiCount' : ''}';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _SectionHeader('顶级单元库 · $name'),
-        _libTile(top, isTop: true),
-        if (subUnits.isNotEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
-            child: Text('单元库',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey)),
+        // 组头本身就是展开开关：整行可点，右侧箭头指示状态。
+        InkWell(
+          key: ValueKey('badge-section-toggle-${top.id}'),
+          onTap: () => setState(() {
+            if (!expandedTopSections.remove(top.id)) {
+              expandedTopSections.add(top.id);
+            }
+          }),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 12, 8),
+            child: Row(children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('顶级单元库 · ${LibraryBadge.stripIndex(name)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
+                    Text(summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                  size: 20, color: Colors.grey),
+            ]),
           ),
-        for (final u in subUnits) _libTile(u, indent: true),
-        if (subBasics.isNotEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
-            child: Text('基础库（末梢，优先级最高）',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey)),
-          ),
-        for (final b in subBasics) _basicTile(b, indent: true),
+        ),
+        if (expanded) ...[
+          _libTile(top, isTop: true),
+          if (subUnits.isNotEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
+              child: Text('单元库',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey)),
+            ),
+          for (final u in subUnits) _libTile(u, indent: true),
+          if (subBasics.isNotEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
+              child: Text('基础库（末梢，优先级最高）',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey)),
+            ),
+          for (final b in subBasics) _basicTile(b, indent: true),
+          const SizedBox(height: 8),
+        ],
       ],
     );
   }
@@ -2551,10 +2618,12 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       source = BadgeColorSource.inheritTop;
                       reset = true;
                     }),
+                    // owner 2026-11-26：统一说法「恢复默认」。
+                    // 语义固定为：来源回「继承顶级」+ 清掉本层自定义色
+                    // + 清掉 emoji 后缀。不再用「恢复继承/自动」这种
+                    // 把两种来源混在一个词里的写法。
                     icon: const Icon(Icons.restart_alt, size: 18),
-                    label: Text(topLevelOnly
-                        ? '恢复继承/自动'
-                        : '恢复自动（颜色 + 后缀）'),
+                    label: const Text('恢复默认'),
                   ),
                 ),
               ]),

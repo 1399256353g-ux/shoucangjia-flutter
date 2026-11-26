@@ -568,6 +568,13 @@ class LibraryBadge {
   /// `own ? '自定义' : '继承'`，于是「来源=自动分配」被显示成「继承」，
   /// 用户改完看到文案没变，会以为开关没生效。
   /// [hasOwn] 本层真有自定义色；[inherits] 本层当前从顶级继承到了色。
+  /// 来源文案：**自动就是自动、继承就是继承**，不许按「当前有没有顶级色」
+  /// 把继承说成自动。
+  ///
+  /// owner 2026-11-26：「自动就是自动，继承就是继承，不要混淆说法，误导用户」。
+  /// 原来 `inheritTop` 在顶级没设色时返回「自动分配」——用户选的是「继承」，
+  /// 界面却告诉他现在是「自动」，于是他以为自己选的没生效，反复来回改。
+  /// 选了继承就显示继承；实际回落由颜色解析链负责，不该改写来源名称。
   static String sourceLabelOf(BadgeColorSource src,
       {required bool hasOwn, required bool inherits}) {
     if (hasOwn) return '自定义';
@@ -575,10 +582,10 @@ class LibraryBadge {
       case BadgeColorSource.autoAssign:
         return '自动分配';
       case BadgeColorSource.fixedCustom:
-        // 声明自定义但色被清掉：真实生效的是自动配色，文案不得说「自定义」。
+        // 声明了自定义、但色被清掉：此时真实生效的是自动配色。
         return '自动分配';
       case BadgeColorSource.inheritTop:
-        return inherits ? '继承顶级' : '自动分配';
+        return '继承顶级';
     }
   }
 
