@@ -3390,6 +3390,9 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   /// 不用 PageView：这些条目是按同步批次分组的，跨组翻页会打断「同一次同步」
   /// 的阅读顺序；折叠更符合这里的结构。
   static const int kDeletedPageSize = 20;
+  /// 键是 [DeletedSyncGroup.key]（UTC 分钟键），不是 `label`（展示文本）：
+  /// 两个不同批次落在同一分钟、或时区切换导致标签相同，用展示文本会让
+  /// 「再显示」按钮展开的是别人那一组。
   final Map<String, int> _shownPerGroup = <String, int>{};
 
   /// C2（owner 2026-11-24）：顶级单元库＝媒体库根，作为删除记录的一级筛选。
@@ -3759,7 +3762,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
             ]),
           ),
           for (final e in g.items.take(
-              _shownPerGroup[g.label] ?? kDeletedPageSize)) ...[
+              _shownPerGroup[g.key] ?? kDeletedPageSize)) ...[
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 4),
               leading: _cover(e),
@@ -3839,19 +3842,19 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
             const Divider(height: 1),
           ],
           // owner 2026-11-27：一组超过一页时给「再显示 N 条」，避免页面无限长。
-          if (g.items.length > (_shownPerGroup[g.label] ?? kDeletedPageSize))
+          if (g.items.length > (_shownPerGroup[g.key] ?? kDeletedPageSize))
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: TextButton.icon(
-                key: ValueKey('deleted-more-${g.label}'),
+                key: ValueKey('deleted-more-${g.key}'),
                 onPressed: () => setState(() {
-                  final cur = _shownPerGroup[g.label] ?? kDeletedPageSize;
-                  _shownPerGroup[g.label] = cur + kDeletedPageSize;
+                  final cur = _shownPerGroup[g.key] ?? kDeletedPageSize;
+                  _shownPerGroup[g.key] = cur + kDeletedPageSize;
                 }),
                 icon: const Icon(Icons.expand_more, size: 18),
                 label: Text(
-                    '再显示 ${g.items.length - (_shownPerGroup[g.label] ?? kDeletedPageSize)} 条'
-                    '（已显示 ${_shownPerGroup[g.label] ?? kDeletedPageSize}/${g.items.length}）'),
+                    '再显示 ${g.items.length - (_shownPerGroup[g.key] ?? kDeletedPageSize)} 条'
+                    '（已显示 ${_shownPerGroup[g.key] ?? kDeletedPageSize}/${g.items.length}）'),
               ),
             ),
         ],
