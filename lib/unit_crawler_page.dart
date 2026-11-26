@@ -347,7 +347,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            ok ? '已配置脚本：${config.script}' : '无爬虫脚本（J17：同步设置已停用）',
+            ok
+                ? '已配置脚本：${config.script}'
+                : '该单元库没有爬虫脚本，不支持同步设置',
             style: const TextStyle(fontSize: 12),
           ),
         ),

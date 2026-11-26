@@ -3344,6 +3344,14 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
   bool checking = false;
 
+  /// owner 2026-11-27：「删除监测条目分页显示，防止积攒过多页面过长」。
+  ///
+  /// 每组（每次同步）默认只显示前 N 条，其余折叠为「再显示 N 条」。
+  /// 不用 PageView：这些条目是按同步批次分组的，跨组翻页会打断「同一次同步」
+  /// 的阅读顺序；折叠更符合这里的结构。
+  static const int kDeletedPageSize = 20;
+  final Map<String, int> _shownPerGroup = <String, int>{};
+
   /// C2（owner 2026-11-24）：顶级单元库＝媒体库根，作为删除记录的一级筛选。
   /// 记录只带基础库 id（`libId`），经 LibMeta 映射到所属顶级单元库。
   LibMeta? _meta;
@@ -3696,7 +3704,8 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
               ),
             ]),
           ),
-          for (final e in g.items) ...[
+          for (final e in g.items.take(
+              _shownPerGroup[g.label] ?? kDeletedPageSize)) ...[
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: 4),
               leading: _cover(e),
@@ -3775,6 +3784,22 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
             ),
             const Divider(height: 1),
           ],
+          // owner 2026-11-27：一组超过一页时给「再显示 N 条」，避免页面无限长。
+          if (g.items.length > (_shownPerGroup[g.label] ?? kDeletedPageSize))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: TextButton.icon(
+                key: ValueKey('deleted-more-${g.label}'),
+                onPressed: () => setState(() {
+                  final cur = _shownPerGroup[g.label] ?? kDeletedPageSize;
+                  _shownPerGroup[g.label] = cur + kDeletedPageSize;
+                }),
+                icon: const Icon(Icons.expand_more, size: 18),
+                label: Text(
+                    '再显示 ${g.items.length - (_shownPerGroup[g.label] ?? kDeletedPageSize)} 条'
+                    '（已显示 ${_shownPerGroup[g.label] ?? kDeletedPageSize}/${g.items.length}）'),
+              ),
+            ),
         ],
       ],
     );
@@ -4118,7 +4143,7 @@ class SettingsHubPage extends StatelessWidget {
         ),
         ListTile(
           leading: const Icon(Icons.library_books_outlined),
-          title: const Text('媒体库与爬虫'),
+          title: const Text('爬虫设置'),
           subtitle: const Text('选择 / 添加 / 删除库 · 库根爬虫 · 维护检查'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const MediaCrawlerSettingsPage())),
@@ -4158,13 +4183,6 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('主题外观 · 词条配色 · 库角标 · 按键绑定 · 播放设置 · 缓存'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const CustomizationHubPage())),
-        ),
-        ListTile(
-          leading: const Icon(Icons.delete_outline),
-          title: const Text('删除监测'),
-          subtitle: const Text('已删除 / 取消收藏的作品记录 · 只读日志，不动媒体'),
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const DeletedMonitorPage())),
         ),
         const _StripIndexTile(),
         const _RecommendCountTile(),
@@ -6268,7 +6286,7 @@ class MarkedNodes {
 
   const MarkedNodes(this.rels, this.covers);
 }
-/// 设置 → 媒体库与爬虫：独立管理页，不再打开主页（避免套叠重复）。
+/// 设置 → 爬虫设置：独立管理页，不再打开主页（避免套叠重复）。
 class MediaCrawlerSettingsPage extends StatefulWidget {
   const MediaCrawlerSettingsPage({super.key});
   @override
@@ -6288,6 +6306,12 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   /// owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库的设置就归到
   /// 对应的下面去」。这里存树上的媒体库（顶级单元库），用于把单元库按归属分组。
   List<UnitLibrary> tops = const [];
+
+  /// owner 2026-11-27：「各爬虫脚本条目按媒体库分类折叠收纳」。
+  ///
+  /// 默认全部折叠——40 多个单元库 + 脚本条目全展开，一屏塞不下也找不到东西。
+  /// 键用媒体库 id（不是名字：名字会变、带序号时还有两种写法）。
+  final Set<String> crawlerSectionOpen = <String>{};
 
   @override
   void initState() {
@@ -6397,24 +6421,15 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     for (final topId in order) {
       final list = byTop[topId] ?? const <UnitLibrary>[];
       if (list.isEmpty) continue;
-      out.add(Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-        child: Row(children: [
-          Icon(Icons.layers_outlined, size: 14, color: Colors.grey.shade600),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-                LibraryBadge.stripIndex(_topNameOf(topId)),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 12.5, fontWeight: FontWeight.w700)),
-          ),
-          Text('${list.length} 个单元库',
-              style: const TextStyle(fontSize: 11, color: Colors.grey)),
-        ]),
+      out.add(_crawlerSectionHeader(
+        key: topId,
+        title: LibraryBadge.stripIndex(_topNameOf(topId)),
+        subtitle: '${list.length} 个单元库 · '
+            '${list.where((u) => _unitHasScript(u)).length} 个有脚本',
       ));
-      for (final u in list) out.add(_unitTile(u));
+      if (crawlerSectionOpen.contains(topId)) {
+        for (final u in list) out.add(_unitTile(u));
+      }
     }
     if (other.isNotEmpty) {
       out.add(const Padding(
@@ -6425,6 +6440,52 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       for (final u in other) out.add(_unitTile(u));
     }
     return out;
+  }
+
+  /// 该单元库是否配了爬虫脚本（与 [_unitTile] 同一判定）。
+  bool _unitHasScript(UnitLibrary u) =>
+      boolOf(unitFlags[u.rel]) ||
+      boolOf(unitFlags[u.id.replaceFirst('node:', '')]);
+
+  /// 可折叠的媒体库分节头。默认折叠，点一下展开该媒体库下的条目。
+  Widget _crawlerSectionHeader({
+    required String key,
+    required String title,
+    required String subtitle,
+  }) {
+    final open = crawlerSectionOpen.contains(key);
+    return InkWell(
+      key: ValueKey('crawler-section-$key'),
+      onTap: () => setState(() {
+        if (!crawlerSectionOpen.remove(key)) crawlerSectionOpen.add(key);
+      }),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 12, 6),
+        child: Row(children: [
+          Icon(Icons.layers_outlined, size: 14, color: Colors.grey.shade600),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12.5, fontWeight: FontWeight.w700)),
+                Text(subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+              ],
+            ),
+          ),
+          Icon(open ? Icons.expand_less : Icons.expand_more,
+              size: 20, color: Colors.grey),
+        ]),
+      ),
+    );
   }
 
   /// 单元库 → 所属媒体库（顶级单元库）id；拿不到返回空串（不猜、不硬塞）。
@@ -6454,7 +6515,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     return id;
   }
 
-  /// H：单个单元库的配置入口；没有脚本时置灰并写明 J17 原因。
+  /// H：单个单元库的配置入口；没有脚本时置灰并写明「为什么不能设置」。
   Widget _unitTile(UnitLibrary u) {
     final has = boolOf(unitFlags[u.rel]) ||
         boolOf(unitFlags[u.id.replaceFirst('node:', '')]);
@@ -6469,7 +6530,9 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       title: Text(LibraryBadge.stripIndex(u.name),
           maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
-        has ? '已配置爬虫脚本 · 可单独设置同步频率' : '无爬虫脚本（J17：同步设置不可用）',
+        has
+            ? '已配置爬虫脚本 · 可单独设置同步频率'
+            : '该单元库没有爬虫脚本，因此不支持同步设置',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style:
@@ -6513,7 +6576,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     final withScripts =
         crawlers.values.where((c) => _scriptCount(c) > 0).length;
     return Scaffold(
-      appBar: AppBar(title: const Text('媒体库与爬虫'), actions: [
+      appBar: AppBar(title: const Text('爬虫设置'), actions: [
         IconButton(
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
         const HomeAction(),
@@ -6529,6 +6592,42 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                         style:
                             const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
+                  // owner 2026-11-27：「删除监控页塞到对应单元库的爬虫配置页面
+                  // 下去，爬虫没有这个功能就显示不支持」。
+                  //
+                  // 删除监测依赖爬虫扫描平台侧，所以入口跟爬虫设置放一起；
+                  // 一个脚本都没配时不可用，并直接说明原因。
+                  Builder(builder: (ctx) {
+                    final anyScript = withScripts > 0;
+                    return ListTile(
+                      key: const ValueKey('deleted-monitor-entry'),
+                      enabled: anyScript,
+                      leading: Icon(
+                          anyScript
+                              ? Icons.delete_outline
+                              : Icons.delete_forever_outlined,
+                          color: anyScript ? null : Colors.grey),
+                      title: const Text('删除监测'),
+                      subtitle: Text(
+                        anyScript
+                            ? '已删除 / 取消收藏的作品记录 · 只读日志，不动媒体'
+                            : '尚未配置任何爬虫脚本，删除监测不可用',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: anyScript ? Colors.grey : Colors.orange),
+                      ),
+                      trailing: Icon(Icons.chevron_right,
+                          color: anyScript
+                              ? null
+                              : Colors.grey.withValues(alpha: 0.4)),
+                      onTap: anyScript
+                          ? () => Navigator.of(ctx).push(MaterialPageRoute(
+                              builder: (_) => const DeletedMonitorPage()))
+                          : null,
+                    );
+                  }),
                   // owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库
                   // 的设置就归到对应的下面去」。
                   //
@@ -7802,7 +7901,9 @@ class AuthorRankTile extends StatelessWidget {
   final int works;
   final int plays;
   final int drops;
-  final String scoreText;
+  /// 当前排行指标（`play` / `drop`）：决定右侧分数格子的类型文字。
+  final String metric;
+  final int score;
   final VoidCallback? onTap;
 
   const AuthorRankTile({
@@ -7817,7 +7918,8 @@ class AuthorRankTile extends StatelessWidget {
     required this.works,
     required this.plays,
     required this.drops,
-    required this.scoreText,
+    this.metric = 'play',
+    this.score = 0,
     this.onTap,
   });
 
@@ -7858,16 +7960,20 @@ class AuthorRankTile extends StatelessWidget {
         // 排行榜明细行**故意保留精确数字**：这一行是用来互相比较的
         // （同一屏里几个作者的播放量谁多谁少），缩写会把 1.2万 和 1.3万
         // 压成同一个读数。它不是「同一读数两处写法」，是另一个用途。
-        Text('播放 $plays · 水滴 $drops · $works 作品',
+        //
+        // 顺序与右侧分数格子统一：类型在前、数字在后（`rank_metric.dart`）。
+        Text(rankDetailLine(plays: plays, drops: drops, works: works),
             style: TextStyle(
                 fontSize: 10,
                 color: Theme.of(context).colorScheme.onSurfaceVariant)),
       ]),
-      trailing: Text(scoreText,
-          style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              color: Colors.lightBlueAccent)),
+      // 分数格子宽度固定、类型在上数字在下：切指标时数字不左右挪
+      // （此前 `💧 4` 与 `2000` 宽度不同，整列数字对不齐）。
+      trailing: RankScoreCell(
+        label: rankMetricLabel(metric),
+        value: score,
+        color: Colors.lightBlueAccent,
+      ),
       onTap: onTap,
     );
   }

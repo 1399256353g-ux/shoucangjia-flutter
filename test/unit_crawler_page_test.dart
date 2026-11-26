@@ -38,7 +38,7 @@ Widget host(http.Client client) => MaterialApp(
     );
 
 void main() {
-  testWidgets('无脚本时同步设置置灰并提示 J17', (t) async {
+  testWidgets('无脚本时同步设置置灰并说明不支持（不再出现内部代号）', (t) async {
     final client = MockClient((req) async {
       if (req.url.path == '/api/settings') {
         return http.Response(jsonEncode({'collections': <dynamic>[]}), 200);
@@ -55,8 +55,12 @@ void main() {
     await t.pumpWidget(host(client));
     await t.pumpAndSettle();
 
-    expect(find.textContaining('J17'), findsOneWidget);
-    expect(find.textContaining('无爬虫脚本，同步设置不可用'), findsOneWidget);
+    // owner 2026-11-27：「无爬虫脚本提示后面的 J17 字样是什么意思，不会是以前
+    // 的项目代号吧，不要使用出现这种不名所以让用户迷惑的文字描述」。
+    // 内部代号已从界面文案里清除，改成用户能懂的一句话。
+    expect(find.textContaining('J17'), findsNothing,
+        reason: '界面不得出现内部代号');
+    expect(find.textContaining('不支持同步设置'), findsOneWidget);
     expect(find.byKey(const ValueKey('unit-crawler-script')), findsNothing);
     final sw = t.widget<SwitchListTile>(
         find.byKey(const ValueKey('unit-crawler-enabled')));

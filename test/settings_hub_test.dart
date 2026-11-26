@@ -12,9 +12,10 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // 同步源已并入每个单元库的爬虫设置；设置页只保留「媒体库与爬虫」。
+    // 同步源已并入每个单元库的爬虫设置；设置页只保留「爬虫设置」入口。
+    // owner 2026-11-27：「媒体库与爬虫设置更名为爬虫设置」。
     expect(find.text('同步源选择'), findsNothing);
-    expect(find.text('媒体库与爬虫'), findsOneWidget);
+    expect(find.text('爬虫设置'), findsOneWidget);
     expect(find.textContaining('收藏夹'), findsNothing);
     // 双击点赞（0.9.19 引入）已在 0.9.174 按 owner 要求整体移除：
     // 设置里不应再出现该开关，避免出现「有开关但画面已无点赞」的死配置。
