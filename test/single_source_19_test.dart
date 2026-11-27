@@ -22,7 +22,7 @@ import 'package:shoucangjia/library_tree.dart';
 import 'package:shoucangjia/unit_library.dart';
 import 'package:shoucangjia/unit_library_view.dart';
 
-String _mainSrc() => File('lib/main.dart').readAsStringSync();
+String _mainSrc() => File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
 
 /// 「拿连接状态文案反推布尔」的两种写法：`== '已连接'` / `== "已连接"`。
 final RegExp _statusLiteral = RegExp(
@@ -217,7 +217,7 @@ void main() {
           .listSync()
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))) {
-        final lines = f.readAsStringSync().split('\n');
+        final lines = f.readAsStringSync().replaceAll('\r\n', '\n').split('\n');
         for (var i = 0; i < lines.length; i++) {
           final t = lines[i].trim();
           if (t.startsWith('//')) continue;
@@ -230,7 +230,7 @@ void main() {
     });
 
     test('卡片状态入参是 bool?，不是文案串', () {
-      final src = File('lib/unit_library_view.dart').readAsStringSync();
+      final src = File('lib/unit_library_view.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('final bool? online;'), isTrue);
       expect(src.contains('final String connectionStatus'), isFalse,
           reason: '文案字段已删除，避免两套表达同一个事实');

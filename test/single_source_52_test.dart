@@ -27,7 +27,7 @@ import 'package:shoucangjia/main.dart' show WorkGridSkeleton;
 
 /// 去掉整行注释后再做「有没有第二个来源」的扫描。
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

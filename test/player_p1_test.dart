@@ -15,7 +15,7 @@ void main() {
       for (final f in lib.listSync(recursive: true)) {
         if (f is! File || !f.path.endsWith('.dart')) continue;
         if (f.path.endsWith('player_controls.dart')) continue;
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         if (src.contains('PlayerInteractionRail')) hits.add(f.path);
       }
       expect(hits, isEmpty);
@@ -36,7 +36,7 @@ void main() {
       final hits = <String>[];
       for (final f in lib.listSync(recursive: true)) {
         if (f is! File || !f.path.endsWith('.dart')) continue;
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         if (src.contains('PlayerInfoPanel') || src.contains('class MarqueeText')) {
           hits.add(f.path);
         }

@@ -17,7 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// 移动端的音量本来是系统音量键（`volumeUiEnabled` 只在桌面端为真）。
 void main() {
-  final String mainSrc = File('lib/main.dart').readAsStringSync();
+  final String mainSrc = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
 
   test('不得再引入 swipe_control（边缘滑动那套从未接上）', () {
     expect(mainSrc.contains("import 'swipe_control.dart';"), isFalse,

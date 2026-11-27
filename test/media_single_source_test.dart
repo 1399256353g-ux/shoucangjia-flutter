@@ -17,7 +17,7 @@ import 'package:shoucangjia/work_cover.dart';
 import 'package:shoucangjia/work_safety.dart';
 
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

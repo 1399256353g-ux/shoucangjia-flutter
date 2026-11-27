@@ -20,7 +20,7 @@ import 'package:shoucangjia/unit_library.dart';
 ///
 /// 本文件只用合成的 `s1` / `s2` / `http://a:8090` 与合成目录名，不涉任何
 /// 真实目录或媒体内容。
-String _code(String p) => File(p).readAsStringSync();
+String _code(String p) => File(p).readAsStringSync().replaceAll('\r\n', '\n');
 
 /// 去掉整行注释：注释里提到某个写法不算「用了它」。
 String _codeNoComments(String p) => _code(p)

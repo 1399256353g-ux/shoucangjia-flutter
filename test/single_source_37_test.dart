@@ -26,7 +26,7 @@ import 'package:shoucangjia/media_path.dart';
 import 'package:shoucangjia/media_resize.dart';
 import 'package:shoucangjia/playback_error.dart';
 
-String _lib(String name) => File('lib/$name').readAsStringSync();
+String _lib(String name) => File('lib/$name').readAsStringSync().replaceAll('\r\n', '\n');
 
 void main() {
   group('w= 的键值解析只有一处实现', () {

@@ -145,7 +145,7 @@ void main() {
       PauseTrace.mark('stall:retryPlay#1');
       final f = File(PauseTrace.logPath);
       expect(f.existsSync(), isTrue);
-      final text = f.readAsStringSync();
+      final text = f.readAsStringSync().replaceAll('\r\n', '\n');
       expect(text, contains('stall:retryPlay#1'));
     });
   });

@@ -31,7 +31,7 @@ import 'package:shoucangjia/http_json.dart';
 import 'package:shoucangjia/media_resize.dart';
 import 'package:shoucangjia/unit_library_view.dart';
 
-String _lib(String name) => File('lib/$name').readAsStringSync();
+String _lib(String name) => File('lib/$name').readAsStringSync().replaceAll('\r\n', '\n');
 
 /// 去掉整行注释后的源码（契约扫描只看真代码）。
 String _code(String name) => _lib(name)

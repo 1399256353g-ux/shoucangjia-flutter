@@ -11,7 +11,7 @@ import 'package:shoucangjia/rank_filter.dart';
 ///  4. 统计来自服务端，不写「本机」。
 void main() {
   String codeOf(String path) => File(path)
-      .readAsStringSync()
+      .readAsStringSync().replaceAll('\r\n', '\n')
       .split('\n')
       .where((l) => !l.trimLeft().startsWith('//'))
       .join('\n');

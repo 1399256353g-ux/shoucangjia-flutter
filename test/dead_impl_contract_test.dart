@@ -22,7 +22,7 @@ void main() {
   }
 
   String libSourceAll() =>
-      libDartFiles().map((f) => f.readAsStringSync()).join('\n');
+      libDartFiles().map((f) => f.readAsStringSync().replaceAll('\r\n', '\n')).join('\n');
 
   group('已删除的死实现在 lib/ 内不得复活', () {
     test('预载计划：shouldPreloadNext / preloadMatches 不得再定义', () {
@@ -151,7 +151,7 @@ void main() {
     test('轻震动只有 haptics.dart 一处实现（页面不得再内联 HapticFeedback）', () {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('haptics.dart'))
-          .where((f) => f.readAsStringSync().contains('HapticFeedback.'))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains('HapticFeedback.'))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '这些文件各自写了一份震动实现：$offenders');
@@ -198,7 +198,7 @@ void main() {
     });
 
     test('同步日志解码走 decodeSyncJson（面板不再手写 jsonDecode）', () {
-      final panel = File('lib/sync_log_panel.dart').readAsStringSync();
+      final panel = File('lib/sync_log_panel.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(panel.contains('decodeSyncJson('), isTrue);
       expect(panel.contains('jsonDecode(utf8.decode('), isFalse,
           reason: '两处响应体解码必须共用一个实现');
@@ -210,7 +210,7 @@ void main() {
     test('亮度→前景色只有 contrast.dart 一处（词条与角标不得各写一份）', () {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('contrast.dart'))
-          .where((f) => f.readAsStringSync().contains('0.299'))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains('0.299'))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '这些文件又抄了一份亮度公式：$offenders');
@@ -222,7 +222,7 @@ void main() {
       final quoted = RegExp(r"split\(RegExp\(r.\[\\\\\\\\/\]\+\.\)\)");
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('rel_path.dart'))
-          .where((f) => quoted.hasMatch(f.readAsStringSync()))
+          .where((f) => quoted.hasMatch(f.readAsStringSync().replaceAll('\r\n', '\n')))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '路径拆分又出现了内联拷贝：$offenders');
@@ -245,7 +245,7 @@ void main() {
       final offenders = <String>[];
       for (final f in libDartFiles()) {
         if (f.path.endsWith('prefs_json.dart')) continue;
-        final text = f.readAsStringSync();
+        final text = f.readAsStringSync().replaceAll('\r\n', '\n');
         if (text.contains('await sp.setString(')) offenders.add(f.path);
       }
       expect(offenders, isEmpty, reason: '这些文件又手写了一份存盘：$offenders');
@@ -253,7 +253,7 @@ void main() {
     });
 
     test('AuthorGrade 不再有两个名字做同一件事', () {
-      final src = File('lib/author_grade.dart').readAsStringSync();
+      final src = File('lib/author_grade.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('static Future<void> save()'), isFalse,
           reason: 'save 与 cacheLocal 逐字相同，只保留 cacheLocal');
       expect(src.contains('static Future<void> cacheLocal()'), isTrue);
@@ -282,13 +282,13 @@ void main() {
     test('崩溃判定的另一端已接线（clean_exit 必须有写入点）', () {
       // 这是本轮修的真 bug：写入函数一直存在，但没人调用，
       // 于是每次冷启动都把上一轮读成「疑似原生崩溃」。
-      final main = File('lib/main.dart').readAsStringSync();
+      final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(main.contains('Breadcrumb.cleanExit()'), isTrue,
           reason: 'cleanExit 必须被生命周期钩子调用');
       expect(main.contains('AppLifecycleState.paused'), isTrue);
       expect(
           File('lib/breadcrumb.dart')
-              .readAsStringSync()
+              .readAsStringSync().replaceAll('\r\n', '\n')
               .contains('static Future<void> cleanExit()'),
           isTrue);
     });
@@ -300,7 +300,7 @@ void main() {
       // main.dart 两处、unit_crawler_page.dart 两处、unit_crawler.dart 一处。
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('interval_label.dart'))
-          .where((f) => f.readAsStringSync().contains("~/ 60} 小时"))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains("~/ 60} 小时"))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '间隔文案又出现了内联拷贝：$offenders');
@@ -309,17 +309,17 @@ void main() {
       // 真实调用点必须转调，不能只是留着一个没人用的函数。
       expect(
           File('lib/main.dart')
-              .readAsStringSync()
+              .readAsStringSync().replaceAll('\r\n', '\n')
               .contains('everyMinutesLabel('),
           isTrue);
       expect(
           File('lib/unit_crawler_page.dart')
-              .readAsStringSync()
+              .readAsStringSync().replaceAll('\r\n', '\n')
               .contains('everyMinutesLabel('),
           isTrue);
       expect(
           File('lib/unit_crawler.dart')
-              .readAsStringSync()
+              .readAsStringSync().replaceAll('\r\n', '\n')
               .contains('everyMinutesLabel('),
           isTrue);
     });
@@ -328,7 +328,7 @@ void main() {
       // 三个业务函数此前各自写了 400/500/default 三个相同分支。
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('http_error_text.dart'))
-          .where((f) => f.readAsStringSync().contains("return '服务端写入失败';"))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains("return '服务端写入失败';"))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '状态码文案又各写了一份：$offenders');
@@ -346,14 +346,14 @@ void main() {
     });
 
     test('星标只有 StarStore 一份状态（LibraryTree 不得再算 starred）', () {
-      final tree = File('lib/library_tree.dart').readAsStringSync();
+      final tree = File('lib/library_tree.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(tree.contains('final List<BasicLib> starred;'), isFalse,
           reason: 'LibraryTree 又持有了第二份星标状态');
       expect(tree.contains('LibraryTree withStars('), isFalse);
       expect(tree.contains('List<BasicLib> visibleBasics('), isFalse);
       expect(tree.contains('orderStarred('), isFalse);
       // 真实星标入口仍在。
-      expect(File('lib/star_store.dart').readAsStringSync(),
+      expect(File('lib/star_store.dart').readAsStringSync().replaceAll('\r\n', '\n'),
           contains('List<String> get ordered'));
       expect(libSourceAll().contains('List<String> toggleStar('), isTrue);
     });
@@ -375,16 +375,16 @@ void main() {
       // 清理前 main.dart 里逐字手写了 7 份 base64(user:pass)。
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('basic_auth.dart'))
-          .where((f) => f.readAsStringSync().contains("'Basic "))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains("'Basic "))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '鉴权头格式又被手写了：$offenders');
-      expect(File('lib/basic_auth.dart').readAsStringSync(),
+      expect(File('lib/basic_auth.dart').readAsStringSync().replaceAll('\r\n', '\n'),
           contains('String basicAuthHeader(String user, String pass)'));
       // 真实调用点必须还在（Cfg 的鉴权头仍从这一条出口出去）。
       expect(
           File('lib/main.dart')
-              .readAsStringSync()
+              .readAsStringSync().replaceAll('\r\n', '\n')
               .contains('basicAuthHeader(u, p)'),
           isTrue);
     });
@@ -392,7 +392,7 @@ void main() {
     test('名次奖牌色只有 rank_medal.dart 一处', () {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('rank_medal.dart'))
-          .where((f) => f.readAsStringSync().contains('0xFFFFC107'))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains('0xFFFFC107'))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '奖牌色又复制了一份：$offenders');
@@ -403,7 +403,7 @@ void main() {
     });
 
     test('作者热区点击只有一个处理函数（三处热区共用）', () {
-      final main = File('lib/main.dart').readAsStringSync();
+      final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(main.contains('void _authorTapOpen()'), isTrue);
       // 0.9.291：此前是 3 处——头像 / 占位头像 / 作者名各一个 GestureDetector。
       // 头像与占位头像现由 `AuthorAvatarView` 自己决定画图还是画占位（同一个
@@ -416,7 +416,7 @@ void main() {
     });
 
     test('绑定表查字段只有 _bindingOf 一处算实际库 id', () {
-      final main = File('lib/main.dart').readAsStringSync();
+      final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(main.contains('String _bindingOf('), isTrue);
       expect('libId ?? lib'.allMatches(main).length, 1,
           reason: '又有地方自己算 libId ?? lib 再查绑定表');
@@ -430,7 +430,7 @@ void main() {
     });
 
     test('播放页不再重复 @override', () {
-      final main = File('lib/main.dart').readAsStringSync();
+      final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(main.contains('@override\n  @override'), isFalse);
     });
   });
@@ -440,8 +440,8 @@ void main() {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('byte_size.dart'))
           .where((f) =>
-              f.readAsStringSync().contains("toStringAsFixed(2)} GB") ||
-              f.readAsStringSync().contains("toStringAsFixed(1)} KB"))
+              f.readAsStringSync().replaceAll('\r\n', '\n').contains("toStringAsFixed(2)} GB") ||
+              f.readAsStringSync().replaceAll('\r\n', '\n').contains("toStringAsFixed(1)} KB"))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '字节分级又抄了一份：$offenders');
@@ -459,7 +459,7 @@ void main() {
       // 因此 `'.heic'` 只允许出现在 media_path.dart 一处。
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('media_path.dart'))
-          .where((f) => f.readAsStringSync().contains("'.heic'"))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains("'.heic'"))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '可显示图片白名单又抄了一份：$offenders');
@@ -483,13 +483,13 @@ void main() {
       final offenders = libDartFiles()
           .where((f) => !f.path.endsWith('time_labels.dart'))
           .where((f) =>
-              RegExp(r"padLeft\(2, '0'\)").hasMatch(f.readAsStringSync()))
+              RegExp(r"padLeft\(2, '0'\)").hasMatch(f.readAsStringSync().replaceAll('\r\n', '\n')))
           .where((f) => RegExp(r"\{two\((d|l|t|u|at|l)\.month\)\}")
-              .hasMatch(f.readAsStringSync()))
+              .hasMatch(f.readAsStringSync().replaceAll('\r\n', '\n')))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '时间两位补零又抄了一份：$offenders');
-      final dm = File('lib/deleted_monitor.dart').readAsStringSync();
+      final dm = File('lib/deleted_monitor.dart').readAsStringSync().replaceAll('\r\n', '\n');
       // 批次键必须保持 UTC：跨时区时同一批不能被拆成两组。
       expect(dm.contains('yearMonthDayTimeUtc(t)'), isTrue,
           reason: 'syncKeyOf 的 UTC 是有意的，改成本地时区会让批次键随时区漂移');
@@ -499,13 +499,13 @@ void main() {
     });
 
     test('播放位置时间进位：进度行与进度条不再各写一份', () {
-      final main = File('lib/main.dart').readAsStringSync();
+      final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(main.contains('String fmt(Duration d) {'), isTrue);
       expect(main.contains('return formatClock(d);'), isTrue,
           reason: '播放页时间必须走统一进位实现（65 分钟要显示 1:05:03）');
       expect(main.contains('inMinutes.remainder(60)'), isFalse,
           reason: '不进位的旧写法又回来了');
-      final pm = File('lib/playback_menu.dart').readAsStringSync();
+      final pm = File('lib/playback_menu.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(
           pm.contains(
               'String formatMenuPosition(int ms) => formatClockMs(ms);'),
@@ -513,7 +513,7 @@ void main() {
     });
 
     test('封面角标的 m:ss 不补零是有意的，不得并入播放器格式', () {
-      final cb = File('lib/cover_badges.dart').readAsStringSync();
+      final cb = File('lib/cover_badges.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(cb.contains('formatClockSeconds(total.round())'), isFalse,
           reason: '角标用 m:ss（0:05），播放器用 mm:ss（00:05）：并入会改掉角标显示');
       expect(cb.contains("h > 0 ? m.toString().padLeft(2, '0') : m.toString()"),
@@ -523,7 +523,7 @@ void main() {
   group('第二十三批：失败原因的拼装单一出口', () {
     // 注释里出现旧写法是说明，不是实现；判断前剥掉行注释。
     String codeOf(File f) => f
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -575,7 +575,7 @@ void main() {
   group('第十三批：响应解码字符集单一出口', () {
     // 注释里提到旧写法是说明，不是实现；判断前先剥掉行注释。
     String codeOf(File f) => f
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -661,7 +661,7 @@ void main() {
 
   group('第十四批：三处「写一份规则、抄一份实现」必须仍只有一个出口', () {
     String codeOf(File f) => f
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -729,7 +729,7 @@ void main() {
   // 两条需求同一个根：入口只能有一个，且必须真的能点开。
   group('第十五批：入口唯一且可见', () {
     String codeOf(File f) => f
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -782,7 +782,7 @@ void main() {
   // 不改真路径」留了一条静默分叉的路。
   group('第十六批：组合键只有一套 API', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -829,7 +829,7 @@ void main() {
   // 第十七批（0.9.217）：单元库「同步就绪」只有一条判定。
   group('第十七批：同步就绪只有一条规则', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -865,7 +865,7 @@ void main() {
   // 之后，任何调用点再手写这套链都会静默分叉，所以从代码层面禁掉。
   group('第十八批：库 id 归一只有一套规则', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -879,7 +879,7 @@ void main() {
       final offenders = <String>[];
       for (final f in libs) {
         if (f.path.endsWith('lib_id.dart')) continue; // 规则本体
-        final s = f.readAsStringSync();
+        final s = f.readAsStringSync().replaceAll('\r\n', '\n');
         if (s.contains("substring(5)")) offenders.add(f.path);
       }
       expect(offenders, isEmpty,
@@ -925,7 +925,7 @@ void main() {
   // 「有的操作生效、有的静默 400」。
   group('第十九批：作者挂载协议只有一处', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -1011,7 +1011,7 @@ void main() {
   // 同理，配色顺序此前在 main.dart 两处各写一遍「注册表优先」三元式。
   group('第二十批：词条注册表与配色顺序单一出口', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -1123,7 +1123,7 @@ void main() {
 
   group('第二十二批：写接口收尾 / 头像优先级 / 性能计数只有一个出口（2026-11-25）', () {
     String codeOf(String path) =>
-        File(path).readAsStringSync().replaceAll('\r\n', '\n');
+        File(path).readAsStringSync().replaceAll('\r\n', '\n').replaceAll('\r\n', '\n');
 
     test('写接口收尾不得再手写「statusCode != 200 || ok != true」四连判定', () {
       // 这条判定曾在 6 处各写一遍，且三处细节各不相同（先解析还是先看
@@ -1206,7 +1206,7 @@ void main() {
 
   group('第二十四批：状态码文案 / 同步源副标题 / 旧间隔字段', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -1263,7 +1263,7 @@ void main() {
 
   group('第二十五批：失败原因不再手拼 / 库树无幽灵序列化 / 扫描器判据', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');
@@ -1322,7 +1322,7 @@ void main() {
 
   group('第二十六批：界面文案不再插原始异常 / 库段编解码对称', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');

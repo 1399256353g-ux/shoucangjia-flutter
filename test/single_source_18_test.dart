@@ -28,7 +28,7 @@ import 'package:shoucangjia/unit_library.dart';
 import 'package:shoucangjia/work_forms.dart';
 import 'package:shoucangjia/main.dart' show LibBadges;
 
-String codeOfLib(String path) => File(path).readAsStringSync();
+String codeOfLib(String path) => File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
 TopBarAction _act(String id) =>
     TopBarAction(id: id, tooltip: id, icon: Icons.circle, onPressed: () {});
@@ -254,7 +254,7 @@ void main() {
           .listSync()
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))) {
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         for (final line in src.split('\n')) {
           if (line.trimLeft().startsWith('//')) continue;
           if (RegExp(r'DateTime\(\s*int\.parse').hasMatch(line)) {
@@ -271,7 +271,7 @@ void main() {
           .listSync()
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))) {
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         for (final line in src.split('\n')) {
           final t = line.trim();
           if (t.startsWith('//')) continue;

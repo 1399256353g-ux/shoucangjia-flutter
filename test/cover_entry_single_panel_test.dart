@@ -12,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// 用源码扫描而不是 widget 测试：面板在播放页内部、依赖大量播放器状态，
 /// 装一个真播放器来断言菜单项数量得不偿失；而这里要防的正是「第二份实现」。
 void main() {
-  final src = File('lib/main.dart').readAsStringSync();
+  final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
 
   test('封面四项只在 _openCoverSheet 里各出现一次', () {
     for (final label in <String>[

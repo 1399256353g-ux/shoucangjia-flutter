@@ -27,7 +27,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// 去掉整行注释后的源码（注释里引用旧写法是允许的，那是在解释为什么改）。
 String _code(String path) {
-  final raw = File(path).readAsStringSync();
+  final raw = File(path).readAsStringSync().replaceAll('\r\n', '\n');
   final out = StringBuffer();
   for (final line in raw.split('\n')) {
     if (line.trimLeft().startsWith('//')) continue;
@@ -193,7 +193,7 @@ void main() {
 
     test('两个名字作用的对象不同，文档里写明', () {
       // 说明在注释里，所以读原文。
-      final raw = File('lib/lib_cover.dart').readAsStringSync();
+      final raw = File('lib/lib_cover.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(raw.contains('作用的是**地址字符串**'), isTrue,
           reason: '必须写清它吃的是路径，与 workLibOf 吃条目字段不同');
       expect(raw.contains('workLibOf'), isTrue,

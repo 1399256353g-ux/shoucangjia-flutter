@@ -200,7 +200,7 @@ void main() {
   });
 
   test('页面切指标必须重排名次（不许只换数字）', () {
-    final main = File('lib/main.dart').readAsStringSync();
+    final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
     final start = main.indexOf('class _LibraryRankPageState');
     final end = main.indexOf('class AuthorGridCard', start);
     final body = main.substring(start, end);

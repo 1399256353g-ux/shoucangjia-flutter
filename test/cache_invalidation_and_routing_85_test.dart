@@ -15,7 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// `cfg.serverIdFor(cfg.lib)`，而这条请求是按 `lib` 发的。跨连接时同步与
 /// 小水滴记到别人的服务器上，节点卡片拿着错的 base 去挂载/取封面。
 String _codeNoComments(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');
@@ -118,7 +118,7 @@ void main() {
     });
 
     test('契约：缓存表不得只剩 putIfAbsent（有写入无失效）', () {
-      final src = File('lib/main.dart').readAsStringSync();
+      final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(RegExp(r'class LibMeta').hasMatch(src), isTrue);
       expect(src.contains('static void invalidate('), isTrue);
     });

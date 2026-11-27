@@ -253,7 +253,7 @@ List<String> flattenNames(UnitLibrary u) {
 
 /// 读源码并去掉整行注释（避免把文档里的旧写法当成缺陷）。
 String codeOfLib(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

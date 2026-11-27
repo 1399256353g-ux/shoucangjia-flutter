@@ -17,7 +17,7 @@ import 'package:shoucangjia/multi_server.dart';
 /// 于是首页拿到的模型是 null → `buildUnitTree(basics: t?.allBasics ?? [])`
 /// 拿到零基础库 → 所有作者/基础库词条落 SECRET、单元库卡片作者数与作品数
 /// 全是 0，而 `/api/libraries.json` 里那些字段其实一个都不缺。
-String _code(String path) => File(path).readAsStringSync();
+String _code(String path) => File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
 Map<String, dynamic> _basicsOnly() => {
       'root': '/root',

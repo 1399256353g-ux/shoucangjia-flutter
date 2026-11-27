@@ -262,4 +262,4 @@ List<String> _libFiles() {
   ];
 }
 
-String _read(String path) => File(path).readAsStringSync();
+String _read(String path) => File(path).readAsStringSync().replaceAll('\r\n', '\n');

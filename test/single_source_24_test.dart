@@ -177,7 +177,7 @@ void main() {
       final offenders = <String>[];
       for (final f in libFiles()) {
         if (f.path.endsWith('player_controls.dart')) continue;
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         if (RegExp(r'dx\s*/\s*\w+\)\s*\.clamp\(0').hasMatch(src)) {
           offenders.add(f.path);
         }
@@ -186,14 +186,14 @@ void main() {
     });
 
     test('text_fit 的宽度守卫包含 isFinite（只判 <=0 会被 NaN 穿透）', () {
-      final src = File('lib/text_fit.dart').readAsStringSync();
+      final src = File('lib/text_fit.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('maxWidth.isFinite'), isTrue);
     });
 
     test('时长上限常量只有一处定义', () {
       var badge = 0, sync = 0;
       for (final f in libFiles()) {
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         badge += RegExp(r'const int kBadgeMaxSeconds').allMatches(src).length;
         sync += RegExp(r'const int kSyncMaxDurationMs').allMatches(src).length;
       }

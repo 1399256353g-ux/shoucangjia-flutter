@@ -222,28 +222,28 @@ void main() {
 
   group('契约扫描：回绕与荒唐文案不得复活', () {
     test('单元库计数必须是 sumSat（不再有 fold(0, (n, b) => n + b.works)）', () {
-      final src = File('lib/unit_library.dart').readAsStringSync();
+      final src = File('lib/unit_library.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('sumSat('), isTrue);
       expect(RegExp(r'fold\(0,\s*\(n, b\) => n \+ b\.(works|authors)\)').hasMatch(src),
           isFalse);
     });
 
     test('分类树计数必须是 sumSat', () {
-      final src = File('lib/category_tree.dart').readAsStringSync();
+      final src = File('lib/category_tree.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('sumSat('), isTrue);
       expect(RegExp(r'fold\(0,\s*\(n, c\) => n \+ c\.(childCategoryCount|authorCount)\)')
           .hasMatch(src), isFalse);
     });
 
     test('删除监测总数走 addSat', () {
-      final src = File('lib/deleted_monitor.dart').readAsStringSync();
+      final src = File('lib/deleted_monitor.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('int get total => addSat('), isTrue);
     });
 
     test('间隔上限常量只有一处定义', () {
       var n = 0;
       for (final f in _libFiles()) {
-        n += RegExp(r'const int kMaxIntervalMinutes').allMatches(f.readAsStringSync()).length;
+        n += RegExp(r'const int kMaxIntervalMinutes').allMatches(f.readAsStringSync().replaceAll('\r\n', '\n')).length;
       }
       expect(n, 1);
     });
@@ -253,7 +253,7 @@ void main() {
       for (final f in _libFiles()) {
         final name = f.path.replaceAll('\\', '/').split('/').last;
         if (name == 'player_controls.dart') continue;
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         if (RegExp(r'speed\.toStringAsFixed').hasMatch(src)) offenders.add(name);
       }
       expect(offenders, isEmpty, reason: '这些文件又自己格式化倍速：$offenders');

@@ -77,7 +77,7 @@ void main() {
   // 这里改为钉住「作者索引模块不再自己造一套命中规则」。
   test('字母条命中规则不属于本模块（避免第二套规则复活）', () {
     final src = File('lib/author_index.dart')
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');

@@ -251,7 +251,7 @@ void main() {
   });
 
   group('契约扫描：这几处不得回退成裸 sort / 裸计数', () {
-    String src(String p) => File(p).readAsStringSync();
+    String src(String p) => File(p).readAsStringSync().replaceAll('\r\n', '\n');
 
     test('author_grid 排序走 stableSort', () {
       // 扫描时剔掉注释行：文件头里就写着旧写法 `list.sort(...)` 作为反例。

@@ -262,7 +262,7 @@ void main() {
         .listSync()
         .whereType<File>()
         .where((f) => f.path.endsWith('.dart'))
-        .map((f) => (f.path.split(RegExp(r'[\\/]')).last, f.readAsStringSync()));
+        .map((f) => (f.path.split(RegExp(r'[\\/]')).last, f.readAsStringSync().replaceAll('\r\n', '\n')));
 
     test('app_settings 里不再有裸数字默认键码', () {
       final src = lib.firstWhere((e) => e.$1 == 'app_settings.dart').$2;

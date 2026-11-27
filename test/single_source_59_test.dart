@@ -11,7 +11,7 @@ import 'package:shoucangjia/library_badge.dart';
 ///  4. 单元库爬虫页同时贴相对路径与绝对路径两行，删掉相对路径那行。
 void main() {
   String codeOf(String path) => File(path)
-      .readAsStringSync()
+      .readAsStringSync().replaceAll('\r\n', '\n')
       .split('\n')
       .where((l) => !l.trimLeft().startsWith('//'))
       .join('\n');
@@ -106,7 +106,7 @@ void main() {
 
   group('一个媒体库在界面上只有一个名字', () {
     test('libraryDisplayName 是「规范化 + 去序号」的唯一出口', () {
-      final names = File('lib/lib_names.dart').readAsStringSync();
+      final names = File('lib/lib_names.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(names.contains('String libraryDisplayName('), isTrue);
       expect(names.contains('LibraryBadge.stripIndex(displayLibraryName('), isTrue);
     });
@@ -114,7 +114,7 @@ void main() {
     test('页面不再自己拼 stripIndex(displayLibraryName(...))', () {
       // 同一个组合写法散在页面里，就是「同一个库在两页两个名字」的来源：
       // 网络设置那页只调 displayLibraryName、爬虫设置那页套了 stripIndex。
-      final main = File('lib/main.dart').readAsStringSync();
+      final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(main.contains('LibraryBadge.stripIndex(displayLibraryName'),
           isFalse,
           reason: '页面不要自己组合这两个函数；用 libraryDisplayName');
@@ -122,7 +122,7 @@ void main() {
     });
 
     test('爬虫配置页与维护页的标题都带库名（名字走同一出口）', () {
-      final main = File('lib/main.dart').readAsStringSync();
+      final main = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(main.contains("'爬虫配置 · '"), isTrue);
       expect(main.contains("'维护 · '"), isTrue);
       // 两处标题里都不再直接贴 `widget.lib['name']`。
@@ -132,7 +132,7 @@ void main() {
 
     test('库列表归一化不剥序号（渲染时才剥）', () {
       // 剥了序号的名字与其它来源（同步源、作者挂载）比对时会对不上。
-      final names = File('lib/lib_names.dart').readAsStringSync();
+      final names = File('lib/lib_names.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(names.contains("'name': displayLibraryName("), isTrue);
       expect(names.contains("'name': libraryDisplayName("), isFalse);
     });

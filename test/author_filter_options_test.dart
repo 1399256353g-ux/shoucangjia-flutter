@@ -33,7 +33,7 @@ UnitLibrary _unit(String id,
       children: children,
     );
 
-String fileText(String path) => File(path).readAsStringSync();
+String fileText(String path) => File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
 void main() {
   group('筛选项汇总只有一个出口', () {

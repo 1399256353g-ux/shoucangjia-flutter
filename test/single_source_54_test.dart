@@ -25,12 +25,12 @@ import 'package:shoucangjia/main.dart' show LibBadges;
 
 /// 去掉整行注释后再扫描：注释里提到「四种」是历史说明，不算第二份实现。
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');
 
-String _raw(String path) => File(path).readAsStringSync();
+String _raw(String path) => File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
 void main() {
   group('作者主页头部几何：骨架与真实头部同一份常量', () {

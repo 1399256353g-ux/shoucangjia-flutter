@@ -115,7 +115,7 @@ void main() {
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))) {
         if (f.path.endsWith('unit_fraction.dart')) continue;
-        final src = f.readAsStringSync();
+        final src = f.readAsStringSync().replaceAll('\r\n', '\n');
         // 去掉注释行再判，避免把说明文字当成代码。
         final code = src
             .split('\n')

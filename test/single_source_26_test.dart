@@ -94,7 +94,7 @@ void main() {
     });
 
     test('契约扫描：脱敏里不再用「第一个空白为止」的朴素正则', () {
-      final src = File('lib/playback_error.dart').readAsStringSync();
+      final src = File('lib/playback_error.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains(r"RegExp(r'/(?:media|api)/\S*')"), isFalse,
           reason: '回到 `\\S*` 就会在空格处截断，文件名后半段落进日志');
     });
@@ -198,7 +198,7 @@ void main() {
     });
 
     test('契约扫描：bump 不得回到裸 `count + 1`', () {
-      final src = File('lib/work_plays.dart').readAsStringSync();
+      final src = File('lib/work_plays.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('count: count + 1,'), isFalse,
           reason: '回绕会让一条被写坏上限的记录沉到最后，自动封面静默退回默认图');
       expect(src.contains('count: addSat('), isTrue);
@@ -210,7 +210,7 @@ void main() {
       final offenders = _libFiles()
           .where((f) => !f.path.endsWith('byte_size.dart'))
           .where((f) =>
-              f.readAsStringSync().contains('String formatBytes(int n)'))
+              f.readAsStringSync().replaceAll('\r\n', '\n').contains('String formatBytes(int n)'))
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty);
@@ -219,12 +219,12 @@ void main() {
     test('库排行总数只有 libraryTotals 一处', () {
       final offenders = _libFiles()
           .where((f) => !f.path.endsWith('library_rank.dart'))
-          .where((f) => f.readAsStringSync().contains('libraryTotals('))
+          .where((f) => f.readAsStringSync().replaceAll('\r\n', '\n').contains('libraryTotals('))
           .map((f) => f.path)
           .toList();
       // 只允许 main.dart 之类的调用点，不允许再定义第二份同名函数。
       for (final p in offenders) {
-        final src = File(p).readAsStringSync();
+        final src = File(p).readAsStringSync().replaceAll('\r\n', '\n');
         expect(src.contains('({int plays, int drops}) libraryTotals('), isFalse,
             reason: '$p 又写了一份 libraryTotals');
       }

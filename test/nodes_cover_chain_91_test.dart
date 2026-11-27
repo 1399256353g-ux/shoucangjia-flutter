@@ -23,7 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/multi_server.dart';
 
 String _codeOf(String path) {
-  final raw = File(path).readAsStringSync();
+  final raw = File(path).readAsStringSync().replaceAll('\r\n', '\n');
   final out = StringBuffer();
   for (final line in raw.split('\n')) {
     final t = line.trimLeft();

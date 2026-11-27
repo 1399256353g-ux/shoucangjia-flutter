@@ -28,7 +28,7 @@ import 'package:shoucangjia/volume_control.dart';
 const int _maxInt = 9223372036854775807;
 
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');
@@ -86,7 +86,7 @@ void main() {
 
   group('计数文案只有一个出口，四个页面都走它', () {
     test('定义在 count_label.dart，单元库只做 re-export', () {
-      final label = File('lib/count_label.dart').readAsStringSync();
+      final label = File('lib/count_label.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(label.contains('String formatCount(int n)'), isTrue);
       final unit = _code('lib/unit_library.dart');
       expect(unit.contains('String formatCount(int n)'), isFalse,

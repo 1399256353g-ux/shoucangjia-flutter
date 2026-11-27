@@ -195,7 +195,7 @@ void main() {
           .listSync(recursive: true)
           .whereType<File>()
           .where((f) => f.path.endsWith('.dart'))) {
-        b.writeln(f.readAsStringSync());
+        b.writeln(f.readAsStringSync().replaceAll('\r\n', '\n'));
       }
       return b.toString();
     }

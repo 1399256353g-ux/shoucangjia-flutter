@@ -108,7 +108,7 @@ void main() {
   //      时播放器已按默认倍速起播，看起来就是「没记住」。
   group('契约：退出落盘 + 起播前等恢复（0.9.303）', () {
     String code() {
-      final src = File('lib/main.dart').readAsStringSync();
+      final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       final start = src.indexOf('class _PlayerPageState');
       expect(start, greaterThan(0), reason: '找不到 _PlayerPageState');
       return src.substring(start);

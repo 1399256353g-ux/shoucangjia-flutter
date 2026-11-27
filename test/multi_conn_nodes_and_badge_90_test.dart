@@ -20,7 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_corner_badge.dart';
 
 String _codeOf(String path) {
-  final raw = File(path).readAsStringSync();
+  final raw = File(path).readAsStringSync().replaceAll('\r\n', '\n');
   final out = StringBuffer();
   for (final line in raw.split('\n')) {
     final t = line.trimLeft();
@@ -32,7 +32,7 @@ String _codeOf(String path) {
 
 /// `_loadTree` 的方法体（截到下一个方法定义前）。
 String _loadTreeBody() {
-  final src = File('lib/main.dart').readAsStringSync();
+  final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
   final start = src.indexOf('Future<void> _loadTree()');
   final end = src.indexOf('Future<void> _toggleUnitStar(', start);
   expect(start, greaterThan(0), reason: '找不到 _loadTree');
@@ -161,7 +161,7 @@ void main() {
     });
 
     test('设置页按枚举遍历：三档就只画三项，硬编码四行会立刻不一致', () {
-      final src = File('lib/main.dart').readAsStringSync();
+      final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       final start = src.indexOf('class _CornerBadgeSettingsPageState');
       final end = src.indexOf('Widget _kindTile(', start);
       final body = src.substring(start, end);

@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 ///    B 的门（401），整棵库树/作者索引退回空，界面只显示「没有数据」。
 /// 2. **各库排行串行 wait**：N 个库 N 次往返（各 8s 超时），库多时页面等十几秒。
 ///    这些请求彼此独立，改有界并发（`concurrency.mapConcurrent`）。
-String _code(String path) => File(path).readAsStringSync();
+String _code(String path) => File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
 /// 「按当前库取头」的字面出现次数：`cfg.headers` **后面不能紧跟 `For`**，
 /// 否则 `cfg.headersFor(lib)` 也会被算成一次。

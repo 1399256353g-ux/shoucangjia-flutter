@@ -34,7 +34,7 @@ import 'package:shoucangjia/unit_crawler.dart';
 
 /// 只保留非注释行，避免文档里的「旧写法」被契约扫描当成现役代码。
 String _lib(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) {
       final t = l.trimLeft();

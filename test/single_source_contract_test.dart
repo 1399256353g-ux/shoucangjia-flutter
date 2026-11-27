@@ -16,13 +16,13 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   final root = Directory('lib');
 
-  String readLib(String name) => File('${root.path}/$name').readAsStringSync();
+  String readLib(String name) => File('${root.path}/$name').readAsStringSync().replaceAll('\r\n', '\n');
 
   String libSourceAll() => root
       .listSync(recursive: true)
       .whereType<File>()
       .where((f) => f.path.endsWith('.dart'))
-      .map((f) => f.readAsStringSync())
+      .map((f) => f.readAsStringSync().replaceAll('\r\n', '\n'))
       .join('\n');
 
   group('音量图标：判定只有一处', () {

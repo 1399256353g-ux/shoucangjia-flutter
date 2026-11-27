@@ -16,7 +16,7 @@ import 'package:shoucangjia/playback_state.dart';
 /// 想改它，只能改这个字段本身，且必须想清楚是「用户/后台/失败」哪一类
 /// 意图。下面的测试钉住这条边界：整页不得再出现对 `paused` 的赋值。
 void main() {
-  final String src = File('lib/main.dart').readAsStringSync();
+  final String src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
 
   String playerPageSource() {
     const marker = 'class _PlayerPageState extends State<PlayerPage>';

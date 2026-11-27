@@ -13,7 +13,7 @@ import 'package:shoucangjia/playback_state.dart';
 /// 各画各的，就会出现「暂停键显示成播放键但画面还在走」这类自相矛盾——
 /// 这正是 owner 反复报的「暂停不灵敏 / 状态自己乱跳」。
 void main() {
-  final String src = File('lib/main.dart').readAsStringSync();
+  final String src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
 
   String playerPageSource() {
     const marker = 'class _PlayerPageState extends State<PlayerPage>';

@@ -33,7 +33,7 @@ import 'package:shoucangjia/author_index.dart';
 import 'package:shoucangjia/author_letter_bar.dart';
 import 'package:shoucangjia/card_action_button.dart';
 
-String _src(String name) => File('lib/$name').readAsStringSync();
+String _src(String name) => File('lib/$name').readAsStringSync().replaceAll('\r\n', '\n');
 
 void main() {
   group('索引条可见性只有一处判定', () {

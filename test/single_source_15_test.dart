@@ -215,7 +215,7 @@ void main() {
 
   group('契约：lib/ 内布尔判定只剩 json_num 一处写法', () {
     String codeOf(String path) => File(path)
-        .readAsStringSync()
+        .readAsStringSync().replaceAll('\r\n', '\n')
         .split('\n')
         .where((l) => !l.trimLeft().startsWith('//'))
         .join('\n');

@@ -16,7 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// 而且「谁后 return 谁覆盖」——两次请求落在不同的 5 分钟窗口时，晚到的旧
 /// 结果会顶掉先写好的新结果。现在两条路径都走唯一的 `_ensureMeta`。
 String _codeNoComments(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

@@ -21,7 +21,7 @@ import 'package:shoucangjia/author_file_picker.dart';
 import 'package:shoucangjia/unit_author_groups.dart';
 
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

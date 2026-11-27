@@ -134,7 +134,7 @@ void main() {
     /// 这条测试直接盯源码：`_loadTree` 造 `LibNode` 时必须传连接标识，
     /// 否则 `buildUnitTree` 会退回「第一层目录当卡片」并把它们标成「媒体库」。
     test('_loadTree 造节点时必须带 serverId/serverLabel', () {
-      final src = File('lib/main.dart').readAsStringSync();
+      final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       final start = src.indexOf('Future<void> _loadTree()');
       expect(start, greaterThan(0), reason: '找不到 _loadTree，测试需同步更新');
       // 截到该函数之后的合理范围（下一个顶层方法定义前）。
@@ -152,7 +152,7 @@ void main() {
     });
 
     test('两条建树路径都带连接标识（防止只修好其中一条）', () {
-      final src = File('lib/main.dart').readAsStringSync();
+      final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
       // 路径一：首页 _loadTree 内联构造
       final loadTree = src.substring(
           src.indexOf('Future<void> _loadTree()'),

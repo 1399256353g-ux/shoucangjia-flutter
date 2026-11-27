@@ -35,7 +35,7 @@ import 'package:shoucangjia/work_key.dart';
 import 'package:shoucangjia/work_plays.dart';
 
 String _code(String name) => File('lib/$name')
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

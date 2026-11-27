@@ -25,7 +25,7 @@ import 'package:shoucangjia/unit_library_view.dart';
 
 /// 只保留非注释行：文档里的「旧写法」不能被契约扫描当成现役代码。
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');
@@ -148,7 +148,7 @@ void main() {
     });
 
     test('visibleViewportOf 由页面转发（几何唯一实现）', () {
-      final src = File('lib/scroll_viewport.dart').readAsStringSync();
+      final src = File('lib/scroll_viewport.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('Size? visibleViewportOf(GlobalKey key)'), isTrue);
       // 页面不得自己算「视口高 − 偏移」。
       final page = _code('lib/unit_library_view.dart');

@@ -13,7 +13,7 @@ import 'package:shoucangjia/playback_state.dart';
 /// 若有人再次加回 `loading = …` 赋值，这条测试立刻失败：相位会重新变成
 /// 一份只写日志的副本，而界面回到各自拍脑袋。
 void main() {
-  final String src = File('lib/main.dart').readAsStringSync();
+  final String src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
 
   /// 播放页 State 的源码片段（从类声明到下一个顶层类之前）。
   String playerPageSource() {

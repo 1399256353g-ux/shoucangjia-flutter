@@ -28,7 +28,7 @@ import 'package:shoucangjia/unit_crawler.dart';
 import 'package:shoucangjia/unit_library.dart';
 
 String _lib(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

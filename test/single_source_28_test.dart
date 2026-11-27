@@ -147,7 +147,7 @@ void main() {
 
   group('契约扫描：四条规则各自只有一处实现', () {
     test('formatBytes 不再以 TB 收尾', () {
-      final src = File('lib/byte_size.dart').readAsStringSync();
+      final src = File('lib/byte_size.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains("'TB'"), isTrue);
       expect(src.contains("return '\${_truncated(gb / 1024, 2)} TB';"), isFalse);
     });
@@ -163,12 +163,12 @@ void main() {
     });
 
     test('命中率不再直接 toStringAsFixed', () {
-      final src = File('lib/resize_cache_api.dart').readAsStringSync();
+      final src = File('lib/resize_cache_api.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains(r'(hitRate * 100).toStringAsFixed(1)'), isFalse);
     });
 
     test('ContinueItem.key 只转发 workKey', () {
-      final src = File('lib/continue_watching.dart').readAsStringSync();
+      final src = File('lib/continue_watching.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains("lib.isEmpty ? id : '\$lib/\$id'"), isFalse);
       expect(src.contains('String get key => workKey(lib: lib, id: id);'), isTrue);
     });

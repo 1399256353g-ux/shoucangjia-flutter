@@ -18,7 +18,7 @@ import 'package:shoucangjia/meta_source.dart';
 import 'package:shoucangjia/server_origin.dart';
 
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

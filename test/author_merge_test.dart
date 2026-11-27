@@ -110,7 +110,7 @@ void _loadPathContract() {
   // 一旦有人把那份循环加回来，这里立刻变红——单测再绿也说明不了
   // 真实路径用的是它。
   group('作者页加载路径只用一份合并规则', () {
-    final src = File('lib/main.dart').readAsStringSync();
+    final src = File('lib/main.dart').readAsStringSync().replaceAll('\r\n', '\n');
 
     test('作者页调用 mergeAuthorWorks', () {
       expect(src.contains('mergeAuthorWorks('), isTrue);

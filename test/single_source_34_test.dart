@@ -37,7 +37,7 @@ import 'package:shoucangjia/work_forms.dart';
 
 /// 只保留非注释行，避免文档里的「旧写法」被契约扫描当成现役代码。
 String _lib(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');
@@ -245,7 +245,7 @@ void main() {
     });
 
     test('isGifMediaPath 是动图判定的唯一定义', () {
-      final mp = File('lib/media_path.dart').readAsStringSync();
+      final mp = File('lib/media_path.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(RegExp(r'bool isGifMediaPath\(').allMatches(mp).length, 1);
       for (final f in Directory('lib').listSync(recursive: true)) {
         if (f is! File || !f.path.endsWith('.dart')) continue;

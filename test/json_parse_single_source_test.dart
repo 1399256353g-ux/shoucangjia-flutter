@@ -18,7 +18,7 @@ import 'package:shoucangjia/json_num.dart';
 import 'package:shoucangjia/watch_progress.dart';
 
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

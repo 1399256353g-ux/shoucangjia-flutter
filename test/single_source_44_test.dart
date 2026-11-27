@@ -28,7 +28,7 @@ import 'package:shoucangjia/work_card.dart';
 
 /// 去掉整行注释后再做「有没有第二个实现」的扫描。
 String _code(String path) => File(path)
-    .readAsStringSync()
+    .readAsStringSync().replaceAll('\r\n', '\n')
     .split('\n')
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');

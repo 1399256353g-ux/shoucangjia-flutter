@@ -232,7 +232,7 @@ void main() {
     test('buildUnitTree 里不存在 _collectServerBasics 那层搬运', () {
       // 该函数只做 `out.add(root)`，却让「按有没有 basics 分叉」的历史缺陷
       // 反复复活。删掉它是本次修复的一部分：连接归组在唯一一处完成。
-      final src = File('lib/unit_library.dart').readAsStringSync();
+      final src = File('lib/unit_library.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains('_collectServerBasics'), isFalse);
       // 节点去重的键必须带连接：只按 rel 去重的那行不允许回来。
       expect(src.contains('final byRel = <String, LibNode>{}'), isFalse);
@@ -240,7 +240,7 @@ void main() {
     });
 
     test('媒体库卡片 id 带连接前缀，且 `media:local` 只在必要时出现', () {
-      final src = File('lib/unit_library.dart').readAsStringSync();
+      final src = File('lib/unit_library.dart').readAsStringSync().replaceAll('\r\n', '\n');
       expect(src.contains("'media:\${sid.isEmpty ? 'local' : sid}'"), isTrue);
       expect(src.contains("'top:\${sid.isEmpty ? 'local' : sid}'"), isTrue);
     });

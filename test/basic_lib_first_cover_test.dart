@@ -54,7 +54,7 @@ void main() {
   test('库树不再有「写了没人读」的本地序列化', () {
     // 此前 BasicLib.toJson 只被本文件断言：库树从不回写本地快照，
     // 重启是重拉 /api/libraries.json。留着它会让人误以为存在缓存。
-    final src = File('lib/library_tree.dart').readAsStringSync();
+    final src = File('lib/library_tree.dart').readAsStringSync().replaceAll('\r\n', '\n');
     expect(RegExp(r'Map<String, dynamic> toJson\(').hasMatch(src), isFalse,
         reason: 'BasicLib.toJson 又回来了（没有产品调用方）');
   });

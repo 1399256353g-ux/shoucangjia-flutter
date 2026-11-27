@@ -34,7 +34,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// 去掉整行注释后的源码（注释里引用旧写法是在解释为什么改）。
 String _code(String path) {
-  final raw = File(path).readAsStringSync().replaceAll('\r\n', '\n');
+  final raw = File(path).readAsStringSync().replaceAll('\r\n', '\n').replaceAll('\r\n', '\n');
   final out = StringBuffer();
   for (final line in raw.split('\n')) {
     if (line.trimLeft().startsWith('//')) continue;
