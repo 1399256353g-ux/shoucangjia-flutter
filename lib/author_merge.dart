@@ -9,6 +9,7 @@
 /// 真实数据仍由调用方按库拉取（磁盘结构完全不改）。
 library;
 
+import 'tally_order.dart';
 import 'work_lib.dart';
 
 /// 参与合并的来源库数量（空/重复一律不计）。
@@ -75,14 +76,8 @@ List<MapEntry<String, int>> libFilterOptions(
   Iterable<dynamic> works, {
   String fallbackLib = '',
 }) {
-  final counts = <String, int>{};
-  final order = <String>[];
-  for (final w in works) {
-    if (w is! Map) continue;
-    final l = workLibOf(w, fallback: fallbackLib);
-    if (l.isEmpty) continue;
-    if (!counts.containsKey(l)) order.add(l);
-    counts[l] = (counts[l] ?? 0) + 1;
-  }
-  return [for (final l in order) MapEntry(l, counts[l]!)];
+  return tallyInOrder<dynamic>(
+    works.whereType<Map>(),
+    (w) => workLibOf(w, fallback: fallbackLib),
+  );
 }

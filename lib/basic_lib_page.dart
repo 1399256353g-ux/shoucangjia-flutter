@@ -13,6 +13,7 @@ import 'work_card_prefetch.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
 import 'author_avatar_view.dart';
+import 'author_uid_index.dart';
 import 'avatar_prefetch.dart';
 import 'author_index.dart';
 import 'author_letter_bar.dart';
@@ -706,7 +707,9 @@ class _BasicLibPageState extends State<BasicLibPage>
       animation: AuthorAvatarStore.instance,
       builder: (c, _) {
         final picked = resolveAvatarSource(
-          manual: AuthorAvatarStore.instance.pathFor(name) ?? '',
+          // `manualAvatarFor`：手动头像有 uid 时按 `uid:` 键存（改名后仍
+          // 找得到），本页原先只按名字查，改名后这里退回爬虫图。
+          manual: manualAvatarFor(name),
           fallback: pickAuthorAvatar(
               av: _authorAv[name] ?? '', fallback: _authorFallback[name] ?? ''),
           fallbackLib: widget.basic.id,

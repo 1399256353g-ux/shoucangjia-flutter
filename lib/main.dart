@@ -61,6 +61,8 @@ import 'author_dir_filter.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
 import 'author_avatar_view.dart';
+import 'author_uid_index.dart';
+import 'tally_order.dart';
 import 'author_badge_row.dart';
 import 'author_filter_bar.dart';
 import 'author_filter_ui.dart';
@@ -415,6 +417,29 @@ String get authorAvatarScopeKey => scopedKey(cfg.base, cfg.user);
 bool get _authorAvatarLoaded =>
     _authorAvatarScope.isNotEmpty && _authorAvatarScope == authorAvatarScopeKey;
 
+/// 作者名 → 平台 uid 的索引是否属于当前连接。
+///
+/// 与 [_authorAvatarLoaded] 分开：两者由同一次响应重建，但**用途不同**——
+/// 头像索引可以缺（旧服务端没有 `av`），uid 表也可以缺（旧服务端没有 `uid`）。
+/// 合并成一个标记会让「有 av 没 uid」的服务器被当成「uid 已加载且为空」，
+/// 于是改名后的手动头像永远查不到。
+bool get _authorUidLoaded =>
+    authorUidIndexLoadedFor(authorAvatarScopeKey);
+
+/// 作者级头像（`authors.json` 的 `av`）：按名字的**两种写法**查。
+///
+/// 索引写入时也按两种写法各记一条（见 `ensureAuthorAvatarsLoaded`），
+/// 所以这里是同一条规则的读端。作者总览卡与播放页原先只做一次
+/// `authorAvatarIndex[name]`——服务端键是 `@作者` 而调用方传裸名时永远查
+/// 不到，于是「同一作者有的地方有头像、有的地方是首字占位」。
+String _authorAvatarOf(String name) {
+  for (final form in authorNameForms(name)) {
+    final hit = authorAvatarIndex[form];
+    if (hit != null && hit.isNotEmpty) return hit;
+  }
+  return '';
+}
+
 /// B2：作者头像索引是异步补进来的，索引到位后通知已渲染的头像/播放页重建。
 ///
 /// 之前的实现只在启动时 fire-and-forget 拉一次，网络慢于首帧时，
@@ -427,6 +452,9 @@ Future<void> ensureAuthorAvatarsLoaded() async {
   // 连接已变：旧索引属于另一台服务器，留着就是串头像（同名作者带上别人
   // 机器上的图，或本机有、对方没有的条目永远不消失）。
   if (_authorAvatarScope.isNotEmpty) authorAvatarIndex.clear();
+  // uid 表同一个作用域：不一起清，切连接后新服务器的同名作者会拿到上一台
+  // 的 uid，手动头像查到别人的图上。
+  if (!_authorUidLoaded) clearAuthorUidIndex();
   final scopeKey = authorAvatarScopeKey;
   try {
     // 头像索引属于**激活连接**：地址与鉴权必须同源（`cfg.aggregate`）。
@@ -441,8 +469,19 @@ Future<void> ensureAuthorAvatarsLoaded() async {
           final v = e.value;
           if (v is! Map) continue;
           final av = '${v['av'] ?? ''}'.trim();
-          if (av.isNotEmpty) authorAvatarIndex['${e.key}'] = av;
+          if (av.isEmpty) continue;
+          // 键按**裸名**归一：服务端历史数据里同一个作者会出现 `作者` 与
+          // `@作者` 两种键，而读取端（`AuthorAvatar` / 播放页）拿到的名字
+          // 可能是任一种。原样写入的后果是「同一个人两条记录，一条命中
+          // 一条空」，看起来就是「有的卡片有头像、有的没有」。
+          for (final form in authorNameForms('${e.key}')) {
+            authorAvatarIndex.putIfAbsent(form, () => av);
+          }
         }
+        // 同一份响应里还有 `uid`：手动头像按 uid 存，读取端要靠这张表把
+        // 名字翻译成 uid（见 `author_uid_index`）。作用域同样取**发请求时**
+        // 那一份。
+        rebuildAuthorUidIndex(m.entries, scopeKey);
         // 作用域取**发请求时**那一份：请求途中用户可能又切了连接，
         // 直接把当前值写进去等于把旧服务器的索引记成新连接的。
         _authorAvatarScope = scopeKey;
@@ -3371,7 +3410,7 @@ class AuthorAvatar extends StatelessWidget {
       animation: Listenable.merge(
           <Listenable>[AuthorAvatarStore.instance, authorAvatarRevision]),
       builder: (context, _) => _buildWith(context,
-          override: AuthorAvatarStore.instance.pathFor(name) ?? ''),
+          override: manualAvatarFor(name)),
     );
   }
 
@@ -3379,7 +3418,7 @@ class AuthorAvatar extends StatelessWidget {
     // owner 2026-11-18：作者主页/作者总览也要吃「作者级头像」兜底——
     // 卡片上能显示的头像，播放页与主页必须一致，不再只依赖调用方传入。
     final authorAv = override.isEmpty && mediaPath.isEmpty
-        ? (authorAvatarIndex[name] ?? '')
+        ? _authorAvatarOf(name)
         : '';
     // 0.9.290：优先级合成与绘制都只有一处（`author_avatar_view`）。
     // 与基础库页作者 tab 共用同一个组件——此前那页自己画一遍，于是不监听
@@ -3793,15 +3832,15 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   String? err;
 
   /// 作用域：空串＝不按单元库过滤。
+  ///
+  /// 节点名缺失时用 rel 的末段——走 `rel_path.lastRelName`（`\` 与 `/`
+  /// 等价、中点段/空段归一）。本页原来自带一个 `_basename`：先
+  /// `replaceAll('\\', '/')` 再 `lastIndexOf('/')`，是同一规则的第三份；
+  /// 与 `unit_crawler`、`rel_path` 两份对 `A\B` 与 `A//B` 的答案不一致
+  /// （前者得 `B`、后者得空串），于是「删不掉」或「筛选条没有选项」。
   String get _scopeName => widget.unitName.trim().isEmpty
-      ? _basename(widget.unitRel)
+      ? lastRelName(widget.unitRel)
       : widget.unitName.trim();
-
-  static String _basename(String path) {
-    final s = path.replaceAll('\\', '/');
-    final i = s.lastIndexOf('/');
-    return (i >= 0 ? s.substring(i + 1) : s).trim();
-  }
 
   String get _base => widget.base.isEmpty ? cfg.base : widget.base;
 
@@ -3883,19 +3922,13 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
   /// 记录里实际出现的顶级单元库（按首次出现顺序，带条数）。
   List<MapEntry<String, int>> get _topOptions {
-    final counts = <String, int>{};
-    final order = <String>[];
     // 只在**当前作用域内的记录**里统计媒体库：从单元库页进来时，
     // 记录已经只剩该单元库，顶部再出现别的媒体库词条就是坏导航。
     final scope = _scopeName;
-    for (final e in report.items) {
-      if (scope.isNotEmpty && e.libName.trim() != scope) continue;
-      final t = _topOf(e);
-      if (t.isEmpty) continue;
-      if (!counts.containsKey(t)) order.add(t);
-      counts[t] = (counts[t] ?? 0) + 1;
-    }
-    return [for (final k in order) MapEntry(k, counts[k] ?? 0)];
+    return tallyInOrder<DeletedEntry>(
+      report.items.where((e) => scope.isEmpty || e.libName.trim() == scope),
+      _topOf,
+    );
   }
 
   String _topLabel(String id) => _meta?.topLabelFor(id) ?? id;
@@ -8106,6 +8139,7 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
       final scopeKey = authorAvatarScopeKey;
       _authorAvatarScope = '';
       authorAvatarIndex.clear();
+      clearAuthorUidIndex();
       await ensureAuthorAvatarsLoaded();
       // 请求途中连接又变了：那一份结果已经被新一轮覆盖，这里不再提升版本。
       if (_authorAvatarScope != scopeKey) return;
@@ -10539,15 +10573,18 @@ class _PlayerPageState extends State<PlayerPage>
     if (name.isEmpty) return av;
     // 统一头像来源：与作者主页共用 AuthorAvatarStore（同一份作者头像）。
     // 只有作者确实没有头像时，才退到作品缩略图。
-    final stored = AuthorAvatarStore.instance.pathFor(name);
-    final manual = (stored != null && stored.isNotEmpty) ? stored : '';
+    //
+    // `manualAvatarFor` 而不是 `pathFor(name)`：手动头像有 uid 时是按
+    // `uid:` 键存的，播放页原先只按名字查，作者改名后这里就退回爬虫图
+    // （作者页却还认得）。名字→uid 的翻译收在 `author_uid_index` 一处。
+    final stored = manualAvatarFor(name);
+    final manual = stored.isNotEmpty ? stored : '';
     // B3：手动头像必须压过作品自带 `av`（爬虫结果），否则手动挑选会失效。
     if (manual.isNotEmpty) return manual;
     // 作者级头像（authors.json）：作品条目没带 av 时用它兜底。
-    final byAuthor = authorAvatarIndex[name];
-    final crawled = av.isNotEmpty
-        ? av
-        : ((byAuthor != null && byAuthor.isNotEmpty) ? byAuthor : '');
+    // 按名字两种写法查（与索引写入同一规则，见 `_authorAvatarOf`）。
+    final byAuthor = _authorAvatarOf(name);
+    final crawled = av.isNotEmpty ? av : byAuthor;
     // 有爬虫/作品自带头像就不用建兜底索引（避免为了兜底白扫一遍全部作品）。
     if (crawled.isNotEmpty) return crawled;
     // 先确保索引与当前作品列表一致，再查缓存：否则列表换了一批后
@@ -17739,7 +17776,6 @@ class _AuthorPageState extends State<AuthorPage> {
   /// 行为与旧版一致。
   String get manualAv =>
       AuthorAvatarStore.instance.pathFor(widget.name, uid: platformUid) ?? '';
-
   /// 服务端自定义头像（上传后注册，跨设备生效）。
   bool get serverManualAv => isManualAvatarPath(av);
 
@@ -18547,17 +18583,8 @@ class _AuthorPageState extends State<AuthorPage> {
   }
 
   /// 作品里实际出现的顶级单元库（按首次出现顺序）；只有 >1 个才显示筛选条。
-  List<MapEntry<String, int>> get _topFilterOptions {
-    final counts = <String, int>{};
-    final order = <String>[];
-    for (final w in works.whereType<Map>()) {
-      final t = _topOfWork(w);
-      if (t.isEmpty) continue;
-      if (!counts.containsKey(t)) order.add(t);
-      counts[t] = (counts[t] ?? 0) + 1;
-    }
-    return [for (final k in order) MapEntry(k, counts[k] ?? 0)];
-  }
+  List<MapEntry<String, int>> get _topFilterOptions =>
+      tallyInOrder<Map>(works.whereType<Map>(), _topOfWork);
 
   /// 顶级单元库的显示名（取树里的名字，拿不到就用 id）。
   ///

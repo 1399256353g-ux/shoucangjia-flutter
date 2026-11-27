@@ -19,6 +19,7 @@ library;
 
 import 'rel_path.dart';
 import 'node_key.dart' show scopedKey;
+import 'tally_order.dart';
 import 'work_lib.dart';
 import 'work_safety.dart';
 
@@ -98,22 +99,20 @@ List<({AuthorDirOption option, int count})> authorDirOptionsOfWorks(
   Iterable<dynamic> works, {
   String fallbackLib = '',
 }) {
-  final counts = <String, int>{};
-  final order = <String>[];
   final byKey = <String, AuthorDirOption>{};
-  for (final w in works) {
-    if (w is! Map) continue;
-    final dir = authorDirOfWork(w);
-    if (dir.isEmpty) continue;
-    final lib = workLibOf(w, fallback: fallbackLib);
-    final o = AuthorDirOption(lib: lib, authorDir: dir);
-    if (!counts.containsKey(o.key)) {
-      order.add(o.key);
-      byKey[o.key] = o;
-    }
-    counts[o.key] = (counts[o.key] ?? 0) + 1;
-  }
+  final tally = tallyInOrder<Map>(
+    works.whereType<Map>(),
+    (w) {
+      final dir = authorDirOfWork(w);
+      if (dir.isEmpty) return '';
+      final lib = workLibOf(w, fallback: fallbackLib);
+      final o = AuthorDirOption(lib: lib, authorDir: dir);
+      // 同一个键只建一个选项；计数仍由 [tallyInOrder] 统一做。
+      byKey.putIfAbsent(o.key, () => o);
+      return o.key;
+    },
+  );
   return [
-    for (final k in order) (option: byKey[k]!, count: counts[k]!),
+    for (final e in tally) (option: byKey[e.key]!, count: e.value),
   ];
 }
