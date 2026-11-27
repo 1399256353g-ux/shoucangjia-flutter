@@ -1577,19 +1577,25 @@ class _BasicLibCardState extends State<BasicLibCard> {
     // 顶级单元库继承 → 自动配色；层级外观固定为 basic（形状/尺寸与上层一致，
     // 只改边框/底纹）。
     final hasUnit = widget.unitLabel.isNotEmpty;
-    final text = LibraryBadge.labelWithEmoji(
-        BasicLibCard.badgeText(hasUnit ? widget.unitLabel : widget.basic.name),
-        hasUnit ? widget.unitKey : '');
     final unitId = widget.unitKey.isEmpty ? widget.unitLabel : widget.unitKey;
+    // 后缀与颜色走同一个分发链：本库设过用本库，否则向上逐级到单元库/媒体库。
+    // 此前只在有单元库时拼后缀，且拼的是**单元库**的后缀：基础库自己设的
+    // 后缀在这张卡上永远不出现（作者卡那排基础库词条却会出现）——同为
+    // 「基础库词条」，两张卡的后缀来源不同。
+    final emoji = LibraryBadge.basicEmojiFor(widget.basic.id, unitId);
+    final text = BasicLibCard.badgeText(
+        hasUnit ? widget.unitLabel : widget.basic.name);
     final color = Color(LibraryBadge.basicColorFor(widget.basic.id, unitId,
         order: UnitBadgeRegistry.order));
     return LibBadgeChip(
       // 截断走 text_clip：按 UTF-16 单元数切会切开 emoji 代理对，
-      // 词条本身带库 emoji 后缀（labelWithEmoji），切点正好落在 emoji 上时
+      // 词条本身带库 emoji 后缀（`emoji`），切点正好落在 emoji 上时
       // 卡片上就是一个替换方块。
       label: clipWithEllipsis(text, 10),
       color: color.toARGB32(),
-      unitId: '',
+      // 后缀已算好，交给 chip 绘制层直接使用（不传空 unitId 让它去查——
+      // 那样基础库 id 会被当成单元库 id，拿到的是另一层的后缀）。
+      emoji: emoji.isEmpty ? '' : emoji,
       kind: LibEntryKind.basic,
     );
   }

@@ -27,7 +27,7 @@ import 'package:flutter/material.dart';
 import 'author_grade.dart';
 import 'library_badge.dart';
 
-/// 一个词条的**全部已解析参数**：文字、底色、库 id、层级外观。
+/// 一个词条的**全部已解析参数**：文字、底色、库 id、层级外观、后缀。
 ///
 /// 两条入口（作者卡那组「单元库+等级」与 `main.LibBadges` 那组「多个库 id」）
 /// 在这里之后不再各写一遍容器：配色、层级、`+N` 都先算成 [BadgeChipSpec]，
@@ -39,11 +39,19 @@ class BadgeChipSpec {
   final String unitId;
   final LibEntryKind kind;
 
+  /// 已算好的 emoji 后缀；null 表示按 [unitId] 走 `LibraryBadge.emojiFor`。
+  ///
+  /// 基础库词条要按「本库设过 → 所属单元库」取后缀（`basicEmojiFor`），
+  /// 而 `emojiFor` 只认单元库 id——直接把基础库 id 传进去会拿不到单元库
+  /// 那条继承链。这里显式带上结果，绘制层不再猜。
+  final String? emoji;
+
   const BadgeChipSpec({
     required this.label,
     required this.color,
     this.unitId = '',
     this.kind = LibEntryKind.unit,
+    this.emoji,
   });
 }
 
@@ -115,7 +123,8 @@ class _CollapsibleBadgeWrapState extends State<CollapsibleBadgeWrap> {
       if (a[i].label != b[i].label ||
           a[i].color != b[i].color ||
           a[i].unitId != b[i].unitId ||
-          a[i].kind != b[i].kind) {
+          a[i].kind != b[i].kind ||
+          a[i].emoji != b[i].emoji) {
         return false;
       }
     }
@@ -166,6 +175,7 @@ class _CollapsibleBadgeWrapState extends State<CollapsibleBadgeWrap> {
                     color: c.color,
                     unitId: c.unitId,
                     kind: c.kind,
+                    emoji: c.emoji,
                     maxWidth: widget.chipMaxWidth,
                   ),
                 )
@@ -174,6 +184,7 @@ class _CollapsibleBadgeWrapState extends State<CollapsibleBadgeWrap> {
                   color: c.color,
                   unitId: c.unitId,
                   kind: c.kind,
+                  emoji: c.emoji,
                   maxWidth: widget.chipMaxWidth,
                 ),
         if (hasHidden)

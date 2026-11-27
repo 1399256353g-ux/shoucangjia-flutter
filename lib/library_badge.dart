@@ -496,22 +496,55 @@ class LibraryBadge {
     // 从**直接上级**开始逐级上行，第一个设过色的那层就是分发源。
     // 此前只有「末梢分发 / 否则直达媒体库根」两种走法，中间层单元库
     // （有下级、自己也设了色）的色谁都拿不到——下级跳过它直达根。
-    var cursor = lookupByLibId(parentOfUnit, unitId) ?? '';
-    final visited = <String>{relOf(unitId)};
-    while (cursor.isNotEmpty && visited.add(relOf(cursor))) {
-      if (sourceFor(cursor) != BadgeColorSource.autoAssign) {
-        final color = lookupByLibId(custom, cursor) ?? topColorFor(cursor);
-        if (color != null) return color;
-      }
-      cursor = lookupByLibId(parentOfUnit, cursor) ?? '';
-    }
-    // 再退到媒体库根（顶级设过、且它自己没有选「自动分配」）。
-    final topId = lookupByLibId(topOfUnit, unitId);
-    if (topId != null && relOf(topId) != relOf(unitId)) {
-      final inherited = topEntryColor(topId, order: order);
+    //
+    // 遍历本身只有 [_upstreamOf] 一处：emoji 后缀必须与颜色走同一条链
+    // （见 [emojiFor]），两处各写一遍必然分叉。
+    final srcUnit = _upstreamOf(unitId,
+        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null);
+    if (srcUnit.isNotEmpty) {
+      final inherited = lookupByLibId(custom, srcUnit) ?? topColorFor(srcUnit);
       if (inherited != null) return inherited;
     }
     return autoColorOf(unitId, order: order);
+  }
+
+  /// 分发源：从 [startId] 向上逐级找第一个「该层这一项有值」的层。
+  ///
+  /// [hasValue] 判断该层这一项是否设过（颜色查 `custom`/`topCustom`，
+  /// emoji 查 `emoji`）。来源显式选了「自动分配」的层不向下传——它表达的是
+  /// 「这一层不要用上级的值」，对颜色和 emoji 是同一个意思。
+  ///
+  /// [includeStart] 为 true 时先看 [startId] 自己（基础库词条色要从它所属的
+  /// 单元库本层开始找）；为 false 时从直接上级开始（单元库自身颜色在
+  /// [colorForUnit] 里已经先查过了）。
+  ///
+  /// 颜色与 emoji **必须**共用这一处：此前 `emojiFor` 只看「本层 → 媒体库根」，
+  /// 中间层设的后缀谁都拿不到，而它的颜色却能分发下去——同一句「上级分发给
+  /// 下级」在两项配置上表现不同，用户按颜色的预期设 emoji 就会觉得没生效。
+  static String _upstreamOf(String startId, bool Function(String id) hasValue,
+      {bool includeStart = false}) {
+    // 不包含起点时先把起点标成已访问：数据里出现环（父子互为上级）时，
+    // 循环会绕回起点自己，那会把「本层已查过」的色当成继承值返回。
+    final visited = <String>{if (!includeStart) relOf(startId)};
+    var cursor = includeStart
+        ? startId
+        : (lookupByLibId(parentOfUnit, startId) ?? '');
+    while (cursor.isNotEmpty) {
+      if (!visited.add(relOf(cursor))) break;
+      if (sourceFor(cursor) != BadgeColorSource.autoAssign && hasValue(cursor)) {
+        return cursor;
+      }
+      cursor = lookupByLibId(parentOfUnit, cursor) ?? '';
+    }
+    final topId = lookupByLibId(topOfUnit, startId);
+    if (topId != null &&
+        relOf(topId) != relOf(startId) &&
+        visited.add(relOf(topId)) &&
+        sourceFor(topId) != BadgeColorSource.autoAssign &&
+        hasValue(topId)) {
+      return topId;
+    }
+    return '';
   }
 
   /// 顶级单元库**实际生效**的词条色；没有可继承色时返回 null。
@@ -627,20 +660,19 @@ class LibraryBadge {
     //
     // 旧实现只有「末梢单元库才分发，否则直接取媒体库根色」。中间层单元库
     // （有下级、自己也设了色）的色因此谁都拿不到：下级跳过它、直达根。
-    // 现在从直接上级开始一级级往上找，第一个设过自定义色的就是分发源；
-    // 一路都没有才落到媒体库根/自动配色。
-    var cursor = unitId;
-    final visited = <String>{};
-    while (cursor.isNotEmpty && visited.add(relOf(cursor))) {
-      final color = lookupByLibId(custom, cursor) ?? topColorFor(cursor);
-      if (color != null) return color;
-      cursor = lookupByLibId(parentOfUnit, cursor) ?? '';
-    }
-    if (unitId.isNotEmpty) {
-      final topId = lookupByLibId(topOfUnit, unitId);
-      final inherited =
-          topId == null ? null : topEntryColor(topId, order: order);
-      if (inherited != null) return inherited;
+    // 现在从「所属单元库本层」开始一级级往上找，第一个设过自定义色的
+    // 就是分发源；与 [colorForUnit] / [emojiFor] 同一个 [_upstreamOf]。
+    //
+    // 此前这里另写了一份循环且**不看颜色来源**：中间层选了「自动分配」、
+    // 表里却还留着旧色的情况下，它的颜色照样传给下级基础库，而它自己的
+    // 词条已经显示自动色——同一层两个说法。
+    final srcUnit = _upstreamOf(
+        unitId,
+        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null,
+        includeStart: true);
+    if (srcUnit.isNotEmpty) {
+      final hit = lookupByLibId(custom, srcUnit) ?? topColorFor(srcUnit);
+      if (hit != null) return hit;
     }
     return colorForUnit(unitId, order: order, allowCustom: false);
   }
@@ -799,10 +831,14 @@ class LibraryBadge {
   /// 颜色有继承链，emoji 没有。同一层级的两项配置只有一半会分发，用户按
   /// 颜色的行为预期去设 emoji，就会觉得「设了没反应」。
   ///
-  /// 现按与颜色完全相同的口径：
+  /// 口径与颜色**完全同一条链**（[_upstreamOf]）：
   ///  1. 本层设过 → 用自己的；
   ///  2. 本层来源是「自动分配」→ 不继承（用户显式要求不要上级的）；
-  ///  3. 否则继承所属顶级单元库的 emoji。
+  ///  3. 否则从直接上级逐级上行，第一个设过后缀的层就是分发源，
+  ///     一路没有才退到媒体库根。
+  ///
+  /// 此前这里只查「本层 → 媒体库根」，中间层单元库设的后缀在此处是死值：
+  /// 层级跳过一次，就与它的颜色分发行为相反。
   ///
   /// `secret`（无归属兜底）不参与继承：它不在任何媒体库下面。
   static String emojiFor(String unitId) {
@@ -811,12 +847,29 @@ class LibraryBadge {
     if (own != null && own.isNotEmpty) return own;
     // 显式选了「自动分配」：不继承上级，避免与颜色语义分叉。
     if (sourceFor(unitId) == BadgeColorSource.autoAssign) return '';
-    final topId = lookupByLibId(topOfUnit, unitId);
-    if (topId == null || relOf(topId) == relOf(unitId)) return '';
-    // 顶级自己若选了自动分配，同样不向下传。
-    if (sourceFor(topId) == BadgeColorSource.autoAssign) return '';
-    return lookupByLibId(emoji, topId) ?? '';
+    final src = _upstreamOf(
+        unitId, (id) => (lookupByLibId(emoji, id) ?? '').isNotEmpty);
+    if (src.isEmpty) return '';
+    return lookupByLibId(emoji, src) ?? '';
   }
+
+  /// 基础库词条的后缀：本库设过用自己的，否则与所属单元库走同一条上行链。
+  ///
+  /// 两个调用点此前各写一份：基础库卡片把后缀拼进文字、再把 chip 的
+  /// `unitId` 置空；作者卡那排基础库词条却把 `unitId` 设成基础库 id，
+  /// 于是「基础库自己设过后缀」只在后者出现，前者永远丢掉。
+  static String basicEmojiFor(String basicId, String unitId) {
+    if (basicId.isNotEmpty) {
+      final own = lookupByLibId(emoji, basicId);
+      if (own != null && own.isNotEmpty) return own;
+    }
+    return emojiFor(unitId);
+  }
+
+  /// 本层**自己设过**的后缀（不含继承）。设置页的「已自定义 N 项」用它：
+  /// [emojiFor] 会回传继承来的后缀，拿它数「设过什么」会把整棵子树算成
+  /// 自定义项，group 摘要变成永远一堆数字。
+  static String ownEmoji(String id) => lookupByLibId(emoji, id) ?? '';
 
   /// 词条展示文字：去序号后的名称 + 该库 emoji 后缀。
   static String labelWithEmoji(String label, String unitId) {
@@ -969,6 +1022,9 @@ class LibBadgeChip extends StatelessWidget {
   /// P1：词条层级。三种层级共用同一形状/内边距/字号，只改边框与底纹。
   final LibEntryKind kind;
 
+  /// 已算好的 emoji 后缀；null 表示按 [unitId] 走 [LibraryBadge.emojiFor]。
+  final String? emoji;
+
   /// 单条词条最大宽度。信息区（播放页/作者头）用 [kBadgeChipMaxWidth]；
   /// 固定尺寸的小卡片（150dp 作者卡）必须传更小的值，否则媒体库+单元库
   /// 两级词条会换行、压到头像上——不是字太长的问题，是**卡片放不下两行**。
@@ -980,6 +1036,7 @@ class LibBadgeChip extends StatelessWidget {
       required this.color,
       this.unitId = '',
       this.kind = LibEntryKind.unit,
+      this.emoji,
       this.maxWidth = kBadgeChipMaxWidth});
 
   @override
@@ -994,7 +1051,11 @@ class LibBadgeChip extends StatelessWidget {
   Widget _paint() {
     final text = label.startsWith('+')
         ? label
-        : LibraryBadge.labelWithEmoji(LibraryBadge.stripIndex(label), unitId);
+        : () {
+            final e = emoji ?? LibraryBadge.emojiFor(unitId);
+            final base = LibraryBadge.stripIndex(label);
+            return e.isEmpty ? base : '$base$e';
+          }();
     // owner 2026-11-27：词条在播放页太长。库名最长 42 字、中位 15 字，
     // 不设上限就会撑满信息区。上限按「一行两三条」取，超出省略。
     return ConstrainedBox(

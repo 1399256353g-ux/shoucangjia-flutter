@@ -2463,11 +2463,11 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         if (LibraryBadge.basicCustom[b.id] != null) b.name,
     ];
     final emojiCount = <String>[
-      if (LibraryBadge.emojiFor(top.id).isNotEmpty) top.id,
+      if (LibraryBadge.ownEmoji(top.id).isNotEmpty) top.id,
       for (final u in subUnits)
-        if (LibraryBadge.emojiFor(u.id).isNotEmpty) u.id,
+        if (LibraryBadge.ownEmoji(u.id).isNotEmpty) u.id,
       for (final b in subBasics)
-        if (LibraryBadge.emojiFor(b.id).isNotEmpty) b.id,
+        if (LibraryBadge.ownEmoji(b.id).isNotEmpty) b.id,
     ].length;
     final summary = customized.isEmpty && emojiCount == 0
         ? '未自定义 · 点开设置'
@@ -2548,7 +2548,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     // 之后其中一处必然漏（实测顶级选「自动分配」仍显示旧自定义色）。
     // 现在一律由 colorForUnit 给出**实际生效**的颜色。
     final color = LibraryBadge.colorForUnit(id, order: _order);
-    final emoji = LibraryBadge.emojiFor(id);
+    final emoji = LibraryBadge.ownEmoji(id);
     // 文案与颜色同源：本层有没有生效中的自定义色 / 是否正在继承顶级。
     final ownColor = LibraryBadge.hasOwnColor(id);
     final inheritingTop = LibraryBadge.inheritsTopColor(id, order: _order);
@@ -3207,6 +3207,9 @@ class UnitBadges extends StatelessWidget {
         label: label,
         unitId: basic,
         kind: LibEntryKind.basic,
+        // 后缀与颜色同一条链：基础库自己的后缀 → 所属单元库 → 逐级上行。
+        // 不传的话绘制层会把基础库 id 当单元库 id 去查，继承段永远落空。
+        emoji: LibraryBadge.basicEmojiFor(basic, _unitKeyOf(basic)),
         // 配色顺序与同一排里的单元库词条同源：`UnitBadges` 上方给单元库词条
         // 走的是注册表（`LibBadges` 里 `orderOr`），这里若直读 `meta.unitOrder`，
         // 退化 meta（没有单元库树）时同一个作者的两条词条会用两套顺序取色。
