@@ -123,3 +123,13 @@ const double kBasicAuthorSearchHeight = 38;
 /// 0.86 比例）一起决定卡片里能放几行字——立名后改比例时不会忘了同步。
 const EdgeInsets kBasicAuthorCardPadding =
     EdgeInsets.fromLTRB(10, 12, 10, 10);
+
+/// 作者总览卡（`kAuthorGrid`，宽 150dp、高 170dp）里词条的最大宽度。
+///
+/// 这张卡顶部只预留 22dp 放一排词条，头像紧贴其下。媒体库 + 单元库两级词条
+/// 若各自按信息区的 120dp 上限排版，两条都要独占一行——第二行会压到头像上
+/// （实测 `AuthorBadges` 41dp 高、头像顶部 33-58dp 处被覆盖）。
+///
+/// 上限取「半张卡再减一个间距」：60dp 下两级词条放得进同一行，同时仍能显示
+/// 4–5 个汉字，超过就省略——词条是辨识用的标识，不是全文。
+const double kAuthorCardChipMaxWidth = 60;

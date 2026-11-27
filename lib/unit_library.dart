@@ -81,6 +81,14 @@ class UnitLibrary {
   String get name => node.name;
   String get rel => node.rel;
 
+  /// 这一层是不是「媒体库」（顶级单元库＝连接的库根）。
+  ///
+  /// 判定只看结构：根直接子节点中 `rel` 为空、`id` 带 `media:` 的那一层。
+  /// 单连接/旧形态没有这一层（根的直接子节点就是单元库），于是全部返回
+  /// false——那时的「一级」本来就是单元库，没有可贴的媒体库词条，不编造。
+  bool get isMediaRoot =>
+      rel.trim().isEmpty && id.trim().startsWith('media:');
+
   /// 整棵子树的作品数（含下级单元库）。
   ///
   /// **饱和求和**（[sumSat]）：服务端把某个基础库的 `works` 写成 int 上限
@@ -689,6 +697,37 @@ UnitLibrary? unitForBasic(UnitLibrary root, String basicId) {
 
   walk(root);
   return hit;
+}
+
+/// 基础库 → 所属**媒体库根**（顶级单元库）；不在媒体库层之下返回 null。
+///
+/// 单连接/旧形态下根的直接子节点就是单元库本身，没有媒体库这一层；
+/// 那种形态返回 null，调用方不贴媒体库词条（不编一个假的一级）。
+UnitLibrary? mediaRootForBasic(UnitLibrary root, String basicId) {
+  if (basicId.isEmpty) return null;
+  for (final c in root.children) {
+    if (!c.isMediaRoot) continue;
+    if (unitForBasic(c, basicId) != null) return c;
+  }
+  return null;
+}
+
+/// 单元库 id → 所属媒体库根节点；同上，只看结构，不看名字。
+///
+/// 供需要「从单元库反推它属于哪个媒体库」的调用方使用；不传就不贴。
+UnitLibrary? mediaRootOfUnit(UnitLibrary root, String unitId) {
+  if (unitId.isEmpty) return null;
+  final forms = idFormsOf(unitId).toSet();
+  bool contains(UnitLibrary u) {
+    if (idFormsOf(u.id).any(forms.contains)) return true;
+    return u.children.any(contains);
+  }
+
+  for (final c in root.children) {
+    if (!c.isMediaRoot) continue;
+    if (contains(c)) return c;
+  }
+  return null;
 }
 
 /// 基础库 → 直接上级单元库名称（位置词条唯一来源）。

@@ -83,6 +83,22 @@ class BasicLibPage extends StatefulWidget {
   /// （同一张卡的两处渲染，属于本批要收的那一类）。
   final String sourceUnitId;
 
+  /// 所属媒体库（顶级单元库）名称与 id。
+  ///
+  /// owner 2026-11-27：「词条还是没下发…媒体库词条啊」——作者卡上只有
+  /// 单元库一级，属于哪个媒体库看不出来。页面自己拿不到单元库树的父级
+  /// （本页只收一个基础库），所以由调用方（有 `unitTree` 的那一层）算好传入；
+  /// 空串＝不贴（单连接旧形态没有媒体库这一层，不编造）。
+  final String sourceMediaLabel;
+  final String sourceMediaId;
+
+  /// 媒体库词条配色（由调用方按同一份顺序算出）。
+  ///
+  /// 必须由调用方传，不能在本页自己 `colorForUnit(sourceMediaId)`：不带
+  /// `order` 时会退到 id 散列，而作者卡/首页/media 卡片走的是注册表顺序——
+  /// 同一个媒体库在两处是两个颜色，两边各自都「算得出一个色」。
+  final int sourceMediaColor;
+
   const BasicLibPage({
     super.key,
     required this.basic,
@@ -94,6 +110,9 @@ class BasicLibPage extends StatefulWidget {
     this.sourceLabel = '',
     this.sourceColor = LibraryBadge.gray,
     this.sourceUnitId = '',
+    this.sourceMediaLabel = '',
+    this.sourceMediaId = '',
+    this.sourceMediaColor = LibraryBadge.gray,
   });
 
   @override
@@ -530,15 +549,28 @@ class _BasicLibPageState extends State<BasicLibPage>
                     name: name,
                   ),
                   const SizedBox(height: 6),
-                  // 词条：单元库（去序号）+ 作者等级，与作者总览卡**同一套渲染**
-                  // （0.9.291：此前这里是两个手写 Container—圆角 4、无 emoji、
-                  // 无层级边框、等级字重不同，于是同一作者在两页词条长得不一样）。
+                  // 词条：媒体库（若有）→ 单元库（去序号）→ 作者等级，与作者总览卡
+                  // **同一套渲染**（0.9.291：此前这里是两个手写 Container—圆角 4、
+                  // 无 emoji、无层级边框、等级字重不同，于是同一作者在两页词条长得不一样）。
                   // 数据来源仍是本页自己的 `sourceLabel` 与 `_authorStats`；
                   // 可以统一的是渲染，不是每个作者属于哪个库。
+                  //
+                  // owner 2026-11-27：媒体库这一级由调用方按单元库树注入
+                  // （本页只有基础库，拿不到父级）。
                   AuthorBadgeRow(
                     unitLabel: widget.sourceLabel,
                     unitColor: widget.sourceColor,
                     unitId: widget.sourceUnitId,
+                    extraChips: <BadgeChipSpec>[
+                      if (widget.sourceMediaId.isNotEmpty &&
+                          widget.sourceMediaLabel.isNotEmpty)
+                        BadgeChipSpec(
+                          label: widget.sourceMediaLabel,
+                          color: widget.sourceMediaColor,
+                          unitId: widget.sourceMediaId,
+                          kind: LibEntryKind.top,
+                        ),
+                    ],
                     grade: AuthorGrade.fromStats(
                         _authorStats[name],
                         works: intOf(a['works'])),

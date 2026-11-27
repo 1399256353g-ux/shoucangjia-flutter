@@ -567,6 +567,25 @@ class LibMeta {
     return topIdFor(unit);
   }
 
+  /// 单元库 → 所属**媒体库** id（用于给作者卡贴媒体库词条）。
+  ///
+  /// 只用**本份元数据自己的树**反查，不走全局 `LibraryBadge.topOfUnit`：
+  /// 那张表是进程级、由最后一次 `setFrom` 覆盖，两台服务器有同名 rel 时
+  /// A 库的作者会贴上 B 服务器的媒体库名（与 0.9.324「两张媒体库卡片同名」
+  /// 同一族）。结构表在这里只能作为「自己这棵树」的查询，不能跨连接共用。
+  ///
+  /// 单连接/旧形态下树里没有媒体库这一层（根的直接子节点就是单元库，且
+  /// 它们本来就以 `LibEntryKind.top` 外观渲染），此时不存在可以额外贴的
+  /// 一级——返回空串，调用方不贴。不拿库根容器冒充一级。
+  String mediaIdFor(String unitId) {
+    if (unitId.isEmpty) return '';
+    final tree = unitTree;
+    if (tree == null) return '';
+    if (!tree.children.any((c) => c.isMediaRoot)) return '';
+    final media = mediaRootOfUnit(tree, unitId);
+    return media?.id ?? '';
+  }
+
   static final Map<String, LibMeta> cache = <String, LibMeta>{};
   static final Map<String, Future<LibMeta>> _loading =
       <String, Future<LibMeta>>{};
@@ -868,7 +887,30 @@ class LibMeta {
     for (final u in units) {
       if (u.id == id) return u.name;
     }
+    // 媒体库根不在 `units` 里（那是容器，不带基础库），只按 id 回落会把
+    // `media:s1` 这种内部键直接写到界面上。先查一次顶层名字。
+    final t = tops.where((u) => u.id == id).toList();
+    if (t.isNotEmpty) {
+      final n = t.first.name.trim();
+      if (n.isNotEmpty) return n;
+    }
     return id;
+  }
+
+  /// 顶级节点（＝媒体库根）的显示名：**只认这份元数据**。
+  ///
+  /// 顶级节点在 `units` 里没有条目（`flattenUnits` 只收带基础库的层，
+  /// 媒体库根是容器），所以 [unitNameOf] 拿它只能回落 id——卡片上就会出现
+  /// `media:s1` 这种东西。名字优先取树里那一层的 `name`，其次本份元数据的
+  /// 库根名（[topName]），最后才回落 id；不读进程级 `TopNodeName`（两台
+  /// 服务器会串名）。
+  String topNameOf(String topId) {
+    if (topId.isEmpty) return '';
+    final t = tops.where((u) => u.id == topId).toList();
+    if (t.isNotEmpty && t.first.name.trim().isNotEmpty) return t.first.name;
+    final own = topName.trim();
+    if (own.isNotEmpty) return own;
+    return topId;
   }
 
   /// 单元库配色顺序（不含顶级 SECRET）。
@@ -2959,6 +3001,9 @@ class LibBadges extends StatelessWidget {
   /// 避免播放页作者卡被撑长。
   final List<BadgeChipSpec> basicChips;
 
+  /// 单条词条最大宽度（透传给词条行）。
+  final double chipMaxWidth;
+
   const LibBadges({
     super.key,
     required this.libIds,
@@ -2967,11 +3012,16 @@ class LibBadges extends StatelessWidget {
     this.grayIds = const {},
     this.grade = '',
     this.basicChips = const <BadgeChipSpec>[],
+    this.chipMaxWidth = kBadgeChipMaxWidth,
   });
 
   @override
   Widget build(BuildContext context) {
-    final labels = LibraryBadge.labels(libIds, names: names);
+    // owner 2026-11-27：媒体库词条也要贴到卡片上（`UnitBadges` 会把媒体库 id
+    // 排在 `libIds` 最前）。上限从 2 提到 3 是**同一件事的后果**，不是放宽：
+    // 保留 2 的话媒体库词条会占掉两个单元库名额中的一个，作者挂两个单元库时
+    // 第二个直接变成 `+1`——「更上级的词条把下级挤掉」正好反了。
+    final labels = LibraryBadge.labels(libIds, max: 3, names: names);
     // 基础库词条（owner 2026-11-26 新增）也必须参与「有没有词条」的判定：
     // 只判 labels/grade 时，一个「单元库归属算不出来（labels 空）+ 没有等级」
     // 却挂了多个基础库的作者，基础库词条会被这条早退整个丢掉——而那正是
@@ -2994,6 +3044,7 @@ class LibBadges extends StatelessWidget {
     // 「去重后的 id」翻译成 `BadgeChipSpec`（颜色/层级/`+N`）——先前本处的
     // `Wrap` 与作者卡那组词条的 `Wrap` 是两份同写。
     return CollapsibleBadgeWrap(
+      chipMaxWidth: chipMaxWidth,
       chips: [
         for (var i = 0; i < labels.length; i++)
           BadgeChipSpec(
@@ -3051,6 +3102,10 @@ class UnitBadges extends StatelessWidget {
   /// [UnitBadgeRegistry]（主页加载单元库时写入），再退回 [meta]。
   final Map<String, String> unitLabels;
   final Map<String, String> unitKeys;
+
+  /// 单条词条最大宽度（透传给 [LibBadges]）。固定尺寸卡片传更小的值。
+  final double chipMaxWidth;
+
   const UnitBadges({
     super.key,
     required this.meta,
@@ -3060,6 +3115,7 @@ class UnitBadges extends StatelessWidget {
     this.grade = '',
     this.unitLabels = const {},
     this.unitKeys = const {},
+    this.chipMaxWidth = kBadgeChipMaxWidth,
   });
 
   /// 基础库 → 所属单元库 id。
@@ -3097,7 +3153,11 @@ class UnitBadges extends StatelessWidget {
       if (ids.contains(unitId)) return;
       ids.add(unitId);
       if (unitId == 'secret') {
-        names[unitId] = TopNodeName.current;
+        // 进程级 `TopNodeName` 是「最后加载那台服务器」的根名：两台服务器
+        // 同时在线时，无名作者会贴上另一台的库根名。手里有 meta 就用它自己
+        // 的库根名（`LibMeta.topName`），没有 meta 才回落全局值。
+        final own = meta?.topName.trim() ?? '';
+        names[unitId] = own.isNotEmpty ? own : TopNodeName.current;
         gray.add(unitId);
         return;
       }
@@ -3140,20 +3200,49 @@ class UnitBadges extends StatelessWidget {
         label: label,
         unitId: basic,
         kind: LibEntryKind.basic,
+        // 配色顺序与同一排里的单元库词条同源：`UnitBadges` 上方给单元库词条
+        // 走的是注册表（`LibBadges` 里 `orderOr`），这里若直读 `meta.unitOrder`，
+        // 退化 meta（没有单元库树）时同一个作者的两条词条会用两套顺序取色。
         color: LibraryBadge.basicColorFor(
           basic,
           _unitKeyOf(basic),
-          order: meta?.unitOrder ?? const [],
+          order: UnitBadgeRegistry.orderOr(meta?.unitOrder ?? const []),
         ),
       ));
     }
+
+    // owner 2026-11-27（第四次提同一件事）：
+    // > 「词条还是没下发，还是没粘贴！！！媒体库词条啊！！！基础库词条啊！！！」
+    //
+    // 单元库词条一直都在，媒体库词条却只有首页卡片有。作者卡/播放页/排行榜
+    // 都只贴到最末一级，于是「这个作者属于哪个媒体库」任何卡片上都看不出来。
+    // 这里按结构补一级：单元库 → 所属媒体库根（`topOfUnit` 结构表），
+    // 拿不到就不贴（不编一个假的一级，也不读目录名）。单连接旧形态下
+    // 单元库自己就是一级，`topIdFor` 返回它自己，于是自然不重复贴。
+    final mediaIds = <String>[];
+    final namesWithTop = <String, String>{...names};
+    if (ids.isNotEmpty) {
+      final topId = meta?.mediaIdFor(ids.first) ?? '';
+      if (topId.isNotEmpty && !ids.contains(topId)) {
+        final label = meta?.topNameOf(topId) ?? '';
+        if (label.isNotEmpty) {
+          mediaIds.add(topId);
+          namesWithTop[topId] = label;
+          // 媒体库词条是继承源，不是「无归属」：不能被灰。
+          gray.remove(topId);
+        }
+      }
+    }
+    // 媒体库词条排在最前（层级从高到低），后面才是单元库与折叠的基础库。
+    final shownIds = <String>[...mediaIds, ...ids];
     return LibBadges(
-      libIds: ids,
+      libIds: shownIds,
       order: meta?.unitOrder ?? const [],
-      names: names,
+      names: namesWithTop,
       grayIds: gray,
       grade: grade,
       basicChips: basicChips,
+      chipMaxWidth: chipMaxWidth,
     );
   }
 }
@@ -3245,6 +3334,9 @@ class AuthorBadges extends StatelessWidget {
   final Map<String, String> unitLabels;
   final Map<String, String> unitKeys;
 
+  /// 单条词条最大宽度（透传给词条行）。固定尺寸的小卡片必须传更小的值。
+  final double chipMaxWidth;
+
   const AuthorBadges({
     super.key,
     required this.meta,
@@ -3257,6 +3349,7 @@ class AuthorBadges extends StatelessWidget {
     this.stats,
     this.unitLabels = const {},
     this.unitKeys = const {},
+    this.chipMaxWidth = kBadgeChipMaxWidth,
   });
 
   /// 统计来源：显式 stats > 当前库 meta 中该作者的统计。
@@ -3285,6 +3378,7 @@ class AuthorBadges extends StatelessWidget {
     return UnitBadges(
       meta: meta,
       mediaPath: mediaPath,
+      chipMaxWidth: chipMaxWidth,
       basicId: _basicId,
       // 多来源：显式传入优先；否则至少带主库，保持旧行为。
       basicIds: basicIds.isNotEmpty
@@ -6391,6 +6485,9 @@ class _LibraryPageState extends State<LibraryPage> {
     // 作者来源词条：本基础库所属单元库（与作者卡/作者页同一口径）。
     final root = unitTree;
     final unit = root == null ? null : unitForBasic(root, b.id);
+    // owner 2026-11-27：作者卡要能看到「属于哪个媒体库」。本页只收一个基础库，
+    // 父级（媒体库根）只有这里有单元库树才能算；拿不到就不传（不编造）。
+    final media = root == null ? null : mediaRootForBasic(root, b.id);
     final unitOrder = root == null
         ? const <String>[]
         : [
@@ -6408,6 +6505,14 @@ class _LibraryPageState extends State<LibraryPage> {
         sourceColor: unit == null
             ? LibraryBadge.gray
             : LibraryBadge.colorForUnit(unit.id,
+                order: UnitBadgeRegistry.orderOr(unitOrder)),
+        sourceMediaLabel: media?.name ?? '',
+        sourceMediaId: media?.id ?? '',
+        // 与作者卡/首页同一条配色链（同一个 `order`），否则同一个媒体库
+        // 在两页是两个颜色。
+        sourceMediaColor: media == null
+            ? LibraryBadge.gray
+            : LibraryBadge.colorForUnit(media.id,
                 order: UnitBadgeRegistry.orderOr(unitOrder)),
         onOpenAuthor: (name) => Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -8676,6 +8781,9 @@ class AuthorGridCard extends StatelessWidget {
                 fallbackId: lib,
                 works: works,
                 stats: stats,
+                // 150dp 卡只放得下一行词条：单条上限必须比信息区小，
+                // 否则媒体库+单元库两级各占一行、第二行压到头像上。
+                chipMaxWidth: kAuthorCardChipMaxWidth,
               ),
             ),
           ]),

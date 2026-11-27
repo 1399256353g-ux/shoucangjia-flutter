@@ -70,11 +70,20 @@ class CollapsibleBadgeWrap extends StatefulWidget {
   /// 初始是否展开。默认折叠——作者卡在播放页里空间有限。
   final bool startExpanded;
 
+  /// 单条词条最大宽度（透传给 [LibBadgeChip]）。
+  ///
+  /// 固定尺寸的小卡片必须传得比 [kBadgeChipMaxWidth] 更小：150dp 的作者卡
+  /// 只放得下**一行**词条（卡片顶部预留 22dp），媒体库 + 单元库两级都按
+  /// 120dp 上限排版时会各占一行，第二行压到头像上。这里不是「字太长」，
+  /// 是容器宽度决定了单条上限，由容器自己声明。
+  final double chipMaxWidth;
+
   const CollapsibleBadgeWrap({
     super.key,
     required this.chips,
     this.alignment = WrapAlignment.start,
     this.startExpanded = false,
+    this.chipMaxWidth = kBadgeChipMaxWidth,
   });
 
   @override
@@ -157,6 +166,7 @@ class _CollapsibleBadgeWrapState extends State<CollapsibleBadgeWrap> {
                     color: c.color,
                     unitId: c.unitId,
                     kind: c.kind,
+                    maxWidth: widget.chipMaxWidth,
                   ),
                 )
               : LibBadgeChip(
@@ -164,6 +174,7 @@ class _CollapsibleBadgeWrapState extends State<CollapsibleBadgeWrap> {
                   color: c.color,
                   unitId: c.unitId,
                   kind: c.kind,
+                  maxWidth: widget.chipMaxWidth,
                 ),
         if (hasHidden)
           _BadgeExpandChip(count: hiddenCount, onTap: _expand),
@@ -237,8 +248,12 @@ class AuthorBadgeRow extends StatelessWidget {
 
   final WrapAlignment alignment;
 
-  /// 额外词条（基础库词条等）。标记为 [LibEntryKind.basic] 的会被折叠收纳。
+  /// 额外词条（基础库词条、媒体库词条）。标记为 [LibEntryKind.basic] 的
+  /// 会被折叠收纳；[LibEntryKind.top] 固定排在最前。
   final List<BadgeChipSpec> extraChips;
+
+  /// 单条词条最大宽度（透传）。固定尺寸的小卡片传更小的值，避免换行。
+  final double chipMaxWidth;
 
   const AuthorBadgeRow({
     super.key,
@@ -249,6 +264,7 @@ class AuthorBadgeRow extends StatelessWidget {
     this.grade = '',
     this.alignment = WrapAlignment.center,
     this.extraChips = const <BadgeChipSpec>[],
+    this.chipMaxWidth = kBadgeChipMaxWidth,
   });
 
   @override
@@ -258,10 +274,24 @@ class AuthorBadgeRow extends StatelessWidget {
     if (!hasUnit && g.isEmpty && extraChips.isEmpty) {
       return const SizedBox.shrink();
     }
+    // 层级顺序固定为「媒体库 → 单元库 → 等级 → 其余（基础库、折叠）」。
+    // 媒体库词条是 external 传入的（基础库页拿不到父级，由调用方算好），
+    // 排在最前才与作者主页/播放页一致——同一作者在三个页面上词条顺序相同，
+    // 否则“第一眼看到的是哪一级”随页面变。
+    final tops = <BadgeChipSpec>[
+      for (final c in extraChips)
+        if (c.kind == LibEntryKind.top) c,
+    ];
+    final rest = <BadgeChipSpec>[
+      for (final c in extraChips)
+        if (c.kind != LibEntryKind.top) c,
+    ];
     // 播放页作者卡空间有限：基础库词条默认折进末尾的展开键（owner 2026-11-26）。
     return CollapsibleBadgeWrap(
       alignment: alignment,
+      chipMaxWidth: chipMaxWidth,
       chips: [
+        ...tops,
         if (hasUnit)
           BadgeChipSpec(
             label: unitLabel,
@@ -273,7 +303,7 @@ class AuthorBadgeRow extends StatelessWidget {
           ),
         if (g.isNotEmpty)
           BadgeChipSpec(label: g, color: AuthorGrade.colorForGrade(g)),
-        ...extraChips,
+        ...rest,
       ],
     );
   }

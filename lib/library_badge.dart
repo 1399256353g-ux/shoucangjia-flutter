@@ -16,6 +16,7 @@ import 'package:flutter/material.dart'
         FontWeight,
         StatelessWidget,
         Text,
+        TextAlign,
         TextOverflow,
         TextStyle,
         ValueListenableBuilder,
@@ -532,16 +533,46 @@ class LibraryBadge {
   /// 圆角与内边距**不可调**，形状尺寸永远一致。
 
   static BoxDecoration decorationFor(LibEntryKind kind, int argb) {
+    // 组合视图（设置页预览与既有测试读的是「一个带边框的 BoxDecoration」）。
+    // 渲染层**不再**用它：见 [fillDecorationFor] / [borderDecorationFor]。
+    final fill = fillDecorationFor(kind, argb);
+    final border = borderDecorationFor(kind);
+    return BoxDecoration(
+      color: fill.color,
+      borderRadius: fill.borderRadius,
+      border: border.border,
+    );
+  }
+
+  /// 词条底纹（**不含边框**）。
+  ///
+  /// 拆成两层的唯一理由（owner 2026-11-27）：
+  /// > 「还有叫你不要动词条占用面积的大小，调粗边框占用不就变大了吗」
+  ///
+  /// `Container` 会把 `decoration` 的 `padding`（即 `Border.dimensions`）
+  /// 加到内容内边距上——边框一旦画在 `decoration` 里，边框粗细就同时决定
+  /// 词条占位面积：1.2 与 0.5 三档并排时宽度差 1.4dp，改成设置里的 3.0 会
+  /// 让整排词条跟着变宽、换行位置漂移。边框必须画在不参与测量的层。
+  static BoxDecoration fillDecorationFor(LibEntryKind kind, int argb) {
     final st = styleFor(kind);
-    // 与原始实现同一条路径：边框画在 decoration 里。
-    // 唯一新增：用户显式调过 borderColor 时用它，否则按层级默认（白/黑）。
-    final base = Color(st.borderColor ??
-        (kind == LibEntryKind.top ? 0xFFFFFFFF : 0xFF000000));
-    final borderColor = base.withValues(alpha: st.borderAlpha);
     return BoxDecoration(
       color: Color(argb).withValues(alpha: st.fillAlpha),
       borderRadius: BorderRadius.circular(kEntryRadius),
-      border: Border.all(color: borderColor, width: st.borderWidth),
+    );
+  }
+
+  /// 词条边框（前景层，`Container.foregroundDecoration` 用）。
+  ///
+  /// 前景装饰不参与布局：同一个词条无论边框 0.5 还是 3.0，占位面积与
+  /// 文字位置都不变，只有视觉描边变粗。
+  static BoxDecoration borderDecorationFor(LibEntryKind kind) {
+    final st = styleFor(kind);
+    final base = Color(st.borderColor ??
+        (kind == LibEntryKind.top ? 0xFFFFFFFF : 0xFF000000));
+    return BoxDecoration(
+      borderRadius: BorderRadius.circular(kEntryRadius),
+      border: Border.all(
+          color: base.withValues(alpha: st.borderAlpha), width: st.borderWidth),
     );
   }
 
@@ -938,12 +969,18 @@ class LibBadgeChip extends StatelessWidget {
   /// P1：词条层级。三种层级共用同一形状/内边距/字号，只改边框与底纹。
   final LibEntryKind kind;
 
+  /// 单条词条最大宽度。信息区（播放页/作者头）用 [kBadgeChipMaxWidth]；
+  /// 固定尺寸的小卡片（150dp 作者卡）必须传更小的值，否则媒体库+单元库
+  /// 两级词条会换行、压到头像上——不是字太长的问题，是**卡片放不下两行**。
+  final double maxWidth;
+
   const LibBadgeChip(
       {super.key,
       required this.label,
       required this.color,
       this.unitId = '',
-      this.kind = LibEntryKind.unit});
+      this.kind = LibEntryKind.unit,
+      this.maxWidth = kBadgeChipMaxWidth});
 
   @override
   Widget build(BuildContext context) {
@@ -961,17 +998,26 @@ class LibBadgeChip extends StatelessWidget {
     // owner 2026-11-27：词条在播放页太长。库名最长 42 字、中位 15 字，
     // 不设上限就会撑满信息区。上限按「一行两三条」取，超出省略。
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: kBadgeChipMaxWidth),
+      constraints: BoxConstraints(maxWidth: maxWidth),
       child: Container(
+        // 内边距是**固定值**（不是 `decoration.padding`）：边框改粗细时
+        // 占位面积与文字位置都不许变（owner 2026-11-27「调粗边框占用不就
+        // 变大了吗」）。底纹画在 decoration、边框画在 foregroundDecoration，
+        // 后者不参与测量。
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-        decoration: LibraryBadge.decorationFor(kind, color),
+        decoration: LibraryBadge.fillDecorationFor(kind, color),
+        foregroundDecoration: LibraryBadge.borderDecorationFor(kind),
         child: Text(
           text,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
+          // `height: 1`：行高等于字号，文字在上下固定的内边距里自然居中。
+          // 用 1.25 时多出的行距并不均匀分到上下两半，单行文本看起来会
+          // 偏下（owner 2026-11-27：「词条里的文字要放在词条区域的中央」）。
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 9,
-            height: 1.25,
+            height: 1.0,
             fontWeight: FontWeight.w600,
             color: Color(LibraryBadge.textColorOn(color)),
           ),
