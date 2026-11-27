@@ -199,7 +199,10 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     _capabilityBanner(),
                     if (!hasScript) ...[
                       const SizedBox(height: 8),
-                      Text('脚本目录：${_scriptDir()}',
+                      Text(
+                          _scriptDir().isEmpty
+                              ? '服务端未返回该目录的绝对路径'
+                              : '脚本目录：${_scriptDir()}',
                           style: const TextStyle(
                               fontSize: 11, color: Colors.grey)),
                     ],
@@ -372,10 +375,12 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     );
   }
 
-  String _scriptDir() {
-    final p = path.isNotEmpty ? path : widget.unit.rel;
-    return p.endsWith('/') ? '${p}crawler' : '$p/crawler';
-  }
+  /// 脚本目录的**绝对路径**：只有服务端给了 `path` 才有。
+  ///
+  /// 0.9.322：此前服务端没给绝对路径时回落到 `widget.unit.rel`（相对路径），
+  /// 同一页于是同时出现「`/vol1/.../A`」和「`A/crawler`」两种坐标，
+  /// 用户拿后者去磁盘上找不到。现在拿不到就不显示（由调用点决定那句提示）。
+  String _scriptDir() => crawlerScriptDir(path);
 
   /// owner 2026-11-27：「删除监测塞到对应单元库的爬虫配置页面下去，
   /// 爬虫没有这个功能就显示不支持」。
@@ -439,7 +444,10 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         if (list.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text('目录：${_scriptDir()}',
+            child: Text(
+                _scriptDir().isEmpty
+                    ? '服务端未返回该目录的绝对路径'
+                    : '目录：${_scriptDir()}',
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ),
       ],

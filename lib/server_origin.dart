@@ -10,6 +10,8 @@
 /// 与封面首图字段 `fc` 同理：`'${raw['fc'] ?? ''}'.trim()` 也写了两遍。
 library;
 
+import 'basic_auth.dart';
+
 /// 五个字段名（唯一定义）。
 const String kServerIdKey = '_serverId';
 const String kServerBaseKey = '_serverBase';
@@ -89,9 +91,27 @@ Map<String, dynamic> withServerOrigin(
     };
 
 /// 服务端下发的「首张作品封面」字段 `fc`（已是 `/media/<lib>/...` 的图片路径）。
-///
 /// 此前这段解析在 `source_lib`（基础库 ref）与 `library_tree`（基础库模型）
 /// 各写一遍；两处一旦对「空串 / 空白 / 非字符串」处理不同，同一张库在
 /// 单元库树与首页就一个有封面、一个灰。
 String firstWorkCoverOf(dynamic raw) =>
     raw is Map ? '${raw['fc'] ?? ''}'.trim() : '';
+
+/// 一条库/节点记录的请求地址：带来源连接时用它，否则用 [fallback]。
+///
+/// 聚合时每条记录都被打上了五个来源字段（[withServerOrigin]），但页面里仍有
+/// 拿 `cfg.baseFor(libId)` 取地址的——绑定表只在首页加载时建立，从设置页
+/// 直接进入（首屏还没加载库列表）时绑定表是空的，跨连接就打到当前服务器。
+/// 记录自己带着地址，就该用它。
+String libraryBaseOf(dynamic record, String fallback) {
+  final o = serverOriginOf(record);
+  return o.base.isNotEmpty ? o.base : fallback;
+}
+
+/// 一条库/节点记录的鉴权头：带来源连接时用它，否则用 [fallback]。
+Map<String, String> libraryHeadersOf(
+    dynamic record, Map<String, String> fallback) {
+  final o = serverOriginOf(record);
+  if (o.base.isEmpty) return fallback;
+  return {'Authorization': basicAuthHeader(o.user, o.pass)};
+}

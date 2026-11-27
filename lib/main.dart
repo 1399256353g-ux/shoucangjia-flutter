@@ -96,6 +96,7 @@ import 'playback_prefs.dart';
 import 'json_isolate.dart';
 import 'library_tree.dart';
 import 'unit_crawler.dart';
+import 'crawler_sections.dart';
 import 'unit_crawler_page.dart';
 import 'unit_author_mount_page.dart';
 import 'stable_order.dart';
@@ -6423,22 +6424,26 @@ class MediaCrawlerSettingsPage extends StatefulWidget {
 }
 
 class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
-  List<Map<String, dynamic>> libs = [];
-  final Map<String, Map<String, dynamic>> crawlers = {};
+  /// 按媒体库分节后的条目（每节先注册库、再单元库）。
+  ///
+  /// 0.9.322：页面上原来有两份互不相干的列表——按媒体库分节可折叠的单元库
+  /// 条目，和一条平铺的注册库条目。现在两者都进 [_sections]，同一个媒体库
+  /// 的设置只在一个地方。分组规则在 `crawler_sections.crawlerSectionsOf`。
+  List<CrawlerSection> _sections = const [];
   bool loading = true;
   String? err;
-  // H：节点/单元库列表与「是否有爬虫脚本」，同步源不再只有 douyin。
-  List<UnitLibrary> units = const [];
-  Map<String, bool> unitFlags = const {};
 
-  /// owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库的设置就归到
-  /// 对应的下面去」。这里存树上的媒体库（顶级单元库），用于把单元库按归属分组。
-  List<UnitLibrary> tops = const [];
+  /// 注册库 id → 爬虫配置（`/api/crawler?id=`）。
+  final Map<String, Map<String, dynamic>> crawlers = {};
+
+  /// `<连接>\u0001<rel>` → 是否有爬虫脚本（合并各连接的 `/api/nodes`）。
+  Map<String, bool> unitFlags = const {};
 
   /// owner 2026-11-27：「各爬虫脚本条目按媒体库分类折叠收纳」。
   ///
   /// 默认全部折叠——40 多个单元库 + 脚本条目全展开，一屏塞不下也找不到东西。
-  /// 键用媒体库 id（不是名字：名字会变、带序号时还有两种写法）。
+  /// 键带连接（`crawler_sections.unitScopeKey`）：名字会变，两台服务端同名
+  /// 媒体库也不能共用一个开关。
   final Set<String> crawlerSectionOpen = <String>{};
 
   @override
@@ -6447,60 +6452,97 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     load();
   }
 
+  /// 本次请求的连接表：**在线**连接优先，没有配置时用当前连接。
+  Future<List<ServerConn>> _liveServers() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final all = migrateLegacy(
+        servers: decodeServers(sp.getString('servers_v1')),
+        base: sp.getString('base') ?? cfg.base,
+        user: sp.getString('user') ?? cfg.user,
+        pass: sp.getString('pass') ?? cfg.pass,
+      );
+      final visible = liveServers(all);
+      if (visible.isNotEmpty) return visible;
+    } catch (_) {}
+    if (cfg.base.isEmpty) return const <ServerConn>[];
+    return <ServerConn>[
+      ServerConn(
+          id: cfg.serverIdFor(),
+          label: cfg.serverLabelFor(),
+          base: cfg.base,
+          user: cfg.user,
+          pass: cfg.pass)
+    ];
+  }
+
   Future<void> load() async {
     setState(() {
       loading = true;
       err = null;
     });
     try {
-      final r = await http
-          .get(Uri.parse('${cfg.base}/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 10));
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
-      final j = jsonMapOf(r);
-      final list = mapsOf(j['libraries']);
       crawlers.clear();
-      for (final l in list) {
-        final id = '${l['id']}';
+      final servers = await _liveServers();
+      if (servers.isEmpty) throw Exception('未配置服务器');
+
+      // 每个连接各取一次：注册库列表 + 单元库元数据 + 脚本表。
+      // 此前只用 `cfg.base` / `LibMeta.load(cfg.lib)`：第二台服务端的库与
+      // 单元库在这页一条都不出现（主页面却看得到）。
+      final metas = <CrawlerMetaUnits>[];
+      final libsByServer = <String, List<Map<String, dynamic>>>{};
+      final flagsByServer = <String, Map<String, bool>>{};
+      for (final s in servers) {
+        final headers = {'Authorization': basicAuthHeader(s.user, s.pass)};
         try {
-          final cr = await http
-              .get(Uri.parse(libApiUrl(cfg.base, '/api/crawler', id)),
-                  headers: cfg.headersFor(id))
-              .timeout(const Duration(seconds: 8));
-          if (cr.statusCode == 200) {
-            final cj = jsonOf(cr);
-            if (cj is Map) {
-              crawlers[id] = Map<String, dynamic>.from(cj);
+          final r = await http
+              .get(Uri.parse('${s.base}/api/libraries'), headers: headers)
+              .timeout(const Duration(seconds: 10));
+          if (r.statusCode == 200) {
+            final list = mapsOf(jsonMapOf(r)['libraries']);
+            libsByServer[s.id] = list;
+            for (final l in list) {
+              final id = '${l['id'] ?? ''}'.trim();
+              if (id.isEmpty) continue;
+              try {
+                final cr = await http
+                    .get(Uri.parse(libApiUrl(s.base, '/api/crawler', id)),
+                        headers: headers)
+                    .timeout(const Duration(seconds: 8));
+                if (cr.statusCode == 200) {
+                  final cj = jsonMapOf(cr);
+                  crawlers[id] = cj;
+                }
+              } catch (_) {}
             }
           }
         } catch (_) {}
-      }
-      // H：同步源适配单元库——列出所有节点文件夹，并标记是否有爬虫脚本。
-      var unitList = const <UnitLibrary>[];
-      var topList = const <UnitLibrary>[];
-      var flags = const <String, bool>{};
-      try {
-        final m = await LibMeta.load(cfg.lib);
-        unitList = [
-          for (final u in m.units)
-            if (u.id != 'secret') u
-        ];
-        topList = m.tops;
-      } catch (_) {}
-      try {
-        final nr = await http
-            .get(Uri.parse('${cfg.base}/api/nodes'), headers: cfg.headers)
-            .timeout(const Duration(seconds: 8));
-        if (nr.statusCode == 200) {
-          flags = unitCrawlerFlags(jsonOf(nr));
+        // 元数据按该连接的**第一个注册库**取：`cfg.lib` 只属于默认连接，
+        // 拿去请求别台服务器的库树必然空。
+        final libs = libsByServer[s.id] ?? const <Map<String, dynamic>>[];
+        final primary = libs.isEmpty ? '' : '${libs.first['id'] ?? ''}'.trim();
+        if (primary.isNotEmpty) {
+          try {
+            final m = await LibMeta.load(primary);
+            metas.add((tops: m.tops, units: m.units));
+          } catch (_) {}
         }
-      } catch (_) {}
+        try {
+          final nr = await http
+              .get(Uri.parse('${s.base}/api/nodes'), headers: headers)
+              .timeout(const Duration(seconds: 8));
+          if (nr.statusCode == 200) {
+            flagsByServer[s.id] = unitCrawlerFlags(jsonOf(nr));
+          }
+        } catch (_) {}
+      }
+
+      final sections = crawlerSectionsOf(
+          metas: metas, librariesByServer: libsByServer);
       if (!mounted) return;
       setState(() {
-        libs = list;
-        units = unitList;
-        tops = topList;
-        unitFlags = flags;
+        _sections = sections;
+        unitFlags = mergeCrawlerFlags(flagsByServer);
         loading = false;
       });
     } catch (e) {
@@ -6525,67 +6567,70 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     return everyMinutesLabel(iv);
   }
 
-  /// owner 2026-11-25：把单元库按「所属媒体库」分节展示。
+  /// 本页全部条目：按媒体库分节，节内先注册库、再单元库。
   ///
-  /// 原来是一条平铺长列表，40 多个库混在一起看不出归属。现在按顶级单元库
-  /// （＝每个连接的媒体库根）分节；不属于任何媒体库的归到「其它」。
-  /// 分组只按树结构算（topIdFor），不看任何目录名文本。
-  List<Widget> _unitSections() {
-    if (units.isEmpty) return const <Widget>[];
-    final byTop = <String, List<UnitLibrary>>{};
-    final order = <String>[];
-    final other = <UnitLibrary>[];
-    for (final u in units) {
-      final t = u.node.serverId.isNotEmpty ? _topIdOfUnit(u) : '';
-      if (t.isEmpty) {
-        other.add(u);
+  /// 分组规则（谁属于哪个媒体库、去重、稳定排序）只在
+  /// `crawler_sections.crawlerSectionsOf` 一处；这里只负责画。
+  List<Widget> _sectionWidgets() {
+    if (_sections.isEmpty) {
+      return const <Widget>[
+        Padding(
+          padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+          child: Text('没有可显示的媒体库（未连接或服务端未下发库树）',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        ),
+      ];
+    }
+    final out = <Widget>[];
+    for (final s in _sections) {
+      if (s.units.isEmpty && s.libraries.isEmpty) continue;
+      final sid = s.serverId;
+      final withScripts =
+          s.units.where((u) => unitHasCrawlerScript(unitFlags, u, serverId: sid)).length;
+      if (s.isOther) {
+        // 「其它」节不折叠：条目本来就少，且没有可点开的媒体库标题。
+        out.add(const Padding(
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: Text('其它（不属于任何媒体库）',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        ));
+        for (final l in s.libraries) {
+          out.add(_libTile(l));
+        }
+        for (final u in s.units) {
+          out.add(_unitTile(u, sid));
+        }
         continue;
       }
-      if (!byTop.containsKey(t)) order.add(t);
-      (byTop[t] ??= <UnitLibrary>[]).add(u);
-    }
-
-    final out = <Widget>[];
-    for (final topId in order) {
-      final list = byTop[topId] ?? const <UnitLibrary>[];
-      if (list.isEmpty) continue;
+      final open = crawlerSectionOpen.contains(s.key);
       out.add(_crawlerSectionHeader(
-        key: topId,
-        title: LibraryBadge.stripIndex(_topNameOf(topId)),
-        subtitle: '${list.length} 个单元库 · '
-            '${list.where((u) => _unitHasScript(u)).length} 个有脚本',
+        section: s,
+        subtitle: '${s.libraries.length} 个库 · ${s.units.length} 个单元库'
+            ' · $withScripts 个有脚本',
       ));
-      if (crawlerSectionOpen.contains(topId)) {
-        for (final u in list) out.add(_unitTile(u));
+      if (!open) continue;
+      for (final l in s.libraries) {
+        out.add(_libTile(l));
       }
-    }
-    if (other.isNotEmpty) {
-      out.add(const Padding(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-        child: Text('其它（不属于任何媒体库）',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-      ));
-      for (final u in other) out.add(_unitTile(u));
+      for (final u in s.units) {
+        out.add(_unitTile(u, sid));
+      }
     }
     return out;
   }
 
-  /// 该单元库是否配了爬虫脚本（与 [_unitTile] 同一判定）。
-  bool _unitHasScript(UnitLibrary u) =>
-      boolOf(unitFlags[u.rel]) ||
-      boolOf(unitFlags[u.id.replaceFirst('node:', '')]);
-
   /// 可折叠的媒体库分节头。默认折叠，点一下展开该媒体库下的条目。
   Widget _crawlerSectionHeader({
-    required String key,
-    required String title,
+    required CrawlerSection section,
     required String subtitle,
   }) {
-    final open = crawlerSectionOpen.contains(key);
+    final open = crawlerSectionOpen.contains(section.key);
     return InkWell(
-      key: ValueKey('crawler-section-$key'),
+      key: ValueKey('crawler-section-${section.key}'),
       onTap: () => setState(() {
-        if (!crawlerSectionOpen.remove(key)) crawlerSectionOpen.add(key);
+        if (!crawlerSectionOpen.remove(section.key)) {
+          crawlerSectionOpen.add(section.key);
+        }
       }),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 12, 6),
@@ -6597,7 +6642,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(title,
+                Text(LibraryBadge.stripIndex(section.title),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -6616,37 +6661,49 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     );
   }
 
-  /// 单元库 → 所属媒体库（顶级单元库）id；拿不到返回空串（不猜、不硬塞）。
-  String _topIdOfUnit(UnitLibrary u) {
-    for (final t in tops) {
-      if (t.id == u.id) return t.id;
-      for (final c in _walk(t)) {
-        if (c.id == u.id) return t.id;
-      }
-    }
-    return '';
+  /// 注册库条目：爬虫配置 / 维护检查两个入口。
+  ///
+  /// 连接从该条目自己的来源字段取（`serverOriginOf` 与聚合时写的是同一套
+  /// 键）；跨连接时菜单里的页面才知道该去哪台服务器。
+  Widget _libTile(Map<String, dynamic> l) {
+    final id = '${l['id'] ?? ''}'.trim();
+    final cfgOfLib = crawlers[id];
+    return ListTile(
+      leading: const Icon(Icons.library_books_outlined),
+      title: Text(libraryDisplayName(id, '${l['name'] ?? id}'),
+          maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+          '$id · ${_freqText(cfgOfLib)} · 脚本 ${_scriptCount(cfgOfLib)} 个',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 11)),
+      trailing: PopupMenuButton<String>(
+        onSelected: (v) async {
+          if (v == 'crawler') {
+            await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => CrawlerConfigPage(lib: l)));
+            load();
+          } else if (v == 'maint') {
+            await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MaintenancePage(lib: l)));
+            load();
+          }
+        },
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'crawler', child: Text('爬虫配置')),
+          PopupMenuItem(value: 'maint', child: Text('维护检查')),
+        ],
+      ),
+    );
   }
 
-  /// 深度优先遍历一棵单元库子树（含自身）。
-  Iterable<UnitLibrary> _walk(UnitLibrary u) sync* {
-    yield u;
-    for (final c in u.children) {
-      yield* _walk(c);
-    }
-  }
-
-  /// 媒体库显示名：取树上的名字，拿不到就用 id。
-  String _topNameOf(String id) {
-    for (final t in tops) {
-      if (t.id == id) return t.name.isEmpty ? id : t.name;
-    }
-    return id;
-  }
-
-  /// H：单个单元库的配置入口；没有脚本时置灰并写明「为什么不能设置」。
-  Widget _unitTile(UnitLibrary u) {
-    final has = boolOf(unitFlags[u.rel]) ||
-        boolOf(unitFlags[u.id.replaceFirst('node:', '')]);
+  /// 单个单元库的配置入口；没有脚本时置灰并写明「为什么不能设置」。
+  ///
+  /// [serverId] 是所在分节的连接：条目自己没带连接标识（旧树）时用它，
+  /// 否则跨连接进入会打到默认库那台服务器。
+  Widget _unitTile(UnitLibrary u, String serverId) {
+    final sid = u.node.serverId.trim().isNotEmpty ? u.node.serverId.trim() : serverId;
+    final has = unitHasCrawlerScript(unitFlags, u, serverId: sid);
     return ListTile(
       enabled: has,
       leading: Icon(
@@ -6677,13 +6734,13 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
               // `/api/sync/logs?lib=` 过滤——库 id 不对就永远查不到该单元库的
               // 日志。单元库页那条入口传的是 `u.basics.first.id`，所以那边有日志。
               //
-              // 统一口径：库 id 取该单元库自己的第一个基础库；base/headers 也按
-              // 同一连接的凭据走（跨连接的多库场景下 Admin 头不能错配）。
-              final libId = u.basics.isNotEmpty ? u.basics.first.id : cfg.lib;
-              // base/headers 都按该库所属连接取（Cfg 内部已按库绑定解析），
-              // 不再自己遍历 servers——本页没有那边的作用域。
-              final base = u.node.serverBase.isNotEmpty
-                  ? u.node.serverBase
+              // 统一口径：库 id 取该单元库自己的第一个基础库；base/headers 都按
+              // 条目所属连接取（跨连接时 Admin 头不能错配）。
+              final libId = u.basics.isNotEmpty
+                  ? u.basics.first.id
+                  : (sid == cfg.serverIdFor() ? cfg.lib : '');
+              final base = u.node.serverBase.trim().isNotEmpty
+                  ? u.node.serverBase.trim()
                   : cfg.baseFor(libId);
               final headers = cfg.headersFor(libId);
               await Navigator.of(context).push(MaterialPageRoute(
@@ -6710,8 +6767,16 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final withScripts =
-        crawlers.values.where((c) => _scriptCount(c) > 0).length;
+    var libCount = 0;
+    var unitCount = 0;
+    var withScripts = 0;
+    for (final s in _sections) {
+      libCount += s.libraries.length;
+      unitCount += s.units.length;
+      withScripts += s.units
+          .where((u) => unitHasCrawlerScript(unitFlags, u, serverId: s.serverId))
+          .length;
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('爬虫设置'), actions: [
         IconButton(
@@ -6725,50 +6790,16 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
               : ListView(children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-                    child: Text('${libs.length} 个库 · $withScripts 个已配置爬虫脚本',
+                    child: Text('$libCount 个库 · $unitCount 个单元库'
+                        ' · $withScripts 个有爬虫脚本',
                         style:
                             const TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
                   // owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库
                   // 的设置就归到对应的下面去」。
-                  //
-                  // 原来是一条平铺的「单元库（节点文件夹）」长列表，40 多个库混在
-                  // 一起，看不出哪个属于哪个媒体库。改为按顶级单元库（＝媒体库根）
-                  // 分节：每节先是媒体库名，再列它下面的单元库；不属于任何媒体库的
-                  // 归到「其它」。
-                  ..._unitSections(),
-                  for (final l in libs)
-                    ListTile(
-                      leading: const Icon(Icons.library_books_outlined),
-                      title: Text(
-                          libraryDisplayName(
-                              '${l['id']}', '${l['name'] ?? l['id']}'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                      subtitle: Text(
-                          '${l['id']} · ${_freqText(crawlers['${l['id']}'])}'
-                          ' · 脚本 ${_scriptCount(crawlers['${l['id']}'])} 个',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11)),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (v) async {
-                          if (v == 'crawler') {
-                            await Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => CrawlerConfigPage(lib: l)));
-                            load();
-                          } else if (v == 'maint') {
-                            await Navigator.of(context).push(MaterialPageRoute(
-                                builder: (_) => MaintenancePage(lib: l)));
-                            load();
-                          }
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'crawler', child: Text('爬虫配置')),
-                          PopupMenuItem(value: 'maint', child: Text('维护检查')),
-                        ],
-                      ),
-                    ),
+                  // owner 2026-11-27：「各爬虫脚本条目按媒体库分类折叠收纳」。
+                  // 注册库条目与单元库条目在同一个分节里，不再一平铺一折叠。
+                  ..._sectionWidgets(),
                 ]),
     );
   }
@@ -6793,7 +6824,16 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
 
   String get libId => '${widget.lib['id']}';
 
-  Uri _u(String path) => Uri.parse(libApiUrl(cfg.baseFor(libId), path, libId));
+  /// 地址与鉴权都优先取**这条记录自己**的来源连接。
+  ///
+  /// 绑定表（`cfg.baseFor/headersFor`）只在首页加载库列表时建立；从设置页
+  /// 直接进入这一页（首屏还没聚合过）时表是空的，跨连接就会拿默认服务器的
+  /// 地址与账号去请求另一台的库。
+  String get _base => libraryBaseOf(widget.lib, cfg.baseFor(libId));
+  Map<String, String> get _headers =>
+      libraryHeadersOf(widget.lib, cfg.headersFor(libId));
+
+  Uri _u(String path) => Uri.parse(libApiUrl(_base, path, libId));
 
   @override
   void initState() {
@@ -6808,7 +6848,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
     });
     try {
       final r = await http
-          .get(_u('/api/crawler'), headers: cfg.headersFor(libId))
+          .get(_u('/api/crawler'), headers: _headers)
           .timeout(const Duration(seconds: 10));
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
@@ -6832,7 +6872,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
     try {
       final r = await http.post(_u('/api/crawler'),
           headers: {
-            ...cfg.headersFor(libId),
+            ..._headers,
             'Content-Type': 'application/json'
           },
           body: jsonEncode({
@@ -6954,7 +6994,13 @@ class _MaintenancePageState extends State<MaintenancePage> {
   bool deepScan = false;
 
   String get libId => '${widget.lib['id']}';
-  Uri _u(String path) => Uri.parse(libApiUrl(cfg.baseFor(libId), path, libId));
+
+  /// 同 `CrawlerConfigPage`：地址与鉴权取这条记录自己的来源连接。
+  String get _base => libraryBaseOf(widget.lib, cfg.baseFor(libId));
+  Map<String, String> get _headers =>
+      libraryHeadersOf(widget.lib, cfg.headersFor(libId));
+
+  Uri _u(String path) => Uri.parse(libApiUrl(_base, path, libId));
 
   @override
   void initState() {
@@ -6971,7 +7017,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
     try {
       final r = await http
           .get(Uri.parse(withQueryFlag('${_u('/api/maintenance')}', deep ? 'deep=1' : '')),
-              headers: cfg.headersFor(libId))
+              headers: _headers)
           .timeout(Duration(seconds: deep ? 90 : 15));
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
@@ -6987,7 +7033,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
     try {
       final r = await http.post(_u('/api/maintenance'),
           headers: {
-            ...cfg.headersFor(libId),
+            ..._headers,
             'Content-Type': 'application/json'
           },
           body: jsonEncode({'action': 'run-crawler', 'lib': libId}));

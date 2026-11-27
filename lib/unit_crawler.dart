@@ -214,6 +214,19 @@ String unitCrawlerUrl(String base, String path,
         {required String unitId, required String rel}) =>
     joinApiUrl(base, path, query: {'unit': unitId, 'rel': rel});
 
+/// 单元库爬虫脚本目录（**绝对路径**）；没有绝对路径时返回空串。
+///
+/// 0.9.322：此前页面的 `_scriptDir()` 在服务端没给绝对路径时回落到
+/// `unit.rel`（相对路径），于是同一页上「库根：/vol1/.../A」与
+/// 「脚本目录：A/crawler」两行是两种坐标——用户拿相对路径在磁盘上找不到
+/// 那个目录，还以为是脚本放错了位置。相对路径不猜、不显示：调用方拿到空串
+/// 就什么都不画，并说明「服务端未返回绝对路径」。
+String crawlerScriptDir(String absPath) {
+  final p = absPath.trim();
+  if (p.isEmpty) return '';
+  return p.endsWith('/') || p.endsWith('\\') ? '${p}crawler' : '$p/crawler';
+}
+
 /// 运行按钮文案。
 String unitCrawlerRunLabel(bool running) => running ? '运行中…' : '运行单元库同步';
 
