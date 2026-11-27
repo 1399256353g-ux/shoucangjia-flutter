@@ -514,6 +514,24 @@ class LibMeta {
   /// 缓存有效期：服务端改了单元库名/节点后最多 5 分钟生效，无需重启 App。
   static const Duration cacheTtl = Duration(minutes: 5);
 
+  /// 作废某库的元数据缓存（`lib` 省略＝全部）。
+  ///
+  /// 与 `clearAuthorTypeCache` 同一个理由：卡片「快速刷新」重建索引后，
+  /// `libraries.json`/`nodes` 都可能已变（单元库新目录、封面指针），
+  /// 而这张表只有 TTL、没有主动失效入口，5 分钟内看到的仍是旧树。
+  /// **不是**给「猜状态」用的保险，只由明确的写入动作调用。
+  static void invalidate([String? lib]) {
+    if (lib == null || lib.isEmpty) {
+      cache.clear();
+      _cachedAt.clear();
+      _loading.clear();
+      return;
+    }
+    cache.remove(lib);
+    _cachedAt.remove(lib);
+    _loading.remove(lib);
+  }
+
   static Future<LibMeta> load(String lib, {bool force = false}) {
     final hit = cache[lib];
     final at = _cachedAt[lib];
@@ -617,11 +635,15 @@ class LibMeta {
               }
               final nodes = markRels.isEmpty
                   ? nodesFromV2(ljm, root: base)
+                  // 节点的连接字段必须按本函数正在读的 `lib` 取：这四条请求
+                  // 已经按 `lib` 路由（`cfg.headersFor(lib)`），节点却写当前库
+                  // 的 base/id，跨连接时单元库卡片的封面与挂载请求会打到另一台
+                  // 服务器（同族缺陷，地址与账号之外还有「节点归属」这一份）。
                   : nodesFromMarks(markRels,
                       covers: markCovers,
-                      serverBase: cfg.base,
-                      serverId: cfg.serverIdFor(cfg.lib),
-                      serverLabel: cfg.serverLabelFor(cfg.lib));
+                      serverBase: cfg.baseFor(lib),
+                      serverId: cfg.serverIdFor(lib),
+                      serverLabel: cfg.serverLabelFor(lib));
               final tree = buildUnitTree(
                   nodes: nodes,
                   basics: unitBasics,
@@ -816,6 +838,20 @@ Future<Map<String, Set<String>>> _typesFromLibIndex(
 }
 
 /// 汇总多个注册库的作者类型。
+/// 清掉某库的类型索引缓存（该库索引被重建后必须清）。
+///
+/// 此前这张表只有 `putIfAbsent`、**没有任何失效入口**：卡片「快速刷新」重建
+/// 了 `lib/<id>/index.json`，类型筛选（kinds）却一直用进程启动时那份结果，
+/// 新加的作品在下一次重启前永远不会出现在「按类型筛选」里——刷新按钮
+/// 看起来成功了，筛选结果却是旧的。
+void clearAuthorTypeCache(String lib) {
+  if (lib.isEmpty) {
+    _authorTypeCache.clear();
+    return;
+  }
+  _authorTypeCache.remove(lib);
+}
+
 Future<Map<String, Set<String>>> loadAuthorTypes(Iterable<String> libs) async {
   final parts =
       await Future.wait([for (final l in libs.toSet()) _authorTypesForLib(l)]);
@@ -861,7 +897,10 @@ Future<Map<String, dynamic>?> startServerSync(
   try {
     final r = await http
         .post(cfg.u('/api/sync', lib: lib),
-            headers: {...cfg.headers, 'Content-Type': 'application/json'},
+            // 地址按 `lib` 路由，鉴权头也必须按 `lib`：`cfg.headers` 是**当前库**
+            // 那条连接的账号，从另一个服务端的库发起同步就是拿 A 的密码敲 B 的
+            // 门（401），页面显示「同步失败」而其实是打错了服务器。
+            headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
             body: jsonEncode({
               'target': target,
               if (idx != null) 'idx': idx,
@@ -1008,7 +1047,8 @@ Future<Map<String, dynamic>?> sendDrop(String id, String author,
   try {
     final r = await http
         .post(cfg.u('/api/drops', lib: lib),
-            headers: {...cfg.headers, 'Content-Type': 'application/json'},
+            // 同上：小水滴统计要记在作品所属那台服务器上。
+            headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
             body: jsonEncode({'id': id, 'author': author}))
         .timeout(const Duration(seconds: 8));
     final j = jsonOf(r);
@@ -5374,6 +5414,10 @@ class _LibraryPageState extends State<LibraryPage> {
       onBumpRevision: () {
         LibDataRevision.bump(id);
         coverRevision.value++;
+        // 索引已重建：类型筛选的 kinds 缓存与库元数据缓存必须一起作废，
+        // 否则新作品在「按类型筛选」／单元库树里要等到重启 App 才出现。
+        clearAuthorTypeCache(id);
+        LibMeta.invalidate(id);
       },
       reloadOpenLists: null,
       reindex: (body) async {
@@ -7377,7 +7421,7 @@ class _RankPageState extends State<RankPage> {
       final reg = r.statusCode == 200
           ? librariesWithDisplayNames(mapsOf(jsonMapOf(r)['libraries']))
           : const <Map<String, dynamic>>[];
-      final meta = await LibMeta.load(cfg.lib);
+      await _ensureMeta(cfg.lib);
       if (!mounted) return;
       // 同名媒体库之间没有次序依据；`List.sort` 不稳定 → 下拉刷新一次换一次
       // 顺序、选中项还跟着跳。稳定排序 + id 作为最终键。
@@ -7385,30 +7429,41 @@ class _RankPageState extends State<RankPage> {
         final c = '${a['name']}'.compareTo('${b['name']}');
         return c != 0 ? c : '${a['id']}'.compareTo('${b['id']}');
       });
-      setState(() {
-        libs = list;
-        metas[cfg.lib] = meta;
-        if (sel.isNotEmpty && sel != 'all' && !metas.containsKey(sel)) {
-          _loadMetaFor(sel);
-        }
-      });
+      setState(() => libs = list);
+      if (sel.isNotEmpty && sel != 'all' && !metas.containsKey(sel)) {
+        _loadMetaFor(sel);
+      }
     } catch (_) {}
   }
 
-  /// 为选中的库加载元数据（`loadLibs` 只装了当前库那份）。
-  Future<void> _loadMetaFor(String lib) async {
-    if (mounted) setState(() => metaLoading = true);
+  /// 为某个库装载元数据并写进 [metas]（**本页唯一的写入点**）。
+  ///
+  /// 此前 `loadLibs` 与 `load` 各自 `LibMeta.load(cfg.lib)` 再各自
+  /// `metas[cfg.lib] = meta`：`initState` 同时启动两者 → 两次 await、两次
+  /// setState，第二份结果无条件覆盖第一份。缓存命中时是浪费；一旦两次请求
+  /// 落在不同的 5 分钟窗口里，先写好的那份会被更旧的一份顶掉（谁后 return
+  /// 谁说话）。现在两条路径都走这里，`LibMeta` 自身的缓存与并发合并在
+  /// 下层完成，页面只负责「装完写一次」。
+  Future<LibMeta?> _ensureMeta(String lib, {bool showLoading = false}) async {
+    if (lib.trim().isEmpty) return null;
+    if (showLoading && mounted) setState(() => metaLoading = true);
+    LibMeta? meta;
     try {
-      final meta = await LibMeta.load(lib);
-      if (!mounted) return;
-      setState(() {
-        metas[lib] = meta;
-        metaLoading = false;
-      });
+      meta = await LibMeta.load(lib);
     } catch (_) {
-      if (mounted) setState(() => metaLoading = false);
+      meta = null;
     }
+    if (!mounted) return meta;
+    setState(() {
+      if (meta != null) metas[lib] = meta;
+      if (showLoading) metaLoading = false;
+    });
+    return meta;
   }
+
+  /// 为选中的库加载元数据（`loadLibs` 只装了当前库那份）。
+  Future<void> _loadMetaFor(String lib) =>
+      _ensureMeta(lib, showLoading: true);
 
   Future<void> load() async {
     if (mounted) setState(() => err = null);
@@ -7419,9 +7474,8 @@ class _RankPageState extends State<RankPage> {
           headers: cfg.headers);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonOf(r);
-      final meta = await LibMeta.load(cfg.lib);
+      await _ensureMeta(cfg.lib);
       if (!mounted) return;
-      metas[cfg.lib] = meta;
       final list = listOf(j is Map ? j['authors'] : null);
       setState(() {
         rows = list;
@@ -13144,10 +13198,14 @@ class _PlayerPageState extends State<PlayerPage>
             if (mounted) setState(() => _imgReload++);
           },
         );
+    // 图文也按**作品所属库**取鉴权头：`lib` 参数可能来自另一个服务端的库
+    // （跨连接进入的图文作品），拿当前库的账号去取图就是 401，界面显示
+    // 「图片加载失败」而文件其实好好的。与视频/海报同一口径 `headersFor`。
+    final imgHeaders = cfg.headersFor(lib);
     if (isGifPath(path)) {
       return Image.network(url,
           key: ValueKey('gif-$cur-$img-$_imgReload'),
-          headers: cfg.headers,
+          headers: imgHeaders,
           // 动图同样按屏幕宽度解码；解码尺寸不影响帧动画播放。
           cacheWidth: decodeW,
           fit: BoxFit.contain,
@@ -13162,7 +13220,7 @@ class _PlayerPageState extends State<PlayerPage>
         cacheManager: DiziCache.manager,
         key: ValueKey('pic-$cur-$img-$_imgReload'),
         imageUrl: url,
-        httpHeaders: cfg.headers,
+        httpHeaders: imgHeaders,
         memCacheWidth: decodeW,
         fit: BoxFit.contain,
         // owner 2026-11-21：图片不再显示中央缓冲圈；但也不能留空——空的

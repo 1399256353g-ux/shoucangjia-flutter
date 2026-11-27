@@ -301,13 +301,18 @@ Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
     final t = snap.tree!;
     final rb = t['bigLibraries'];
     final rs = t['basicLibraries'];
-    if (rb is! List || rs is! List) continue;
+    // `basicLibraries` 是唯一必需字段：新服务端已不再下发 `bigLibraries`，
+    // 旧写法把两者都当必需 → 每一条快照都被跳过、`any` 恒 false →
+    // 整棵树返回 null（首页于是「零基础库」）。旧分组缺失只是没有旧分组。
+    if (rs is! List) continue;
     any = true;
-    for (final raw in rb) {
-      if (raw is! Map) continue;
-      final id = '${raw['id'] ?? ''}'.trim();
-      if (id.isEmpty || !seenBig.add(id)) continue;
-      bigs.add(_tag(raw, snap.server));
+    if (rb is List) {
+      for (final raw in rb) {
+        if (raw is! Map) continue;
+        final id = '${raw['id'] ?? ''}'.trim();
+        if (id.isEmpty || !seenBig.add(id)) continue;
+        bigs.add(_tag(raw, snap.server));
+      }
     }
     for (final raw in rs) {
       if (raw is! Map) continue;

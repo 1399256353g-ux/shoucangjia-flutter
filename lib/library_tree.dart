@@ -2,18 +2,25 @@ import 'basic_lib.dart';
 import 'json_num.dart';
 import 'server_origin.dart';
 
-// 「大库 / 基础库」两级选择模型（纯函数，便于单测）。
+// 首页库树模型（纯函数，便于单测）。
 //
 // 数据来源：/api/libraries.json（v2，由 NAS `lib_scan.py` 生成）
-//  - bigLibraries:   第一层大库（5 个）
-//  - basicLibraries: 基础库（39 个，带 big_id 归属）
+//  - basicLibraries: 基础库（全量，**【必需】**）
+//  - bigLibraries:   旧版「大库」分组（**可缺**，新服务端已不再下发）
+//
+// 0.9.321（第八十五批）：`parse` 曾经把 `bigLibraries` 当作必需字段——
+// 它不是 List 就整棵返回 null。新服务端只下发 `basicLibraries`，于是首页
+// `_loadTree` 拿到的模型是 null，`buildUnitTree(basics: t?.allBasics ?? [])`
+// 退化成「零基础库」：所有词条落 SECRET、单元库卡片的作者/作品数全是 0。
+// 现在只有「一条基础库都读不出来」才算 v1（返回 null，页面走旧列表），
+// 分组缺失只是没有旧分组，不再连带丢掉全部基础库。
 //
 // 规则：
 //  - 主页默认只展示大库（全部折叠），点开才看到基础库，减少首屏长度（J3）
 //  - 星标标记「基础库」：被标记的基础库收集到顶部「星标」区，按标记时间倒序
 //  - 已星标的基础库不再重复出现在大库分组里，避免同一项出现两次
 //  - 找不到 big_id 的基础库归入「未归属」分组，不丢数据
-//  - 旧版（v1，只有 libraries 注册表）解析返回 null，由页面走原列表兜底
+//  - 旧版（v1，只有 libraries 注册表、没有任何基础库）解析返回 null
 //
 // `BasicLib` 模型本身在 `basic_lib.dart`（0.9.284 与 `source_lib.BasicLibRef`
 // 合并为一份）：两处各定义一个「基础库」时，单元库页走的那个少 `cover`/`cv`
@@ -62,11 +69,14 @@ class LibraryTree {
     required this.unassigned,
   });
 
-  /// 解析 v2；不是 v2 或没有大库时返回 null。
+  /// 解析 v2；**只要读不出基础库**就返回 null（页面走旧列表兜底）。
+  ///
+  /// `bigLibraries` 缺失不是错误：新服务端只下发 `basicLibraries`，此处按
+  /// 「没有旧分组」处理（`bigs` 为空、全部基础库进 [unassigned]）。
   static LibraryTree? parse(Map<String, dynamic> json) {
     final rawBigs = json['bigLibraries'];
     final rawBasics = json['basicLibraries'];
-    if (rawBigs is! List || rawBasics is! List) return null;
+    if (rawBasics is! List) return null;
 
     final basics = <BasicLib>[];
     for (final raw in rawBasics) {
@@ -85,24 +95,27 @@ class LibraryTree {
     }
 
     final bigs = <BigLib>[];
-    for (final raw in rawBigs) {
-      if (raw is! Map) continue;
-      final id = '${raw['id'] ?? ''}'.trim();
-      if (id.isEmpty) continue;
-      final origin = serverOriginOf(raw);
-      bigs.add(BigLib(
-        id: id,
-        name: '${raw['name'] ?? id}'.trim(),
-        path: '${raw['path'] ?? ''}'.trim(),
-        authors: intOf(raw['authors']),
-        works: intOf(raw['works']),
-        basics: basics.where((b) => b.bigId == id).toList(growable: false),
-        serverId: origin.id,
-        serverBase: origin.base,
-        serverLabel: origin.label,
-      ));
+    if (rawBigs is List) {
+      for (final raw in rawBigs) {
+        if (raw is! Map) continue;
+        final id = '${raw['id'] ?? ''}'.trim();
+        if (id.isEmpty) continue;
+        final origin = serverOriginOf(raw);
+        bigs.add(BigLib(
+          id: id,
+          name: '${raw['name'] ?? id}'.trim(),
+          path: '${raw['path'] ?? ''}'.trim(),
+          authors: intOf(raw['authors']),
+          works: intOf(raw['works']),
+          basics: basics.where((b) => b.bigId == id).toList(growable: false),
+          serverId: origin.id,
+          serverBase: origin.base,
+          serverLabel: origin.label,
+        ));
+      }
     }
-    if (bigs.isEmpty) return null;
+    // 一条基础库都没有 → 不是可用的 v2 载荷，交给页面兜底。
+    if (basics.isEmpty) return null;
 
     final known = {for (final b in bigs) b.id};
     final unassigned =

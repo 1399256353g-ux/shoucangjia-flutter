@@ -1,0 +1,113 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+
+/// 0.9.321 第八十五批（项 2 / 项 3）：
+///
+/// **项 2 · 缓存只有写入、没有失效**：`LibMeta.cache`（TTL 5 分钟）与
+/// `_authorTypeCache`（进程级，无 TTL）都只有 `putIfAbsent`。卡片「快速刷新」
+/// 重建了 `lib/<id>/index.json` 与单元库节点，缓存却原样留着——刷新按钮报
+/// 「已刷新 · N 个作品」，筛选面板与单元库树还是旧数据，直到重启 App。
+///
+/// **项 3 · 地址按 lib 路由、鉴权头/节点归属却按当前库**：
+/// `startServerSync` / `sendDrop` 用 `cfg.u(..., lib: lib)` 拼地址，头却取
+/// `cfg.headers`（当前库的账号）；`LibMeta.load` 建节点时写 `cfg.base` /
+/// `cfg.serverIdFor(cfg.lib)`，而这条请求是按 `lib` 发的。跨连接时同步与
+/// 小水滴记到别人的服务器上，节点卡片拿着错的 base 去挂载/取封面。
+String _codeNoComments(String path) => File(path)
+    .readAsStringSync()
+    .split('\n')
+    .where((l) => !l.trimLeft().startsWith('//'))
+    .join('\n');
+
+/// `cfg.headers` 后不能紧跟 `For`，否则 `cfg.headersFor(...)` 也被算进来。
+int _currentLibHeaderUses(String body) =>
+    RegExp(r'cfg\.headers(?!For)').allMatches(body).length;
+
+String _body(String src, String start, String end) {
+  final a = src.indexOf(start);
+  final b = src.indexOf(end, a);
+  expect(a, greaterThan(0), reason: '找不到起点：$start');
+  expect(b, greaterThan(a), reason: '找不到终点：$end');
+  return src.substring(a, b);
+}
+
+void main() {
+  final main = _codeNoComments('lib/main.dart');
+
+  group('地址与鉴权头同源（同步 / 小水滴 / 节点归属）', () {
+    test('startServerSync 按 lib 取头', () {
+      final body = _body(main, 'Future<Map<String, dynamic>?> startServerSync(',
+          'Future<Map<String, dynamic>?> serverSyncStatus(');
+      expect(_currentLibHeaderUses(body), 0,
+          reason: '同步请求打到 B，凭据却是 A 的 → 401 或记到错的服务端');
+      expect(body.contains('cfg.headersFor(lib)'), isTrue);
+    });
+
+    test('sendDrop 按 lib 取头', () {
+      final body = _body(main, 'Future<Map<String, dynamic>?> sendDrop(',
+          'Set<String> toggleWorkSelection(');
+      expect(_currentLibHeaderUses(body), 0,
+          reason: '小水滴要记在作品所属服务器上');
+      expect(body.contains('cfg.headersFor(lib)'), isTrue);
+    });
+
+    test('LibMeta 建节点时连接字段也按 lib 取', () {
+      final body = _body(main, 'static Future<LibMeta> load(',
+          'String labelFor(String mediaPath');
+      expect(body.contains('serverBase: cfg.base,'), isFalse,
+          reason: '节点 base 用了当前库的服务器');
+      expect(body.contains('serverId: cfg.serverIdFor(cfg.lib)'), isFalse,
+          reason: '节点归属用了当前库的连接 id');
+      expect(body.contains('serverBase: cfg.baseFor(lib)'), isTrue);
+      expect(body.contains('serverId: cfg.serverIdFor(lib)'), isTrue);
+      expect(body.contains('serverLabel: cfg.serverLabelFor(lib)'), isTrue);
+    });
+
+    test('图文作品取图按作品所属库取头', () {
+      final body = _body(main, 'Widget picView(String path, {String? lib})',
+          'void _setPicIndex(int v)');
+      expect(_currentLibHeaderUses(body), 0,
+          reason: '跨连接进入的图文会 401，界面只说「图片加载失败」');
+      expect(body.contains('final imgHeaders = cfg.headersFor(lib);'), isTrue);
+      expect('imgHeaders'.allMatches(body).length, greaterThanOrEqualTo(3),
+          reason: 'GIF 与缓存图两条分支都要用它');
+    });
+  });
+
+  group('缓存必须有失效入口（刷新一次就该看到新数据）', () {
+    test('LibMeta.invalidate 三个表一起清，并可只清一个库', () {
+      final body = _body(main, 'static void invalidate([String? lib])',
+          'static Future<LibMeta> load(');
+      expect(body.contains('cache.clear()'), isTrue);
+      expect(body.contains('_cachedAt.clear()'), isTrue);
+      expect(body.contains('_loading.clear()'), isTrue);
+      expect(body.contains('cache.remove(lib)'), isTrue);
+      expect(body.contains('_cachedAt.remove(lib)'), isTrue);
+      expect(body.contains('_loading.remove(lib)'), isTrue,
+          reason: '正在飞的 Future 不清，下一次 load 会复用旧结果');
+    });
+
+    test('类型索引缓存有唯一清入口', () {
+      final body = _body(main, 'void clearAuthorTypeCache(String lib)',
+          'Future<Map<String, Set<String>>> loadAuthorTypes(');
+      expect(body.contains('_authorTypeCache.remove(lib)'), isTrue);
+      expect(body.contains('_authorTypeCache.clear()'), isTrue);
+    });
+
+    test('快速刷新两处缓存一起作废（唯一的调用点）', () {
+      final body = _body(main, 'Future<String?> _quickRefresh(',
+          'Future<void> load() async {');
+      expect(body.contains('clearAuthorTypeCache(id)'), isTrue,
+          reason: '重建索引后类型筛选还用旧 kinds');
+      expect(body.contains('LibMeta.invalidate(id)'), isTrue,
+          reason: '重建索引后单元库树还用旧 meta');
+    });
+
+    test('契约：缓存表不得只剩 putIfAbsent（有写入无失效）', () {
+      final src = File('lib/main.dart').readAsStringSync();
+      expect(RegExp(r'class LibMeta').hasMatch(src), isTrue);
+      expect(src.contains('static void invalidate('), isTrue);
+    });
+  });
+}
