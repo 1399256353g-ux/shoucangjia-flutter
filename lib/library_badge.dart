@@ -496,7 +496,7 @@ class LibraryBadge {
       // 卡片上要靠调用方再写一遍 `topColorFor(id) ?? …` 才显示得出来：
       // 两处口径，第二处一定会漏（实测顶级切「自动分配」后仍显示旧色）。
       // 两张表都查不会串色：[topCustom] 只由 [setTopColor] 写入顶级 id。
-      final own = lookupByLibId(custom, unitId) ?? topColorFor(unitId);
+      final own = colorValueAt(unitId);
       if (own != null) return own;
     }
     if (src == BadgeColorSource.fixedCustom) {
@@ -511,10 +511,9 @@ class LibraryBadge {
     //
     // 遍历本身只有 [_upstreamOf] 一处：emoji 后缀必须与颜色走同一条链
     // （见 [emojiFor]），两处各写一遍必然分叉。
-    final srcUnit = _upstreamOf(unitId,
-        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null);
+    final srcUnit = _upstreamOf(unitId, hasColorAt);
     if (srcUnit.isNotEmpty) {
-      final inherited = lookupByLibId(custom, srcUnit) ?? topColorFor(srcUnit);
+      final inherited = colorValueAt(srcUnit);
       if (inherited != null) return inherited;
     }
     return autoColorOf(unitId, order: order);
@@ -635,6 +634,32 @@ class LibraryBadge {
     return isTopSelf(unitId) ? LibEntryKind.top : LibEntryKind.unit;
   }
 
+  /// 这一层「有没有设过颜色」——分发链上的唯一判定。
+  ///
+  /// 0.9.347：此前这句 `lookupByLibId(custom, id) != null ||
+  /// topColorFor(id) != null` 在 `colorForUnit`、`basicColorFor`、
+  /// `inheritedColorFrom`、`inheritedColorFromBasic` 里各抄了一遍（四份逐字
+  /// 相同），emoji 那一条又在 `emojiFor` 里写成另一种形态。四份里只要有一份
+  /// 漏掉 `topCustom`，「顶级设的色能不能被下级拿到」就随调用路径不同而不同
+  /// ——设置页说继承了、卡片上没有，两边都不报错。
+  ///
+  /// 现在分发链（[_upstreamOf]）的 `hasValue` 只允许传这三个判定函数。
+  static bool hasColorAt(String id) => colorValueAt(id) != null;
+
+  /// 这一层「设过的颜色值」；没设过返回 null。
+  ///
+  /// 普通单元库存在 [custom]、媒体库根存在 [topCustom]。这个「两张表依次查」
+  /// 的表达式此前在 `colorForUnit`（本层 / 继承）、`basicColorFor`、
+  /// `hasOwnColor`、`inheritedColorFrom*` 里共写了五遍；任何一遍漏掉
+  /// `topCustom`，就会出现「媒体库设的色在某些路径上能用、另一些路径上是空」
+  /// ——两边都不报错。现在取值和判有值都只走这里。
+  static int? colorValueAt(String id) =>
+      id.isEmpty ? null : (lookupByLibId(custom, id) ?? topColorFor(id));
+
+  /// 这一层「有没有设过 emoji 后缀」（只看本层，不含继承）。
+  static bool hasEmojiAt(String id) =>
+      id.isNotEmpty && (lookupByLibId(emoji, id) ?? '').isNotEmpty;
+
   /// 顶级单元库自定义色；没设过返回 null（调用方继续走自动配色/继承链）。
   static int? topColorFor(String topId) {
     if (topId.isEmpty) return null;
@@ -666,12 +691,9 @@ class LibraryBadge {
     // 此前这里另写了一份循环且**不看颜色来源**：中间层选了「自动分配」、
     // 表里却还留着旧色的情况下，它的颜色照样传给下级基础库，而它自己的
     // 词条已经显示自动色——同一层两个说法。
-    final srcUnit = _upstreamOf(
-        unitId,
-        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null,
-        includeStart: true);
+    final srcUnit = _upstreamOf(unitId, hasColorAt, includeStart: true);
     if (srcUnit.isNotEmpty) {
-      final hit = lookupByLibId(custom, srcUnit) ?? topColorFor(srcUnit);
+      final hit = colorValueAt(srcUnit);
       if (hit != null) return hit;
     }
     return colorForUnit(unitId, order: order, allowCustom: false);
@@ -688,7 +710,7 @@ class LibraryBadge {
     if (sourceFor(unitId) == BadgeColorSource.autoAssign) return false;
     // 与 [colorForUnit] 同一条读法：两张表都查，不依赖 [topOfUnit] 是否
     // 已由注册表填好（冷启动阶段结构表还是空的）。
-    return lookupByLibId(custom, unitId) != null || topColorFor(unitId) != null;
+    return hasColorAt(unitId);
   }
 
   /// 基础库是否真有生效中的自定义色（来源=自动时不算）。
@@ -714,12 +736,15 @@ class LibraryBadge {
   ///
   /// 唯一实现是 [_upstreamOf]——颜色、后缀、基础库颜色三处共用，设置页只读
   /// 这个结果，不再自己写「查 topOfUnit 再看 topCustom」的短链。
+  ///
+  /// `hasValue` 一律走 [hasColorAt]（0.9.347）：这句判定此前在这个文件里
+  /// 有四份拷贝，任何一份漏掉 `topCustom` 都会让「顶级色能否分发」随调用
+  /// 路径而变。
   static String inheritedColorFrom(String unitId) {
     if (unitId.isEmpty || unitId == 'secret') return '';
     if (hasOwnColor(unitId)) return '';
     if (sourceFor(unitId) == BadgeColorSource.autoAssign) return '';
-    return _upstreamOf(unitId,
-        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null);
+    return _upstreamOf(unitId, hasColorAt);
   }
 
   /// 基础库实际从哪一层继承了颜色（从所属单元库本层开始逐级上行）。
@@ -727,10 +752,7 @@ class LibraryBadge {
     if (hasOwnBasicColor(basicId)) return '';
     if (sourceForBasic(basicId) == BadgeColorSource.autoAssign) return '';
     if (unitId.isEmpty || unitId == 'secret') return '';
-    return _upstreamOf(
-        unitId,
-        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null,
-        includeStart: true);
+    return _upstreamOf(unitId, hasColorAt, includeStart: true);
   }
 
   /// 设置页「来源」文案的**唯一**出口。
@@ -875,8 +897,7 @@ class LibraryBadge {
     if (own != null && own.isNotEmpty) return own;
     // 显式选了「自动分配」：不继承上级，避免与颜色语义分叉。
     if (sourceFor(unitId) == BadgeColorSource.autoAssign) return '';
-    final src = _upstreamOf(
-        unitId, (id) => (lookupByLibId(emoji, id) ?? '').isNotEmpty);
+    final src = _upstreamOf(unitId, hasEmojiAt);
     if (src.isEmpty) return '';
     return lookupByLibId(emoji, src) ?? '';
   }
@@ -898,6 +919,17 @@ class LibraryBadge {
   /// [emojiFor] 会回传继承来的后缀，拿它数「设过什么」会把整棵子树算成
   /// 自定义项，group 摘要变成永远一堆数字。
   static String ownEmoji(String id) => lookupByLibId(emoji, id) ?? '';
+
+  /// 词条样式弹窗里 emoji 输入框的初值：**只取本层设置**。
+  ///
+  /// 0.9.347 修的真缺陷：那个输入框此前用 [emojiFor]（含继承）初始化。于是
+  /// 打开一个「本层没设、从上级继承到 🔥」的单元库，只想改个颜色、直接点
+  /// 保存，就把继承来的 🔥 原样写进了本层——从此上级换后缀它不再跟。
+  /// 用户什么都没做，继承关系却断了，而且界面上看不出任何变化。
+  ///
+  /// 与 [ownEmoji] 的区别只是语义命名：写路径读它就必须是本层值，
+  /// 这样「谁允许返回继承值」在调用点一眼可辨。
+  static String emojiForEdit(String id) => ownEmoji(id);
 
   /// 词条展示文字：去序号后的名称 + 该库 emoji 后缀。
   static String labelWithEmoji(String label, String unitId) {

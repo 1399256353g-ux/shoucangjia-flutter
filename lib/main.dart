@@ -548,8 +548,26 @@ class LibMeta {
       ];
 
   /// P3：单元库 → 所属顶级节点 id。顶级节点自身返回自己。
+  ///
+  /// 查询顺序（0.9.347 收口）：
+  ///  1. **本份元数据自己的树**（`mediaRootOfUnit`）——多连接时它与
+  ///     `LibraryBadge.topOfUnit` 可能给出两个答案；
+  ///  2. 树里没有「媒体库」这一层（单连接旧形态）时，才读全局结构表；
+  ///  3. 最后只接受「本身就是顶级」的精确命中，不猜。
+  ///
+  /// 为什么第 1 步必须在前面：`LibraryBadge.topOfUnit` 是**进程级**、由最后
+  /// 一次 `UnitMetaReg.setFrom` 覆盖。两台服务器存在同名 rel 时（`A/MID`
+  /// 两边都有），A 服务器的作者会被贴上 B 服务器的媒体库 id：筛选面板点
+  /// 「媒体库 B」能看到 A 的作者，点 A 反而看不到。`mediaIdFor` 已在 0.9.324
+  /// 改成只读本树并写了注释，而这条链路（筛选/删除监测/作者页顶部筛选）
+  /// 还停在全局表上——同一个问题只修了半边。
   String topIdFor(String unitId) {
     if (unitId.isEmpty) return '';
+    final tree = unitTree;
+    if (tree != null && tree.children.any((c) => c.isMediaRoot)) {
+      final own = mediaRootOfUnit(tree, unitId);
+      if (own != null) return own.id;
+    }
     final rel = relOf(unitId);
     final pre = 'node:$rel';
     final t = lookupByLibId(LibraryBadge.topOfUnit, unitId);
@@ -910,6 +928,24 @@ class LibMeta {
     if (t.isNotEmpty && t.first.name.trim().isNotEmpty) return t.first.name;
     final own = topName.trim();
     if (own.isNotEmpty) return own;
+    return topId;
+  }
+
+  /// 筛选条上那一枚媒体库词条的名字：**树里的名字，拿不到就用 id**。
+  ///
+  /// 与 [topNameOf] 的区别是有意的：`topName` 是本份元数据**库根目录**的名字，
+  /// 多连接时每个媒体库根的目录名全都一样（都叫 SECRET 或同一个根名），
+  /// 拿它当兜底会让筛选条上出现两三个同名词条 —— 用户无法区分点哪个。
+  /// 所以这里回落 id（`media:s1`），至少能看出是两张不同的卡片。
+  ///
+  /// 0.9.347：这段「遍历 tops 找同 id、名字空就回落 id」此前在删除监测页与
+  /// 作者页的 `_topLabel` 里各写一份，**函数体逐字相同**；两处词条文案必须
+  /// 一致（同一个媒体库在两个页面不能显示两个名字），所以只能有一处实现。
+  String topLabelFor(String topId) {
+    if (topId.isEmpty) return '';
+    for (final t in tops) {
+      if (t.id == topId) return t.name.trim().isEmpty ? topId : t.name;
+    }
     return topId;
   }
 
@@ -2757,7 +2793,10 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     // 了后者，前者要靠调用方另写一遍才不露）。
     var current = autoColor;
     var hsv = HSVColor.fromColor(Color(current));
-    var currentEmoji = LibraryBadge.emojiFor(id);
+    // 本层设置值，**不是**含继承的 `emojiFor`：用后者当初值，一个「本层没设、
+    // 从上级继承到某后缀」的库只要在这里改个颜色再保存，继承来的后缀就被
+    // 写成本层值——用户没碰过后缀，继承关系却断了（0.9.347）。
+    var currentEmoji = LibraryBadge.emojiForEdit(id);
     // D1：点「恢复自动」后必须真的清掉自定义色，而不是把当前自动色存成自定义。
     var reset = false;
     // owner 2026-11-25：颜色来源可选，不再把「继承顶级」写死成唯一出路。
@@ -3850,12 +3889,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     return [for (final k in order) MapEntry(k, counts[k] ?? 0)];
   }
 
-  String _topLabel(String id) {
-    for (final t in _meta?.tops ?? const <UnitLibrary>[]) {
-      if (t.id == id) return t.name.isEmpty ? id : t.name;
-    }
-    return id;
-  }
+  String _topLabel(String id) => _meta?.topLabelFor(id) ?? id;
 
   void _setTopFilter(String t) {
     if (topFilter == t) return;
@@ -18513,12 +18547,10 @@ class _AuthorPageState extends State<AuthorPage> {
   }
 
   /// 顶级单元库的显示名（取树里的名字，拿不到就用 id）。
-  String _topLabel(String id) {
-    for (final t in meta?.tops ?? const <UnitLibrary>[]) {
-      if (t.id == id) return t.name.isEmpty ? id : t.name;
-    }
-    return id;
-  }
+  ///
+  /// 0.9.347：遍历与回落规则收进 `LibMeta.topLabelFor` —— 删除监测页那份
+  /// 与这里逐字相同，两页同一个媒体库必须显示同一个名字。
+  String _topLabel(String id) => meta?.topLabelFor(id) ?? id;
 
   /// 切换顶级单元库筛选项（空串 = 全部）。
   void _setTopFilter(String top) {
