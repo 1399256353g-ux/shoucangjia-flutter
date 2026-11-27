@@ -21,6 +21,7 @@ library;
 
 import 'api_url.dart';
 import 'basic_auth.dart';
+import 'node_key.dart' show kNodeKeySep, scopedKey;
 import 'server_origin.dart';
 
 /// 一条读取来源：连接 id + 地址 + 账号。
@@ -101,9 +102,9 @@ String metaCacheKey(String lib, MetaSource source) {
   final sid = source.serverId.trim();
   if (sid.isEmpty) {
     // 有地址没 id（手工构造的连接）：用地址做作用域，仍不允许跨服务器共用。
-    return '$l\u0001${source.base.trim()}';
+    return scopedKey(l, source.base);
   }
-  return '$l\u0001$sid';
+  return scopedKey(l, sid);
 }
 
 /// [key] 是否属于库 [lib]（不带来源的键与任何作用域键都算）。
@@ -112,5 +113,5 @@ String metaCacheKey(String lib, MetaSource source) {
 bool metaKeyIsFor(String key, String lib) {
   final l = lib.trim();
   if (l.isEmpty) return false;
-  return key == l || key.startsWith('$l\u0001');
+  return key == l || key.startsWith('$l$kNodeKeySep');
 }

@@ -16,6 +16,7 @@
 library;
 
 import 'rel_path.dart' show normalizeRelPath;
+import 'node_key.dart' show scopedKey;
 import 'stable_order.dart';
 import 'unit_library.dart';
 
@@ -151,7 +152,7 @@ List<CrawlerSection> crawlerSectionsOf({
 
 /// 跨连接的单元库键：连接 + 归一化 rel（与 [unitScopeKey] 同一套作用域）。
 String unitRelKey(String serverId, String rel) =>
-    '${serverId.trim()}\u0001${normalizeRelPath(rel)}';
+    scopedKey(serverId, normalizeRelPath(rel));
 
 /// 注册库爬虫配置的键：连接 + 库 id。
 ///
@@ -159,7 +160,7 @@ String unitRelKey(String serverId, String rel) =>
 /// 配置：A 的「不自动抓取」会把 B 的「每 30 分钟」盖掉，而两行标题各自
 /// 显示自己的名字，界面上完全看不出一处错。
 String crawlerConfigKey(String serverId, String libId) =>
-    '${serverId.trim()}\u0001${libId.trim()}';
+    scopedKey(serverId, libId);
 
 /// 合并各连接的 `/api/nodes` `crawler` 表（键＝连接 + 归一化 rel）。
 ///

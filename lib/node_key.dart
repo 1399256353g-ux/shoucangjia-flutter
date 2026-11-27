@@ -58,3 +58,17 @@ bool nodeKeyHasServer(String key, String serverId) =>
 /// 归一化 rel 后直接成键（服务端下发的节点只有原始 rel 时用）。
 String nodeKeyNormalized(String serverId, String rel) =>
     nodeKey(serverId, normalizeRelPath(rel));
+
+/// 两段作用域键的**中性**拼装：`<a>␁<b>`（两侧各 trim 一次）。
+///
+/// 输出与 [nodeKey] 逐字相同，但语义中性：`meta_source.metaCacheKey` 的键是
+/// `<库>␁<连接>`——第一段是库、第二段才是作用域，与 `nodeKey(连接, rel)` 的
+/// 字段顺序正好相反。共用拼装是为了让**分隔符只有一份**，而不是让两个
+/// 不同语义的东西共用一个名字（名字错了比分隔符错了更难看出来）。
+///
+/// 0.9.334：此前 `author_dir_filter`、`crawler_sections`（两处）、
+/// `meta_source`（两处）各自在字符串里写了一个 `\u0001` 字面量——五份肉眼
+/// 分不出差别的控制字符，只在「某处被改成 `\u0001 `」时才炸，而那种时候
+/// 表现是「这条筛选/配置/缓存读不出来」，四处都自洽。
+String scopedKey(String a, String b) =>
+    '${a.trim()}$kNodeKeySep${b.trim()}';

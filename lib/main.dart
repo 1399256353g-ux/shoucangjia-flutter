@@ -854,6 +854,32 @@ class LibMeta {
       AuthorGrade.fromStats(stats[author], works: works);
 }
 
+/// 多份 [LibMeta] → 筛选面板选项（**唯一同包装**）。
+///
+/// 0.9.334：`_optionsOf` 与 `_unitNameIn` 这两个静态函数在推荐页与搜索页
+/// 各写了一份，**字节完全相同**。四张表的合并规则（`bigNames` 同名取谁、
+/// 单元库名先问哪份 meta）只该有一条：改一处而漏另一处时，两个页面的
+/// 筛选面板就会对同一份数据给出不同名字，而两边各自都「汇总成功」。
+AuthorFilterOptions authorFilterOptionsOfMetas(List<LibMeta> ms) =>
+    authorFilterOptionsFrom(
+      basics: [for (final m in ms) ...m.filterBasics],
+      units: [for (final m in ms) ...m.units],
+      tops: [for (final m in ms) ...m.tops],
+      bigNames: {for (final m in ms) ...m.bigNames},
+      unitNameOf: (id) => unitNameInMetas(ms, id),
+    );
+
+/// 单元库名称：先问定义了它的那份 meta。
+///
+/// `secret`（＝媒体库根）这层的名字来自 `TopNodeName`，不是节点自身字段，
+/// 所以不能直接读 `u.name`。
+String unitNameInMetas(List<LibMeta> ms, String id) {
+  for (final m in ms) {
+    if (m.units.any((u) => u.id == id)) return m.unitNameOf(id);
+  }
+  return '';
+}
+
 /// J10：作者作品类型索引。T3 起只走基础库索引
 /// `/api/lib/<id>/index.json` 的 kinds（覆盖库内全部作品，无需逐作者请求）；
 /// 旧「收藏夹」`/api/c/<idx>.json` 通道已移除。按注册库缓存，失败不阻断筛选。
@@ -8858,9 +8884,15 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
         metas[cfg.lib] = meta;
       });
       try {
+        // 地址与 `lib=`、鉴权头必须同源。此前地址写 `cfg.base`（**激活连接**
+        // 的 base），参数与账号却按 `cfg.lib`：用户切过连接但没切库时，
+        // 请求打到 A 却问着 B 的库 id，返回 200 但脚本表为空——那个空表
+        // 与“这个库确实没有爬虫脚本”完全一样，卡片上的入口看起来就是坏的。
         final cr = await http
-            .get(Uri.parse(libApiUrl(cfg.base, '/api/crawler', cfg.lib)),
-                headers: cfg.headers)
+            .get(
+                Uri.parse(libApiUrl(
+                    cfg.baseFor(cfg.lib), '/api/crawler', cfg.lib)),
+                headers: cfg.headersFor(cfg.lib))
             .timeout(const Duration(seconds: 8));
         if (cr.statusCode == 200) {
           final cj = jsonOf(cr);
@@ -16156,24 +16188,8 @@ class _RecommendPageState extends State<RecommendPage> {
   }
 
   /// 筛选面板选项：只由 `author_filter_options` 一处汇总（本页作用域＝当前库）。
-  AuthorFilterOptions get _options => _optionsOf(meta == null ? const [] : [meta!]);
-
-  AuthorFilterOptions _optionsOf(List<LibMeta> ms) => authorFilterOptionsFrom(
-        basics: [for (final m in ms) ...m.filterBasics],
-        units: [for (final m in ms) ...m.units],
-        tops: [for (final m in ms) ...m.tops],
-        bigNames: {for (final m in ms) ...m.bigNames},
-        unitNameOf: (id) => _unitNameIn(ms, id),
-      );
-
-  /// 单元库名称：先问定义了它的那份 meta（`secret` 这一层的名字来自
-  /// `TopNodeName`，不是节点自身字段，所以不能直接读 `u.name`）。
-  static String _unitNameIn(List<LibMeta> ms, String id) {
-    for (final m in ms) {
-      if (m.units.any((u) => u.id == id)) return m.unitNameOf(id);
-    }
-    return '';
-  }
+  AuthorFilterOptions get _options =>
+      authorFilterOptionsOfMetas(meta == null ? const [] : [meta!]);
 
   bool _matches(dynamic raw, AuthorFilterState f) {
     if (raw is! Map) return false;
@@ -16513,22 +16529,8 @@ class _SearchPageState extends State<SearchPage> {
   // ---- J11：作者筛选（与总览/排行/推荐同一状态与组件） ----
 
   /// 筛选面板选项：只由 `author_filter_options` 一处汇总（本页作用域＝全部库）。
-  AuthorFilterOptions get _options => _optionsOf(metas.values.toList());
-
-  AuthorFilterOptions _optionsOf(List<LibMeta> ms) => authorFilterOptionsFrom(
-        basics: [for (final m in ms) ...m.filterBasics],
-        units: [for (final m in ms) ...m.units],
-        tops: [for (final m in ms) ...m.tops],
-        bigNames: {for (final m in ms) ...m.bigNames},
-        unitNameOf: (id) => _unitNameIn(ms, id),
-      );
-
-  static String _unitNameIn(List<LibMeta> ms, String id) {
-    for (final m in ms) {
-      if (m.units.any((u) => u.id == id)) return m.unitNameOf(id);
-    }
-    return '';
-  }
+  AuthorFilterOptions get _options =>
+      authorFilterOptionsOfMetas(metas.values.toList());
 
   bool _matchesFilter(Map<String, dynamic> e, AuthorFilterState f) {
     final w = e['w'];
@@ -17568,13 +17570,19 @@ class _AuthorPageState extends State<AuthorPage> {
   /// 再选哪个作者吗？搞笑」。挂载是**作者维度**的操作——打开某个人，才该
   /// 看到他在哪些基础库/文件夹里、是否已合并。
   ///
-  /// 鉴权头沿用主库连接（与作品、头像、简介同一口径）。
+  /// 地址与鉴权头必须同源（与作品、头像、简介同一口径）。
+  ///
+  /// 0.9.334：此前写的是 `base: cfg.base` + `headers: cfg.headersFor(lib)`——
+  /// 地址取**当前连接**、账号取**作者所属库那条连接**。从另一台服务器的
+  /// 单元库进入作者页时（`primaryLib` 属于 B，`cfg.base` 还是 A），面板是
+  /// 拿 A 的地址配 B 的密码去问挂载列表：401 或空列表，而“这个作者没有
+  /// 任何挂载”与“请求本身发错了”长得一模一样，界面上看不出区别。
   Future<void> _openAuthorMount() async {
     final lib = primaryLib.isEmpty ? cfg.lib : primaryLib;
     await showAuthorMountSheet(
       context: context,
       authorName: widget.name,
-      base: cfg.base,
+      base: cfg.baseFor(lib),
       headers: cfg.headersFor(lib),
     );
     // 面板里可能做过合并/拆分：关掉后一律重载，不依赖它是否回传结果

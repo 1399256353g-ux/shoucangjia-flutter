@@ -18,6 +18,7 @@
 library;
 
 import 'rel_path.dart';
+import 'node_key.dart' show scopedKey;
 import 'work_lib.dart';
 import 'work_safety.dart';
 
@@ -72,7 +73,7 @@ class AuthorDirOption {
   final String authorDir;
   const AuthorDirOption({required this.lib, required this.authorDir});
 
-  String get key => '$lib\u0001$authorDir';
+  String get key => scopedKey(lib, authorDir);
 }
 
 /// 由挂载项生成筛选项：按 (库, 目录) 去重，保持挂载列表顺序。
