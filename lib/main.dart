@@ -3121,12 +3121,39 @@ class UnitBadges extends StatelessWidget {
     // `basicChips`，再叠加 emoji 分发 —— 一个跨 3 个基础库的作者会在播放页
     // 出现 3 条长词条、把信息区顶满。owner 只要「媒体库 / 单元库 / 基础库
     // 三个种类」，不是「每个来源各一条」。已撤掉，只保留单元库这一级。
+    //
+    // 2026-11-27 补：撤过头了。`CollapsibleBadgeWrap` 本来就是为「基础库
+    // 词条常态折叠、点展开才显示」写的（owner 原话：「平日里可把基础库等
+    // 词条隐藏起来…留一个小展开显示按键」），但它一直没有收到任何
+    // `basicChips` —— `LibBadges.basicChips` 在全库零调用点。于是「基础库
+    // 词条」这个种类在界面上根本不存在，owner 说「词条还是没下发」指的就是它。
+    // 现在按来源基础库各生成一条（`LibEntryKind.basic`），交给折叠组件收纳：
+    // 常态只显示媒体库/单元库，末尾一个 `▾N`，点它或点媒体库词条才展开。
+    final basicChips = <BadgeChipSpec>[];
+    for (final basic in sources) {
+      if (basic.isEmpty) continue;
+      final label = (meta?.basicById(basic)?.name ?? '').trim();
+      if (label.isEmpty) continue;
+      // 同一基础库只贴一条（多来源可能重复传入同一个库）。
+      if (basicChips.any((c) => c.unitId == basic)) continue;
+      basicChips.add(BadgeChipSpec(
+        label: label,
+        unitId: basic,
+        kind: LibEntryKind.basic,
+        color: LibraryBadge.basicColorFor(
+          basic,
+          _unitKeyOf(basic),
+          order: meta?.unitOrder ?? const [],
+        ),
+      ));
+    }
     return LibBadges(
       libIds: ids,
       order: meta?.unitOrder ?? const [],
       names: names,
       grayIds: gray,
       grade: grade,
+      basicChips: basicChips,
     );
   }
 }
