@@ -99,6 +99,8 @@ import 'unit_crawler.dart';
 import 'crawler_sections.dart';
 import 'unit_crawler_page.dart';
 import 'unit_author_mount_page.dart';
+import 'unit_author_groups.dart'
+    show authorDirForName, authorDirError, unitAuthorCreateUrl;
 import 'stable_order.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
@@ -8908,6 +8910,103 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     });
   }
 
+  /// 新建作者目录（`@作者名`）。
+  ///
+  /// owner 2026-11-27：这件事属于**作者页**，不属于挂载设置页——
+  /// 挂载解决的是「已有文件夹怎么归类」，建目录是在作者容器里造新作者。
+  Future<void> _createAuthor() async {
+    final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
+    final basics = meta == null
+        ? const <BasicLib>[]
+        : (meta.allBasics.isNotEmpty ? meta.allBasics : meta.basics);
+    if (basics.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('还没有可用的基础库')));
+      return;
+    }
+    var lib = basics.first.id;
+    final nameCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('新建作者目录'),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              DropdownButtonFormField<String>(
+                initialValue: lib,
+                decoration:
+                    const InputDecoration(labelText: '基础库', isDense: true),
+                items: [
+                  for (final b in basics)
+                    DropdownMenuItem(
+                        value: b.id,
+                        child: Text(b.name, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setD(() => lib = v ?? lib),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                key: const ValueKey('author-create-name'),
+                controller: nameCtl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: '作者名（会建成 @作者名 目录）',
+                  isDense: true,
+                ),
+                onChanged: (_) => setD(() {}),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('取消')),
+            FilledButton(
+              key: const ValueKey('author-create-ok'),
+              onPressed: nameCtl.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.pop(c, true),
+              child: const Text('创建'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final dir = authorDirForName(nameCtl.text);
+    final bad = authorDirError(dir);
+    if (bad != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(bad)));
+      return;
+    }
+    try {
+      final r = await http
+          .post(
+            Uri.parse(unitAuthorCreateUrl(cfg.baseFor(lib))),
+            headers: {
+              ...cfg.headersFor(lib),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'lib': lib, 'name': nameCtl.text.trim()}),
+          )
+          .timeout(const Duration(seconds: 15));
+      final j = jsonOf(r);
+      if (r.statusCode == 409) throw Exception('该作者目录已存在');
+      throwIfApiFailed(r.statusCode, j);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已创建作者目录')));
+      await load(quiet: true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(errorText(e))));
+    }
+  }
+
   Future<void> loadLibs() async {
     try {
       final meta = await LibMeta.load(cfg.lib);
@@ -9233,6 +9332,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('作者'), actions: [
+        IconButton(
+            tooltip: '新建作者目录',
+            onPressed: _createAuthor,
+            icon: const Icon(Icons.person_add_alt_1_outlined)),
         const HomeAction(),
         IconButton(
             tooltip: syncing ? '同步中…' : (hasScripts ? '立即同步作者' : '当前库未配置爬虫脚本'),

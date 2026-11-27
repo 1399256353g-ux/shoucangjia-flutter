@@ -251,14 +251,6 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
           ),
         for (final g in auto) _autoTile(g),
-        const Divider(height: 24),
-        _sectionTitle('新建作者目录'),
-        ListTile(
-          leading: const Icon(Icons.create_new_folder_outlined),
-          title: const Text('按名字建 @作者 目录'),
-          subtitle: const Text('服务端已存在的目录会返回 409，不会覆盖'),
-          onTap: busy ? null : _openCreate,
-        ),
       ],
     );
   }
@@ -625,88 +617,4 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     ));
   }
 
-  Future<void> _openCreate() async {
-    final basics = widget.unit.allBasics;
-    if (basics.isEmpty) {
-      _toast('该单元库下没有基础库，无法建作者目录', bad: true);
-      return;
-    }
-    var lib = basics.first.id;
-    final nameCtl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setD) => AlertDialog(
-          title: const Text('新建作者目录'),
-          content: SizedBox(
-            width: 420,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              DropdownButtonFormField<String>(
-                initialValue: lib,
-                decoration:
-                    const InputDecoration(labelText: '基础库', isDense: true),
-                items: [
-                  for (final b in basics)
-                    DropdownMenuItem(
-                        value: b.id,
-                        child: Text(b.name, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (v) => setD(() => lib = v ?? lib),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                key: const ValueKey('uag-create-name'),
-                controller: nameCtl,
-                decoration: const InputDecoration(
-                  labelText: '作者名（会建成 @作者名 目录）',
-                  isDense: true,
-                ),
-              ),
-            ]),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(c, false),
-                child: const Text('取消')),
-            FilledButton(
-              key: const ValueKey('uag-create-ok'),
-              onPressed: nameCtl.text.trim().isEmpty
-                  ? null
-                  : () => Navigator.pop(c, true),
-              child: const Text('创建'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    final dir = authorDirForName(nameCtl.text);
-    final bad = authorDirError(dir);
-    if (bad != null) {
-      _toast(bad, bad: true);
-      return;
-    }
-    setState(() => busy = true);
-    try {
-      final r = await _client
-          .post(
-            Uri.parse(unitAuthorCreateUrl(widget.base)),
-            headers: {...widget.headers, 'Content-Type': 'application/json'},
-            body: jsonEncode({'lib': lib, 'name': nameCtl.text.trim()}),
-          )
-          .timeout(const Duration(seconds: 15));
-      final j = jsonOf(r);
-      // 409 是「已存在」，属于用户可理解的结果，不是错误路径。
-      if (r.statusCode == 409) throw Exception('该作者目录已存在');
-      throwIfApiFailed(r.statusCode, j);
-      await load();
-      if (!mounted) return;
-      _toast('已创建作者目录');
-    } catch (e) {
-      if (!mounted) return;
-      _toast(errorText(e), bad: true);
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
 }
