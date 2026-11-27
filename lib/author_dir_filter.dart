@@ -76,51 +76,6 @@ class AuthorDirOption {
   String get key => scopedKey(lib, authorDir);
 }
 
-/// 由挂载项生成筛选项：按 (库, 目录) 去重，保持挂载列表顺序。
-///
-/// 只收非空目录；同一目录在两个库里是**两个**选项（跨库合并后作品各自
-/// 有来源库，混成一个选项会让「按目录筛选」同时跨两台服务器）。
-List<AuthorDirOption> authorDirOptions(
-  Iterable<({String lib, String authorDir})> items,
-) {
-  final out = <AuthorDirOption>[];
-  final seen = <String>{};
-  for (final it in items) {
-    final lib = it.lib.trim();
-    final dir = it.authorDir.trim();
-    if (dir.isEmpty) continue;
-    final o = AuthorDirOption(lib: lib, authorDir: dir);
-    if (!seen.add(o.key)) continue;
-    out.add(o);
-  }
-  return out;
-}
-
-/// 每个选项命中多少条作品；命中 0 条的选项由调用方丢弃（空筛选项没有意义）。
-List<({AuthorDirOption option, int count})> authorDirCounts(
-  Iterable<dynamic> works,
-  Iterable<AuthorDirOption> options, {
-  String fallbackLib = '',
-}) {
-  final out = <({AuthorDirOption option, int count})>[];
-  final all = [
-    for (final w in works)
-      if (w is Map) w
-  ];
-  for (final o in options) {
-    var n = 0;
-    for (final w in all) {
-      if (o.lib.isNotEmpty && workLibOf(w, fallback: fallbackLib) != o.lib) {
-        continue;
-      }
-      if (!workInAuthorDir(w, o.authorDir)) continue;
-      n++;
-    }
-    if (n > 0) out.add((option: o, count: n));
-  }
-  return out;
-}
-
 /// 作品媒体路径里的**第一个** `@` 目录段；没有则空串。
 ///
 /// 服务端约定作者目录以 `@` 开头（`authorDirNameOf` / `authorDirError`）。

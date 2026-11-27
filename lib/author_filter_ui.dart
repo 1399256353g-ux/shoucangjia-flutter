@@ -62,7 +62,43 @@ class _AuthorFilterSheet extends StatefulWidget {
 }
 
 class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
+  /// 已被「单元库」维度接管的旧分组 id 集合。
+  ///
+  /// 0.9.348：同一句「这个 `big_id` 已经被单元库维度接管」此前在这个文件里
+  /// 写了两遍——[_migrateLegacyBigs] 里算一份 `knownUnits`，`build` 里又在每个 chip 的
+  /// `if` 条件里内联重建一次 `{for (final u in widget.units) u.id}`。两处只要
+  /// 有一处漏掉某个单元库 id，同一个节点就会同时出现在「单元库」与「其他历史
+  /// 筛选」两段（选了一段、另一段看起来仍是未选）；第二处还在循环条件里建
+  /// 集合，O(n²)。
+  ///
+  /// 不能写成 `late final`：面板开着时 `widget.units` 仍会变（跨连接聚合
+  /// 逐个到达），那时必须重算——见 [didUpdateWidget]。
+  Set<String> _takenOver = const <String>{};
+
   late AuthorFilterState f = _migrateLegacyBigs(widget.initial);
+
+  @override
+  void initState() {
+    super.initState();
+    _takenOver = _unitIds();
+  }
+
+  Set<String> _unitIds() => {for (final u in widget.units) u.id};
+
+  /// 面板开着时 `widget.units` 才拿到那些节点：迁移与接管判定都要**跟着重算**。
+  ///
+  /// 0.9.348：迁移原先只在 `late f = _migrateLegacyBigs(widget.initial)` 那一帧
+  /// 跑一次。推荐页/搜索页的面板是等类型索引回来后打开的，但「单元库」列表
+  /// 本身可能晚一帧才齐：面板已经开着、`units` 才多了几个 id 时，那几个节点会
+  /// 同时出现在「单元库」与「其他历史筛选」两段。迁移是幂等的（搬不动的不动），
+  /// 所以这里重跑一次即可。
+  @override
+  void didUpdateWidget(covariant _AuthorFilterSheet old) {
+    super.didUpdateWidget(old);
+    _takenOver = _unitIds();
+    // 这一帧紧接着会 rebuild，不需要 setState。
+    f = _migrateLegacyBigs(f);
+  }
 
   /// 把旧的「大库」选择并进「单元库」维度（0.9.313）。
   ///
@@ -77,10 +113,9 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
   AuthorFilterState _migrateLegacyBigs(AuthorFilterState initial) {
     final state = initial.copy();
     if (state.bigs.isEmpty) return state;
-    final knownUnits = {for (final u in widget.units) u.id};
     final moved = <String>[];
     for (final id in state.bigs.toList()) {
-      if (!knownUnits.contains(id)) continue;
+      if (!_takenOver.contains(id)) continue;
       moved.add(id);
     }
     for (final id in moved) {
@@ -138,7 +173,7 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
     final bigChips = [
       for (final b in widget.bigs)
         // 已被单元库维度接管的大库不再画一次（同一个节点两个词条）。
-        if (!{for (final u in widget.units) u.id}.contains(b.id))
+        if (!_takenOver.contains(b.id))
           _chip(b.name, f.bigs.contains(b.id), () => f.toggleBig(b.id)),
     ];
     final basicChips = [

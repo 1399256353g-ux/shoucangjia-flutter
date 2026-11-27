@@ -21,8 +21,6 @@
 /// 必须取自 [kNodeKeySep]。
 library;
 
-import 'rel_path.dart';
-
 /// 连接标识与 rel 之间的分隔符。
 ///
 /// rel 里可能出现 `|`、`:`、`/`，但不会是控制字符，因此 `\u0001` 拼接后
@@ -55,9 +53,6 @@ String nodeKeyRel(String key) {
 bool nodeKeyHasServer(String key, String serverId) =>
     nodeKeyServerId(key) == serverId.trim() && key.contains(kNodeKeySep);
 
-/// 归一化 rel 后直接成键（服务端下发的节点只有原始 rel 时用）。
-String nodeKeyNormalized(String serverId, String rel) =>
-    nodeKey(serverId, normalizeRelPath(rel));
 
 /// 两段作用域键的**中性**拼装：`<a>␁<b>`（两侧各 trim 一次）。
 ///

@@ -194,7 +194,8 @@ void main() {
       expect(unitCoverKey(sid, rel), tree);
       // 归一化写法（服务端原始 rel 带反斜杠/点段）落到同一个键。
       expect(unitCoverKey(sid, r'(1) A\.\(2) B'), tree);
-      expect(nodeKeyNormalized(sid, r'(1) A\.\(2) B'), tree);
+      // `nodeKeyNormalized` 已删（lib/ 零调用）：归一化成键的真实入口是
+      // `multi_server.unitCoverKey`，上面那条断言已经钉住「归一后同一键」。
       // 归属判定用同一个键。
       expect(nodeKeyHasServer(tree, sid), isTrue);
       expect(nodeKeyHasServer(tree, 'srv-3'), isFalse);

@@ -136,8 +136,6 @@ String? mediaRelOrNull(String path) {
   );
 }
 
-/// `/media/` 之后的路径段；不是媒体路径返回空串（需要区分时用 [mediaRelOrNull]）。
-String mediaRel(String path) => mediaRelOrNull(path) ?? '';
 
 /// 相对路径 → `/media/<lib>/<rel>`（**唯一拼装口**）。
 ///

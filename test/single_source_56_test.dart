@@ -142,28 +142,20 @@ void main() {
           isEmpty);
     });
 
-    test('挂载项去重：同一 (库,目录) 只留一条，空目录排掉', () {
-      final opts = authorDirOptions(const [
-        (lib: 'l1', authorDir: '@a'),
-        (lib: 'l1', authorDir: '@a'),
-        (lib: 'l1', authorDir: '  '),
-        (lib: 'l2', authorDir: '@a'),
+    test('选项去重：同一 (库,目录) 只留一条，空目录排掉', () {
+      // 0.9.348：`authorDirOptions`（由「挂载项」构造）与 `authorDirCounts`
+      // 在 lib/ 里零调用点，只有测试在断言它们——测试于是为一条不存在的路径
+      // 作证。真实的去重/计数都在 `authorDirOptionsOfWorks` 里，这里钉它。
+      final opts = authorDirOptionsOfWorks([
+        _work('l1', '/media/l1/@a/1.jpg'),
+        _work('l1', '/media/l1/@a/2.jpg'),
+        _work('l2', '/media/l2/@a/3.jpg'),
+        _work('l2', '/media/l2/A/B/4.jpg'),
       ]);
-      expect(opts.length, 2);
-    });
-
-    test('authorDirCounts 只保留命中 ≥1 条的选项', () {
-      final opts = authorDirOptions(const [
-        (lib: 'l1', authorDir: '@a'),
-        (lib: 'l1', authorDir: '@空'),
-      ]);
-      final counted = authorDirCounts(
-        [_work('l1', '/media/l1/@a/1.jpg')],
-        opts,
-      );
-      expect(counted.length, 1);
-      expect(counted.first.option.authorDir, '@a');
-      expect(counted.first.count, 1);
+      expect(opts.length, 2, reason: '同一 (库,目录) 只一条；无 @ 段的作品不计');
+      expect(opts.map((o) => o.option.lib).toList(), ['l1', 'l2']);
+      expect(opts.every((o) => o.count >= 1), isTrue,
+          reason: '命中 0 条的选项不出现');
     });
   });
 

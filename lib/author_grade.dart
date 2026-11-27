@@ -11,6 +11,14 @@ class AuthorGrade {
   /// 从低到高；[grades].length - 1 个门槛。
   static const List<String> grades = <String>['D', 'C', 'B', 'A', 'S'];
 
+  /// 从高到低（S → D）：**界面上凡是列等级的地方都用它**。
+  ///
+  /// 0.9.348：作者筛选面板（两处）与筛选摘要此前各自手写
+  /// `['S', 'A', 'B', 'C', 'D']`——三份与 [grades] 无关的字面量。改等级集合
+  /// 或顺序时它们不会跟，于是面板里多/少一个等级、摘要里排序与面板不一致，
+  /// 而三处各自都「看起来正常」。顺序也只有一处定义（[grades] 反向）。
+  static List<String> get gradesDescending => grades.reversed.toList();
+
   /// 默认等级底色（D 灰 → S 金）。服务端未下发配色时用它。
   static const List<int> defaultColors = <int>[
     0xFF6B7280,

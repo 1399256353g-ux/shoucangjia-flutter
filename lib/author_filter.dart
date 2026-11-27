@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'author_grade.dart';
 import 'http_json.dart';
 import 'json_num.dart';
 
@@ -178,7 +179,7 @@ class AuthorFilterState {
       if (basics.isNotEmpty) _namesPart('基础库', basics, basicNames),
       if (bigs.isNotEmpty) _namesPart('历史分组', bigs, bigNames),
       if (grades.isNotEmpty)
-        '等级 ${['S', 'A', 'B', 'C', 'D'].where(grades.contains).join('/')}',
+        '等级 ${AuthorGrade.gradesDescending.where(grades.contains).join('/')}',
       if (types.isNotEmpty)
         workFilterOrder.where(types.contains).map(workFilterLabel).join('/'),
     ];

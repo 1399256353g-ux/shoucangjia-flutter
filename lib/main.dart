@@ -579,11 +579,17 @@ class LibMeta {
     return '';
   }
 
+  /// 基础库 → 所属单元库 id（**全 App 唯一出口**）。
+  ///
+  /// 0.9.348：`basicToUnit[id] ?? ''` 这个表达式此前在 `main.dart` 里散着
+  /// 六份（筛选两处、词条两处、设置页一处、`topIdForBasic` 一处）——其中
+  /// 「查不到时给空串」与「查不到时回落 `secret`」两种口径并存，同一张基础库
+  /// 卡片在不同页面会被算成「无归属」或「归属库根」。判定只有一处之后，
+  /// 回落策略由调用点显式写出来，不再藏在 `?? ''` 里。
+  String unitOfBasic(String basicId) => unitIdOfBasic(basicToUnit, basicId);
+
   /// P3：基础库 → 所属顶级节点 id（经基础库→单元库→顶级节点）。
-  String topIdForBasic(String basicId) {
-    final unit = basicToUnit[basicId] ?? '';
-    return topIdFor(unit);
-  }
+  String topIdForBasic(String basicId) => topIdFor(unitOfBasic(basicId));
 
   /// 单元库 → 所属**媒体库** id（用于给作者卡贴媒体库词条）。
   ///
@@ -874,8 +880,8 @@ class LibMeta {
     // 这样 lib-001…lib-039 与 douyin 的基础库都走同一套口径。
     final basic = basicIdForPath(mediaPath);
     if (basic.isNotEmpty) {
-      final unit = basicToUnit[basic];
-      if (unit != null && unit.isNotEmpty) return unit;
+      final unit = unitOfBasic(basic);
+      if (unit.isNotEmpty) return unit;
     }
     // 兜底：按节点文件夹（单元库）路径匹配（旧数据、非基础库媒体）。
     final rel = decodeMediaRel(mediaPath);
@@ -892,7 +898,10 @@ class LibMeta {
       }
       if (bestId.isNotEmpty) return bestId;
     }
-    if (basic.isNotEmpty) return basicToUnit[basic] ?? 'secret';
+    if (basic.isNotEmpty) {
+      final unit = unitOfBasic(basic);
+      return unit.isEmpty ? 'secret' : unit;
+    }
     return rel.isEmpty ? '' : 'secret';
   }
 
@@ -2682,7 +2691,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
 
   /// P1：基础库词条——自己设色优先，否则继承单元库/媒体库。
   Widget _basicTile(BasicLib b, {bool indent = false}) {
-    final unitId = meta?.basicToUnit[b.id] ?? '';
+    final unitId = meta?.unitOfBasic(b.id) ?? '';
     final color = LibraryBadge.basicColorFor(b.id, unitId, order: _order);
     // 文案与颜色同源：以前这行写 `own ? '自定义' : '继承'`，
     // 于是「来源=自动分配」被显示成「继承」，改了来源看不出变化。
@@ -3198,7 +3207,7 @@ class UnitBadges extends StatelessWidget {
     if (basic.isEmpty) return '';
     return unitKeys[basic] ??
         UnitBadgeRegistry.keys[basic] ??
-        meta?.basicToUnit[basic] ??
+        meta?.unitOfBasic(basic) ??
         '';
   }
 
@@ -4691,7 +4700,10 @@ class SettingsHubPage extends StatelessWidget {
         ListTile(
           leading: const Icon(Icons.workspace_premium_outlined),
           title: const Text('作者等级'),
-          subtitle: const Text('D–S 等级词条 · 播放/水滴加权、门槛可调'),
+          // 0.9.348：此前这里写「门槛可调」，而点进去那一页从头到尾没有
+          // 任何可写控件（PROJECT_RULES §八：等级由服务端权威、App 只读）。
+          // 入口文案承诺的事在下一屏不存在，用户只会去找那个不存在的开关。
+          subtitle: const Text('D–S 等级词条 · 由服务端统一管理，此处只读'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => const AuthorGradeSettingsPage())),
         ),
@@ -16609,7 +16621,7 @@ class _RecommendPageState extends State<RecommendPage> {
     if (basic.isEmpty && meta?.basicById(libId) != null) basic = libId;
     final unit = basic.isEmpty
         ? (meta?.unitIdFor(av) ?? '')
-        : (meta?.basicToUnit[basic] ?? '');
+        : (meta?.unitOfBasic(basic) ?? '');
     return f.matches(
       basicId: basic,
       bigId: meta?.bigIdFor(av) ?? '',
@@ -16641,7 +16653,8 @@ class _RecommendPageState extends State<RecommendPage> {
       bigs: opts.bigs,
       units: opts.units,
       tops: opts.tops,
-      grades: const ['S', 'A', 'B', 'C', 'D'],
+      // 等级清单只从 `AuthorGrade` 取：面板、摘要、配置三处共用一份定义。
+      grades: AuthorGrade.gradesDescending,
       count: (f) => works.where((w) => _matches(w, f)).length,
     );
     if (res == null || !mounted) return;
@@ -16949,7 +16962,7 @@ class _SearchPageState extends State<SearchPage> {
     final bid = '${e['_bid'] ?? ''}';
     final known = bid.isNotEmpty ? meta?.basicById(bid) : null;
     final unitId = bid.isNotEmpty
-        ? (meta?.basicToUnit[bid] ?? '')
+        ? (meta?.unitOfBasic(bid) ?? '')
         : (meta?.unitIdFor(av) ?? '');
     return f.matches(
       basicId: known?.id ?? (meta?.idFor(av) ?? ''),
@@ -16996,7 +17009,7 @@ class _SearchPageState extends State<SearchPage> {
       bigs: opts.bigs,
       units: opts.units,
       tops: opts.tops,
-      grades: const ['S', 'A', 'B', 'C', 'D'],
+      grades: AuthorGrade.gradesDescending,
       count: (f) => all.where((e) => _matchesFilter(e, f)).length,
     );
     if (res == null || !mounted) return;

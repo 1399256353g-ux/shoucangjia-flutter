@@ -174,8 +174,11 @@ void main() {
       expect(mediaRelOrNull('/media/'), '');
       expect(mediaRelOrNull('/media'), isNull);
       expect(mediaRelOrNull('/mediax/a.jpg'), isNull);
-      expect(mediaRel('/media/lib/a.jpg'), 'lib/a.jpg');
-      expect(mediaRel('/other/a.jpg'), '');
+      // `mediaRel`（`mediaRelOrNull(...) ?? ''` 的第二个名字）已删：
+      // 需要「不是媒体路径」时可空区分就调 mediaRelOrNull，lib/ 里没有
+      // 只想要空串的调用点，留着就是同一条规则的两种说法。
+      expect(mediaRelOrNull('/media/lib/a.jpg'), 'lib/a.jpg');
+      expect(mediaRelOrNull('/other/a.jpg'), isNull);
       expect(isMediaPath(' /media/x'), isTrue);
     });
 
