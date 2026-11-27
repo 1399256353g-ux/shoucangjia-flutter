@@ -10,6 +10,7 @@
 library;
 
 import 'media_path.dart';
+import 'text_fold.dart';
 
 const List<String> _authorKeys = <String>['a', 'author', 'authorName'];
 
@@ -72,15 +73,12 @@ String authorNameFromWork(Map work) {
 /// 用于 UI 展示的作者名：去掉作者名前面可能带的 `@`。
 String authorDisplayNameFromWork(Map work) {
   final name = authorNameFromWork(work);
-  return name.startsWith('@') ? name.substring(1).trim() : name;
+  return stripAtPrefixes(name);
 }
 
 String _bareAuthor(String name) {
-  var s = name.trim();
-  while (s.startsWith('@')) {
-    s = s.substring(1).trim();
-  }
-  return s;
+  // 剥 `@` 只有 `text_fold.stripAtPrefixes` 一处。
+  return stripAtPrefixes(name);
 }
 
 /// 在 `/api/authors.json` 的索引里按作者名取记录。

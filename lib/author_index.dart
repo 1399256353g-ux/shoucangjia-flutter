@@ -30,10 +30,8 @@ import 'text_fold.dart';
 /// `@张三` 在 Z 组、`＠张三` 在 `#` 组，看起来像「作者漏了」。
 String stripAuthorAt(String s) {
   var t = foldFullWidthAscii(s.trim());
-  while (t.startsWith('@')) {
-    t = t.substring(1).trim();
-  }
-  return t;
+  // 剥前缀的本体只有 `text_fold.stripAtPrefixes` 一处（四份拷贝已收口）。
+  return stripAtPrefixes(t);
 }
 
 /// 比较键：折叠全角 + 小写（**不改原串**，只用于「是不是同一个名字」）。

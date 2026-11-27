@@ -884,18 +884,34 @@ class LibMeta {
   }
 
   /// 基础库词条显示名：路径命中基础库时用其名称，否则回落到传入的库名。
+  ///
+  /// 0.9.350：与 [idFor] 同一条链——先按「目录前缀」再按「库作用域
+  /// `lib-\\d+`」反查。旧写法只调 `basicLibForMedia`，库作用域写法的 `av`
+  /// 认不出基础库，词条显示名回落到调用方兜底值（常常是单元库名），
+  /// 同一张卡上的名字与颜色分别取自两个库。
   String labelFor(String mediaPath, String fallback) {
-    final b = basicLibForMedia(basics, mediaPath) ??
-        basicLibForMedia(allBasics, mediaPath);
+    final b = basicById(idFor(mediaPath));
     if (b == null) return '';
     return basicLibLabel(b, fallback);
   }
 
-  /// 作者所属基础库 id（用于配色）；未命中返回空。
-  String idFor(String mediaPath) =>
-      basicLibForMedia(basics, mediaPath)?.id ??
-      basicLibForMedia(allBasics, mediaPath)?.id ??
-      '';
+  /// 作者所属基础库 id（用于配色/筛选）；未命中返回空。
+  ///
+  /// 0.9.350：这里原来自写了一份
+  /// `basicLibForMedia(basics) ?? basicLibForMedia(allBasics)`——只按目录前缀
+  /// 匹配，**不认库作用域写法**。作者头像的 `av` 有两种：库内相对路径
+  /// （`(1) 其他/@作者/_avatar/x.jpg`）与库作用域路径
+  /// （`lib-015/@作者/_avatar/x.jpg`）。后者前缀里是基础库 id、不是目录名，
+  /// `startsWith('$rel/')` 一个都不中 → 返回空串。
+  ///
+  /// 后果：搜索结果里直接带 `_bid` 时不走这条；但**没带 `_bid`** 的条目
+  /// （旧索引、跨库聚合）basicId 算成空 → 作者筛选勾了「基础库」时该作者
+  /// 一条都不出现，而同一个人的作者主页却能筛出来——两边都自称按同一份
+  /// meta 算的。
+  ///
+  /// 现在与 [basicIdForPath] 同一条链（它含 `lib-\d+` 前缀处理），
+  /// 不再各写一份。
+  String idFor(String mediaPath) => basicIdForPath(mediaPath);
 
   /// 作者所属基础库 id：兼容库作用域路径（`/media/lib-015/...`）。
   String basicIdForPath(String mediaPath) {
@@ -910,6 +926,38 @@ class LibMeta {
       if (b.id == id) return b;
     }
     return null;
+  }
+
+  /// 一条作品/作者条目 → （基础库 id, 单元库 id），**唯一归属链**。
+  ///
+  /// 0.9.350：这条链此前在作者主页与搜索/推荐的筛选判定里各写一份，
+  /// 而且两份的回落规则不同：
+  ///
+  /// ```
+  /// 作者页  basic = _bid ?? 路径反查 ?? _lib（不校验 _bid 是否存在）
+  ///         unit  = basic.isEmpty ? unitIdFor(av) : unitOfBasic(basic)
+  /// 搜索页  basic = basicById(_bid)?.id ?? 路径反查
+  ///         unit  = _bid.isNotEmpty ? unitOfBasic(_bid) : unitIdFor(av)
+  /// ```
+  ///
+  /// 两处都能跑，但跨连接时 `_bid` 可能是另一台服务器的库 id：作者页直接
+  /// 采信它 → 基础库筛选命中一个面板里不存在的 id（永远筛不出来）；
+  /// 搜索页采信它 → `unitOfBasic` 给空串、`unitIdFor` 又被跳过 → 勾「单元库/
+  /// 媒体库」整条消失，而勾「基础库」还在。同一个作者两个维度两个答案。
+  ///
+  /// 现在规则只有一条：**本份元数据认识这个 id 才采信**，否则按路径反查；
+  /// 单元库归属沿用基础库那条链，基础库算不出来才按路径反查单元库。
+  ({String basic, String unit}) ownershipOf({
+    String bid = '',
+    String libTag = '',
+    String mediaPath = '',
+  }) {
+    var basic = basicById(bid)?.id ?? '';
+    if (basic.isEmpty) basic = basicIdForPath(mediaPath);
+    if (basic.isEmpty && basicById(libTag) != null) basic = libTag;
+    var unit = basic.isEmpty ? '' : unitOfBasic(basic);
+    if (unit.isEmpty) unit = unitIdFor(mediaPath);
+    return (basic: basic, unit: unit);
   }
 
   /// L5：作者所属单元库 id；无法匹配基础库时为空。
@@ -13757,9 +13805,8 @@ class _PlayerPageState extends State<PlayerPage>
     // 作品缺 `a` 时统一从媒体路径 `%40作者` 回退；UI 与跳转必须用同一个名字，
     // 否则会出现「点头像能进、作者名显示空」的不一致。
     final authorName = authorNameOf(w);
-    final authorLabel = authorName.startsWith('@')
-        ? authorName.substring(1).trim()
-        : authorName;
+    // 剥 `@` 只有 `text_fold.stripAtPrefixes` 一处（四份拷贝已收口）。
+    final authorLabel = stripAtPrefixes(authorName);
     return [
       // P1 §2：非全屏左侧信息区走独立的抖音式面板；全屏保留旧信息行。
       if (!broken)
@@ -16650,15 +16697,12 @@ class _RecommendPageState extends State<RecommendPage> {
     final type = workFilterType(w);
     final types =
         authorTypes[a] ?? (type == 'other' ? const <String>{} : <String>{type});
-    // 作品条目直接带 `_bid`（基础库 id）时优先用它，否则按路径反查；
-    // 再不行用条目自带的 `_lib`（基础库页/单库数据源）。
-    var basic = '${w['_bid'] ?? ''}';
-    final libId = workLibTag(w);
-    if (basic.isEmpty) basic = meta?.basicIdForPath(av) ?? '';
-    if (basic.isEmpty && meta?.basicById(libId) != null) basic = libId;
-    final unit = basic.isEmpty
-        ? (meta?.unitIdFor(av) ?? '')
-        : (meta?.unitOfBasic(basic) ?? '');
+    // 归属链只有 `LibMeta.ownershipOf` 一处（基础库 → 单元库）。
+    final own = meta?.ownershipOf(
+            bid: '${w['_bid'] ?? ''}', libTag: workLibTag(w), mediaPath: av) ??
+        (basic: '', unit: '');
+    final basic = own.basic;
+    final unit = own.unit;
     return f.matches(
       basicId: basic,
       bigId: meta?.bigIdFor(av) ?? '',
@@ -16998,19 +17042,19 @@ class _SearchPageState extends State<SearchPage> {
         (type == 'other' ? const <String>{} : <String>{type});
     final bid = '${e['_bid'] ?? ''}';
     final known = bid.isNotEmpty ? meta?.basicById(bid) : null;
-    final unitId = bid.isNotEmpty
-        ? (meta?.unitOfBasic(bid) ?? '')
-        : (meta?.unitIdFor(av) ?? '');
+    // 归属链只有 `LibMeta.ownershipOf` 一处（与作者页同一条规则）。
+    final own = meta?.ownershipOf(bid: bid, libTag: lib, mediaPath: av) ??
+        (basic: '', unit: '');
+    final basicId = own.basic;
+    final unitId = own.unit;
     return f.matches(
-      basicId: known?.id ?? (meta?.idFor(av) ?? ''),
+      basicId: basicId,
       bigId: known != null && known.bigId.isNotEmpty
           ? known.bigId
           : (meta?.bigIdFor(av) ?? ''),
       unitId: unitId,
       // P3：顶级节点按「基础库 → 单元库 → 顶级节点」链，不另算一份归属。
-      topId: bid.isNotEmpty
-          ? (meta?.topIdForBasic(bid) ?? '')
-          : (unitId.isEmpty ? '' : (meta?.topIdFor(unitId) ?? '')),
+      topId: unitId.isEmpty ? '' : (meta?.topIdFor(unitId) ?? ''),
       grade: meta?.gradeFor(author, authorWorkCount['$lib|$author'] ?? 0) ?? '',
       workTypes: types,
     );

@@ -56,3 +56,23 @@ String foldFullWidthAscii(String s) {
 ///
 /// 只用于比较，绝不用于落盘或回写名称（名称是内容，不能被改写）。
 String foldForMatch(String s) => foldFullWidthAscii(s).toLowerCase();
+
+/// 去掉名称前的作者目录前缀 `@`（可能不止一个）并 trim 首尾空白。
+///
+/// 0.9.350：这个「while 剥 `@`」的小循环此前在四个文件里各写一遍
+/// （`author_index.stripAuthorAt`、`index_prefix.bareNameOf`、
+/// `work_author._bareAuthor`、`main.dart` 的作者页标签），四份都是
+/// `trim → while startsWith('@') substring(1).trim()`。它们必须完全一致：
+/// 全角 `＠` 折叠后也会落到这里，任何一份少剥一层，同一个作者在
+/// 「索引字母 / 显示名 / 索引查询」三处就是三个不同的键——A 组里找不到人，
+/// 作者页点进去空白，而两边都返回了一个「看着对」的字符串。
+///
+/// 只剥前缀，不做其它归一（序号前缀由 `index_prefix` 负责、全角折叠由
+/// [foldFullWidthAscii] 负责）；调用方按自己的顺序组合它们。
+String stripAtPrefixes(String s) {
+  var t = s.trim();
+  while (t.startsWith('@')) {
+    t = t.substring(1).trim();
+  }
+  return t;
+}

@@ -267,7 +267,9 @@ class LibraryBadge {
   /// 基础库的颜色来源（缺省继承顶级）。
   static BadgeColorSource sourceForBasic(String basicId) {
     if (basicId.isEmpty) return BadgeColorSource.inheritTop;
-    return _sourceFromWire(basicSource[basicId]);
+    // 读端与写端同一条规则：写端用 `removeByLibId` 删掉 `b` / `node:b`
+    // 两种等价键，读端原样按下标查就会「设置页写着自动、卡片还是旧色」。
+    return _sourceFromWire(lookupByLibId(basicSource, basicId));
   }
 
   static Future<void> _saveSources() async {
@@ -675,7 +677,7 @@ class LibraryBadge {
       return autoColorOf(basicId, order: order);
     }
     if (basicId.isNotEmpty) {
-      final c = basicCustom[basicId];
+      final c = basicColorAt(basicId);
       if (c != null) return c;
     }
     if (src == BadgeColorSource.fixedCustom) {
@@ -717,8 +719,20 @@ class LibraryBadge {
   static bool hasOwnBasicColor(String basicId) {
     if (basicId.isEmpty) return false;
     if (sourceForBasic(basicId) == BadgeColorSource.autoAssign) return false;
-    return basicCustom[basicId] != null;
+    return basicColorAt(basicId) != null;
   }
+
+  /// 基础库本层**设过的**颜色；没设过返回 null。
+  ///
+  /// 0.9.350：写端（[setBasicColor] / [setSource]）一直用 [removeByLibId]
+  /// 清掉 `<id>` 与 `node:<id>` 两种等价键，读端却写成 `basicCustom[basicId]`
+  /// 只认原样那一个键。只要有调用方传过带前缀的 id（单元库树里的
+  /// `LibNode.id` 就是 `node:<rel>` 形态），就会出现
+  /// 「同一个基础库：设置页显示自定义、卡片上是自动色」——两边都不报错。
+  ///
+  /// 现在读只有这一处，且与写端共用 [lookupByLibId]。
+  static int? basicColorAt(String basicId) =>
+      basicId.isEmpty ? null : lookupByLibId(basicCustom, basicId);
 
   /// 本层此刻是否从**上级**继承到颜色（没有本层色，且逐级上行有可继承色）。
   ///
@@ -787,8 +801,15 @@ class LibraryBadge {
   /// 设置/清除基础库词条色。
   static Future<void> setBasicColor(String basicId, int? argb) async {
     if (basicId.isEmpty) return;
-    if (basicCustom[basicId] == argb) return;
-    basicCustom.remove(basicId);
+    if (basicColorAt(basicId) == argb) return;
+    // 清除必须清掉全部等价键（`b` / `node:b`）。
+    //
+    // 旧写法只 `remove(basicId)`：传进来的 id 若带 `node:` 前缀
+    // （单元库树里 `LibNode.id` 就是这种形态），带前缀那条键原样留着，
+    // 于是点「恢复自动」后 [basicColorAt] 仍读得到旧色——按钮点了没反应，
+    // 而表里已经没有任何界面能改到它。写端与读端、清端现在共用
+    // [lookupByLibId] / [removeByLibId] 这一对。
+    removeByLibId(basicCustom, basicId);
     if (argb != null) basicCustom[basicId] = argb;
     _bump();
     await saveBasic();

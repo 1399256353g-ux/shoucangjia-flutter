@@ -133,7 +133,9 @@ List<String> _stringList(dynamic v) {
   for (final x in v) {
     final s = '${x ?? ''}'.trim();
     if (s.isEmpty) continue;
-    out.add(s.startsWith('@') ? s.substring(1) : s);
+    // 剥 `@` 只走 `text_fold.stripAtPrefixes`：旧写法只剥一层、不 trim
+    // 剥完的前缀，`@@作者` 会剩 `@作者`，与作者索引里的裸名不是同一个键。
+    out.add(stripAtPrefixes(s));
   }
   return out;
 }

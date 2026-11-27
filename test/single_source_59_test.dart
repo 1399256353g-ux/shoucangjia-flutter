@@ -66,8 +66,15 @@ void main() {
       // 历史分组 id 比，两个命名空间永不相等（点「某库」一条都看不到）。
       // 所以这里从「≥3」收紧成「正好这两处」。
       expect(RegExp(r"\.bigIdFor\(").allMatches(s).length, 2);
-      expect(s.contains('basicLibForMedia(basics, mediaPath)'), isTrue,
-          reason: 'labelFor/idFor 仍是唯一读 basics 的地方');
+      // 0.9.350：`labelFor`/`idFor` 不再各自调 `basicLibForMedia`（那条只认
+      // 目录前缀，库作用域写法 `lib-015/...` 认不出），统一走
+      // `basicIdForPath`（含 `lib-\\d+` 前缀处理）。所以这里断言的是
+      // 「路径反查唯一出口」，而不是「某个具体函数名还在」。
+      expect(s.contains('basicIdForMedia(basics, mediaPath)'), isTrue,
+          reason: '路径反查仍在（basicIdForPath 内部）');
+      expect(s.contains('String idFor(String mediaPath) => basicIdForPath'),
+          isTrue,
+          reason: 'idFor 必须与 basicIdForPath 同一条链');
     });
   });
 

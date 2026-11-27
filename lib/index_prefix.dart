@@ -70,9 +70,9 @@ String bareNameOf(String raw) {
   var s = foldFullWidthAscii(raw.trim());
   for (var i = 0; i < 8; i++) {
     var t = s;
-    while (t.startsWith('@')) {
-      t = t.substring(1).trim();
-    }
+    // 剥 `@` 只有 `text_fold.stripAtPrefixes` 一处；这里负责「与序号前缀
+    // 交错剥到稳定」的顺序。
+    t = stripAtPrefixes(t);
     t = stripIndexPrefix(t).trim();
     if (t == s) break;
     s = t;
