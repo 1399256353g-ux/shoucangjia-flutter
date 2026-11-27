@@ -165,9 +165,14 @@ void main() {
 
     test('卡片标星时按记录自己的连接查默认库', () {
       final main = _code('lib/main.dart');
-      final start = main.indexOf(
-          "Widget _libTile(Map<String, dynamic> l) {\n    final id = '\${l['id']}';");
+      // 锚点必须**单行**：Windows CI 检出的是 CRLF，一个横跨两行的字面量
+      // 锚点会找不到（本批 Windows 红、Linux 绿就是这么来的）。签名里带
+      // `UnitLibrary` 的那一处是单元库卡片，与这里要的注册库卡片不同名，
+      // 所以第一处命中就是它。
+      const marker = 'Widget _libTile(Map<String, dynamic> l) {';
+      final start = main.indexOf(marker);
       expect(start, greaterThan(0), reason: '找不到主页面那张卡片');
+      expect(main.substring(start, start + 80).contains("final id = "), isTrue);
       final end = main.indexOf("final cr = mapOrNull(l['crawler'])", start);
       expect(end, greaterThan(start));
       final body = main.substring(start, end);

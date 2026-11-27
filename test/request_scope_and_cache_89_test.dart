@@ -19,7 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 // 字面量（例如 '@override\n  Widget build(...)'）——不归一就永远 indexOf
 // 不到，本地 LF 绿、Windows 红。产品代码无关。
 String _code(String p) =>
-    File(p).readAsStringSync().replaceAll('\r\n', '\n').replaceAll('\r\n', '\n');
+    File(p).readAsStringSync().replaceAll('\r\n', '\n');
 
 String _body(String src, String startMark, String endMark) {
   final s = src.indexOf(startMark);

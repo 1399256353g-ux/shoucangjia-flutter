@@ -34,7 +34,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// 去掉整行注释后的源码（注释里引用旧写法是在解释为什么改）。
 String _code(String path) {
-  final raw = File(path).readAsStringSync().replaceAll('\r\n', '\n').replaceAll('\r\n', '\n');
+  final raw = File(path).readAsStringSync().replaceAll('\r\n', '\n');
   final out = StringBuffer();
   for (final line in raw.split('\n')) {
     if (line.trimLeft().startsWith('//')) continue;
@@ -172,7 +172,9 @@ void main() {
           'final counted = await mapConcurrent<ServerConn,');
       expect(RegExp(r'mapConcurrent<ServerConn,').hasMatch(body), isTrue);
       expect(body.contains('live, 4,'), isTrue);
-      expect(body.contains('for (final s in live) {\n      var code = 0;'),
+      // 用正则而不是含 `\n` 的字面量：Windows CI 检出的是 CRLF，含换行的
+      // 字面量在那里永远不命中，`isFalse` 会**白通过**。
+      expect(RegExp(r'for \(final s in live\) \{\s*var code = 0;').hasMatch(body),
           isFalse,
           reason: '旧形态：逐条连接 await');
     });
