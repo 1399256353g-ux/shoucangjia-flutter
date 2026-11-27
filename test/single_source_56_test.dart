@@ -17,7 +17,10 @@ import 'package:shoucangjia/author_dir_filter.dart';
 /// 去掉整行注释后再做「有没有第二个来源」的扫描。
 String _code(String path) => File(path)
     .readAsStringSync()
-    .split('\n')
+    // 行尾归一：Windows CI 检出的是 CRLF，只按 '\n' 切会留下 '\r'，
+    // 于是断言里的 'SizedBox(\n      width ...' 这类字面量永远匹配不上
+    // （本地 LF 绿、Windows 红）。这里统一按 CRLF/LF 切。
+    .split(RegExp(r'\r?\n'))
     .where((l) => !l.trimLeft().startsWith('//'))
     .join('\n');
 
