@@ -463,6 +463,67 @@ Map<String, Map<String, String>> decodeBindings(String? raw) {
 String encodeBindings(Map<String, Map<String, String>> bindings) =>
     jsonEncode(bindings);
 
+/// 某个节点/单元库所属的连接（**唯一判定**）。
+///
+/// 单元库页面（爬虫配置、作者挂载、删除监测）都拿它来决定「向哪台服务器
+/// 发请求、用谁的头」。此前这段判定在 `main._openUnitAuthorMount` 与
+/// `main._openUnitCrawler` 各写了一遍，且两处都按**地址字符串**找连接：
+///
+/// ```dart
+/// if (s.base == base) { headers = {...}; break; }
+/// ```
+///
+/// `base` 来自节点字段 `serverBase`，而连接表里的 `base` 早已被
+/// [normalizeBase] 归一（补协议、去尾斜杠、全角折叠）。用户把地址存成
+/// `NAS:8090/`（末尾斜杠）或从地址栏复制成 `HTTP://NAS:8090` 时，两边字符串
+/// 永不相等：该单元库的请求于是拿到绑定表里的账号——而那可能是另一台机器
+/// 的密码（401/串库），界面只说「加载失败」。
+///
+/// 现在优先按连接 id（记录自带、聚合时写入，是真正的身份），查不到才按
+/// **归一化后**的地址回落。两处页面共用这一份，不再各自比字符串。
+ServerConn? serverOfOrigin(
+  Iterable<ServerConn> servers,
+  ServerOrigin origin, {
+  String fallbackBase = '',
+}) {
+  final sid = origin.id.trim();
+  if (sid.isNotEmpty) {
+    for (final s in servers) {
+      if (s.id == sid) return s;
+    }
+  }
+  final want = normalizeBase(
+      origin.base.trim().isNotEmpty ? origin.base : fallbackBase);
+  if (want.isEmpty) return null;
+  for (final s in servers) {
+    if (sameBase(s.base, want)) return s;
+  }
+  return null;
+}
+
+/// 两个 base 是否指向同一台服务器。
+///
+/// `normalizeBase` 只统一了协议大小写与尾斜杠，**没有把主机名转小写**：
+/// 从浏览器地址栏复制来的 `HTTP://NAS:8090` 归一后仍是 `http://NAS:8090`，
+/// 与配置里的 `http://nas:8090` 字符串不等。主机名按 RFC 3986 本来就不区分
+/// 大小写，所以这里按 `scheme` / `host`（小写）/ `port` 相同、路径逐字相同
+/// 来判等——既不会把两台机器判成同一台，也不会因为大写主机名而认不出来。
+bool sameBase(String a, String b) {
+  final x = normalizeBase(a);
+  final y = normalizeBase(b);
+  if (x.isEmpty || y.isEmpty) return false;
+  if (x == y) return true;
+  final ux = Uri.tryParse(x);
+  final uy = Uri.tryParse(y);
+  if (ux == null || uy == null) return false;
+  if (ux.scheme.toLowerCase() != uy.scheme.toLowerCase()) return false;
+  if (ux.host.toLowerCase() != uy.host.toLowerCase()) return false;
+  if (ux.port != uy.port) return false;
+  if (ux.path != uy.path) return false;
+  if (ux.query != uy.query) return false;
+  return true;
+}
+
 /// 新增连接时生成稳定且不重复的 id。
 String nextServerId(List<ServerConn> servers) {
   var n = servers.length + 1;

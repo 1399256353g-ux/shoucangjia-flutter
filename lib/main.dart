@@ -466,6 +466,18 @@ class LibMeta {
   /// 基础库 id → 所属单元库 id。
   final Map<String, String> basicToUnit;
 
+  /// 顶级节点（媒体库根）的显示名：**这台服务器自己的库根目录名**。
+  ///
+  /// 此前 `unitNameOf('secret')` 一律读进程级 `TopNodeName.current`，而那是
+  /// 一个全局单值：设置页逐台加载元数据时，第二台的库根名会把第一台的名字
+  /// 直接改掉（`LibMeta.load` 里无条件 `TopNodeName.setFromRoot(root)`）。
+  /// 首页两张媒体库卡片于是同名——都是最后加载那台的根目录名，而各自的
+  /// 基础库/封面仍然来自不同机器，用户看到的是「两个不一样的库叫同一个名字」。
+  ///
+  /// 名字是这份元数据的属性（它读的就是这台服务器的 `root`），所以存在这里；
+  /// 全局 `TopNodeName` 只服务「手里没有 meta」的旧页面（文件结构页）。
+  final String topName;
+
   const LibMeta({
     required this.basics,
     required this.stats,
@@ -474,6 +486,7 @@ class LibMeta {
     this.unitTree,
     this.units = const [],
     this.basicToUnit = const {},
+    this.topName = '',
   });
 
   /// 跨库口径的基础库列表（全量优先，缺失时回落到当前库）。
@@ -565,6 +578,7 @@ class LibMeta {
       UnitLibrary? unitTree;
       var units = const <UnitLibrary>[];
       var basicToUnit = const <String, String>{};
+      var topName = '';
       try {
         // 地址与鉴权同源：有显式来源就用它，否则按 `lib` 走绑定表。
         // 旧写法两处都是 `cfg.*`，绑定表为空（设置页直入）或库里没有这条
@@ -631,6 +645,13 @@ class LibMeta {
               // 「单元库归属」用的基础库列表。
               final root = '${ljm['root'] ?? ''}'.trim();
               // owner 2026-11-22：顶级节点名＝媒体库根目录名（不是内置常量）。
+              //
+              // 0.9.324：这里原来只写全局 `TopNodeName`——设置页逐台加载时，
+              // 后一台的库根名会把前一台覆盖掉（两张媒体库卡片同名）。名字是
+              // **这份元数据**的属性，本地留一份；全局值只留给没有 meta 的
+              // 旧页面（文件结构页）。
+              final ownTopName = TopNodeName.nameFromRoot(root);
+              if (ownTopName.isNotEmpty) topName = ownTopName;
               TopNodeName.setFromRoot(root);
               // 0.9.284：`basicsUnderBase` 直接返回 `BasicLib`，不再有
               // 「ref → 模型」的转换点（那里就是丢 cover/cv 的地方）。
@@ -673,10 +694,14 @@ class LibMeta {
                       serverLabel: source.isScoped
                           ? ''
                           : cfg.serverLabelFor(lib));
+              final ownName =
+                  ownTopName.isEmpty ? TopNodeName.current : ownTopName;
               final tree = buildUnitTree(
                   nodes: nodes,
                   basics: unitBasics,
-                  topName: TopNodeName.current);
+                  topName: ownName,
+                  // 这台服务器的根名就是它自己的：节点归属连接只有它一个。
+                  topNameOf: (_) => ownName);
               if (tree != null) {
                 unitTree = tree;
                 units = flattenUnits(tree);
@@ -706,7 +731,8 @@ class LibMeta {
           bigNames: bigNames,
           unitTree: unitTree,
           units: units,
-          basicToUnit: basicToUnit);
+          basicToUnit: basicToUnit,
+          topName: topName);
       cache[key] = meta;
       _cachedAt[key] = DateTime.now();
       _loading.remove(key);
@@ -774,7 +800,10 @@ class LibMeta {
 
   String unitNameOf(String id) {
     if (id.isEmpty) return '';
-    if (id == 'secret') return TopNodeName.current;
+    if (id == 'secret') {
+      final own = topName.trim();
+      return own.isNotEmpty ? own : TopNodeName.current;
+    }
     for (final u in units) {
       if (u.id == id) return u.name;
     }
@@ -3600,7 +3629,15 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
             query: {'lib': widget.libId})));
       }
       addAttempt(Uri.parse(joinApiUrl(_base, '/api/deleted.json')));
-      if (cfg.lib.isNotEmpty && cfg.lib != widget.libId) {
+      // 第三条「该连接上的首个库」只在它**确实属于这台服务器**时才试。
+      //
+      // 旧写法无条件加一条 `?lib=${cfg.lib}`：`cfg.lib` 是默认注册库，可能
+      // 属于另一台服务器，拿它去问这一台只会 404/空列表——而空列表会与
+      // 「服务端真的没有记录」写得一模一样，排查时看不出是请求本身发错了。
+      // 地址比对走 `sameBase`（协议/主机大小写/尾斜杠都归一）。
+      if (cfg.lib.isNotEmpty &&
+          cfg.lib != widget.libId &&
+          sameBase(cfg.baseFor(cfg.lib), _base)) {
         addAttempt(Uri.parse(joinApiUrl(_base, '/api/deleted.json',
             query: {'lib': cfg.lib})));
       }
@@ -5008,7 +5045,9 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       err = null;
     });
     try {
-      final r = await http.get(cfg.u('/api/settings'), headers: cfg.headers);
+      final r = await http
+          .get(cfg.u('/api/settings'), headers: cfg.headers)
+          .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       _apply(jsonMapOf(r), setLoading: true);
     } catch (e) {
@@ -5033,9 +5072,11 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
 
   Future<Map<String, dynamic>> _send(
       String path, Map<String, dynamic> body) async {
-    final r = await http.post(cfg.u(path),
-        headers: {...cfg.headers, 'Content-Type': 'application/json'},
-        body: jsonEncode(body));
+    final r = await http
+        .post(cfg.u(path),
+            headers: {...cfg.headers, 'Content-Type': 'application/json'},
+            body: jsonEncode(body))
+        .timeout(const Duration(seconds: 20));
     if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     return jsonMapOf(r);
   }
@@ -5598,6 +5639,9 @@ class _LibraryPageState extends State<LibraryPage> {
       await StarStore.instance.load();
       final saved = StarStore.instance.ordered;
       final snaps = <ServerLibraries>[];
+      // 每台服务器自己的库根名：媒体库卡片的名字必须来自它那台机器，
+      // 不能让全局 `TopNodeName` 被最后一台覆盖（见 `LibMeta.topName`）。
+      final rootNames = <String, String>{};
       for (final s in servers) {
         final h = {
           'Authorization': basicAuthHeader(s.user, s.pass),
@@ -5614,6 +5658,11 @@ class _LibraryPageState extends State<LibraryPage> {
           if (j is! Map) continue;
           // owner 2026-11-22：顶级节点名＝媒体库根目录名。先到先用，
           // 多个连接时以首条连接（servers.first，与文件结构页一致）为准。
+          //
+          // 0.9.324：按连接各记一份（`rootNames`），卡片取名用它；全局值
+          // 仍只由首条连接写，供没有 meta 的旧页面（文件结构页）使用。
+          final rn = TopNodeName.nameFromRoot('${j['root'] ?? ''}');
+          if (rn.isNotEmpty) rootNames[s.id] = rn;
           if (identical(s, servers.first)) {
             TopNodeName.setFromRoot('${j['root'] ?? ''}');
           }
@@ -5694,6 +5743,7 @@ class _LibraryPageState extends State<LibraryPage> {
         nodes: nodes,
         basics: t?.allBasics ?? const <BasicLib>[],
         topName: TopNodeName.current,
+        topNameOf: (sid) => rootNames[sid] ?? '',
       );
       // K7：单元库被删除/重建后，清掉已不存在节点的星标（标记只存本机
       // SharedPreferences，不写 NAS）。树拿不到时（网络失败）不动标记。
@@ -6001,59 +6051,68 @@ class _LibraryPageState extends State<LibraryPage> {
 
   /// A1：打开作者文件夹挂载面板（合并/拆分/新建作者目录）。
   ///
-  /// 鉴权头沿用该单元库第一个基础库的连接——与爬虫配置、封面请求同一口径，
-  /// 避免在一个页面里出现「用的不是同一个连接」的情况。
+  /// 地址与鉴权都取该单元库**所属连接**（[_unitConn]），与爬虫配置、删除监测
+  /// 同一份判定——避免在一个页面里出现「用的不是同一个连接」。
   void _openUnitAuthorMount(UnitLibrary u) {
     if (u.rel.trim().isEmpty) return;
-    final base = u.node.serverBase.isNotEmpty
-        ? u.node.serverBase
-        : cfg.baseFor(u.basics.isNotEmpty ? u.basics.first.id : null);
-    var headers =
-        cfg.headersFor(u.basics.isNotEmpty ? u.basics.first.id : null);
-    for (final s in servers) {
-      if (s.base == base) {
-        headers = {'Authorization': basicAuthHeader(s.user, s.pass)};
-        break;
-      }
-    }
+    final c = _unitConn(u);
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => UnitAuthorMountPage(
         unit: u,
-        base: base,
-        headers: headers,
+        base: c.base,
+        headers: c.headers,
       ),
     ));
+  }
+
+  /// 单元库 → 「发请求用的连接」：地址 / 鉴权头 / 库 id（**唯一出口**）。
+  ///
+  /// 此前 `_openUnitAuthorMount` 与 `_openUnitCrawler` 各写一遍同一段：
+  /// 先取 `basics.first.id` 的 base/headers，再遍历 `servers` 按**地址字符串**
+  /// 匹配连接。两处都有两个问题：
+  ///  1. 地址字符串比对不归一——连接表里的 base 已被 `normalizeBase`（补协议、
+  ///     去尾斜杠、全角折叠），节点字段却可能带 `/` 或大写协议，永远比不中；
+  ///     比不中就拿绑定表的账号去敲该单元库的服务器（401 / 串库）；
+  ///  2. `lib=` 参数在两处各算一次，改一处就与 base 不同源。
+  /// 现在只此一处：按连接 id 找（记录自带），找不到再按归一化地址回落。
+  ({String base, Map<String, String> headers, String libId}) _unitConn(
+      UnitLibrary u) {
+    final firstBasic = u.basics.isNotEmpty ? u.basics.first.id : null;
+    final s = serverOfOrigin(
+      servers,
+      ServerOrigin(
+        id: u.node.serverId.trim(),
+        base: u.node.serverBase.trim(),
+        label: u.node.serverLabel.trim(),
+      ),
+      fallbackBase: cfg.baseFor(firstBasic),
+    );
+    final base = u.node.serverBase.trim().isNotEmpty
+        ? u.node.serverBase.trim()
+        : (s != null && s.base.isNotEmpty ? s.base : cfg.baseFor(firstBasic));
+    final headers = s != null
+        ? <String, String>{'Authorization': _authFor(s)}
+        : cfg.headersFor(firstBasic);
+    return (base: base, headers: headers, libId: firstBasic ?? cfg.lib);
   }
 
   /// L5-D：打开单元库级爬虫配置（顶级 SECRET 不提供）。
   void _openUnitCrawler(UnitLibrary u) {
     if (u.rel.trim().isEmpty) return;
-    final base = u.node.serverBase.isNotEmpty
-        ? u.node.serverBase
-        : cfg.baseFor(u.basics.isNotEmpty ? u.basics.first.id : null);
-    var headers =
-        cfg.headersFor(u.basics.isNotEmpty ? u.basics.first.id : null);
-    for (final s in servers) {
-      if (s.base == base) {
-        headers = {
-          'Authorization': basicAuthHeader(s.user, s.pass),
-        };
-        break;
-      }
-    }
+    final c = _unitConn(u);
     Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (c) => UnitCrawlerPage(
+      builder: (ctx) => UnitCrawlerPage(
         unit: u,
-        base: base,
-        headers: headers,
-        libId: u.basics.isNotEmpty ? u.basics.first.id : cfg.lib,
-        onOpenDeletedMonitor: () => Navigator.of(c).push(MaterialPageRoute(
+        base: c.base,
+        headers: c.headers,
+        libId: c.libId,
+        onOpenDeletedMonitor: () => Navigator.of(ctx).push(MaterialPageRoute(
             builder: (_) => DeletedMonitorPage(
                   unitRel: u.rel,
                   unitName: u.name,
-                  base: base,
-                  headers: headers,
-                  libId: u.basics.isNotEmpty ? u.basics.first.id : cfg.lib,
+                  base: c.base,
+                  headers: c.headers,
+                  libId: c.libId,
                 ))),
       ),
     ));
@@ -6119,9 +6178,14 @@ class _LibraryPageState extends State<LibraryPage> {
     try {
       final id = '${l['id']}';
       final sb = serverOriginOf(l).base;
-      final r = await http.post(_u('/api/libraries/default', id, sb),
-          headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
-          body: jsonEncode({'id': l['id']}));
+      final r = await http
+          .post(_u('/api/libraries/default', id, sb),
+              headers: {
+                ...cfg.headersFor(id),
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({'id': l['id']}))
+          .timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -6154,9 +6218,14 @@ class _LibraryPageState extends State<LibraryPage> {
     try {
       final id = '${l['id']}';
       final sb = serverOriginOf(l).base;
-      final r = await http.post(_u('/api/libraries/delete', id, sb),
-          headers: {...cfg.headersFor(id), 'Content-Type': 'application/json'},
-          body: jsonEncode({'id': l['id']}));
+      final r = await http
+          .post(_u('/api/libraries/delete', id, sb),
+              headers: {
+                ...cfg.headersFor(id),
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({'id': l['id']}))
+          .timeout(const Duration(seconds: 15));
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -6233,15 +6302,17 @@ class _LibraryPageState extends State<LibraryPage> {
         }
         return servers.isEmpty ? cfg.base : servers.first.base;
       }();
-      final r = await http.post(_u('/api/libraries', null, atBase),
-          headers: {...cfg.headers, 'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'id': lid,
-            'name': name.text.trim(),
-            'desc': desc.text.trim(),
-            'base': base.text.trim(),
-            'dir': dir.text.trim(),
-          }));
+      final r = await http
+          .post(_u('/api/libraries', null, atBase),
+              headers: {...cfg.headers, 'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'id': lid,
+                'name': name.text.trim(),
+                'desc': desc.text.trim(),
+                'base': base.text.trim(),
+                'dir': dir.text.trim(),
+              }))
+          .timeout(const Duration(seconds: 15));
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -7018,17 +7089,19 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
   Future<void> save() async {
     setState(() => saving = true);
     try {
-      final r = await http.post(_u('/api/crawler'),
-          headers: {
-            ..._headers,
-            'Content-Type': 'application/json'
-          },
-          body: jsonEncode({
-            'enabled': enabled,
-            'schedule': schedule.trim(),
-            'intervalMin': intervalMin,
-            'note': note,
-          }));
+      final r = await http
+          .post(_u('/api/crawler'),
+              headers: {
+                ..._headers,
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                'enabled': enabled,
+                'schedule': schedule.trim(),
+                'intervalMin': intervalMin,
+                'note': note,
+              }))
+          .timeout(const Duration(seconds: 15));
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -7179,12 +7252,14 @@ class _MaintenancePageState extends State<MaintenancePage> {
   Future<void> runCrawler() async {
     setState(() => running = true);
     try {
-      final r = await http.post(_u('/api/maintenance'),
-          headers: {
-            ..._headers,
-            'Content-Type': 'application/json'
-          },
-          body: jsonEncode({'action': 'run-crawler', 'lib': libId}));
+      final r = await http
+          .post(_u('/api/maintenance'),
+              headers: {
+                ..._headers,
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({'action': 'run-crawler', 'lib': libId}))
+          .timeout(const Duration(seconds: 20));
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -7663,9 +7738,10 @@ class _RankPageState extends State<RankPage> {
     if (mounted) setState(() => err = null);
     try {
       // 0.9.8：排行榜数据源改为全部基础库；大库筛选在本地按作者所属基础库收敛。
-      final r = await http.get(
-          cfg.u('/api/rank?period=$period&metric=$metric', lib: 'all'),
-          headers: cfg.headers);
+      final r = await http
+          .get(cfg.u('/api/rank?period=$period&metric=$metric', lib: 'all'),
+              headers: cfg.headers)
+          .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonOf(r);
       await _ensureMeta(cfg.lib);
@@ -8828,8 +8904,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     if (_avLookup.contains(key)) return;
     _avLookup.add(key);
     try {
-      final r = await http.get(cfg.u('/api/a/$idx.json', lib: lib),
-          headers: cfg.headersFor(lib));
+      final r = await http
+          .get(cfg.u('/api/a/$idx.json', lib: lib),
+              headers: cfg.headersFor(lib))
+          .timeout(const Duration(seconds: 12));
       if (r.statusCode != 200) return;
       final m = jsonOf(r);
       final pick = pickFallbackAvatar(avatarCandidatesFromWorks(
@@ -11618,8 +11696,11 @@ class _PlayerPageState extends State<PlayerPage>
           : '${w['ti']}';
       final name = mediaSaveFileName(base: base, url: url, video: isVideo);
       final file = File('${dir.path}${Platform.pathSeparator}$name');
-      final resp =
-          await http.get(Uri.parse(url), headers: cfg.headersFor(_libFor(w)));
+      // 下载整条作品文件：内容可能几百 MB，超时按体量放宽（仍要有限，
+      // 否则断网时这个 Future 永远不结束，界面一直显示「正在保存…」）。
+      final resp = await http
+          .get(Uri.parse(url), headers: cfg.headersFor(_libFor(w)))
+          .timeout(const Duration(minutes: 5));
       if (resp.statusCode != 200) {
         _toast('保存失败：${httpErrorText(resp.statusCode)}');
         return;
@@ -13785,11 +13866,16 @@ class _PlayerPageState extends State<PlayerPage>
     }
     final lib = req.lib;
     try {
-      final r = await http.post(
-        cfg.u(req.scope.path, lib: lib),
-        headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
-        body: jsonEncode(req.toBody()),
-      );
+      final r = await http
+          .post(
+            cfg.u(req.scope.path, lib: lib),
+            headers: {
+              ...cfg.headersFor(lib),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(req.toBody()),
+          )
+          .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) {
         _toast('${req.failText}：${coverErrorText(r.statusCode)}');
         return;
@@ -15768,9 +15854,10 @@ class _RecommendPageState extends State<RecommendPage> {
       authorFilter.value.isActive ? 600 : RecommendCountSettings.value;
 
   Future<List<Map<String, dynamic>>> _fetchPage(int seed, int n) async {
-    final r = await http.get(
-        cfg.u('/api/recommend?n=$n&seed=$seed', lib: 'all'),
-        headers: cfg.headers);
+    final r = await http
+        .get(cfg.u('/api/recommend?n=$n&seed=$seed', lib: 'all'),
+            headers: cfg.headers)
+        .timeout(const Duration(seconds: 20));
     if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     final j = jsonOf(r);
     final out = <Map<String, dynamic>>[];
@@ -16514,8 +16601,10 @@ Future<bool> syncAuthorGradeFromServer({String? lib}) async {
   if (cfg.base.isEmpty) return false;
   http.Response r;
   try {
-    r = await http.get(cfg.u('/api/author-grade.json', lib: lib),
-        headers: cfg.headersFor(lib));
+    r = await http
+        .get(cfg.u('/api/author-grade.json', lib: lib),
+            headers: cfg.headersFor(lib))
+        .timeout(const Duration(seconds: 10));
   } catch (_) {
     return false;
   }
@@ -16535,15 +16624,20 @@ Future<AuthorEditResult> uploadAuthorAvatarBytes({
 }) async {
   http.Response r;
   try {
-    r = await http.post(
-      cfg.u('/api/author/avatar', lib: libId),
-      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'lib': libId,
-        'author': author,
-        'data': base64Encode(pngBytes),
-      }),
-    );
+    r = await http
+        .post(
+          cfg.u('/api/author/avatar', lib: libId),
+          headers: {
+            ...cfg.headersFor(libId),
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'lib': libId,
+            'author': author,
+            'data': base64Encode(pngBytes),
+          }),
+        )
+        .timeout(const Duration(seconds: 30));
   } catch (e) {
     return AuthorEditResult(false, '上传失败：${errorText(e)}');
   }
@@ -16564,11 +16658,16 @@ Future<AuthorEditResult> uploadAuthorBio({
   final clean = normalizeAuthorBio(bio);
   http.Response r;
   try {
-    r = await http.post(
-      cfg.u('/api/author/bio', lib: libId),
-      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
-      body: jsonEncode({'lib': libId, 'author': author, 'bio': clean}),
-    );
+    r = await http
+        .post(
+          cfg.u('/api/author/bio', lib: libId),
+          headers: {
+            ...cfg.headersFor(libId),
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'lib': libId, 'author': author, 'bio': clean}),
+        )
+        .timeout(const Duration(seconds: 15));
   } catch (e) {
     return AuthorEditResult(false, '保存失败：${errorText(e)}');
   }
@@ -16596,12 +16695,17 @@ Future<AuthorEditResult> setAuthorAvatarFile({
   }
   http.Response r;
   try {
-    r = await http.post(
-      cfg.u(kAuthorAvatarSetPath, lib: libId),
-      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
-      body: jsonEncode(authorAvatarSetBody(
-          lib: libId, author: author, file: file)),
-    );
+    r = await http
+        .post(
+          cfg.u(kAuthorAvatarSetPath, lib: libId),
+          headers: {
+            ...cfg.headersFor(libId),
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(authorAvatarSetBody(
+              lib: libId, author: author, file: file)),
+        )
+        .timeout(const Duration(seconds: 20));
   } catch (e) {
     return AuthorEditResult(false, '设置头像失败：${errorText(e)}');
   }
@@ -16623,11 +16727,16 @@ Future<AuthorEditResult> clearAuthorAvatar({
 }) async {
   http.Response r;
   try {
-    r = await http.post(
-      cfg.u(kAuthorAvatarSetPath, lib: libId),
-      headers: {...cfg.headersFor(libId), 'Content-Type': 'application/json'},
-      body: jsonEncode(authorAvatarClearBody(lib: libId, author: author)),
-    );
+    r = await http
+        .post(
+          cfg.u(kAuthorAvatarSetPath, lib: libId),
+          headers: {
+            ...cfg.headersFor(libId),
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(authorAvatarClearBody(lib: libId, author: author)),
+        )
+        .timeout(const Duration(seconds: 20));
   } catch (e) {
     return AuthorEditResult(false, '清除头像失败：${errorText(e)}');
   }
@@ -17330,16 +17439,20 @@ class _AuthorPageState extends State<AuthorPage> {
     final perLib = <List<Map<String, dynamic>>>[];
     for (final lib in _libs) {
       try {
-        final r = await http.get(cfg.u('/api/authors.json', lib: lib),
-            headers: cfg.headersFor(lib));
+        final r = await http
+            .get(cfg.u('/api/authors.json', lib: lib),
+                headers: cfg.headersFor(lib))
+            .timeout(const Duration(seconds: 20));
         if (r.statusCode != 200) continue;
         final idx = jsonMapOf(r);
         // 服务端作者索引存在 `作者` / `@作者` 两种键；名字可能来自作品 `a`
         // 或媒体路径里的 `%40作者`。统一按裸名匹配，避免「进页后空白」。
         final info = authorInfoFromIndex(idx, widget.name);
         if (info == null) continue;
-        final d = await http.get(cfg.u('/api/a/${info['i']}.json', lib: lib),
-            headers: cfg.headersFor(lib));
+        final d = await http
+            .get(cfg.u('/api/a/${info['i']}.json', lib: lib),
+                headers: cfg.headersFor(lib))
+            .timeout(const Duration(seconds: 20));
         if (d.statusCode != 200) continue;
         final m = jsonOf(d);
         if (bio.isEmpty) bio = (m['bio'] ?? '').toString();

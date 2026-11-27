@@ -136,15 +136,19 @@ Future<CoverUploadResult> uploadCoverBytes({
   }
   http.Response r;
   try {
-    r = await http.post(
-      Uri.parse(url),
-      headers: {...headers, 'Content-Type': 'application/json'},
-      body: jsonEncode(coverScopeBody(
-        lib: libId,
-        unitRel: unitRel,
-        extra: <String, dynamic>{'data': base64Encode(bytes)},
-      )),
-    );
+    r = await http
+        .post(
+          Uri.parse(url),
+          headers: {...headers, 'Content-Type': 'application/json'},
+          body: jsonEncode(coverScopeBody(
+            lib: libId,
+            unitRel: unitRel,
+            extra: <String, dynamic>{'data': base64Encode(bytes)},
+          )),
+        )
+        // 12MB 上限的 base64 请求体：给 60s，超时后界面报「网络异常」
+        // 而不是永远停在「上传中…」。
+        .timeout(const Duration(seconds: 60));
   } catch (e) {
     return const CoverUploadResult(false, '上传失败：网络异常，请检查连接后重试');
   }

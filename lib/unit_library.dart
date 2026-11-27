@@ -247,16 +247,27 @@ String _sidOf(LibNode n) => n.serverId.trim();
 /// [nodes] 节点文件夹（可以是 bigLibraries + groups 的合集）。
 /// [basics] 基础库，`rel` 为相对库根的路径。
 /// [topName] 顶级单元库名称（默认取库根目录名），顶级 id 为 [topId]。
+///
+/// [topNameOf] 按**连接 id** 取该服务器自己的库根名（可选）。一张媒体库卡片
+/// 的名字必须来自它那台服务器：此前多连接下发一个全局名，两张卡片同名
+/// （见 `LibMeta.topName` 的说明）。拿不到就回落连接标签，再回落 [topName]。
+///
 /// 返回顶级单元库；没有基础库时返回 null（整棵树在选择页消失）。
 UnitLibrary? buildUnitTree({
   required List<LibNode> nodes,
   required List<BasicLib> basics,
   String topId = 'secret',
   String? topName,
+  String Function(String serverId)? topNameOf,
 }) {
   final top = (topName == null || topName.trim().isEmpty)
       ? TopNodeName.current
       : topName;
+  /// 某连接的根目录名：优先它自己的，其次 [top]。
+  String rootNameOf(String serverId) {
+    final own = topNameOf == null ? '' : topNameOf(serverId.trim()).trim();
+    return own.isEmpty ? top : own;
+  }
   if (basics.isEmpty) return null;
 
   // 1. 节点去重：同一**连接内**的同一 rel 只保留一个。
@@ -385,7 +396,7 @@ UnitLibrary? buildUnitTree({
       node: LibNode(
         id: 'top:${sid.isEmpty ? 'local' : sid}',
         rel: '',
-        name: label.isEmpty ? top : label,
+        name: label.isEmpty ? rootNameOf(sid) : label,
         serverId: sid,
         serverBase: group.first.serverBase,
         serverLabel: label,
@@ -430,7 +441,7 @@ UnitLibrary? buildUnitTree({
       node: LibNode(
         id: 'media:${sid.isEmpty ? 'local' : sid}',
         rel: '',
-        name: label.isEmpty ? top : label,
+        name: label.isEmpty ? rootNameOf(sid) : label,
         serverId: sid,
         serverBase: subs.first.node.serverBase,
         serverLabel: label,
