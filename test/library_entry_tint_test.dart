@@ -118,9 +118,8 @@ void main() {
     };
     expect(radii.length, 1);
     // 边框宽度两两不同（媒体库最粗、基础库最细）。
-    // 边框不在 decoration 里（会挤占布局），从 borderFor 取。
-    final widths = [
-      for (final k in kinds) (LibraryBadge.borderFor(k)! as Border).top.width
+    // 边框画在 decoration 里（与原始实现同路径）。
+    final widths = [for (final d in decos) (d.border as Border).top.width
     ];
     expect(widths[0] > widths[1], isTrue);
     expect(widths[1] > widths[2], isTrue);

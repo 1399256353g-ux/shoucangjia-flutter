@@ -3070,36 +3070,16 @@ class UnitBadges extends StatelessWidget {
       if (ids.isEmpty) addUnit('secret', '');
     }
 
-    // owner 2026-11-26：基础库词条（配合文件夹挂载）。
-    //
-    // 只有「作者确实分布在多个来源」时才值得列——单库作者列出来只是把单元库
-    // 词条重复一遍。它是**最末一级**，与单元库词条各司其职：
-    //   单元库词条 → 由最下级单元库生成，回答「归哪个单元库」
-    //   基础库词条 → 回答「在这个单元库下的哪几个基础库有目录」
-    final basicChips = <BadgeChipSpec>[];
-    if (sources.length > 1) {
-      for (final basic in sources) {
-        final b = meta?.basicById(basic);
-        final nm = (b?.name ?? '').trim();
-        if (nm.isEmpty) continue;
-        basicChips.add(BadgeChipSpec(
-          label: nm,
-          // 基础库词条用该基础库自己的生效色（含分发链），层级固定 basic。
-          color: LibraryBadge.basicColorFor(
-              basic, _unitKeyOf(basic), order: meta?.unitOrder ?? const []),
-          unitId: _unitKeyOf(basic),
-          kind: LibEntryKind.basic,
-        ));
-      }
-    }
-
+    // 2026-11-27 事故复盘：这里曾按「每个来源基础库各贴一条」生成
+    // `basicChips`，再叠加 emoji 分发 —— 一个跨 3 个基础库的作者会在播放页
+    // 出现 3 条长词条、把信息区顶满。owner 只要「媒体库 / 单元库 / 基础库
+    // 三个种类」，不是「每个来源各一条」。已撤掉，只保留单元库这一级。
     return LibBadges(
       libIds: ids,
       order: meta?.unitOrder ?? const [],
       names: names,
       grayIds: gray,
       grade: grade,
-      basicChips: basicChips,
     );
   }
 }

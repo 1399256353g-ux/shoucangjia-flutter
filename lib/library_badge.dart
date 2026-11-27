@@ -4,20 +4,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart'
     show
-        Alignment,
         Border,
         BorderRadius,
-        BoxBorder,
         BoxConstraints,
         BoxDecoration,
         BuildContext,
         Color,
+        ConstrainedBox,
         Container,
         EdgeInsets,
         FontWeight,
         StatelessWidget,
         Text,
-        TextAlign,
         TextOverflow,
         TextStyle,
         ValueListenableBuilder,
@@ -54,6 +52,9 @@ enum LibEntryKind {
 
 /// 词条圆角：三种层级共用，**不可调**（形状一致是硬约束）。
 const double kEntryRadius = 6;
+
+/// 单个词条最大宽度（逻辑像素）。超出省略，不撑满信息区。
+const double kBadgeChipMaxWidth = 120;
 
 /// P1：单个层级的词条外观（只允许改边框粗细与底纹透明度）。
 ///
@@ -155,21 +156,24 @@ class EntryStyle {
 ///  3. 底纹浓度：0.96 / 0.90 / 0.80（逐级变透）
 const Map<LibEntryKind, EntryStyle> kDefaultEntryStyle =
     <LibEntryKind, EntryStyle>{
+  // 2026-11-27 事故复盘：上一版把这里从 1.2/0.8/0.5 改成 2.0/1.3/0.8，
+  // 还把单元库/基础库的边框色从黑改成浅灰 —— 浅灰压在浅底纹上几乎看不见，
+  // 词条发虚、层级也分不出来。默认值恢复到 owner 认可的原观感。
   LibEntryKind.top: EntryStyle(
-      borderWidth: 2.0,
-      borderAlpha: 0.95,
-      fillAlpha: 0.96,
+      borderWidth: 1.2,
+      borderAlpha: 0.85,
+      fillAlpha: 0.94,
       borderColor: 0xFFFFFFFF),
   LibEntryKind.unit: EntryStyle(
-      borderWidth: 1.3,
-      borderAlpha: 0.70,
-      fillAlpha: 0.90,
-      borderColor: 0xFFE2E8F0),
-  LibEntryKind.basic: EntryStyle(
       borderWidth: 0.8,
-      borderAlpha: 0.45,
-      fillAlpha: 0.80,
-      borderColor: 0xFFCBD5E1),
+      borderAlpha: 0.35,
+      fillAlpha: 0.90,
+      borderColor: 0xFF000000),
+  LibEntryKind.basic: EntryStyle(
+      borderWidth: 0.5,
+      borderAlpha: 0.18,
+      fillAlpha: 0.86,
+      borderColor: 0xFF000000),
 };
 
 /// 库词条（作者卡片左上角）的配色与标签逻辑。
@@ -517,27 +521,18 @@ class LibraryBadge {
   ///
   /// 边框粗细与底纹浓度可在「设置 → 自定义 → 库词条配色」里按层级调整；
   /// 圆角与内边距**不可调**，形状尺寸永远一致。
-  /// 词条的边框（用 `foregroundDecoration` 叠加，**不占布局**）。
-  ///
-  /// 返回 null 表示不画（厚度为 0）。
-  static BoxBorder? borderFor(LibEntryKind kind) {
-    final st = styleFor(kind);
-    if (st.borderWidth <= 0) return null;
-    final base = Color(st.borderColor ??
-        (kDefaultEntryStyle[kind]?.borderColor ?? 0xFF000000));
-    return Border.all(
-        color: base.withValues(alpha: st.borderAlpha), width: st.borderWidth);
-  }
 
   static BoxDecoration decorationFor(LibEntryKind kind, int argb) {
     final st = styleFor(kind);
-    // 边框不在这里画。owner 2026-11-26：「叫你不要动词条占用面积的大小，调粗
-    // 边框占用不就变大了吗」——`border:` 会**向内挤占**内容盒，边框一变粗
-    // 文字可用宽度就变小，词条看起来被撑大/换行。边框改由 [borderFor]
-    // 配合 `foregroundDecoration` 叠加，只改变视觉、**不改变占位**。
+    // 与原始实现同一条路径：边框画在 decoration 里。
+    // 唯一新增：用户显式调过 borderColor 时用它，否则按层级默认（白/黑）。
+    final base = Color(st.borderColor ??
+        (kind == LibEntryKind.top ? 0xFFFFFFFF : 0xFF000000));
+    final borderColor = base.withValues(alpha: st.borderAlpha);
     return BoxDecoration(
       color: Color(argb).withValues(alpha: st.fillAlpha),
       borderRadius: BorderRadius.circular(kEntryRadius),
+      border: Border.all(color: borderColor, width: st.borderWidth),
     );
   }
 
@@ -951,37 +946,26 @@ class LibBadgeChip extends StatelessWidget {
   }
 
   Widget _paint() {
-    // 位置词条自动省略目录名前缀序号（`(1) 名称` → `名称`）。
     final text = label.startsWith('+')
         ? label
         : LibraryBadge.labelWithEmoji(LibraryBadge.stripIndex(label), unitId);
-    // 层级差异只由 LibraryBadge 的外观决定（形状/尺寸统一，只改边框底纹）。
-    // 边框走 foregroundDecoration：加粗只影响视觉，**不改变词条占位**。
-    return Container(
-      // owner 2026-11-26：「词条里的文字要放在词条区域的中央，现在是更偏向
-      // 靠在下边的」。
-      //
-      // 根因：`height: 1.25` 会在字号上方留出额外行距，而容器只有
-      // `vertical: 1` 的固定内边距，那点行距把文字整体压向底部。
-      // 现在用 `Center` 让文字在盒子里垂直居中，行距不再参与定位。
-      padding: const EdgeInsets.symmetric(horizontal: 5),
-      constraints: const BoxConstraints(minHeight: 15),
-      alignment: Alignment.center,
-      decoration: LibraryBadge.decorationFor(kind, color),
-      foregroundDecoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(kEntryRadius),
-        border: LibraryBadge.borderFor(kind),
-      ),
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 9,
-          height: 1.05,
-          fontWeight: FontWeight.w600,
-          color: Color(LibraryBadge.textColorOn(color)),
+    // owner 2026-11-27：词条在播放页太长。库名最长 42 字、中位 15 字，
+    // 不设上限就会撑满信息区。上限按「一行两三条」取，超出省略。
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: kBadgeChipMaxWidth),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: LibraryBadge.decorationFor(kind, color),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 9,
+            height: 1.25,
+            fontWeight: FontWeight.w600,
+            color: Color(LibraryBadge.textColorOn(color)),
+          ),
         ),
       ),
     );
