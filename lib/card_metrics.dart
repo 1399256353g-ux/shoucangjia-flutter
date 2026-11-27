@@ -101,7 +101,13 @@ const double kDeletedThumbSize = 56;
 /// 0.9.289：首屏预热此前按 `firstScreenRowCount` 的默认 72 行高估算，实际
 /// 排版是 67（`ListTile` + 两行 subtitle），多算约 7% —— 预热到的是屏幕外的
 /// 最后一行头像。列表页的分隔线也是 1dp，两者一起决定真实行步进。
-const double kAuthorRankTileHeight = 67;
+///
+/// 0.9.343：媒体库词条接进来后实测是 **67.6**（词条块 11 → 14.6dp，
+/// `ListTile` 自己不出整数）。常量若继续写 67，每行少算 0.6dp——两屏 1600dp
+/// 下恰好还算 24 行，但这是幸运而不是正确；行数一改就会多预热屏幕外一行。
+/// 现在这个值是**测出来的**，并有 widget 测试钉住「真实排版高度 == 常量」
+/// （`test/rank_row_extent_98_test.dart`）。不能随手改回整数。
+const double kAuthorRankTileHeight = 67.6;
 
 /// 排行榜列表的分隔线高度（页面 `Divider(height: ...)`）。
 const double kAuthorRankDividerHeight = 1;

@@ -3047,18 +3047,25 @@ class LibBadges extends StatelessWidget {
       chipMaxWidth: chipMaxWidth,
       chips: [
         for (var i = 0; i < labels.length; i++)
-          BadgeChipSpec(
-            label: labels[i],
-            unitId: i < shown.length ? shown[i] : '',
-            kind: i < shown.length
-                ? LibraryBadge.entryKindOfUnit(shown[i])
-                : LibEntryKind.unit,
-            color: (labels[i].startsWith('+') ||
-                    (i < shown.length && grayIds.contains(shown[i])))
-                ? LibraryBadge.gray
-                : LibraryBadge.colorForUnit(i < shown.length ? shown[i] : '',
-                    order: colorOrder),
-          ),
+          // `+N` 那一条不对应任何库：`labels` 比 `shown` 多出一项（末尾的
+          // 折叠计数）。此前仍拿 `shown[i]` 取 id/层级，于是「+2」这个词条会
+          // 用第 4 个库的真实层级外观（比如媒体库粗边框）看起来像一级词条，
+          // 颜色又因为 `startsWith('+')` 被强行改灰——同一个词条两处口径相反。
+          if (labels[i].startsWith('+'))
+            BadgeChipSpec(
+                label: labels[i], color: LibraryBadge.gray)
+          else
+            BadgeChipSpec(
+              label: labels[i],
+              unitId: i < shown.length ? shown[i] : '',
+              kind: i < shown.length
+                  ? LibraryBadge.entryKindOfUnit(shown[i])
+                  : LibEntryKind.unit,
+              color: (i < shown.length && grayIds.contains(shown[i]))
+                  ? LibraryBadge.gray
+                  : LibraryBadge.colorForUnit(i < shown.length ? shown[i] : '',
+                      order: colorOrder),
+            ),
         if (grade.isNotEmpty)
           BadgeChipSpec(
             label: grade,
@@ -3219,19 +3226,26 @@ class UnitBadges extends StatelessWidget {
     // 这里按结构补一级：单元库 → 所属媒体库根（`topOfUnit` 结构表），
     // 拿不到就不贴（不编一个假的一级，也不读目录名）。单连接旧形态下
     // 单元库自己就是一级，`topIdFor` 返回它自己，于是自然不重复贴。
+    // 逐个单元库取所属媒体库，**不是只看第一个**。
+    //
+    // 同名作者可能同时挂在两台服务器（两个媒体库）下——挂载不跨单元库，
+    // 但作者身份是按平台 uid 认的，于是 `ids` 里会有属于 A 库与 B 库的两个
+    // 单元库。此前只对 `ids.first` 求一次媒体库，作者卡上永远只有先出现的
+    // 那一个媒体库词条，另一个库的归属在界面上不存在——而 owner 的原话是
+    // 「多挂载作者挂几个文件夹就贴几个」。
     final mediaIds = <String>[];
     final namesWithTop = <String, String>{...names};
-    if (ids.isNotEmpty) {
-      final topId = meta?.mediaIdFor(ids.first) ?? '';
-      if (topId.isNotEmpty && !ids.contains(topId)) {
-        final label = meta?.topNameOf(topId) ?? '';
-        if (label.isNotEmpty) {
-          mediaIds.add(topId);
-          namesWithTop[topId] = label;
-          // 媒体库词条是继承源，不是「无归属」：不能被灰。
-          gray.remove(topId);
-        }
+    for (final unitId in ids) {
+      final topId = meta?.mediaIdFor(unitId) ?? '';
+      if (topId.isEmpty || ids.contains(topId) || mediaIds.contains(topId)) {
+        continue;
       }
+      final label = meta?.topNameOf(topId) ?? '';
+      if (label.isEmpty) continue;
+      mediaIds.add(topId);
+      namesWithTop[topId] = label;
+      // 媒体库词条是继承源，不是「无归属」：不能被灰。
+      gray.remove(topId);
     }
     // 媒体库词条排在最前（层级从高到低），后面才是单元库与折叠的基础库。
     final shownIds = <String>[...mediaIds, ...ids];
@@ -4878,8 +4892,10 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('播放设置'), actions: [
         TextButton(
+          // 只重置播放参数：按键绑定属于另一个页面，不能被这一页的按钮带走
+          // （此前调 `resetDefaults()`，用户改过的 Ctrl+J… 全部静默丢失）。
           onPressed: () {
-            setState(() => AppSettings.resetDefaults());
+            setState(() => AppSettings.resetPlayback());
             _persist();
           },
           child: const Text('恢复默认'),
@@ -5033,8 +5049,9 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('按键绑定'), actions: [
         TextButton(
+          // 只重置按键：播放倍速/预载属于另一个页面，不能被这一页的按钮带走。
           onPressed: () {
-            setState(() => AppSettings.resetDefaults());
+            setState(() => AppSettings.resetKeys());
             AppSettings.save();
           },
           child: const Text('恢复默认'),

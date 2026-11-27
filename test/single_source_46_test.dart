@@ -82,7 +82,7 @@ void main() {
     });
 
     test('解码宽度按头像显示尺寸算，不是按列表行高', () {
-      // 42dp × 2 = 84；若误用行高 67 会得到 134。
+      // 42dp × 2 = 84；若误用行高 67.6 会得到 135.2。
       expect(avatarDecodeWidth(displaySize: 42, devicePixelRatio: 2), 84);
       expect(avatarDecodeWidth(displaySize: 58, devicePixelRatio: 2), 116);
       expect(avatarDecodeWidth(displaySize: 42, devicePixelRatio: 2),
@@ -91,10 +91,12 @@ void main() {
   });
 
   group('排行榜行步进只有一处（0.9.289）', () {
-    test('行高与分隔线合成行步进 68', () {
-      expect(kAuthorRankTileHeight, 67);
+    test('行高与分隔线合成行步进 68.6', () {
+      // 0.9.343：行高是测出来的 67.6，不是整数 67（词条块 14.6dp 后
+      // `ListTile` 算出的真实高度带小数）。
+      expect(kAuthorRankTileHeight, closeTo(67.6, 1e-9));
       expect(kAuthorRankDividerHeight, 1);
-      expect(kAuthorRankRowExtent, 68);
+      expect(kAuthorRankRowExtent, closeTo(68.6, 1e-9));
     });
 
     test('firstScreenRowCount 不再有默认行高（调用方必须给几何）', () {
