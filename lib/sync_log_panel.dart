@@ -55,12 +55,22 @@ class SyncLogPanelState extends State<SyncLogPanel> {
   /// 正在提交保留天数（避免连点）。
   bool busy = false;
 
-  http.Client get _client => widget.client ?? http.Client();
+  /// 注入的客户端优先；否则本页自建一个并在 dispose 关闭（与
+  /// `collection_sync_panel` 同一理由：每个请求各建一个客户端且从不关闭，
+  /// 反复进出的页面会各留一套连接池）。
+  http.Client? _ownClient;
+  http.Client get _client => widget.client ?? (_ownClient ??= http.Client());
 
   @override
   void initState() {
     super.initState();
     load();
+  }
+
+  @override
+  void dispose() {
+    _ownClient?.close();
+    super.dispose();
   }
 
   Future<void> load() async {

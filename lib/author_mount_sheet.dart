@@ -71,12 +71,20 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
   bool busy = false;
   String? err;
 
-  http.Client get _client => widget.client ?? http.Client();
+  /// 注入的客户端优先；否则本页自建一个并在 dispose 关闭。
+  http.Client? _ownClient;
+  http.Client get _client => widget.client ?? (_ownClient ??= http.Client());
 
   @override
   void initState() {
     super.initState();
     load();
+  }
+
+  @override
+  void dispose() {
+    _ownClient?.close();
+    super.dispose();
   }
 
   Future<void> load() async {

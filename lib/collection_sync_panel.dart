@@ -51,7 +51,14 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
   bool saving = false;
   String? err;
 
-  http.Client get _client => widget.client ?? http.Client();
+  /// 注入的客户端（测试/调用方复用）优先；否则本页自建一个并**在 dispose
+  /// 关闭**。
+  ///
+  /// 此前是 `widget.client ?? http.Client()`：每个请求各建一个客户端、从不
+  /// 关闭——保存一次要发 GET + POST，就是两条泄漏的 keep-alive 连接与两组
+  /// 连接池；页面反复进出时越积越多。生命周期与页面同长才合理。
+  http.Client? _ownClient;
+  http.Client get _client => widget.client ?? (_ownClient ??= http.Client());
 
   Uri get _settingsUri {
     // 拼接走 `api_url.joinApiUrl`：`base` 带查询串 / 带尾斜杠 / 缺协议都已在
@@ -75,6 +82,12 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
   void initState() {
     super.initState();
     load();
+  }
+
+  @override
+  void dispose() {
+    _ownClient?.close();
+    super.dispose();
   }
 
   Future<void> load() async {

@@ -153,6 +153,14 @@ List<CrawlerSection> crawlerSectionsOf({
 String unitRelKey(String serverId, String rel) =>
     '${serverId.trim()}\u0001${normalizeRelPath(rel)}';
 
+/// 注册库爬虫配置的键：连接 + 库 id。
+///
+/// 只用库 id 会让两台服务端的同名库（`lib-1` 在两边都很常见）共用一条
+/// 配置：A 的「不自动抓取」会把 B 的「每 30 分钟」盖掉，而两行标题各自
+/// 显示自己的名字，界面上完全看不出一处错。
+String crawlerConfigKey(String serverId, String libId) =>
+    '${serverId.trim()}\u0001${libId.trim()}';
+
 /// 合并各连接的 `/api/nodes` `crawler` 表（键＝连接 + 归一化 rel）。
 ///
 /// 只按 rel 合并会让两台服务端的同名目录互相顶掉：B 的「有脚本」把 A 的

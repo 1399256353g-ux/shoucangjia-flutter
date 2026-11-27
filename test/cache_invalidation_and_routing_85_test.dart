@@ -59,9 +59,14 @@ void main() {
           reason: '节点 base 用了当前库的服务器');
       expect(body.contains('serverId: cfg.serverIdFor(cfg.lib)'), isFalse,
           reason: '节点归属用了当前库的连接 id');
-      expect(body.contains('serverBase: cfg.baseFor(lib)'), isTrue);
-      expect(body.contains('serverId: cfg.serverIdFor(lib)'), isTrue);
-      expect(body.contains('serverLabel: cfg.serverLabelFor(lib)'), isTrue);
+      // 0.9.323：节点归属改成「有显式来源就用来源连接的 base/id」，
+      // 没来源时才回落 `cfg.baseFor(lib)`——两条分支都必须按同一个 lib，
+      // 不能有一支写 `cfg.base`（当前库）。
+      expect(body.contains('serverBase: source.isScoped'), isTrue);
+      expect(body.contains('serverId: source.isScoped'), isTrue);
+      expect(body.contains(': cfg.baseFor(lib)'), isTrue);
+      expect(body.contains(': cfg.serverIdFor(lib)'), isTrue);
+      expect(body.contains(': cfg.serverLabelFor(lib)'), isTrue);
     });
 
     test('图文作品取图按作品所属库取头', () {
@@ -82,10 +87,15 @@ void main() {
       expect(body.contains('cache.clear()'), isTrue);
       expect(body.contains('_cachedAt.clear()'), isTrue);
       expect(body.contains('_loading.clear()'), isTrue);
-      expect(body.contains('cache.remove(lib)'), isTrue);
-      expect(body.contains('_cachedAt.remove(lib)'), isTrue);
-      expect(body.contains('_loading.remove(lib)'), isTrue,
-          reason: '正在飞的 Future 不清，下一次 load 会复用旧结果');
+      // 0.9.323：键可能带来源连接（同一库在两台服务器各有一份元数据），
+      // 「作废这个库」必须清掉**全部**副本。旧的 `cache.remove(lib)` 只清
+      // 默认那一份，另一台的旧树会留到 TTL 到期。三张表都按
+      // `metaKeyIsFor` 清。
+      expect(RegExp(r'\w+\.removeWhere\(\(k, _\) => metaKeyIsFor\(k, lib\)\)')
+          .allMatches(body).length, 3,
+          reason: 'cache / _loading / _cachedAt 三张表都要按库清');
+      expect(body.contains('cache.remove(lib)'), isFalse,
+          reason: '只清默认那一份');
     });
 
     test('类型索引缓存有唯一清入口', () {

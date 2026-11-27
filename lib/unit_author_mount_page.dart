@@ -55,7 +55,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   bool busy = false;
   String? err;
 
-  http.Client get _client => widget.client ?? http.Client();
+  /// 注入的客户端优先；否则本页自建一个并在 dispose 关闭。
+  http.Client? _ownClient;
+  http.Client get _client => widget.client ?? (_ownClient ??= http.Client());
 
   /// 单元库标识：一律用 rel（服务端 `resolveUnit` 只认 rel 或 id 反查，
   /// rel 是最直接的一手标识；id 形式在两种 id 语义下可能对不上目录）。
@@ -65,6 +67,12 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   void initState() {
     super.initState();
     load();
+  }
+
+  @override
+  void dispose() {
+    _ownClient?.close();
+    super.dispose();
   }
 
   Future<void> load() async {

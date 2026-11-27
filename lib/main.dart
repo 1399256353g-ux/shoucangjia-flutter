@@ -106,6 +106,7 @@ import 'header_collapse.dart';
 import 'work_card.dart';
 import 'work_key.dart';
 import 'multi_server.dart';
+import 'meta_source.dart';
 import 'node_key.dart';
 import 'server_origin.dart';
 import 'playback_flow.dart';
@@ -528,21 +529,35 @@ class LibMeta {
       _loading.clear();
       return;
     }
-    cache.remove(lib);
-    _cachedAt.remove(lib);
-    _loading.remove(lib);
+    // 键可能带来源连接（同一库在两台服务器各有一份元数据），
+    // 「作废这个库」必须清掉**全部连接**的副本，不能只清默认那一份。
+    cache.removeWhere((k, _) => metaKeyIsFor(k, lib));
+    _loading.removeWhere((k, _) => metaKeyIsFor(k, lib));
+    _cachedAt.removeWhere((k, _) => metaKeyIsFor(k, lib));
   }
 
-  static Future<LibMeta> load(String lib, {bool force = false}) {
-    final hit = cache[lib];
-    final at = _cachedAt[lib];
+  /// 读取某库的元数据。
+  ///
+  /// [source] 是**这条记录属于哪台服务器**。不传（旧行为）时按 `cfg` 绑定表
+  /// 路由——那条路只在首页聚合过库列表后才成立：从设置页直接进入时表是空的，
+  /// 第二台服务端的库 id 会被拿去请求默认服务器（404 → 叶节点全落 SECRET，
+  /// 或恰好同名时读到另一台服务器的整棵树）。调用方知道自己读的是哪台
+  /// 服务器时必须传进来。
+  ///
+  /// 缓存键同时带连接（`meta_source.metaCacheKey`）：两台服务端各有一个
+  /// `lib-1` 时只按 `lib` 做键，后到的一份会把先到的一份顶掉。
+  static Future<LibMeta> load(String lib,
+      {bool force = false, MetaSource source = MetaSource.none}) {
+    final key = metaCacheKey(lib, source);
+    final hit = cache[key];
+    final at = _cachedAt[key];
     if (!force &&
         hit != null &&
         at != null &&
         DateTime.now().difference(at) < cacheTtl) {
       return Future.value(hit);
     }
-    return _loading.putIfAbsent(lib, () async {
+    return _loading.putIfAbsent(key, () async {
       var basics = const <BasicLib>[];
       var allBasics = const <BasicLib>[];
       var stats = <String, dynamic>{};
@@ -551,21 +566,25 @@ class LibMeta {
       var units = const <UnitLibrary>[];
       var basicToUnit = const <String, String>{};
       try {
+        // 地址与鉴权同源：有显式来源就用它，否则按 `lib` 走绑定表。
+        // 旧写法两处都是 `cfg.*`，绑定表为空（设置页直入）或库里没有这条
+        // 绑定时，第二台服务端的请求会打到默认服务器。
+        final hdr = source.headers();
+        Uri u(String path) => source.isScoped
+            ? Uri.parse(libApiUrl(source.base, path, lib))
+            : cfg.u(path, lib: lib);
+        Map<String, String> h() => hdr ?? cfg.headersFor(lib);
         final rs = await Future.wait([
           http.get(
-              cfg.u(
-                  '/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}',
-                  lib: lib),
+              u('/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
               // 地址按 `lib` 路由，鉴权头也必须按 `lib`（`cfg.headers` 是
               // **当前库**那条连接的账号）：从另一个服务端的库进来时，两者
               // 不同源就是拿 A 的密码去敲 B 的门（401），整棵库树退回空。
-              headers: cfg.headersFor(lib)),
-          http.get(cfg.u('/api/libraries', lib: lib),
-              headers: cfg.headersFor(lib)),
-          http.get(cfg.u('/api/author_stats.json', lib: lib),
-              headers: cfg.headersFor(lib)),
-          http.get(cfg.u('/api/nodes', lib: lib),
-              headers: cfg.headersFor(lib)),
+              headers: h()),
+          http.get(u('/api/libraries'), headers: h()),
+          http.get(u('/api/author_stats.json'),
+              headers: h()),
+          http.get(u('/api/nodes'), headers: h()),
         ]).timeout(const Duration(seconds: 10));
         if (rs[0].statusCode == 200 && rs[1].statusCode == 200) {
           final lj = jsonOf(rs[0]);
@@ -642,9 +661,18 @@ class LibMeta {
                   // 服务器（同族缺陷，地址与账号之外还有「节点归属」这一份）。
                   : nodesFromMarks(markRels,
                       covers: markCovers,
-                      serverBase: cfg.baseFor(lib),
-                      serverId: cfg.serverIdFor(lib),
-                      serverLabel: cfg.serverLabelFor(lib));
+                      // 节点归属也按来源：`cfg.baseFor(lib)` 在绑定表为空时
+                      // 回落到默认服务器，单元库卡片的封面与挂载请求就会
+                      // 打到另一台机器（同族缺陷的「归属」那一份）。
+                      serverBase: source.isScoped
+                          ? source.base
+                          : cfg.baseFor(lib),
+                      serverId: source.isScoped
+                          ? source.serverId
+                          : cfg.serverIdFor(lib),
+                      serverLabel: source.isScoped
+                          ? ''
+                          : cfg.serverLabelFor(lib));
               final tree = buildUnitTree(
                   nodes: nodes,
                   basics: unitBasics,
@@ -679,9 +707,9 @@ class LibMeta {
           unitTree: unitTree,
           units: units,
           basicToUnit: basicToUnit);
-      cache[lib] = meta;
-      _cachedAt[lib] = DateTime.now();
-      _loading.remove(lib);
+      cache[key] = meta;
+      _cachedAt[key] = DateTime.now();
+      _loading.remove(key);
       return meta;
     });
   }
@@ -3451,7 +3479,11 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
   Future<void> _loadMeta() async {
     if (_base.isEmpty || _metaLib.isEmpty) return;
     try {
-      final m = await LibMeta.load(_metaLib);
+      // 记录带着所属连接的地址与鉴权头（从单元库页进来时一定非空）。
+      // 只传库 id 会让 `LibMeta.load` 去查绑定表——那页的绑定表里只有默认
+      // 注册库那几条，跨服务端时元数据整棵取自另一台机器。
+      final m = await LibMeta.load(_metaLib,
+          source: MetaSource.ofBase(_base, _headers));
       if (!mounted) return;
       setState(() => _meta = m);
     } catch (_) {}
@@ -6416,6 +6448,27 @@ class MarkedNodes {
   const MarkedNodes(this.rels, this.covers);
 }
 /// 设置 → 爬虫设置：独立管理页，不再打开主页（避免套叠重复）。
+/// 爬虫设置页「一台服务器」的取数结果（`_loadServerPart` 的返回）。
+class _CrawlerServerPart {
+  final String serverId;
+  final List<Map<String, dynamic>> libs;
+  final Map<String, Map<String, dynamic>> crawlers;
+
+  /// 这一台服务器上「配置没读出来」的库 id（与「配置为空」区分开）。
+  final Set<String> crawlFailed;
+  final CrawlerMetaUnits? meta;
+  final Map<String, bool> flags;
+
+  const _CrawlerServerPart({
+    required this.serverId,
+    required this.libs,
+    required this.crawlers,
+    required this.crawlFailed,
+    required this.meta,
+    required this.flags,
+  });
+}
+
 class MediaCrawlerSettingsPage extends StatefulWidget {
   const MediaCrawlerSettingsPage({super.key});
   @override
@@ -6433,7 +6486,21 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   bool loading = true;
   String? err;
 
-  /// 注册库 id → 爬虫配置（`/api/crawler?id=`）。
+  /// 本次载入的在线连接（`id → 连接`）：单元库条目的地址与鉴权从这里取。
+  ///
+  /// 此前条目页用 `cfg.baseFor/lib.headersFor`——绑定表只在首页聚合时建立，
+  /// 从设置页直接进入时是空的，第二台服务端的单元库会拿默认那台的地址与
+  /// 账号去请求（401，或恰好同名库时读到别人的数据）。
+  Map<String, ServerConn> _serversById = const <String, ServerConn>{};
+
+  /// `crawlerConfigKey(连接, 库)` → 该库配置读取失败。
+  final Set<String> _crawlFailed = <String>{};
+
+  /// `<连接>\u0001<注册库 id>` → 爬虫配置（`/api/crawler?id=`）。
+  ///
+  /// 键必须带连接（`crawler_sections.crawlerConfigKey`）：只按库 id 建键时，
+  /// 两台服务端各有一个 `lib-1` 就共用一条配置——A 的「不自动抓取」会把
+  /// B 的「每 30 分钟」盖掉，而两行各自显示自己的库名，看不出哪里错。
   final Map<String, Map<String, dynamic>> crawlers = {};
 
   /// `<连接>\u0001<rel>` → 是否有爬虫脚本（合并各连接的 `/api/nodes`）。
@@ -6483,58 +6550,31 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     });
     try {
       crawlers.clear();
+      _crawlFailed.clear();
       final servers = await _liveServers();
       if (servers.isEmpty) throw Exception('未配置服务器');
+      _serversById = {for (final s in servers) s.id: s};
 
       // 每个连接各取一次：注册库列表 + 单元库元数据 + 脚本表。
       // 此前只用 `cfg.base` / `LibMeta.load(cfg.lib)`：第二台服务端的库与
       // 单元库在这页一条都不出现（主页面却看得到）。
+      //
+      // 连接之间并发（每个连接三件事彼此独立，串行时 N 台服务器 =
+      // 3N 次往返）；同一个连接内注册库的爬虫配置也并发（40 多个库串行
+      // await 会让这一页开屏等十几秒）。
+      final parts = await mapConcurrent<ServerConn, _CrawlerServerPart>(
+          servers, 4, (s) => _loadServerPart(s));
       final metas = <CrawlerMetaUnits>[];
       final libsByServer = <String, List<Map<String, dynamic>>>{};
       final flagsByServer = <String, Map<String, bool>>{};
-      for (final s in servers) {
-        final headers = {'Authorization': basicAuthHeader(s.user, s.pass)};
-        try {
-          final r = await http
-              .get(Uri.parse('${s.base}/api/libraries'), headers: headers)
-              .timeout(const Duration(seconds: 10));
-          if (r.statusCode == 200) {
-            final list = mapsOf(jsonMapOf(r)['libraries']);
-            libsByServer[s.id] = list;
-            for (final l in list) {
-              final id = '${l['id'] ?? ''}'.trim();
-              if (id.isEmpty) continue;
-              try {
-                final cr = await http
-                    .get(Uri.parse(libApiUrl(s.base, '/api/crawler', id)),
-                        headers: headers)
-                    .timeout(const Duration(seconds: 8));
-                if (cr.statusCode == 200) {
-                  final cj = jsonMapOf(cr);
-                  crawlers[id] = cj;
-                }
-              } catch (_) {}
-            }
-          }
-        } catch (_) {}
-        // 元数据按该连接的**第一个注册库**取：`cfg.lib` 只属于默认连接，
-        // 拿去请求别台服务器的库树必然空。
-        final libs = libsByServer[s.id] ?? const <Map<String, dynamic>>[];
-        final primary = libs.isEmpty ? '' : '${libs.first['id'] ?? ''}'.trim();
-        if (primary.isNotEmpty) {
-          try {
-            final m = await LibMeta.load(primary);
-            metas.add((tops: m.tops, units: m.units));
-          } catch (_) {}
+      for (final p in parts) {
+        if (p.libs.isNotEmpty) libsByServer[p.serverId] = p.libs;
+        if (p.meta != null) metas.add(p.meta!);
+        if (p.flags.isNotEmpty) flagsByServer[p.serverId] = p.flags;
+        crawlers.addAll(p.crawlers);
+        for (final f in p.crawlFailed) {
+          _crawlFailed.add(crawlerConfigKey(p.serverId, f));
         }
-        try {
-          final nr = await http
-              .get(Uri.parse('${s.base}/api/nodes'), headers: headers)
-              .timeout(const Duration(seconds: 8));
-          if (nr.statusCode == 200) {
-            flagsByServer[s.id] = unitCrawlerFlags(jsonOf(nr));
-          }
-        } catch (_) {}
       }
 
       final sections = crawlerSectionsOf(
@@ -6555,11 +6595,109 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     }
   }
 
+  /// 一台服务器在这页需要的三份数据（库列表 / 元数据 / 脚本表 / 爬虫配置）。
+  ///
+  /// 抽成一个方法而不是在 `load` 里逐台 await：这样连接之间、注册库之间
+  /// 都能并发，且每份结果自带来源 id（不再靠共享 map 的写入顺序）。
+  Future<_CrawlerServerPart> _loadServerPart(ServerConn s) async {
+    final headers = {'Authorization': basicAuthHeader(s.user, s.pass)};
+    var libs = const <Map<String, dynamic>>[];
+    final crawlers = <String, Map<String, dynamic>>{};
+    CrawlerMetaUnits? meta;
+    var flags = const <String, bool>{};
+    try {
+      final r = await http
+          .get(Uri.parse('${s.base}/api/libraries'), headers: headers)
+          .timeout(const Duration(seconds: 10));
+      if (r.statusCode == 200) {
+        // 每条库记录都要打上来源连接：这一页有两条入口会把它交给
+        // `CrawlerConfigPage` / `MaintenancePage`，那两页的地址与鉴权由
+        // `libraryBaseOf` / `libraryHeadersOf` 从记录自身取；不打标就只能
+        // 回落绑定表，而绑定表里没有第二台服务器的库——请求打到默认那台。
+        libs = [
+          for (final raw in mapsOf(jsonMapOf(r)['libraries']))
+            withServerOrigin(raw,
+                id: s.id,
+                base: s.base,
+                label: s.cardLabel,
+                user: s.user,
+                pass: s.pass),
+        ];
+      }
+    } catch (_) {}
+
+    final ids = [
+      for (final l in libs) '${l['id'] ?? ''}'.trim()
+    ].where((id) => id.isNotEmpty).toList(growable: false);
+    // 读失败的库要单独记下来：`null` 与「真的没有配置」在界面上是两件事。
+    // 此前两者都落成「不自动抓取 · 脚本 0 个」——401/超时看起来像一条真设置。
+    final fetched = await mapConcurrent<String, Map<String, dynamic>?>(ids, 6,
+        (id) async {
+      try {
+        final cr = await http
+            .get(Uri.parse(libApiUrl(s.base, '/api/crawler', id)),
+                headers: headers)
+            .timeout(const Duration(seconds: 8));
+        if (cr.statusCode == 200) return jsonMapOf(cr);
+      } catch (_) {}
+      return null;
+    });
+    final failed = <String>{};
+    for (var i = 0; i < ids.length; i++) {
+      final cj = fetched[i];
+      if (cj != null) {
+        crawlers[crawlerConfigKey(s.id, ids[i])] = cj;
+      } else {
+        failed.add(ids[i]);
+      }
+    }
+
+    // 元数据按该连接的**第一个注册库**取：`cfg.lib` 只属于默认连接，
+    // 拿去请求别台服务器的库树必然空。
+    final primary = ids.isEmpty ? '' : ids.first;
+    if (primary.isNotEmpty) {
+      try {
+        // 来源显式传给 `LibMeta.load`：绑定表只在首页聚合后建立，
+        // 从设置页直接进来时它是空的——这里自己知道读的是哪台服务器，
+        // 再让函数去「猜」就会把第二台的库 id 拿去请求默认服务器。
+        final m = await LibMeta.load(primary,
+            source: MetaSource.ofServer(
+                id: s.id, base: s.base, user: s.user, pass: s.pass));
+        meta = (tops: m.tops, units: m.units);
+      } catch (_) {}
+    }
+
+    try {
+      final nr = await http
+          .get(Uri.parse('${s.base}/api/nodes'), headers: headers)
+          .timeout(const Duration(seconds: 8));
+      if (nr.statusCode == 200) flags = unitCrawlerFlags(jsonOf(nr));
+    } catch (_) {}
+    return _CrawlerServerPart(
+        serverId: s.id,
+        libs: libs,
+        crawlers: crawlers,
+        crawlFailed: failed,
+        meta: meta,
+        flags: flags);
+  }
+
   Map _cfgOf(Map<String, dynamic>? j) =>
       mapOrNull(j == null ? null : j['crawler']) ?? const <String, dynamic>{};
 
   int _scriptCount(Map<String, dynamic>? j) =>
       listLengthOf(j == null ? null : j['scripts']);
+
+  /// 条目副标题：频率 + 脚本数；**读失败时说实话**。
+  ///
+  /// 旧写法在 `j == null` 时写「不自动抓取 · 脚本 0 个」——超时与 401 看起来
+  /// 跟一条真设置一模一样，用户会以为那台服务器的抓取被关掉了。
+  String _libSummary(String serverId, String libId, Map<String, dynamic>? j) {
+    if (j == null && _crawlFailed.contains(crawlerConfigKey(serverId, libId))) {
+      return '配置读取失败（网络或鉴权）· 脚本数未知';
+    }
+    return '${_freqText(j)} · 脚本 ${_scriptCount(j)} 个';
+  }
 
   String _freqText(Map<String, dynamic>? j) {
     final iv = intOf(_cfgOf(j)['intervalMin']);
@@ -6667,16 +6805,19 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   /// 键）；跨连接时菜单里的页面才知道该去哪台服务器。
   Widget _libTile(Map<String, dynamic> l) {
     final id = '${l['id'] ?? ''}'.trim();
-    final cfgOfLib = crawlers[id];
+    final sid = serverOriginOf(l).id;
+    // 配置按「连接 + 库 id」取：同名的库在两台服务端各有一份。
+    final cfgOfLib = crawlers[crawlerConfigKey(sid, id)];
+    final failed = _crawlFailed.contains(crawlerConfigKey(sid, id));
     return ListTile(
       leading: const Icon(Icons.library_books_outlined),
       title: Text(libraryDisplayName(id, '${l['name'] ?? id}'),
           maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-          '$id · ${_freqText(cfgOfLib)} · 脚本 ${_scriptCount(cfgOfLib)} 个',
+      subtitle: Text('$id · ${_libSummary(sid, id, cfgOfLib)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 11)),
+          style: TextStyle(
+              fontSize: 11, color: failed ? Colors.orange : null)),
       trailing: PopupMenuButton<String>(
         onSelected: (v) async {
           if (v == 'crawler') {
@@ -6739,10 +6880,17 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
               final libId = u.basics.isNotEmpty
                   ? u.basics.first.id
                   : (sid == cfg.serverIdFor() ? cfg.lib : '');
+              // 地址/账号取条目所属连接（本页自己刚读到的连接表），
+              // 拿不到才回落绑定表：避免「地址是 A、账号是 B」。
+              final conn = _serversById[sid];
               final base = u.node.serverBase.trim().isNotEmpty
                   ? u.node.serverBase.trim()
-                  : cfg.baseFor(libId);
-              final headers = cfg.headersFor(libId);
+                  : (conn?.base.isNotEmpty == true
+                      ? conn!.base
+                      : cfg.baseFor(libId));
+              final headers = conn != null
+                  ? {'Authorization': basicAuthHeader(conn.user, conn.pass)}
+                  : cfg.headersFor(libId);
               await Navigator.of(context).push(MaterialPageRoute(
                   builder: (c) => UnitCrawlerPage(
                         unit: u,

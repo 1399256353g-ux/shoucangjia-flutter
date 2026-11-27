@@ -62,7 +62,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
   /// M7：服务端下发的运行记录（上次/下次/最近结果）。
   Map<String, dynamic> schedule = const {};
 
-  http.Client get _client => widget.client ?? http.Client();
+  /// 注入的客户端优先；否则本页自建一个并在 dispose 关闭。
+  http.Client? _ownClient;
+  http.Client get _client => widget.client ?? (_ownClient ??= http.Client());
 
   String get _configUrl => unitCrawlerUrl(widget.base, '/api/unit/crawler',
       unitId: widget.unit.id, rel: widget.unit.rel);
@@ -80,6 +82,12 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
   void initState() {
     super.initState();
     load();
+  }
+
+  @override
+  void dispose() {
+    _ownClient?.close();
+    super.dispose();
   }
 
   Future<void> load() async {

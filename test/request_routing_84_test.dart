@@ -35,9 +35,15 @@ void main() {
       final body = main.substring(start, end);
       expect(_currentLibHeaderUses(body), 0,
           reason: 'cfg.headers 是当前库那条连接的账号，按 lib 取才对');
-      expect(
-          'cfg.headersFor(lib)'.allMatches(body).length, greaterThanOrEqualTo(4),
-          reason: 'libraries.json / libraries / author_stats / nodes 四条都要按 lib');
+      // 0.9.323：四条请求的头从「各自写 `cfg.headersFor(lib)`」收成一个
+      // `h()`——有显式来源（`MetaSource`）时用那条连接的账号，否则回落
+      // `cfg.headersFor(lib)`。判定改成「唯一出口 + 四条都用它 + 回落分支
+      // 仍按 lib」，比数 `cfg.headersFor(lib)` 的出现次数更贴近真实约束
+      // （旧写法再多写两遍也只是重复）。
+      expect(body.contains('cfg.headersFor(lib)'), isTrue,
+          reason: '没有显式来源时必须按 lib 取头');
+      expect('headers: h()'.allMatches(body).length, 4,
+          reason: 'libraries.json / libraries / author_stats / nodes 四条都要走同一出口');
     });
 
     test('作者类型索引（libraries.json + lib/<id>/index.json）按 lib 取头', () {
