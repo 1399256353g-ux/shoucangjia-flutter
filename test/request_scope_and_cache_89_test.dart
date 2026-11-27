@@ -15,7 +15,11 @@ import 'package:flutter_test/flutter_test.dart';
 ///    0.9.324 的统一扫描只认 `http.post`，漏了它；断网时界面永远停在「保存中…」。
 ///
 /// 只用合成 id / 地址，不涉任何真实目录或媒体内容。
-String _code(String p) => File(p).readAsStringSync();
+// 行尾归一：Windows CI 检出的是 CRLF，而下面 `_body` 的锚点里有 `\n`
+// 字面量（例如 '@override\n  Widget build(...)'）——不归一就永远 indexOf
+// 不到，本地 LF 绿、Windows 红。产品代码无关。
+String _code(String p) =>
+    File(p).readAsStringSync().replaceAll('\r\n', '\n');
 
 String _body(String src, String startMark, String endMark) {
   final s = src.indexOf(startMark);
