@@ -364,7 +364,13 @@ String libOfMediaPath(String p) {
 /// 四份逻辑一样、只是“当前库”的来源不同。这个回退放在调用点寫，必然会有
 /// 一处忘记兜（—或反过来，把非媒体路径当成「属于当前库」带错了鉴权头）。
 /// 现在 `lib_cover` 里一行：取不到库段就返回 [fallbackLib]。
-String libForMediaPath(String path, {String? fallbackLib}) {
+///
+/// 名字里的 **MediaPath** 是刻意的：它作用的是**地址字符串**，与
+/// `work_lib.workLibOf`（作用的是作品的 `_lib` 字段）不是同一件事。
+/// 两者此前一个叫 `libForMediaPath`、一个叫 `workLibOf`，看名字分不出
+/// 输入是路径还是条目，改错一处就是「按地址取库」与「按条目取库」
+/// 互相顶替——读起来都通顺，行为却不同。
+String libFromMediaPath(String path, {String? fallbackLib}) {
   final own = libOfMediaPath(path);
   if (own.isNotEmpty) return own;
   return fallbackLib?.trim() ?? '';

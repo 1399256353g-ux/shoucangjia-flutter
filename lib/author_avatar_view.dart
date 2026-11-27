@@ -32,7 +32,7 @@ import 'package:flutter/material.dart';
 import 'author_avatar.dart' show AvatarLetterPlaceholder;
 import 'author_grid.dart' show avatarDecodeWidth;
 import 'cover_cache.dart' show DiziCache;
-import 'lib_cover.dart' show libOfMediaPath, libForMediaPath;
+import 'lib_cover.dart' show libOfMediaPath, libFromMediaPath;
 import 'media_resize.dart' show kAvatarImageWidth, withImageWidth;
 
 /// 手动覆盖 + 调用方给的兜底路径 → 实际要请求的路径，以及它所属的库。
@@ -63,7 +63,7 @@ import 'media_resize.dart' show kAvatarImageWidth, withImageWidth;
 /// 播放页此前自己写 `libOfMediaPath(p).isEmpty ? _curLib : …`，是全 App 第三份
 /// 同义判断（封面解析里还有两份各自实现）。
 String avatarLibOf(String path, {String? fallbackLib}) =>
-    libForMediaPath(path, fallbackLib: fallbackLib);
+    libFromMediaPath(path, fallbackLib: fallbackLib);
 
 /// 画一个圆形作者头像：无图/加载中/失败都退到首字母占位（emoji 安全）。
 ///

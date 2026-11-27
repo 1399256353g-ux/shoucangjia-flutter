@@ -24,7 +24,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/author_avatar_view.dart';
 import 'package:shoucangjia/author_grid.dart' show avatarDecodeWidth;
 import 'package:shoucangjia/card_metrics.dart';
-import 'package:shoucangjia/lib_cover.dart' show libForMediaPath;
+import 'package:shoucangjia/lib_cover.dart' show libFromMediaPath;
 
 /// 去掉整行注释后再做「有没有第二个实现」的扫描。
 String _code(String path) => File(path)
@@ -82,13 +82,13 @@ void main() {
       expect(avatarLibOf('  /media/B/x.jpg  ', fallbackLib: 'A'), 'B');
     });
 
-    test('libForMediaPath：四份内联写法的唯一出口', () {
-      expect(libForMediaPath('/media/B/a.jpg', fallbackLib: 'A'), 'B');
-      expect(libForMediaPath('/media/', fallbackLib: 'A'), 'A');
-      expect(libForMediaPath('rel/a.jpg', fallbackLib: 'A'), 'A');
-      expect(libForMediaPath('rel/a.jpg'), '');
+    test('libFromMediaPath：四份内联写法的唯一出口', () {
+      expect(libFromMediaPath('/media/B/a.jpg', fallbackLib: 'A'), 'B');
+      expect(libFromMediaPath('/media/', fallbackLib: 'A'), 'A');
+      expect(libFromMediaPath('rel/a.jpg', fallbackLib: 'A'), 'A');
+      expect(libFromMediaPath('rel/a.jpg'), '');
       // 回退库前后的空白不影响鉴权头查找。
-      expect(libForMediaPath('rel/a.jpg', fallbackLib: ' A '), 'A');
+      expect(libFromMediaPath('rel/a.jpg', fallbackLib: ' A '), 'A');
     });
 
     test('main 里不再自己写「libOfMediaPath 为空就用当前库」', () {
@@ -97,7 +97,7 @@ void main() {
           reason: '播放页的库归属判断已收进 avatarLibOf');
       expect(main.contains('libOfMediaPath(p).isEmpty'), isFalse);
       expect(main.contains('libOfMediaPath(src).isEmpty'), isFalse);
-      expect(main.contains('libForMediaPath('), isTrue,
+      expect(main.contains('libFromMediaPath('), isTrue,
           reason: '四处同义判断必须走同一出口');
     });
   });

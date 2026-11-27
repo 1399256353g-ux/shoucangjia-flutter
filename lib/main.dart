@@ -893,8 +893,13 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
       final libJson = jsonOf(lj);
       if (base.isEmpty || libJson is! Map) return _typesFailed(lib);
       final basics = basicsUnderBase(Map<String, dynamic>.from(libJson), base);
-      final parts = await Future.wait(
-          [for (final b in basics) _typesFromLibIndex(lib, b.id)]);
+      // 每个基础库各读一份 `index.json`。此前是 `Future.wait` 全量并发：
+      // 39 个基础库会在同一瞬间发出 39 条请求（各 12s 上限），把刚起来的
+      // 连接池和 NAS 一起打满——与搜索页/爬虫页的「有界并发」口径相反。
+      // 这里同样走 6 路（`mapConcurrent`），结果保持输入顺序，
+      // `mergeAuthorTypes` 不关心顺序。
+      final parts = await mapConcurrent<BasicLib, Map<String, Set<String>>>(
+          basics, 6, (b) => _typesFromLibIndex(lib, b.id));
       return mergeAuthorTypes(parts);
     } catch (_) {
       return _typesFailed(lib);
@@ -3734,7 +3739,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     }
     // 删除记录可能来自其他单元库；`/media/<lib>/...` 里的 lib 必须原样保留，
     // 不能按当前库重新前缀，否则会 404 成空白缩略图。
-    final lib = libForMediaPath(path, fallbackLib: cfg.lib);
+    final lib = libFromMediaPath(path, fallbackLib: cfg.lib);
     // 0.9.292：边长与解码宽度同源（原先 56 写三遍 + `memCacheWidth: 160` 内联）。
     final ql = squareThumbDecodeWidth(
         kDeletedThumbSize, MediaQuery.devicePixelRatioOf(context));
@@ -5391,7 +5396,18 @@ class LibraryPage extends StatefulWidget {
 class _LibraryPageState extends State<LibraryPage> {
   List<Map<String, dynamic>> libs = [];
   List<ServerConn> servers = [];
-  String? defaultId;
+
+  /// 每条连接各自的**默认库** id（`/api/libraries` 的 `default`）。
+  ///
+  /// 此前只有一个全局 `defaultId`：两台服务器各有一个默认库时，后读到的
+  /// 那台会顶掉前一台，第一台的默认库在「已注册媒体库」里永远不标星；
+  /// 而两台恰好同 id 时又都标星——两种错法都源于「默认」是**每条连接**
+  /// 的属性，不是进程级的。键是连接 id，不是地址（地址可能被改）。
+  final Map<String, String> defaultIdByServer = <String, String>{};
+
+  /// 某条连接的默认库 id（没有就返回空串，不猜）。
+  String defaultIdOf(String serverId) =>
+      defaultIdByServer[serverId.trim()] ?? '';
   bool loading = true;
   String? err;
   String? warn;
@@ -5577,8 +5593,18 @@ class _LibraryPageState extends State<LibraryPage> {
                   pass: cfg.pass)
             ].where((s) => s.base.isNotEmpty).toList()
           : visible;
-      final snaps = <ServerLibraries>[];
-      for (final s in use) {
+      // 每台服务器各取一次注册表与 v2 索引。此前是串行的 `for` + `await`：
+      // N 台服务器就是 N 次完整往返，每条各 10s 上限——连接多时首页首屏
+      // 一直白等到最慢的那台返回，而这几份数据彼此完全独立（与 0.9.327
+      // 修掉的 `/api/nodes` 是同一处遗漏）。改为有界并发（4 路，与爬虫
+      // 设置页、搜索页同一口径）。
+      //
+      // `mapConcurrent` 保序：结果与 `use` 一一对应，因此下面挑 `default`
+      // 仍按 `use` 的顺序「第一个非空」，与串行版的先到先得等价。
+      final fetched = await mapConcurrent<ServerConn, ({
+        ServerLibraries snap,
+        String def,
+      })>(use, 4, (s) async {
         final h = {
           'Authorization': basicAuthHeader(s.user, s.pass),
         };
@@ -5609,13 +5635,31 @@ class _LibraryPageState extends State<LibraryPage> {
             final j = jsonOf(rs[1]);
             if (j is Map) treeJson = Map<String, dynamic>.from(j);
           }
-          if (def.isNotEmpty && defaultId == null) defaultId = def;
-          snaps
-              .add(ServerLibraries(server: s, libraries: list, tree: treeJson));
+          return (
+            snap: ServerLibraries(server: s, libraries: list, tree: treeJson),
+            def: def,
+          );
         } catch (e) {
-          snaps.add(ServerLibraries(server: s, error: errorText(e)));
+          return (
+            snap: ServerLibraries(server: s, error: errorText(e)),
+            def: '',
+          );
         }
+      });
+      // 每台服务器的默认库各记一份（键是它自己的连接 id）。并发回填时
+      // 直接按结果写表即可：键不同，不存在互相覆盖。
+      //
+      // 先清空再写：断连/删除的连接不该把「它那台的默认库」留在表里——
+      // 否则重新添加一台同 id 的连接时，会拿旧默认库去标星。
+      defaultIdByServer.clear();
+      for (final r in fetched) {
+        if (r.def.isEmpty) continue;
+        final sid = r.snap.server.id.trim();
+        if (sid.isEmpty) continue;
+        defaultIdByServer[sid] = r.def;
       }
+      final snaps = [for (final r in fetched) r.snap];
+
       final merged = mergeRegisteredLibraries(snaps);
       final treeJson = mergeLibraryTrees(snaps);
       // 记录库 → 连接，之后播放/统计/媒体都按所属 IP 路由。
@@ -5673,11 +5717,18 @@ class _LibraryPageState extends State<LibraryPage> {
       // 0.9.6：星标统一从 StarStore 读，保证各页面看到同一份数据。
       await StarStore.instance.load();
       final saved = StarStore.instance.ordered;
-      final snaps = <ServerLibraries>[];
       // 每台服务器自己的库根名：媒体库卡片的名字必须来自它那台机器，
       // 不能让全局 `TopNodeName` 被最后一台覆盖（见 `LibMeta.topName`）。
       final rootNames = <String, String>{};
-      for (final s in servers) {
+      // 0.9.328：逐台读取此前同样是串行 `for` + `await`（每条 8s 上限）。
+      // 与 `load()` 的注册表读取、0.9.327 的 `/api/nodes` 是同一处遗漏：
+      // 这几份 `libraries.json` 彼此独立，串行时首屏白等 N×8s。
+      // 结果按 `servers` 保序，因此下面「全局根名只由首条连接写」的判断
+      // （`identical(s, servers.first)`）语义不变。
+      final fetched = await mapConcurrent<ServerConn, ({
+        ServerConn server,
+        Map<String, dynamic>? tree,
+      })>(servers, 4, (s) async {
         final h = {
           'Authorization': basicAuthHeader(s.user, s.pass),
         };
@@ -5688,25 +5739,33 @@ class _LibraryPageState extends State<LibraryPage> {
                       '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
                   headers: h)
               .timeout(const Duration(seconds: 8));
-          if (r.statusCode != 200) continue;
+          if (r.statusCode != 200) return (server: s, tree: null);
           final j = jsonOf(r);
-          if (j is! Map) continue;
-          // owner 2026-11-22：顶级节点名＝媒体库根目录名。先到先用，
-          // 多个连接时以首条连接（servers.first，与文件结构页一致）为准。
-          //
-          // 0.9.324：按连接各记一份（`rootNames`），卡片取名用它；全局值
-          // 仍只由首条连接写，供没有 meta 的旧页面（文件结构页）使用。
-          final rn = TopNodeName.nameFromRoot('${j['root'] ?? ''}');
-          if (rn.isNotEmpty) rootNames[s.id] = rn;
-          if (identical(s, servers.first)) {
-            TopNodeName.setFromRoot('${j['root'] ?? ''}');
-          }
-          snaps.add(ServerLibraries(
-              server: s,
-              libraries: const [],
-              tree: Map<String, dynamic>.from(j)));
-        } catch (_) {}
+          if (j is! Map) return (server: s, tree: null);
+          return (server: s, tree: Map<String, dynamic>.from(j));
+        } catch (_) {
+          return (server: s, tree: null);
+        }
+      });
+      final snaps = <ServerLibraries>[];
+      for (final r in fetched) {
+        final s = r.server;
+        final j = r.tree;
+        if (j == null) continue;
+        // owner 2026-11-22：顶级节点名＝媒体库根目录名。先到先用，
+        // 多个连接时以首条连接（servers.first，与文件结构页一致）为准。
+        //
+        // 0.9.324：按连接各记一份（`rootNames`），卡片取名用它；全局值
+        // 仍只由首条连接写，供没有 meta 的旧页面（文件结构页）使用。
+        final rn = TopNodeName.nameFromRoot('${j['root'] ?? ''}');
+        if (rn.isNotEmpty) rootNames[s.id] = rn;
+        if (identical(s, servers.first)) {
+          TopNodeName.setFromRoot('${j['root'] ?? ''}');
+        }
+        snaps.add(ServerLibraries(
+            server: s, libraries: const [], tree: j));
       }
+
       final merged = mergeLibraryTrees(snaps);
       if (merged == null) {
         if (mounted) setState(() => tree = null);
@@ -6520,7 +6579,8 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Widget _libTile(Map<String, dynamic> l) {
     final id = '${l['id']}';
-    final isDef = id == defaultId;
+    // 「默认」按这条记录**自己的连接**查：两台服务器可以各有各的默认库。
+    final isDef = id.isNotEmpty && id == defaultIdOf(serverOriginOf(l).id);
     final cr = mapOrNull(l['crawler']) ?? const <String, dynamic>{};
     final scripts = listOf(l['crawlerScripts']);
     return ListTile(
@@ -17248,9 +17308,9 @@ class _AuthorPageState extends State<AuthorPage> {
             itemCount: cands.length,
             itemBuilder: (_, i) {
               final p = cands[i];
-              // 0.9.291：库归属判断只有 `libForMediaPath` 一处（同义写法
+              // 0.9.291：库归属判断只有 `libFromMediaPath` 一处（同义写法
               // 此前在本文件出现四份，四份各自决定兜底库）。
-              final l = libForMediaPath(p, fallbackLib: primaryLib);
+              final l = libFromMediaPath(p, fallbackLib: primaryLib);
               return InkWell(
                 onTap: () async {
                   // 批 A：`.avatars` 里的头像文件直接注册到服务端（跨设备）；
@@ -18037,7 +18097,7 @@ class _AuthorPageState extends State<AuthorPage> {
   void _showAvatar(BuildContext context) {
     final src = effectiveAv;
     if (src.isEmpty) return;
-    final srcLib = libForMediaPath(src, fallbackLib: primaryLib);
+    final srcLib = libFromMediaPath(src, fallbackLib: primaryLib);
     showDialog(
       context: context,
       barrierColor: Colors.black87,
