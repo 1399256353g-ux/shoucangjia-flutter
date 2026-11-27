@@ -15184,9 +15184,6 @@ class _PlayerPageState extends State<PlayerPage>
             screenHeight: viewSize.height,
             taskbarHeight: _taskbarHNow,
             fullscreen: fs,
-            // owner 2026-11-27（win）：非全屏进度条在任务栏上方，会压住画面。
-            // 把条带高度一并让出，画面底边贴到条带上沿，一像素都不重叠。
-            progressStripHeight: kScrubHotZoneHeight,
           );
     // T：进度层贴在本页舞台底边（PageView 子页 Stack 内）；作者/标题信息行
     // 在进度层上方避让，避免压住进度条。
