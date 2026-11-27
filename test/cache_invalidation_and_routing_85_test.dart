@@ -99,10 +99,13 @@ void main() {
     });
 
     test('类型索引缓存有唯一清入口', () {
-      final body = _body(main, 'void clearAuthorTypeCache(String lib)',
+      final body = _body(main, 'void clearAuthorTypeCache(String lib,',
           'Future<Map<String, Set<String>>> loadAuthorTypes(');
-      expect(body.contains('_authorTypeCache.remove(lib)'), isTrue);
       expect(body.contains('_authorTypeCache.clear()'), isTrue);
+      // 0.9.331：键带连接，所以「作废这个库」按库清**全部连接**的副本
+      // （`authorTypeCacheKeyIsFor`），并允许只清指定连接的那一份。
+      expect(body.contains('authorTypeCacheKeyIsFor(k, l)'), isTrue,
+          reason: '只清裸库 id 会留下另一台服务器那份旧 kinds');
     });
 
     test('快速刷新两处缓存一起作废（唯一的调用点）', () {

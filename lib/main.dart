@@ -863,15 +863,34 @@ class LibMeta {
 /// 重启 App 或手动快速刷新之前都是空结果，而索引其实好好的。现在只缓存
 /// **读成功**的结果（含「服务器上确实没有基础库」这种真答案）；读失败当场
 /// 把条目摘掉，下一次进筛选面板重新请求一次。
+///
+/// 0.9.331：缓存键**必须带连接**。此前只按 `lib` 做键，而两台服务器各有一个
+/// `lib-1` 时（同 id 不同机器是常见情形），后读到的一份会把先到的一份顶掉：
+/// 「按类型筛选」在第二台服务器的页面上用着第一台的 kinds——命中数少一半、
+/// 或者一个都不中，两边的数据都是「读成功」的，界面上看不出是哪一台错了。
+/// 与 `LibMeta` 的 `metaCacheKey` / `unitCoverKey` 同一条规则：库 id 单独不唯一。
 final Map<String, Future<Map<String, Set<String>>>> _authorTypeCache = {};
 
-Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
-  return _authorTypeCache.putIfAbsent(lib, () async {
+/// 类型索引的缓存键：`<lib>` 或 `<lib>\u0001<连接>`。
+///
+/// 未指定来源时退化为裸库 id（旧键）：调用方不知道自己在哪台服务器上，
+/// 硬编一个作用域只会把同一份数据拆成两份缓存。
+/// 分隔符取自 `node_key.kNodeKeySep`，与节点/封面/元数据缓存同一套。
+String authorTypeCacheKey(String lib, String serverId) {
+  final l = lib.trim();
+  final sid = serverId.trim();
+  return sid.isEmpty ? l : '$l$kNodeKeySep$sid';
+}
+
+Future<Map<String, Set<String>>> _authorTypesForLib(String lib,
+    {String serverId = ''}) {
+  final key = authorTypeCacheKey(lib, serverId);
+  return _authorTypeCache.putIfAbsent(key, () async {
     try {
       final reg = await http
           .get(cfg.u('/api/libraries', lib: lib), headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 12));
-      if (reg.statusCode != 200) return _typesFailed(lib);
+      if (reg.statusCode != 200) return _typesFailed(key);
       final lj = await http
           .get(
               cfg.u(
@@ -879,7 +898,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
                   lib: lib),
               headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 12));
-      if (lj.statusCode != 200) return _typesFailed(lib);
+      if (lj.statusCode != 200) return _typesFailed(key);
       final regJson = jsonOf(reg);
       var base = '';
       if (regJson is Map) {
@@ -891,7 +910,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
         }
       }
       final libJson = jsonOf(lj);
-      if (base.isEmpty || libJson is! Map) return _typesFailed(lib);
+      if (base.isEmpty || libJson is! Map) return _typesFailed(key);
       final basics = basicsUnderBase(Map<String, dynamic>.from(libJson), base);
       // 每个基础库各读一份 `index.json`。此前是 `Future.wait` 全量并发：
       // 39 个基础库会在同一瞬间发出 39 条请求（各 12s 上限），把刚起来的
@@ -902,7 +921,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
           basics, 6, (b) => _typesFromLibIndex(lib, b.id));
       return mergeAuthorTypes(parts);
     } catch (_) {
-      return _typesFailed(lib);
+      return _typesFailed(key);
     }
   });
 }
@@ -912,8 +931,8 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
 /// 不做「先缓存、失败后再删」的两段式：`putIfAbsent` 已经把这枚 Future 放
 /// 进表里，删除必须发生在**同一次**调用内，否则下一次调用拿到的是那个
 /// 已经失败的 Future（Future 不会重跑）。
-Map<String, Set<String>> _typesFailed(String lib) {
-  _authorTypeCache.remove(lib);
+Map<String, Set<String>> _typesFailed(String cacheKey) {
+  _authorTypeCache.remove(cacheKey);
   return <String, Set<String>>{};
 }
 
@@ -938,21 +957,48 @@ Future<Map<String, Set<String>>> _typesFromLibIndex(
 /// 了 `lib/<id>/index.json`，类型筛选（kinds）却一直用进程启动时那份结果，
 /// 新加的作品在下一次重启前永远不会出现在「按类型筛选」里——刷新按钮
 /// 看起来成功了，筛选结果却是旧的。
-void clearAuthorTypeCache(String lib) {
-  if (lib.isEmpty) {
+/// 键带连接（`authorTypeCacheKey`），所以「作废这个库」必须清掉**全部连接**
+/// 的副本——只清裸库 id 会留下另一台服务器那份旧 kinds，与
+/// `LibMeta.invalidate` 同一个口径（`metaKeyIsFor`）。
+void clearAuthorTypeCache(String lib, {String serverId = ''}) {
+  final l = lib.trim();
+  if (l.isEmpty) {
     _authorTypeCache.clear();
     return;
   }
-  _authorTypeCache.remove(lib);
+  if (serverId.trim().isNotEmpty) {
+    _authorTypeCache.remove(authorTypeCacheKey(l, serverId));
+    return;
+  }
+  _authorTypeCache.removeWhere((k, _) => authorTypeCacheKeyIsFor(k, l));
 }
 
-Future<Map<String, Set<String>>> loadAuthorTypes(Iterable<String> libs) async {
-  final parts =
-      await Future.wait([for (final l in libs.toSet()) _authorTypesForLib(l)]);
+/// [key] 是否属于库 [lib]（不带连接的旧键与任何作用域键都算）。
+bool authorTypeCacheKeyIsFor(String key, String lib) {
+  final l = lib.trim();
+  if (l.isEmpty) return false;
+  return key == l || key.startsWith('$l$kNodeKeySep');
+}
+
+/// [libs] 的每一条各自属于哪台连接：[lib] → 连接 id。
+///
+/// 调用方从库列表/绑定表能读到来源时用它，读不到就留空（旧行为：裸库 id 做键）。
+typedef AuthorTypeScope = String Function(String lib);
+
+Future<Map<String, Set<String>>> loadAuthorTypes(Iterable<String> libs,
+    {AuthorTypeScope? serverIdOf}) async {
+  final parts = await Future.wait([
+    for (final l in libs.toSet())
+      _authorTypesForLib(l, serverId: serverIdOf?.call(l) ?? '')
+  ]);
   return mergeAuthorTypes(parts);
 }
 
 // 作者统计上报（播放/访问），失败静默，不影响播放
+//
+// 0.9.331：带上上限。`.ignore()` 只是不关心结果，**不是**不限时：断网/掉包时
+// 这条请求会在连接池里挂到 OS 超时，长时间占用一个连接名额（而它是每次进
+// 作者页都会发的一条）。8s 与其它读请求同一口径。
 void postStat(String type, String author, {String? lib}) {
   if (cfg.base.isEmpty || author.isEmpty) return;
   try {
@@ -960,6 +1006,7 @@ void postStat(String type, String author, {String? lib}) {
         .post(cfg.u('/api/stats', lib: lib),
             headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
             body: jsonEncode({'type': type, 'author': author}))
+        .timeout(const Duration(seconds: 8))
         .ignore();
   } catch (_) {}
 }
@@ -16097,7 +16144,7 @@ class _RecommendPageState extends State<RecommendPage> {
         m ??= loaded;
       } catch (_) {}
     }
-    final types = await loadAuthorTypes(ids);
+    final types = await loadAuthorTypes(ids, serverIdOf: cfg.serverIdFor);
     if (!mounted) return;
     setState(() {
       meta = m;
@@ -16521,7 +16568,9 @@ class _SearchPageState extends State<SearchPage> {
         : [sel.isEmpty ? cfg.lib : sel];
     if (targets.isEmpty) return;
     setState(() => typesLoading = true);
-    final map = await loadAuthorTypes(targets);
+    // 每条库各自属于哪台连接：类型索引缓存与 kinds 都是按 (库, 连接) 存，
+    // 两台服务器各有 `lib-1` 时不能共用一份（同 `LibMeta` 的缓存键规则）。
+    final map = await loadAuthorTypes(targets, serverIdOf: cfg.serverIdFor);
     if (!mounted) return;
     setState(() {
       authorTypes = map;
@@ -17167,6 +17216,35 @@ class _AvatarAction extends StatelessWidget {
   }
 }
 
+/// 一个库的作者主页取数结果（`AuthorPage.load` 的并发单元）。
+///
+/// 只有「索引命中 + 作者卡 200」才算 [ok]；其余（索引无此人、非 200、
+/// 异常）都是一个「这个库没有该作者」的确定答案，不进合并也不发访问上报。
+/// 四个字段按 `_libs` 顺序先到先得，与改造前串行版语义一致。
+class _AuthorLibFetch {
+  final String lib;
+  final bool ok;
+  final List<Map<String, dynamic>> works;
+  final String uid;
+  final String bio;
+  final String av;
+
+  const _AuthorLibFetch({
+    required this.lib,
+    required this.works,
+    required this.uid,
+    required this.bio,
+    required this.av,
+  }) : ok = true;
+
+  const _AuthorLibFetch.failed(this.lib)
+      : ok = false,
+        works = const <Map<String, dynamic>>[],
+        uid = '',
+        bio = '',
+        av = '';
+}
+
 class AuthorPage extends StatefulWidget {
   final String name;
   // 按库筛选后可能合并多个库；默认当前库
@@ -17178,6 +17256,14 @@ class AuthorPage extends StatefulWidget {
 
 class _AuthorPageState extends State<AuthorPage> {
   String bio = '';
+
+  /// 平台稳定标识（抖音 `sec_uid`）。
+  ///
+  /// owner 2026-11-26：「新增 uid 显示，有爬虫的库作者页标注平台 uid，
+  /// 无则留空」。只有服务端索引里带 `uid` 时才显示（爬虫同步过的库才有）。
+  ///
+  /// owner 2026-11-27 追加用途：本机手动头像改按 uid 存，作者改名后仍能找到。
+  String platformUid = '';
 
   /// J13：本机最近一次简介写入时间（服务端 authors.json 的 bioAt 未下发）。
   int bioAt = 0;
@@ -17228,7 +17314,12 @@ class _AuthorPageState extends State<AuthorPage> {
   String get displayAv => av.isNotEmpty ? av : fallbackAv;
 
   /// 0.9.41：本机手动头像（作者主页长按头像设置）。
-  String get manualAv => AuthorAvatarStore.instance.pathFor(widget.name) ?? '';
+  ///
+  /// owner 2026-11-27：带上平台 uid 一起查——作者在平台改名后，服务端已按
+  /// uid 并成一个人，而本机覆盖可能还是旧名字的键。不传 uid 就只查名字，
+  /// 行为与旧版一致。
+  String get manualAv =>
+      AuthorAvatarStore.instance.pathFor(widget.name, uid: platformUid) ?? '';
 
   /// 服务端自定义头像（上传后注册，跨设备生效）。
   bool get serverManualAv => isManualAvatarPath(av);
@@ -17327,7 +17418,7 @@ class _AuthorPageState extends State<AuthorPage> {
                       return;
                     }
                     // 服务端已生效：清掉同作者的本机覆盖，避免旧图压住新图。
-                    await AuthorAvatarStore.instance.clear(widget.name);
+                    await AuthorAvatarStore.instance.clear(widget.name, uid: platformUid);
                     if (!mounted) return;
                     setState(() {
                       if (r.path.isNotEmpty) av = r.path;
@@ -17341,8 +17432,8 @@ class _AuthorPageState extends State<AuthorPage> {
                   // 跨设备生效了。这里按可注册性分开提示（不进 white list 的
                   // 判定仍只有 `isServerAvatarFileName` 一处）。
                   final localOnly = isServerAvatarDirPath(p);
-                  final ok =
-                      await AuthorAvatarStore.instance.setPath(widget.name, p);
+                  final ok = await AuthorAvatarStore.instance
+                      .setPath(widget.name, p, uid: platformUid);
                   if (!ctx.mounted) return;
                   Navigator.of(ctx).pop();
                   if (!mounted) return;
@@ -17432,7 +17523,7 @@ class _AuthorPageState extends State<AuthorPage> {
       return;
     }
     // 清掉本机覆盖，避免旧的手动头像继续遮住服务端新图。
-    await AuthorAvatarStore.instance.clear(widget.name);
+    await AuthorAvatarStore.instance.clear(widget.name, uid: platformUid);
     if (!mounted) return;
     authorAvatarRevision.value++;
     setState(() {
@@ -17460,7 +17551,7 @@ class _AuthorPageState extends State<AuthorPage> {
         return;
       }
     }
-    await AuthorAvatarStore.instance.clear(widget.name);
+    await AuthorAvatarStore.instance.clear(widget.name, uid: platformUid);
     if (!mounted) return;
     setState(() => av = _crawledAv);
     authorAvatarRevision.value++;
@@ -17601,35 +17692,54 @@ class _AuthorPageState extends State<AuthorPage> {
     // 带单测的合并规则是同一件事的第二份实现。两份实现的好处是零，代价是
     // 改规则时必然漏一处：这里改了就与单测脱节，单测绿着、真实路径却是另一套。
     // 现在只保留一份：按 _libs 顺序传入，先到先得 = 主库优先，语义不变。
-    final perLib = <List<Map<String, dynamic>>>[];
-    for (final lib in _libs) {
+    //
+    // 0.9.331：**每库两条请求改为有界并发**。此前是串行 `for` + 两次 `await`：
+    // 作者被合并到 N 个单元库时就是 N 次完整往返（各 20s 上限），页面一直
+    // 白等到最慢那个库，而每个库的请求彼此独立。`mapConcurrent` 保序，
+    // 因此下面「先到先得」的 `bio/av/uid/primaryLib` 仍由 `_libs` 顺序决定。
+    final fetched = await mapConcurrent<String, _AuthorLibFetch>(_libs, 4,
+        (lib) async {
       try {
         final r = await http
             .get(cfg.u('/api/authors.json', lib: lib),
                 headers: cfg.headersFor(lib))
             .timeout(const Duration(seconds: 20));
-        if (r.statusCode != 200) continue;
+        if (r.statusCode != 200) return _AuthorLibFetch.failed(lib);
         final idx = jsonMapOf(r);
         // 服务端作者索引存在 `作者` / `@作者` 两种键；名字可能来自作品 `a`
         // 或媒体路径里的 `%40作者`。统一按裸名匹配，避免「进页后空白」。
         final info = authorInfoFromIndex(idx, widget.name);
-        if (info == null) continue;
+        if (info == null) return _AuthorLibFetch.failed(lib);
         final d = await http
             .get(cfg.u('/api/a/${info['i']}.json', lib: lib),
                 headers: cfg.headersFor(lib))
             .timeout(const Duration(seconds: 20));
-        if (d.statusCode != 200) continue;
+        if (d.statusCode != 200) return _AuthorLibFetch.failed(lib);
         final m = jsonOf(d);
-        if (bio.isEmpty) bio = (m['bio'] ?? '').toString();
-        if (av.isEmpty) av = (m['av'] ?? '').toString();
-        if (primaryLib.isEmpty) primaryLib = lib;
         // 本库作品打上 `_lib` 后整批交给合并器；去重与顺序由它保证。
-        perLib.add([
-          for (final w in listOf(m is Map ? m['works'] : null))
-            if (w is Map) withWorkLib(w, lib),
-        ]);
-        postStat('visit', widget.name, lib: lib);
-      } catch (_) {}
+        return _AuthorLibFetch(
+          lib: lib,
+          works: [
+            for (final w in listOf(m is Map ? m['works'] : null))
+              if (w is Map) withWorkLib(w, lib),
+          ],
+          uid: '${info['uid'] ?? ''}'.trim(),
+          bio: '${m is Map ? (m['bio'] ?? '') : ''}',
+          av: '${m is Map ? (m['av'] ?? '') : ''}',
+        );
+      } catch (_) {
+        return _AuthorLibFetch.failed(lib);
+      }
+    });
+    final perLib = <List<Map<String, dynamic>>>[];
+    for (final f in fetched) {
+      if (!f.ok) continue;
+      if (platformUid.isEmpty) platformUid = f.uid;
+      if (bio.isEmpty) bio = f.bio;
+      if (av.isEmpty) av = f.av;
+      if (primaryLib.isEmpty) primaryLib = f.lib;
+      perLib.add(f.works);
+      postStat('visit', widget.name, lib: f.lib);
     }
     works = mergeAuthorWorks(perLib);
     // 记下爬虫/自动头像，上传自定义后仍保留，供「恢复自动」回滚显示。
@@ -17642,11 +17752,13 @@ class _AuthorPageState extends State<AuthorPage> {
     fallbackAv =
         pickFallbackAvatar(avatarCandidatesFromWorks(works.whereType<Map>())) ??
             '';
-    // K3：手动名单按库拉取并缓存，刷新后重取。
+    // K3：手动名单按库拉取并缓存，刷新后重取。同样逐库独立 → 有界并发。
     final manual = <String>{};
-    final manualLibs = _libs.toSet();
-    for (final lib in manualLibs) {
-      manual.addAll(await fetchManualWorkIds(lib));
+    final manualLibs = _libs.toSet().toList();
+    final manualParts = await mapConcurrent<String, Set<String>>(
+        manualLibs, 4, (l) => fetchManualWorkIds(l));
+    for (final part in manualParts) {
+      manual.addAll(part);
     }
     manualWorkIds = manual;
     if (mounted) {
@@ -18214,6 +18326,43 @@ class _AuthorPageState extends State<AuthorPage> {
                         key: const ValueKey('author-merge-hint'),
                         style: const TextStyle(fontSize: 11, color: Colors.grey),
                       ),
+                    ),
+                  // 平台 uid：只有爬虫同步过的库才带；拿不到就整行不显示
+                  // （owner：「无则留空」，不猜、不用作者名冒充）。
+                  if (platformUid.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(children: [
+                        const Text('平台 UID',
+                            style: TextStyle(fontSize: 11, color: Colors.grey)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            platformUid,
+                            key: const ValueKey('author-platform-uid'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey,
+                                fontFeatures: [FontFeature.tabularFigures()]),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () async {
+                            await Clipboard.setData(
+                                ClipboardData(text: platformUid));
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('已复制 UID')));
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: const Padding(
+                            padding: EdgeInsets.all(3),
+                            child: Icon(Icons.copy, size: 13, color: Colors.grey),
+                          ),
+                        ),
+                      ]),
                     ),
                   const SizedBox(height: 6),
                   Row(children: [

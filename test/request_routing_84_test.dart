@@ -56,8 +56,15 @@ void main() {
     });
 
     test('作者主页多库循环、单作品请求都按各自的 lib 取头', () {
-      final start = main.indexOf("final perLib = <List<Map<String, dynamic>>>[];");
-      final end = main.indexOf('perLib.add([', start);
+      // 0.9.331 起每库请求改成有界并发：请求发生在 `fetched` 的
+      // `mapConcurrent` 闭包里，`perLib` 只做汇总、不再发请求。
+      // 因此断言必须盯**发请求那一段**，而不是汇总段。
+      final start = main.indexOf(
+          'final fetched = await mapConcurrent<String, _AuthorLibFetch>(');
+      expect(start, greaterThan(0), reason: '找不到作者页多库取数块');
+      final end = main.indexOf(
+          'final perLib = <List<Map<String, dynamic>>>[];', start);
+      expect(end, greaterThan(start), reason: '找不到取数块结尾');
       final body = main.substring(start, end);
       expect(_currentLibHeaderUses(body), 0,
           reason: '跨库循环里用当前库的账号会 401');

@@ -101,8 +101,8 @@ void main() {
       final main = _code('lib/main.dart');
       final body = _body(
           main,
-          'Future<Map<String, Set<String>>> _authorTypesForLib(',
-          'Map<String, Set<String>> _typesFailed(String lib) {');
+          'Future<Map<String, Set<String>>> _authorTypesForLib(String lib,',
+          'Map<String, Set<String>> _typesFailed(String cacheKey) {');
       // 调用的实参跨了行：`mapConcurrent<...>(` 与 `basics, 6,` 之间有换行，
       // 所以断言按「泛型签名 + 换行 + 实参」而不是拼成一行。
       expect(
@@ -115,13 +115,14 @@ void main() {
       expect(body.contains('Future.wait('), isFalse,
           reason: '无界 fan-out 是本次修掉的形态');
       // 失败语义不变：四条失败分支仍走 _typesFailed。
-      expect('_typesFailed(lib)'.allMatches(body).length, 4);
+      // 0.9.331：缓存键带连接，失败分支摘的是这枚键（语义不变，键变了）。
+      expect('_typesFailed(key)'.allMatches(body).length, 4);
     });
 
     test('loadAuthorTypes 的「库级」并发是另一件事，保持原样', () {
       final main = _code('lib/main.dart');
       final body = _body(main,
-          'Future<Map<String, Set<String>>> loadAuthorTypes(Iterable<String> libs) async {',
+          'Future<Map<String, Set<String>>> loadAuthorTypes(Iterable<String> libs,',
           'void postStat(');
       // 注册库数量通常个位数，这一层的 Future.wait 不是问题；
       // 真正会爆的是上面「每个基础库一条」那层。

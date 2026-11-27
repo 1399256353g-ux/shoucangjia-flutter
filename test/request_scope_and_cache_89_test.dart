@@ -55,9 +55,12 @@ void main() {
   group('2. 类型索引缓存：只有成功才进缓存', () {
     test('四种读失败都走 _typesFailed（摘掉缓存条目）', () {
       final main = _code('lib/main.dart');
-      final body = _body(main, 'Future<Map<String, Set<String>>> _authorTypesForLib(',
+      final body = _body(main,
+          'Future<Map<String, Set<String>>> _authorTypesForLib(String lib,',
           '/// 读失败：把这条缓存摘掉再返回空表。');
-      expect('_typesFailed(lib)'.allMatches(body).length, 4,
+      // 0.9.324 起缓存键带 serverId，参数名从 lib 改成 key；
+      // 四条失败分支仍必须走同一个出口。
+      expect('_typesFailed(key)'.allMatches(body).length, 4,
           reason: '注册表非 200 / 索引非 200 / base 为空或载荷非法 / 抛异常');
       expect(body.contains('return <String, Set<String>>{};'), isFalse,
           reason: '空表直接返回就等价于「缓存一个失败结果」');
@@ -65,9 +68,10 @@ void main() {
 
     test('_typesFailed 真的从表里摘掉条目', () {
       final main = _code('lib/main.dart');
-      final body = _body(main, 'Map<String, Set<String>> _typesFailed(String lib) {',
+      final body = _body(
+          main, 'Map<String, Set<String>> _typesFailed(String cacheKey) {',
           'Future<Map<String, Set<String>>> _typesFromLibIndex(');
-      expect(body.contains('_authorTypeCache.remove(lib)'), isTrue);
+      expect(body.contains('_authorTypeCache.remove(cacheKey)'), isTrue);
       expect(body.contains('return <String, Set<String>>{};'), isTrue,
           reason: '摘掉之后给调用方一张空表，本次筛选照常进行');
     });
@@ -76,18 +80,20 @@ void main() {
       final main = _code('lib/main.dart');
       // 只看 `_authorTypesForLib` 自身；它后面紧跟 `_typesFailed` 的定义
       // （空表返回本来就该在那里出现一次）。
-      final body = _body(main, 'Future<Map<String, Set<String>>> _authorTypesForLib(',
+      final body = _body(main,
+          'Future<Map<String, Set<String>>> _authorTypesForLib(String lib,',
           '/// 读失败：把这条缓存摘掉再返回空表。');
       expect(body.contains('return <String, Set<String>>{};'), isFalse,
           reason: '业务分支自己返回空表 = 失败又被缓存一次');
-      expect('_typesFailed(lib)'.allMatches(body).length, 4,
+      expect('_typesFailed(key)'.allMatches(body).length, 4,
           reason: '四条失败分支都必须走统一出口');
     });
 
     test('_typesFailed 之外没有第二处「空表 + 摘缓存」实现', () {
       final main = _code('lib/main.dart');
-      final all = _body(main, 'final Map<String, Future<Map<String, Set<String>>>> _authorTypeCache',
-          '/// 汇总多个注册库的作者类型。');
+      final all = _body(main,
+          'final Map<String, Future<Map<String, Set<String>>>> _authorTypeCache',
+          '/// [libs] 的每一条各自属于哪台连接');
       // `_typesFailed` 自己一处 + `_typesFromLibIndex` 的两处（单库索引失败，
       // 那里没有缓存条目可摘，只是本次跳过该库）。
       expect('return <String, Set<String>>{};'.allMatches(all).length, 3,

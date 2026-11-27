@@ -14,6 +14,15 @@
 ///
 /// 键按**作者名**（服务端 `/api/authors.json` 本身就是按名字合并的，
 /// 同名即同一作者），所以作者总览、排行榜、作者主页三处入口看到的是同一张。
+///
+/// owner 2026-11-27：作者在平台侧改名后，服务端已按平台 uid（`sec_uid`）把
+/// 新旧名字并成一个人，但**本机手动头像仍是按旧名字存的**——改名后就找不到，
+/// 头像退回爬虫/自动结果。
+///
+/// 现在新增 `uid:<sec_uid>` 形式的键：
+///  - 写入时若调用方给了 uid，就存 uid 键（下次改名不受影响）；
+///  - 读取时先查名字键（兼容历史数据），再查 uid 键；
+///  - 老数据不动、不迁移——迁移要写盘，而写盘失败一次就会丢用户设置。
 library;
 
 import 'dart:convert';
@@ -31,6 +40,16 @@ const String kAuthorAvatarPrefsKey = 'author_avatar_overrides_v1';
 
 /// 覆盖表的键：作者名去掉首尾空白。
 String authorAvatarKey(String name) => name.trim();
+
+/// 平台 uid 形式的键。uid 为空时返回空串（调用方据此退回名字键）。
+///
+/// 用 `uid:` 前缀与作者名分开命名空间：作者名可能是任意文本（含冒号），
+/// 不加前缀就可能与真实作者名撞键。
+String authorAvatarUidKey(String uid) {
+  final u = uid.trim();
+  if (u.isEmpty) return '';
+  return 'uid:$u';
+}
 
 /// 只接受能作为媒体地址的相对/绝对图片路径，避免把任意字符串写进偏好。
 ///
@@ -224,9 +243,17 @@ class AuthorAvatarStore extends ChangeNotifier {
   int get count => _paths.length;
 
   /// 该作者的手动头像路径；没有返回 null。
-  String? pathFor(String name) => _paths[authorAvatarKey(name)];
+  ///
+  /// 查找顺序：名字键（历史数据都在这）→ `uid:` 键（改名后仍能找到）。
+  /// 传 uid 时两处都查；不传就只查名字，行为与旧版完全一致。
+  String? pathFor(String name, {String uid = ''}) {
+    final byName = _paths[authorAvatarKey(name)];
+    if (byName != null) return byName;
+    final uk = authorAvatarUidKey(uid);
+    return uk.isEmpty ? null : _paths[uk];
+  }
 
-  bool has(String name) => pathFor(name) != null;
+  bool has(String name, {String uid = ''}) => pathFor(name, uid: uid) != null;
 
   /// 从 SharedPreferences 读一次；失败按空处理。
   Future<void> load() async {
@@ -241,11 +268,22 @@ class AuthorAvatarStore extends ChangeNotifier {
   }
 
   /// 设为该作者的头像。返回 false 表示路径不合法。
-  Future<bool> setPath(String name, String mediaPath) async {
+  ///
+  /// 传了 [uid] 时写 `uid:` 键（改名后仍能命中），同时清掉同作者的名字键，
+  /// 避免两份记录给出两个答案（名字键优先，留着就等于「改了名还是旧图」）。
+  Future<bool> setPath(String name, String mediaPath, {String uid = ''}) async {
     final k = authorAvatarKey(name);
     final v = mediaPath.trim();
     if (k.isEmpty || !_validAvatarValue(v)) return false;
-    _paths = <String, String>{..._paths, k: v};
+    final uk = authorAvatarUidKey(uid);
+    final next = <String, String>{..._paths};
+    if (uk.isNotEmpty) {
+      next[uk] = v;
+      next.remove(k); // 名字键让位给 uid 键，避免两份并存
+    } else {
+      next[k] = v;
+    }
+    _paths = next;
     _ready = true;
     notifyListeners();
     await _persist();
@@ -253,10 +291,16 @@ class AuthorAvatarStore extends ChangeNotifier {
   }
 
   /// 清除该作者的手动头像（回到爬虫/自动结果）。
-  Future<void> clear(String name) async {
+  ///
+  /// 名字键与 uid 键一起清：只清一个的话，另一个还会把旧头像捞回来。
+  Future<void> clear(String name, {String uid = ''}) async {
     final k = authorAvatarKey(name);
-    if (!_paths.containsKey(k)) return;
+    final uk = authorAvatarUidKey(uid);
+    final hasKey = _paths.containsKey(k) ||
+        (uk.isNotEmpty && _paths.containsKey(uk));
+    if (!hasKey) return;
     final next = <String, String>{..._paths}..remove(k);
+    if (uk.isNotEmpty) next.remove(uk);
     _paths = next;
     _ready = true;
     notifyListeners();
