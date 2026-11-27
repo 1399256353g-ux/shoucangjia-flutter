@@ -23,17 +23,18 @@ enum LibBadgeKind {
 
   /// 末梢基础库。
   basic,
-
-  /// 无法判定归属（作者卡等非库语境）。
-  other,
 }
 
 /// 角标图案的默认映射：每种层级一个固定图案。
+///
+/// 0.9.326：删掉第四档 `other`（「其它（非库语境）」）。owner 反复提「不明
+/// 所以的文字」——设置页那一行没有任何用户能理解的含义，`lib/` 里也没有
+/// 任何调用点会把角标画成它；留着只会让人问「第四种角标控制哪里」。
+/// 没有归属的角标按 `basic` 处理，与词条侧删掉 `other` 是同一个决定。
 const Map<LibBadgeKind, int> kDefaultCornerPattern = <LibBadgeKind, int>{
   LibBadgeKind.top: 0, // 六边形
   LibBadgeKind.unit: 1, // 层叠方块
   LibBadgeKind.basic: 2, // 书页
-  LibBadgeKind.other: 5, // 圆点
 };
 
 /// 可选图案清单（顺序即 id）：图案用内置形状绘制，不依赖图标字体，
@@ -54,7 +55,6 @@ const Map<LibBadgeKind, int> kDefaultCornerColor = <LibBadgeKind, int>{
   LibBadgeKind.top: 0xFF1D4ED8,
   LibBadgeKind.unit: 0xFF047857,
   LibBadgeKind.basic: 0xFF6B7280,
-  LibBadgeKind.other: 0xFF6B7280,
 };
 
 /// 角标设置：图案与颜色都可自定义，按层级存。

@@ -4928,7 +4928,6 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
     LibBadgeKind.top: '媒体库',
     LibBadgeKind.unit: '单元库',
     LibBadgeKind.basic: '基础库',
-    LibBadgeKind.other: '其它（非库语境）',
   };
 
   @override
@@ -5695,15 +5694,14 @@ class _LibraryPageState extends State<LibraryPage> {
       }
       final t = LibraryTree.parse(merged);
       // 节点文件夹由 owner 在「文件结构」里指定；默认为空 = 只有顶级 SECRET。
-      final marked = await _fetchMarkedNodes();
-      // owner 2026-11-24：这里原来内联造节点、不带连接标识，于是 buildUnitTree
-      // 走进「无连接信息」回退分支，把第一层目录当卡片却标成「媒体库」——
-      // 首页层级错位的真正根因就在这一处（不是 LibMeta.load）。
-      // 标记节点来自 servers.first（_fetchMarkedNodes 的取数口径），
-      // 因此连接标识也必须取同一条连接，不能留空。
-      final firstServer = servers.isEmpty ? null : servers.first;
-      // owner 2026-11-25：「单元库选过往封面，返回界面就恢复原样」。
       //
+      // 0.9.326：**每条连接各取一次** `/api/nodes`，并把节点归给**它自己**那条
+      // 连接。旧实现只读 `servers.first`，再用这台的 `serverId/base/label` 覆盖
+      // 全部节点：
+      //   · 第二台服务端的节点文件夹整批不上屏（那台的层级塌成「一层目录当卡片」）；
+      //   · 第一台恰好有同名 rel 时，第二台的基础库被挂到第一台的节点上，
+      //     封面与鉴权按第一台去请求 —— 必然 404，而界面看着「有卡片、没图」。
+      final nodesPerServer = await _fetchNodesPerServer();
       // 封面指针有两个来源，取并集：`/api/libraries.json` 的整棵树（全部层级
       // 都有，实测 6/6）优先，`/api/nodes` 的 covers 兜底（只覆盖被标记为节点
       // 的 rel，实测 31 条里仅 4 条带封面）。此前只认后者，第 3 层那 2 条单元库
@@ -5723,38 +5721,40 @@ class _LibraryPageState extends State<LibraryPage> {
           treeCovers[k] = v;
         }
       }
-      // 节点标识取第一条连接（与 `_fetchMarkedNodes` 同一取数口径）。
-      final markedSid = firstServer?.id ?? '';
-      String coverOfRel(String rel) =>
-          treeCovers[unitCoverKey(markedSid, rel)] ??
-          marked.covers[normalizeUnitRel(rel)] ??
-          '';      // 节点＝owner 在文件结构里标记的 rel；再补上「树里有封面指针但没被标记」
-      // 的 rel —— 否则那几条指针即使拿到了也没有节点承载，卡片仍然拿不到。
-      // 补的那部分只认本条连接自己的指针（其它连接的 rel 与这里的节点无关）。
-      final rels = <String>{
-        ...marked.rels,
-        // 反向解析也走 `node_key`（唯一实现）：这里此前手写
-        // `k.startsWith('$markedSid\u0001')` + `k.indexOf('\u0001') + 1`——
-        // 两处各自假定分隔符是同一个字面量，改一处就静默漏掉全部指针。
-        for (final k in treeCovers.keys)
-          if (nodeKeyHasServer(k, markedSid)) nodeKeyRel(k),
-      }.toList(growable: false)
-        ..sort();
-      final nodes = rels
-          .map((rel) => LibNode(
-                id: 'node:$rel',
-                rel: rel,
-                name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
-                // owner 2026-11-24：必须带上服务端下发的封面指针，
-                // 否则选完过往封面返回界面就回落到自动封面。
-                coverUrl: coverOfRel(rel),
-                // serverId 必须是连接 id（buildUnitTree 按它归组），
-                // 不能写成 cardLabel——那会让分层再次错位。
-                serverId: firstServer?.id ?? '',
-                serverBase: firstServer?.base ?? '',
-                serverLabel: firstServer?.cardLabel ?? '',
-              ))
-          .toList(growable: false);
+
+      /// 一条连接的节点：`/api/nodes` 标记 ∪ 该连接自己有封面指针的 rel。
+      ///
+      /// 补封面那部分不能省：树里有指针但没被标记的 rel 没有节点承载，
+      /// 卡片就拿不到那张封面。反向解析走 `node_key`（唯一实现）。
+      List<LibNode> nodesOfServer(ServerConn s) {
+        final payload = nodesPerServer[s.id] ?? NodesPayload.empty;
+        final rels = <String>{
+          ...payload.rels,
+          for (final k in treeCovers.keys)
+            if (nodeKeyHasServer(k, s.id)) nodeKeyRel(k),
+        }.toList(growable: false)
+          ..sort();
+        return [
+          for (final rel in rels)
+            LibNode(
+              id: 'node:$rel',
+              rel: rel,
+              name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
+              // owner 2026-11-24：必须带上服务端下发的封面指针，
+              // 否则选完过往封面返回界面就回落到自动封面。
+              coverUrl: treeCovers[unitCoverKey(s.id, rel)] ??
+                  payload.covers[normalizeUnitRel(rel)] ??
+                  '',
+              // serverId 必须是连接 id（buildUnitTree 按它归组与归属），
+              // 不能写成 cardLabel——那会让分层再次错位。
+              serverId: s.id,
+              serverBase: s.base,
+              serverLabel: s.cardLabel,
+            ),
+        ];
+      }
+
+      final nodes = [for (final s in servers) ...nodesOfServer(s)];
       final units = buildUnitTree(
         nodes: nodes,
         basics: t?.allBasics ?? const <BasicLib>[],
@@ -5961,32 +5961,23 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 鉴权头。格式只有 `basicAuthHeader` 一个出处。
   String _authFor(ServerConn s) => basicAuthHeader(s.user, s.pass);
 
-  /// 读取 owner 指定的节点文件夹（服务端 nodes.json）；失败时按「只有 SECRET」处理。
-  Future<MarkedNodes> _fetchMarkedNodes() async {
-    if (servers.isEmpty) return const MarkedNodes([], {});
-    final s = servers.first;
-    try {
-      final r = await http.get(Uri.parse('${s.base}/api/nodes'), headers: {
+  /// 每条连接各读一次 `/api/nodes`（连接 id → 解析结果）。
+  Future<Map<String, NodesPayload>> _fetchNodesPerServer() async {
+    final out = <String, NodesPayload>{};
+    for (final s in servers) {
+      final h = {
         'Authorization': _authFor(s),
-      }).timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) return const MarkedNodes([], {});
-      final j = jsonOf(r);
-      // owner 2026-11-24：把 `/api/nodes` 的 covers 映射一并带出，
-      // 否则 LibNode.coverUrl 恒为空，手动设过的单元库封面永远不生效
-      // （选完过往封面返回界面就回落到自动封面）。
-      //
-      // owner 2026-11-26：rel 与 covers 的键统一在 [parseNodesPayload] 归一。
-      // 这里原先两处都只 `trim()`：服务端把分隔符写成 `A\B`（或 `A//B`）时，
-      // 节点 rel 与封面键保持原样，而调用方一律用归一化形式去查——写进去、
-      // 读不回来；同一目录还会以 `node:A\B` 与 `node:A/B` 两个 id 各建一个
-      // 节点，首页出现重复卡片，星标/词条也各存一半。
-      final payload = parseNodesPayload(j);
-      return MarkedNodes(payload.rels, payload.covers);
-    } catch (_) {
-      return const MarkedNodes([], {});
+      };
+      try {
+        final r = await http
+            .get(Uri.parse('${s.base}/api/nodes'), headers: h)
+            .timeout(const Duration(seconds: 8));
+        if (r.statusCode != 200) continue;
+        out[s.id] = parseNodesPayload(jsonOf(r));
+      } catch (_) {}
     }
+    return out;
   }
-
 
   /// 已注册媒体库管理（添加/删除/默认/爬虫），从首页移入独立面板。
   void _openRegisteredLibs() {
@@ -6540,18 +6531,6 @@ class _LibraryPageState extends State<LibraryPage> {
 }
 
 
-/// 「文件结构」里勾选的节点 + 服务端下发的封面指针。
-///
-/// owner 2026-11-24：把 rel 列表和 covers 映射一起返回，
-/// 否则单元库手动封面在首页永远不生效。
-class MarkedNodes {
-  final List<String> rels;
-
-  /// rel → `/media/<lib>/_cover/<version>.<ext>`（owner 设过的单元库封面）。
-  final Map<String, String> covers;
-
-  const MarkedNodes(this.rels, this.covers);
-}
 /// 设置 → 爬虫设置：独立管理页，不再打开主页（避免套叠重复）。
 /// 爬虫设置页「一台服务器」的取数结果（`_loadServerPart` 的返回）。
 class _CrawlerServerPart {

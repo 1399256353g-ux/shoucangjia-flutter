@@ -20,7 +20,7 @@ void main() {
         LibBadgeKind.basic);
   });
 
-  test('四种层级默认图案互不相同（可区分）', () {
+  test('三种层级默认图案互不相同（可区分）', () {
     final kinds = [LibBadgeKind.top, LibBadgeKind.unit, LibBadgeKind.basic];
     final patterns = kinds.map(LibraryCornerBadge.patternFor).toList();
     expect(patterns.toSet().length, 3);
@@ -70,7 +70,7 @@ void main() {
     expect(LibraryCornerBadge.colorFor(LibBadgeKind.top), 0xFF00FF00);
   });
 
-  testWidgets('角标四层级形状与尺寸完全一致，只有图案不同', (tester) async {
+  testWidgets('角标三层级形状与尺寸完全一致，只有图案不同', (tester) async {
     final sizes = <String, Size>{};
     for (final kind in LibBadgeKind.values) {
       await tester.pumpWidget(
@@ -84,6 +84,11 @@ void main() {
     expect(sizes.values.map((s) => s.width).toSet().length, 1);
     expect(sizes.values.map((s) => s.height).toSet().length, 1);
     expect(sizes[LibBadgeKind.top.name], const Size(kCornerBadgeSize, kCornerBadgeSize));
+  });
+
+  test('角标只有三种层级（other 已删，设置页不得再出现无含义的第四项）', () {
+    expect(LibBadgeKind.values.length, 3);
+    expect(LibBadgeKind.values.map((e) => e.name), ['top', 'unit', 'basic']);
   });
 
   test('改图案/颜色会递增唯一变更信号（已渲染角标靠它重建）', () async {
