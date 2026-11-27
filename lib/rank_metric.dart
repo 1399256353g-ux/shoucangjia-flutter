@@ -67,13 +67,18 @@ class RankScoreCell extends StatelessWidget {
 /// 明细行：数值类型在前，切换指标时任何一个数字都不换位置。
 ///
 /// `works` 为空时不输出作品数（各库榜没有这一项）。
+///
+/// 第三项此前写成 `'$works 作品'`——前两项都是「类型 + 数字」，只有它把
+/// 类型放在数字后面。owner 的规则是「数值类型统一在数字前面」，同一条明细行
+/// 里出现两种语序，读起来像两套排版：`播放 2000 · 水滴 4 · 3 作品`。
+/// 现在三项同一语序。
 String rankDetailLine({
   required int plays,
   required int drops,
   int? works,
 }) {
   final parts = <String>['播放 $plays', '水滴 $drops'];
-  if (works != null) parts.add('$works 作品');
+  if (works != null) parts.add('作品 $works');
   return parts.join(' · ');
 }
 

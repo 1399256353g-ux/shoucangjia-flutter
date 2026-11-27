@@ -57,7 +57,9 @@ class CrawlerSection {
 String unitScopeKey(UnitLibrary u) {
   final sid = u.node.serverId.trim();
   final rel = normalizeRelPath(u.rel);
-  if (rel.isEmpty) return 'media:${sid.isEmpty ? 'local' : sid}';
+  // 媒体库根直接复用树节点的 id：同一个键在两个模块里各拼一遍，
+  // 前缀改名时必有一处漏（`ai` 会变成空的 `""`）——这里只转发。
+  if (rel.isEmpty) return u.id.isEmpty ? mediaRootId(sid) : u.id;
   return 'u:$sid/$rel';
 }
 

@@ -26,9 +26,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_badge.dart';
 import 'package:shoucangjia/node_key.dart';
-import 'package:shoucangjia/unit_library.dart' show LibNode;
-import 'package:shoucangjia/unit_cover_store.dart';
-import 'package:shoucangjia/author_dir_filter.dart';
+// `unit_library` / `unit_cover_store` / `author_dir_filter` 三个 import 在本批
+// 收口后已无引用（断言改成扫源码文本），留着会让 analyze 一直有 3 条 warning
+// ——warning 长期不红，就没人记得哪一条是新的。
 
 /// 去掉整行注释后的源码（注释里引用旧写法是在解释为什么改）。
 String _code(String path) {

@@ -446,19 +446,13 @@ class LibraryBadge {
     return palette[i];
   }
 
-  /// 库词条颜色：自定义优先，其次按库注册顺序，最后按 id 稳定散列。
-  static int colorFor(String libId, {List<String> order = const []}) {
-    final c = custom[libId];
-    if (c != null) return c;
-    if (libId.isEmpty) return gray;
-    final i = order.indexOf(libId);
-    if (i >= 0) return autoColorAt(i);
-    var h = 0;
-    for (final u in libId.codeUnits) {
-      h = (h * 31 + u) & 0x7fffffff;
-    }
-    return autoColorAt(h);
-  }
+  // 0.9.346：`colorFor(libId)` 已删。它是**第三个取色入口**，而且只挂在
+  // 测试上（`lib/` 零调用）：真实渲染全部走 `colorForUnit` /
+  // `basicColorFor` / `autoColorOf`。留着它的坏处不是“多一个函数”，而是
+  // 它第一步就查 `custom`——即 0.9.265 从 `autoColorOf` 里特意删掉的
+  // 「自动配色读到残留自定义色」那条路径。测试拿它当“自动色基准”时，
+  // 只要 `custom` 里还有旧值，断言就会以旧值为准，看起来“自动色就是那个”。
+  // 自动色现在只能用 `autoColorOf`（永读自定义表）。
 
   /// 单元库配色：同一单元库在主页（`node:rel`）与 LibMeta（`rel`）里 id
   /// 形式不同，这里统一归一，保证作者词条与基础库卡颜色一致。
@@ -468,7 +462,7 @@ class LibraryBadge {
   /// 都得到同一个色（不用随机，避免每次重建换个颜色）。
   ///
   /// **绝不读用户自定义表**。0.9.265 修：上一版末尾 `return colorFor(relOf(...))`，
-  /// 而 [colorFor] 第一步就是查 `custom`，于是「来源=自动分配」仍可能返回残留
+  /// 而那个入口第一步就是查 `custom`，于是「来源=自动分配」仍可能返回残留
   /// 自定义色（实测 `basicSource=auto` + 单元库 `custom` 有值 → 直接返回旧色）。
   /// 自动色能等于自定义色时，「来源」这个选项就名存实亡：用户选了自动、看到
   /// 的还是自己以前挑的颜色，只会认为开关又没生效。

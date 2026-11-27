@@ -105,7 +105,7 @@ void main() {
       ));
       expect(find.text('1'), findsOneWidget);
       expect(find.text('作者丙'), findsOneWidget);
-      expect(find.text('播放 2000 · 水滴 4 · 3 作品'), findsOneWidget);
+      expect(find.text('播放 2000 · 水滴 4 · 作品 3'), findsOneWidget);
       // 数值类型在数字**前面**且单独一行，数字本身不带 emoji（owner 2026-11-27）：
       // 此前是 `💧 4`，宽度和纯数字不同，整列数字对不齐。
       expect(find.text('小水滴'), findsOneWidget);

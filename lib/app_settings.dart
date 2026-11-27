@@ -223,11 +223,16 @@ class AppSettings {
     }
   }
 
-  /// 播放参数恢复默认（**不动按键绑定**）。
+  /// 播放参数恢复默认（**不动按键绑定，也不动词条显示开关**）。
   ///
   /// 修的是「点『播放设置 → 恢复默认』把按键绑定也一起清掉」：这一页只展示
   /// 速度/间隔/预载/填充，按钮却调了全量重置；用户在按键页辛苦改的 Ctrl+J…
   /// 一次「恢复默认播放参数」就全丢，而且没有任何提示。
+  ///
+  /// 同一类问题还剩一处：`stripLibIndex`（词条省略序号）属于设置首层的
+  /// 「词条」开关，不在本页任何一行上。它原来也在这个函数里被重置——
+  /// 用户在该页点一次「恢复默认」，别处关掉的「显示序号」会自己打开，
+  /// 而这一页从头到尾没出现过那个开关。现在它归 [resetLabelPrefs]。
   static void resetPlayback() {
     defaultSpeed = 1.0;
     imageIntervalSec = 3;
@@ -235,8 +240,16 @@ class AppSettings {
     preloadPerSide = preloadDefaultPerSideFor(
         mobile: Platform.isAndroid || Platform.isIOS);
     preloadMemoryMb = preloadDefaultMemoryMb;
-    stripLibIndex = true;
     videoFitOverride = null;
+  }
+
+  /// 词条/标签显示开关恢复默认（**不动播放参数，也不动按键绑定**）。
+  ///
+  /// 目前只有 [stripLibIndex]。单独一个函数的理由与 [resetKeys] 相同：
+  /// 它有自己的入口（设置首层「词条省略序号」），不该被任何一个别的
+  /// 「恢复默认」按钮连带重置。
+  static void resetLabelPrefs() {
+    stripLibIndex = true;
   }
 
   /// 按键绑定恢复默认（**不动播放参数**）。
@@ -251,14 +264,15 @@ class AppSettings {
       });
   }
 
-  /// 全部恢复默认（两页各自的重置是上面两个；这里保留给「清空全部设置」
+  /// 全部恢复默认（三页各自的重置是上面三个；这里保留给「清空全部设置」
   /// 这类真的需要全量的场景，以及测试基线）。
   ///
-  /// 不是「两个函数的第二份实现」：[applyJson] 读入前必须先回到已知状态，
+  /// 不是「三个函数的第二份实现」：[applyJson] 读入前必须先回到已知状态，
   /// 那条路径需要的就是全量；单页按钮则必须只碰自己那一半。
   static void resetDefaults() {
     resetPlayback();
     resetKeys();
+    resetLabelPrefs();
   }
 
   static Future<void> load() async {

@@ -66,6 +66,37 @@ class LibNode {
 }
 
 /// 单元库节点（已挂上直属基础库与下级单元库）。
+/// 媒体库根 id 的前缀。
+///
+/// 同一个前缀此前在**两处各写一遍**：`buildUnitTree` 拼出 `media:<连接>`，
+/// `UnitLibrary.isMediaRoot` 又自己写 `startsWith('media:')` 去认它，
+/// `crawler_sections.unitScopeKey` 再拼第三次。前缀改名时漏一处，
+/// 「这一层是不是媒体库」就会静默变成 false——首页不再贴媒体库词条、
+/// 爬虫分节里所有单元库都掉进「其它」，而两边都不报错。
+const String kMediaRootIdPrefix = 'media:';
+
+/// 「无归属基础库」分组根的 id 前缀（与媒体库根分开，否则按 id 索引互相顶掉）。
+const String kOrphanRootIdPrefix = 'top:';
+
+/// 空连接标识统一写成 `local`，不写空串——`media:` 后面跟空串会与
+/// 「前缀本身就是 id」的写法撞车，且没法从 id 反推出作用域。
+String _scopeSegment(String serverId) {
+  final sid = serverId.trim();
+  return sid.isEmpty ? 'local' : sid;
+}
+
+/// 媒体库根 id：`media:<连接>`。唯一拼装口。
+String mediaRootId(String serverId) =>
+    '$kMediaRootIdPrefix${_scopeSegment(serverId)}';
+
+/// 无归属基础库分组根 id：`top:<连接>`。唯一拼装口。
+String orphanRootId(String serverId) =>
+    '$kOrphanRootIdPrefix${_scopeSegment(serverId)}';
+
+/// 这个 id 是不是媒体库根（只认前缀，不看任何目录名文本）。
+bool isMediaRootId(String id) =>
+    id.trim().startsWith(kMediaRootIdPrefix);
+
 class UnitLibrary {
   final LibNode node;
   final List<BasicLib> basics;
@@ -87,7 +118,7 @@ class UnitLibrary {
   /// 单连接/旧形态没有这一层（根的直接子节点就是单元库），于是全部返回
   /// false——那时的「一级」本来就是单元库，没有可贴的媒体库词条，不编造。
   bool get isMediaRoot =>
-      rel.trim().isEmpty && id.trim().startsWith('media:');
+      rel.trim().isEmpty && isMediaRootId(id);
 
   /// 整棵子树的作品数（含下级单元库）。
   ///
@@ -402,7 +433,7 @@ UnitLibrary? buildUnitTree({
     final label = group.first.serverLabel.trim();
     rootUnits.add(UnitLibrary(
       node: LibNode(
-        id: 'top:${sid.isEmpty ? 'local' : sid}',
+        id: orphanRootId(sid),
         rel: '',
         name: label.isEmpty ? rootNameOf(sid) : label,
         serverId: sid,
@@ -447,7 +478,7 @@ UnitLibrary? buildUnitTree({
     final label = subs.first.node.serverLabel.trim();
     mediaLibraries.add(UnitLibrary(
       node: LibNode(
-        id: 'media:${sid.isEmpty ? 'local' : sid}',
+        id: mediaRootId(sid),
         rel: '',
         name: label.isEmpty ? rootNameOf(sid) : label,
         serverId: sid,

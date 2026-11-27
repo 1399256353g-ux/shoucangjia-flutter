@@ -5,24 +5,38 @@ void main() {
   setUp(() => LibraryBadge.custom.clear());
 
   test('自动配色按库注册顺序分配且不同库不同色', () {
-    final a = LibraryBadge.colorFor('douyin', order: ['douyin', 'second']);
-    final b = LibraryBadge.colorFor('second', order: ['douyin', 'second']);
+    final a = LibraryBadge.autoColorOf('douyin', order: ['douyin', 'second']);
+    final b = LibraryBadge.autoColorOf('second', order: ['douyin', 'second']);
     expect(a, LibraryBadge.palette[0]);
     expect(b, LibraryBadge.palette[1]);
     expect(a, isNot(b));
   });
 
-  test('自定义颜色优先，恢复自动后回到调色板', () {
-    final auto = LibraryBadge.colorFor('douyin', order: ['douyin']);
+  test('来源=自定义时取本层色，切回自动后回到调色板', () async {
+    final auto = LibraryBadge.autoColorOf('douyin', order: ['douyin']);
+    await LibraryBadge.setSource('douyin', BadgeColorSource.fixedCustom);
+    await LibraryBadge.setColor('douyin', 0xFF123456);
+    expect(LibraryBadge.colorForUnit('douyin', order: ['douyin']), 0xFF123456);
+    // 切回自动：本层自定义色被清掉，直接回调色板（不留残留色）。
+    await LibraryBadge.setSource('douyin', BadgeColorSource.autoAssign);
+    expect(LibraryBadge.colorForUnit('douyin', order: ['douyin']), auto);
+    expect(LibraryBadge.custom.containsKey('douyin'), isFalse);
+  });
+
+  test('自动配色永不读自定义表（残留值不得冒充自动色）', () {
+    // 0.9.346 删掉的 `colorFor` 第一步就查 custom：手工改过配置或从别的入口
+    // 写过旧色时，用户选「自动分配」看到的仍是旧色。`autoColorOf` 必须无视它。
+    final auto = LibraryBadge.autoColorOf('douyin', order: ['douyin']);
     LibraryBadge.custom['douyin'] = 0xFF123456;
-    expect(LibraryBadge.colorFor('douyin', order: ['douyin']), 0xFF123456);
+    expect(LibraryBadge.autoColorOf('douyin', order: ['douyin']), auto);
+    expect(LibraryBadge.colorForUnit('douyin', order: ['douyin']), auto,
+        reason: '来源=继承/自动时不得落到残留自定义色');
     LibraryBadge.custom.remove('douyin');
-    expect(LibraryBadge.colorFor('douyin', order: ['douyin']), auto);
   });
 
   test('未知库按 id 稳定散列，同一 id 颜色恒定', () {
-    final c1 = LibraryBadge.colorFor('unknown-lib');
-    final c2 = LibraryBadge.colorFor('unknown-lib', order: ['x', 'y']);
+    final c1 = LibraryBadge.autoColorOf('unknown-lib');
+    final c2 = LibraryBadge.autoColorOf('unknown-lib', order: ['x', 'y']);
     expect(c1, c2);
     expect(LibraryBadge.palette, contains(c1));
   });

@@ -241,8 +241,14 @@ void main() {
 
     test('媒体库卡片 id 带连接前缀，且 `media:local` 只在必要时出现', () {
       final src = File('lib/unit_library.dart').readAsStringSync().replaceAll('\r\n', '\n');
-      expect(src.contains("'media:\${sid.isEmpty ? 'local' : sid}'"), isTrue);
-      expect(src.contains("'top:\${sid.isEmpty ? 'local' : sid}'"), isTrue);
+      // 拼装只剩一处（`mediaRootId` / `orphanRootId`），页面代码不再写字面量：
+      // 前缀与空连接的 `local` 都由那一个函数决定。
+      expect(src.contains('String mediaRootId(String serverId)'), isTrue);
+      expect(src.contains('String orphanRootId(String serverId)'), isTrue);
+      expect(src.contains("'media:\${sid.isEmpty ? 'local' : sid}'"), isFalse,
+          reason: '媒体库 id 的拼装不得回到第二处');
+      expect(src.contains("'top:\${sid.isEmpty ? 'local' : sid}'"), isFalse,
+          reason: '无归属根 id 的拼装不得回到第二处');
     });
   });
 }

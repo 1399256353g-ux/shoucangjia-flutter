@@ -13,7 +13,6 @@ void main() {
   });
 
   test('默认外观：三层级圆角一致，边框与底纹逐级递减', () {
-    final kinds = LibEntryKind.values;
     final decos = [
       for (final k in LibEntryKind.values) LibraryBadge.decorationFor(k, 0xFF336699)
     ];

@@ -89,7 +89,7 @@ void main() {
     LibraryBadge.topCustom.remove('TOP');
     // 撤销后不再继承，回到自动配色（TOP/MID 不在 order 里 → id 稳定散列）
     expect(LibraryBadge.colorForUnit('TOP/MID'),
-        LibraryBadge.colorFor('TOP/MID'));
+        LibraryBadge.autoColorOf('TOP/MID'));
   });
 
   test('词条层级判定：媒体库 / 单元库 / 基础库 / 作者四档，且无 other', () {
