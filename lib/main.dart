@@ -842,6 +842,12 @@ class LibMeta {
 /// J10：作者作品类型索引。T3 起只走基础库索引
 /// `/api/lib/<id>/index.json` 的 kinds（覆盖库内全部作品，无需逐作者请求）；
 /// 旧「收藏夹」`/api/c/<idx>.json` 通道已移除。按注册库缓存，失败不阻断筛选。
+///
+/// 0.9.325：**失败不进缓存**。这张表是进程级的，没有 TTL；此前一次超时/401
+/// 也被当成「这个库的作者都没有类型」永久写进表里，于是「按类型筛选」直到
+/// 重启 App 或手动快速刷新之前都是空结果，而索引其实好好的。现在只缓存
+/// **读成功**的结果（含「服务器上确实没有基础库」这种真答案）；读失败当场
+/// 把条目摘掉，下一次进筛选面板重新请求一次。
 final Map<String, Future<Map<String, Set<String>>>> _authorTypeCache = {};
 
 Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
@@ -850,7 +856,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
       final reg = await http
           .get(cfg.u('/api/libraries', lib: lib), headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 12));
-      if (reg.statusCode != 200) return <String, Set<String>>{};
+      if (reg.statusCode != 200) return _typesFailed(lib);
       final lj = await http
           .get(
               cfg.u(
@@ -858,7 +864,7 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
                   lib: lib),
               headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 12));
-      if (lj.statusCode != 200) return <String, Set<String>>{};
+      if (lj.statusCode != 200) return _typesFailed(lib);
       final regJson = jsonOf(reg);
       var base = '';
       if (regJson is Map) {
@@ -870,15 +876,25 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib) {
         }
       }
       final libJson = jsonOf(lj);
-      if (base.isEmpty || libJson is! Map) return <String, Set<String>>{};
+      if (base.isEmpty || libJson is! Map) return _typesFailed(lib);
       final basics = basicsUnderBase(Map<String, dynamic>.from(libJson), base);
       final parts = await Future.wait(
           [for (final b in basics) _typesFromLibIndex(lib, b.id)]);
       return mergeAuthorTypes(parts);
     } catch (_) {
-      return <String, Set<String>>{};
+      return _typesFailed(lib);
     }
   });
+}
+
+/// 读失败：把这条缓存摘掉再返回空表。
+///
+/// 不做「先缓存、失败后再删」的两段式：`putIfAbsent` 已经把这枚 Future 放
+/// 进表里，删除必须发生在**同一次**调用内，否则下一次调用拿到的是那个
+/// 已经失败的 Future（Future 不会重跑）。
+Map<String, Set<String>> _typesFailed(String lib) {
+  _authorTypeCache.remove(lib);
+  return <String, Set<String>>{};
 }
 
 Future<Map<String, Set<String>>> _typesFromLibIndex(
@@ -6301,17 +6317,28 @@ class _LibraryPageState extends State<LibraryPage> {
       return;
     }
     try {
-      final atBase = await () async {
+      // 「往哪台服务器注册新库」= 当前激活的连接。地址与账号必须同源：
+      // 此前地址取激活连接、鉴权头却写 `cfg.headers`（**当前库**那条连接的
+      // 账号）——激活的连接不是当前库所属那台时，就是拿 A 的密码敲 B 的门，
+      // 界面只写「添加失败」。同理不再附带 `lib=<默认库>` 查询参数：注册库是
+      // 服务器级操作，不属于任何一个库。
+      final at = await () async {
         final sp = await SharedPreferences.getInstance();
         final active = sp.getString('active_server_v1') ?? '';
         for (final s in servers) {
-          if (s.id == active) return s.base;
+          if (s.id == active) return s;
         }
-        return servers.isEmpty ? cfg.base : servers.first.base;
+        return servers.isEmpty ? null : servers.first;
       }();
+      final atBase = at?.base ?? cfg.base;
+      final atHeaders = at == null
+          ? cfg.headers
+          : <String, String>{
+              'Authorization': basicAuthHeader(at.user, at.pass),
+            };
       final r = await http
-          .post(_u('/api/libraries', null, atBase),
-              headers: {...cfg.headers, 'Content-Type': 'application/json'},
+          .post(_u('/api/libraries', '', atBase),
+              headers: {...atHeaders, 'Content-Type': 'application/json'},
               body: jsonEncode({
                 'id': lid,
                 'name': name.text.trim(),
@@ -16273,6 +16300,11 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   /// 分页拉取一个基础库的全部作品（搜索用）。失败返回已取到的部分。
+  ///
+  /// 地址按 `lib` 路由（`cfg.u(..., lib: lib)`），鉴权头也必须按同一个 `lib`
+  /// 取。0.9.325 之前这里写的是 `cfg.headers`——那是**当前库**那条连接的账号：
+  /// 搜索范围切到另一台服务器上的库时，请求打到 B 却带 A 的密码，全部 401，
+  /// 界面上表现为「这个库里一条作品都没有」（空列表与真的没有作品长得一样）。
   Future<List<dynamic>> _libWorks(String lib, String basicId) async {
     const pageSize = 1000;
     const cap = 40000;
@@ -16286,7 +16318,7 @@ class _SearchPageState extends State<SearchPage> {
                     '/api/lib/$basicId/works.json'
                     '?offset=$offset&limit=$pageSize',
                     lib: lib),
-                headers: cfg.headers)
+                headers: cfg.headersFor(lib))
             .timeout(const Duration(seconds: 20));
         if (r.statusCode != 200) break;
         final j = jsonOf(r);

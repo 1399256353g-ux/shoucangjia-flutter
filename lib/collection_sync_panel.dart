@@ -132,15 +132,20 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
     if (saving) return;
     setState(() => saving = true);
     try {
-      final r = await _client.post(_settingsUri,
-          headers: {...widget.headers, 'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'default': defaultIdx,
-            'collections': [
-              for (final c in all)
-                {'idx': c.idx, 'name': c.name, 'sync': c.sync}
-            ],
-          }));
+      // 超时与 `load()` 同一条口径：断网时这个 POST 永不返回，界面就永远停在
+      // 「保存中…」。0.9.324 给页面级请求统一补上限时漏了这一处——它是全仓库
+      // 唯一走注入客户端（`_client`）的写请求，而当时的扫描器只认 `http.post`。
+      final r = await _client
+          .post(_settingsUri,
+              headers: {...widget.headers, 'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'default': defaultIdx,
+                'collections': [
+                  for (final c in all)
+                    {'idx': c.idx, 'name': c.name, 'sync': c.sync}
+                ],
+              }))
+          .timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
