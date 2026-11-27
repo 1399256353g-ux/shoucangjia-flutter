@@ -1192,8 +1192,12 @@ class UnitLibraryPage extends StatefulWidget {
   /// L5-D：非顶级单元库可配置独立爬虫（SECRET 顶级不显示入口）。
   final void Function(UnitLibrary unit)? onConfigureUnit;
 
-  /// A1：作者文件夹挂载（合并同名作者 / 拆分 / 新建作者目录）。
+  /// A1：作者文件夹挂载（合并同名作者 / 拆分 / 编辑组成员）。
   /// 顶级单元库（rel 为空）不显示入口——它没有可挂载的作者目录。
+  ///
+  /// 这里**没有**「新建作者目录」：建目录属于作者页（owner 2026-11-27
+  /// 「新建作者塞到挂载设置里面，你咋想的」），挂载解决的是「已有文件夹
+  /// 怎么归类」，两件事不该共用一个面板。
   final void Function(UnitLibrary unit)? onMountAuthors;
 
   /// C2：本地选图上传封面；为空时不显示卡片上的封面按钮。

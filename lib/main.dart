@@ -6302,7 +6302,10 @@ class _LibraryPageState extends State<LibraryPage> {
     ));
   }
 
-  /// A1：打开作者文件夹挂载面板（合并/拆分/新建作者目录）。
+  /// A1：打开作者文件夹挂载面板（合并/拆分/编辑组成员）。
+  ///
+  /// 面板里**不再有**「新建作者目录」：建作者属于作者页（owner 2026-11-27），
+  /// 挂载解决的是「已有文件夹怎么归类」。
   ///
   /// 地址与鉴权都取该单元库**所属连接**（[_unitConn]），与爬虫配置、删除监测
   /// 同一份判定——避免在一个页面里出现「用的不是同一个连接」。
@@ -8834,8 +8837,29 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   String _sig = '';
   // T1：作者卡没有现成头像（av 为空）时，从该作者作品图里挑一张兜底。
   // 只对缺头像的作者发一次请求，结果按「库|作者」缓存在内存里。
+  //
+  // 0.9.338：这两张表**立即**属于某一条连接。`_avLookup` 只加不清，切过
+  // 激活连接后新连接的作者仍在表里（同名同库 id 时）——于是「已查过」成立，
+  // 兜底头像永远不拉，卡片停在首字占位，直到重启 App。作者头像索引
+  // （`_authorAvatarScope`）上一批已经把「已加载」改成作用域比较，这里是同一
+  // 族里最后一处，口径必须一致：连接一变就当作没查过，并丢掉旧图。
   final Map<String, String> _avFallback = {};
   final Set<String> _avLookup = {};
+
+  /// 上面两张表的作用域（`authorAvatarScopeKey`）。空串＝尚未写入。
+  String _avScope = '';
+
+  /// 作用域变了就清空兜底缓存；返回当前作用域。
+  ///
+  /// 只在 [load] 开头调一次：`_authorCell` 在 build 里跑，在里面改表会
+  /// 在构造帧中触发重建。
+  void _syncAvScope() {
+    final scope = authorAvatarScopeKey;
+    if (_avScope == scope) return;
+    _avScope = scope;
+    _avFallback.clear();
+    _avLookup.clear();
+  }
 
   @override
   void initState() {
@@ -8941,8 +8965,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   ///
   /// owner 2026-11-27：这件事属于**作者页**，不属于挂载设置页——
   /// 挂载解决的是「已有文件夹怎么归类」，建目录是在作者容器里造新作者。
+  /// 同一批里已把 `unit_author_mount_page` 的那份入口连同实现一起删掉，
+  /// 这里是**唯一**入口（服务端 `POST /api/unit/authors/create`）。
   Future<void> _createAuthor() async {
-    final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
+    final meta = _metaForAuthorPage();
     final basics = meta == null
         ? const <BasicLib>[]
         : (meta.allBasics.isNotEmpty ? meta.allBasics : meta.basics);
@@ -9067,6 +9093,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// 不显示加载骨架、不重置滚动位置，数据签名没变就完全不 setState，
   /// 避免整页 Grid 重建造成返回卡顿（I7）。
   Future<void> load({bool quiet = false}) async {
+    _syncAvScope();
     if (mounted) {
       if (!quiet) {
         setState(() {
@@ -9301,7 +9328,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   // T1：为缺头像的作者取一张作品图兜底（每条作者+库只发一次请求）。
   Future<void> _fetchFallbackAvatar(String name, String lib, String idx) async {
     if (!mounted) return;
-    final key = '$lib|$name';
+    // 作用域先归一：请求途中用户切了连接时，这份结果不能再写进新一轮的表
+    // （与 `_authorAvatarScope` 的「取发请求时那一份」同一条规则）。
+    final scope = authorAvatarScopeKey;
+    // 分隔符不在这里手写：`node_key.scopedKey` 是作用域键的唯一拼装口。
+    final key = scopedKey(scope, '$lib|$name');
     if (_avLookup.contains(key)) return;
     _avLookup.add(key);
     try {
@@ -9314,6 +9345,8 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       final pick = pickFallbackAvatar(avatarCandidatesFromWorks(
           [for (final w in listOf(m is Map ? m['works'] : null)) if (w is Map) w]));
       if (pick == null || pick.isEmpty || !mounted) return;
+      // 期间连接又变了：这份图属于上一台服务器，不能落到新一轮的表里。
+      if (authorAvatarScopeKey != scope) return;
       setState(() => _avFallback[key] = pick);
     } catch (_) {}
   }
@@ -9327,13 +9360,25 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     if (mounted) await load(quiet: true);
   }
 
+  /// 作者页用的元数据：当前库优先，没有就取手里任何一份。
+  ///
+  /// 这两处（新建作者目录的「基础库下拉」、作者卡词条）此前各写了一遍
+  /// `metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first)`：
+  /// 字节相同的两行，改一处就变成「下拉里可选的基础库」与「卡片上贴的词条」
+  /// 来自不同的库——两边都自洽，界面上只是「这个词条怎么不是我这个库的」。
+  LibMeta? _metaForAuthorPage() =>
+      metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
+
   Widget _authorCell(MapEntry<String, Map<String, dynamic>> e) {
     final av = '${e.value['av'] ?? ''}';
     final lib = workLibOf(e.value, fallback: cfg.lib);
-    final meta = metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
+    final meta = _metaForAuthorPage();
 
-    // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位
-    final fallbackKey = '$lib|${e.key}';
+    // T1：av 优先；没有 av 用作品图兜底；都拿不到才显示首字母占位。
+    // 键带作用域：表本身按连接清空，键里再带一次是为了「清理还没跑到」
+    // 的那一帧也不会读到上一台服务器的图。
+    final fallbackKey =
+        scopedKey(authorAvatarScopeKey, '$lib|${e.key}');
     final shownAv = av.isNotEmpty ? av : (_avFallback[fallbackKey] ?? '');
     if (av.isEmpty && shownAv.isEmpty) {
       final idx = '${e.value['i'] ?? ''}';
