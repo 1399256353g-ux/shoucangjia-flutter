@@ -125,12 +125,19 @@ String coverActionErrorText(int status) =>
     });
 
 /// 列出版本列表：`GET /api/cover/versions?lib=&unitRel=`。
+///
+/// 0.9.327：[client] 可注入。调用方按页面持有客户端（与
+/// `collection_sync_panel` 等五个页面同一口径）；不传时每次调用建一个
+/// 临时客户端并关闭——那是「能用但每点一次就新建一条连接池」的写法，
+/// 只有在单次脚本/测试里才该走。
 Future<CoverListResult> fetchCoverVersions({
   required Uri url,
   required Map<String, String> headers,
+  http.Client? client,
 }) async {
+  final c = client ?? http.Client();
   try {
-    final r = await http
+    final r = await c
         .get(url, headers: headers)
         .timeout(const Duration(seconds: 8));
     if (r.statusCode != 200) {
@@ -141,6 +148,8 @@ Future<CoverListResult> fetchCoverVersions({
     return CoverListResult(true, '', versions: parseCoverVersions(json));
   } catch (_) {
     return const CoverListResult(false, '读取封面历史失败：网络异常');
+  } finally {
+    if (client == null) c.close();
   }
 }
 
@@ -209,12 +218,14 @@ Future<CoverActionResult> clearCustomCover({
   required String libId,
   String unitRel = '',
   bool hard = false,
+  http.Client? client,
 }) async {
   if (libId.trim().isEmpty) {
     return const CoverActionResult(false, '缺少库标识');
   }
+  final c = client ?? http.Client();
   try {
-    final r = await http
+    final r = await c
         .post(
           url,
           headers: {...headers, 'Content-Type': 'application/json'},
@@ -232,5 +243,7 @@ Future<CoverActionResult> clearCustomCover({
     return CoverActionResult(true, hard ? '已清除自定义封面' : '已恢复自动封面');
   } catch (_) {
     return const CoverActionResult(false, '操作失败：网络异常');
+  } finally {
+    if (client == null) c.close();
   }
 }

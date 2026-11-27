@@ -11,6 +11,8 @@
 
 import 'dart:convert';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'json_num.dart';
 import 'media_path.dart' show isMediaPath;
 import 'node_key.dart' show nodeKey;
@@ -320,7 +322,7 @@ Map<String, dynamic>? mergeLibraryTrees(List<ServerLibraries> snapshots) {
       if (id.isEmpty || !seenBasic.add(id)) continue;
       basics.add(_tag(raw, snap.server));
     }
-    _collectUnitCovers(t, unitCovers, snap.server.id);
+    collectUnitCovers(t, unitCovers, snap.server.id);
   }
   if (!any) return null;
   return <String, dynamic>{
@@ -342,7 +344,12 @@ String unitCoverKey(String serverId, String rel) =>
 /// 与 `gallery_server.js` 下发时的口径保持一致：只认 `cover` 对象里的 `u`，
 /// 且必须是媒体路径（`/media/...`）。rel 归一化走 [normalizeUnitRel]，
 /// 与服务端 `unitRelKey` 同一套规则，避免「写进去、读不回来」。
-void _collectUnitCovers(
+///
+/// 0.9.327：由私有改为公开——首页聚合与 `LibMeta.load`（单库作用域）原本
+/// 只有前者读得到 `libraries.json` 的整棵树，后者只读 `/api/nodes` 的
+/// `covers`（那里只有被标记成节点的 rel 才带指针），于是同一张单元库卡片
+/// 在首页有 owner 设过的封面、从设置页进单元库页就退回自动封面。
+void collectUnitCovers(
     Map<String, dynamic> tree, Map<String, String> out, String serverId) {
   for (final key in const ['nodes', 'bigLibraries', 'groups']) {
     final arr = tree[key];
@@ -358,6 +365,39 @@ void _collectUnitCovers(
       out.putIfAbsent(unitCoverKey(serverId, rel), () => u);
     }
   }
+}
+
+/// 某一连接下「rel → 封面指针」的合并表：**唯一优先级链**。
+///
+/// 两个来源的覆盖面不同，取并集而不是二选一：
+///  - `treeCovers`：`/api/libraries.json` 整棵树里带 `cover.u` 的节点，
+///    键是 `<连接>␁<rel>`（[unitCoverKey]），覆盖全部层级；
+///  - `nodesCovers`：`/api/nodes` 的 `covers`，键是裸 rel，只覆盖被标记为
+///    节点的那些目录（实测 31 条里仅 4 条带指针），但它是节点文件夹的
+///    **权威来源**（owner 刚在「文件结构」里设过、树快照还没刷新时只有它）。
+///
+/// 0.9.327 之前这条链在首页 `_loadTree` 与 `LibMeta.load` 各写一遍，且后者
+/// 只取了 `nodesCovers`——所以同一张卡在两个入口显示的封面不一样，而两边
+/// 各自都「查到了值」。现在只有这里一处排序。
+Map<String, String> unitCoverTable({
+  required String serverId,
+  required Iterable<String> rels,
+  required Map<String, String> treeCovers,
+  required Map<String, String> nodesCovers,
+}) {
+  final out = <String, String>{};
+  for (final raw in rels) {
+    final rel = normalizeUnitRel(raw);
+    if (rel.isEmpty) continue;
+    final tree = '${treeCovers[unitCoverKey(serverId, rel)] ?? ''}'.trim();
+    if (tree.isNotEmpty) {
+      out[rel] = tree;
+      continue;
+    }
+    final node = '${nodesCovers[rel] ?? ''}'.trim();
+    if (node.isNotEmpty) out[rel] = node;
+  }
+  return out;
 }
 
 /// 单元库 rel 归一化——与服务端 `unitRelKey` 同一套规则：
@@ -532,4 +572,28 @@ String nextServerId(List<ServerConn> servers) {
     n++;
   }
   return 'srv-$n';
+}
+
+/// 从本机偏好读取连接表（含旧版单 base 的迁移），不抛异常。
+///
+/// 这条链此前在 `main` 里抄了五遍（`_boot` / 设置页 / 库页 `load` /
+/// 爬虫设置页 / 首页总刷新），每份都自带「读 pref → migrateLegacy」两行。
+/// 0.9.327 新增「文件结构页要全部在线连接」的调用点，收成一处再复用它，
+/// 避免第六份。
+Future<List<ServerConn>> loadServersFromPrefs({
+  String fallbackBase = '',
+  String fallbackUser = 'zzx',
+  String fallbackPass = '',
+}) async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    return migrateLegacy(
+      servers: decodeServers(sp.getString('servers_v1')),
+      base: sp.getString('base') ?? fallbackBase,
+      user: sp.getString('user') ?? fallbackUser,
+      pass: sp.getString('pass') ?? fallbackPass,
+    );
+  } catch (_) {
+    return const <ServerConn>[];
+  }
 }

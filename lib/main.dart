@@ -674,14 +674,29 @@ class LibMeta {
                 markRels = p.rels;
                 markCovers = p.covers;
               }
+              // 0.9.327：封面指针与首页同一条链（`unitCoverTable`）。
+              // 此前这里只把 `/api/nodes` 的 `covers` 交给 `nodesFromMarks`，
+              // 而那个表只有被标记为节点的 rel 才带指针（实测 31 条里 4 条）：
+              // 从设置页进单元库页时，owner 在 `libraries.json` 里设过的
+              // 整树封面读不到，卡片回落到自动封面——首页却是对的。
+              //
+              // 作用域仍是**本函数正在读的那条连接**：这四条请求已经按 `lib`
+              // 路由，节点却写当前库的 base/id 时，跨连接下单元库卡片的封面
+              // 与挂载请求会打到另一台服务器。
+              final treeCovers = <String, String>{};
+              collectUnitCovers(ljm, treeCovers,
+                  source.isScoped ? source.serverId : cfg.serverIdFor(lib));
               final nodes = markRels.isEmpty
                   ? nodesFromV2(ljm, root: base)
-                  // 节点的连接字段必须按本函数正在读的 `lib` 取：这四条请求
-                  // 已经按 `lib` 路由（`cfg.headersFor(lib)`），节点却写当前库
-                  // 的 base/id，跨连接时单元库卡片的封面与挂载请求会打到另一台
-                  // 服务器（同族缺陷，地址与账号之外还有「节点归属」这一份）。
                   : nodesFromMarks(markRels,
-                      covers: markCovers,
+                      covers: unitCoverTable(
+                        serverId: source.isScoped
+                            ? source.serverId
+                            : cfg.serverIdFor(lib),
+                        rels: markRels,
+                        treeCovers: treeCovers,
+                        nodesCovers: markCovers,
+                      ),
                       // 节点归属也按来源：`cfg.baseFor(lib)` 在绑定表为空时
                       // 回落到默认服务器，单元库卡片的封面与挂载请求就会
                       // 打到另一台机器（同族缺陷的「归属」那一份）。
@@ -5401,6 +5416,10 @@ class _LibraryPageState extends State<LibraryPage> {
   List<ServerConn> shownServers = [];
   int disconnected = 0;
 
+  /// 封面菜单（历史 / 回滚 / 恢复自动 / 清除）共用的 HTTP 客户端。
+  /// 与周边五个项目页同一口径：页面内复用、`dispose` 时关闭。
+  final http.Client _coverClient = http.Client();
+
   /// L5：单元库树（节点文件夹＝单元库，SECRET 顶级）。
   UnitLibrary? unitTree;
   Set<String> expanded = <String>{};
@@ -5426,6 +5445,7 @@ class _LibraryPageState extends State<LibraryPage> {
     StarStore.instance.removeListener(_onStarsChanged);
     coverRevision.removeListener(_onCoverChanged);
     _menuScroll.dispose();
+    _coverClient.close();
     super.dispose();
   }
 
@@ -5722,10 +5742,15 @@ class _LibraryPageState extends State<LibraryPage> {
         }
       }
 
-      /// 一条连接的节点：`/api/nodes` 标记 ∪ 该连接自己有封面指针的 rel。
+      /// 一条连接的节点：`/api/nodes` 标记 ∪ 该连接自己带封面指针的 rel。
       ///
       /// 补封面那部分不能省：树里有指针但没被标记的 rel 没有节点承载，
       /// 卡片就拿不到那张封面。反向解析走 `node_key`（唯一实现）。
+      ///
+      /// 0.9.327：rel 去重与封面优先级都收到 `unitCoverTable`（与
+      /// `LibMeta.load` 同一条链）——此前两处各排一遍，结果同一张卡在两个
+      /// 入口显示的封面不一样：首页认 `libraries.json` 的整树指针，从设置页
+      /// 进单元库页只认 `/api/nodes` 的 `covers`（那里只有节点才带）。
       List<LibNode> nodesOfServer(ServerConn s) {
         final payload = nodesPerServer[s.id] ?? NodesPayload.empty;
         final rels = <String>{
@@ -5734,6 +5759,12 @@ class _LibraryPageState extends State<LibraryPage> {
             if (nodeKeyHasServer(k, s.id)) nodeKeyRel(k),
         }.toList(growable: false)
           ..sort();
+        final covers = unitCoverTable(
+          serverId: s.id,
+          rels: rels,
+          treeCovers: treeCovers,
+          nodesCovers: payload.covers,
+        );
         return [
           for (final rel in rels)
             LibNode(
@@ -5742,9 +5773,7 @@ class _LibraryPageState extends State<LibraryPage> {
               name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
               // owner 2026-11-24：必须带上服务端下发的封面指针，
               // 否则选完过往封面返回界面就回落到自动封面。
-              coverUrl: treeCovers[unitCoverKey(s.id, rel)] ??
-                  payload.covers[normalizeUnitRel(rel)] ??
-                  '',
+              coverUrl: covers[normalizeUnitRel(rel)] ?? '',
               // serverId 必须是连接 id（buildUnitTree 按它归组与归属），
               // 不能写成 cardLabel——那会让分层再次错位。
               serverId: s.id,
@@ -5797,6 +5826,10 @@ class _LibraryPageState extends State<LibraryPage> {
   CoverMenuActions? _coverMenuFor(String libId, String unitRel) {
     if (libId.trim().isEmpty) return null;
     final headers = cfg.headersFor(libId);
+    // 封面菜单的四条请求共用本页的客户端（页面销毁时关闭）：此前每条各建
+    // 一个 `http.Client()` 再由函数自己 close，一次「看历史 → 回滚」就白开
+    // 三次连接池，且与其余项目页的写法不一致。
+    final client = _coverClient;
     Uri versionsUri() {
       final base = cfg.u('/api/cover/versions', lib: libId);
       if (unitRel.isEmpty) return base;
@@ -5814,8 +5847,8 @@ class _LibraryPageState extends State<LibraryPage> {
       headers: headers,
       urlOf: (p) => cfg.mediaUrl(p, lib: libId),
       pickLocal: () => uploadCoverFromPicker(libId: libId, unitRel: unitRel),
-      listVersions: () =>
-          fetchCoverVersions(url: versionsUri(), headers: headers),
+      listVersions: () => fetchCoverVersions(
+          url: versionsUri(), headers: headers, client: client),
       restore: (v) => restoreCoverVersion(
         url: restoreUri,
         headers: headers,
@@ -5823,6 +5856,7 @@ class _LibraryPageState extends State<LibraryPage> {
         unitRel: unitRel,
         version: v.version,
         ext: v.ext,
+        client: client,
       ),
       restoreAuto: () => clearCustomCover(
         url: clearUri,
@@ -5830,6 +5864,7 @@ class _LibraryPageState extends State<LibraryPage> {
         libId: libId,
         unitRel: unitRel,
         hard: false,
+        client: client,
       ),
       clearAll: () => clearCustomCover(
         url: clearUri,
@@ -5837,6 +5872,7 @@ class _LibraryPageState extends State<LibraryPage> {
         libId: libId,
         unitRel: unitRel,
         hard: true,
+        client: client,
       ),
       onChanged: () => coverRevision.value++,
     );
@@ -5963,8 +5999,13 @@ class _LibraryPageState extends State<LibraryPage> {
 
   /// 每条连接各读一次 `/api/nodes`（连接 id → 解析结果）。
   Future<Map<String, NodesPayload>> _fetchNodesPerServer() async {
-    final out = <String, NodesPayload>{};
-    for (final s in servers) {
+    if (servers.isEmpty) return <String, NodesPayload>{};
+    // 0.9.327：连接之间**有界并发**（4 路，与爬虫设置页同一口径）。
+    // 串行时 N 台服务器就是 N 次完整往返，每条各 8s 上限——三台以上时首页
+    // 首屏在「节点还没读完」这件事上白等十几秒，而这几份数据彼此独立。
+    // 单条失败仍然只是「那台缺席」：不进表、不造假条目。
+    final payloads = await mapConcurrent<ServerConn, NodesPayload?>(
+        servers, 4, (s) async {
       final h = {
         'Authorization': _authFor(s),
       };
@@ -5972,9 +6013,16 @@ class _LibraryPageState extends State<LibraryPage> {
         final r = await http
             .get(Uri.parse('${s.base}/api/nodes'), headers: h)
             .timeout(const Duration(seconds: 8));
-        if (r.statusCode != 200) continue;
-        out[s.id] = parseNodesPayload(jsonOf(r));
-      } catch (_) {}
+        if (r.statusCode != 200) return null;
+        return parseNodesPayload(jsonOf(r));
+      } catch (_) {
+        return null;
+      }
+    });
+    final out = <String, NodesPayload>{};
+    for (var i = 0; i < servers.length; i++) {
+      final p = payloads[i];
+      if (p != null) out[servers[i].id] = p;
     }
     return out;
   }
@@ -6007,14 +6055,24 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
+  /// 「文件结构」：列出库下全部文件夹，勾选哪些是节点文件夹（单元库）。
+  ///
+  /// 0.9.327：把**全部在线连接**交给页面。此前只传 `servers.first`，多连接
+  /// 时第二台服务器在「文件结构」里根本选不到，那台的节点文件夹永远设不了
+  /// （首页却照常画出它的卡片）。页面内可按服务器切换，保存写回当前那台。
   Future<void> _openFolders() async {
     if (servers.isEmpty) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => FolderStructurePage(
-        urlOf: (path) => Uri.parse('${servers.first.base}$path'),
-        headersOf: () => {
-          'Authorization': _authFor(servers.first),
-        },
+        sources: [
+          for (final s in servers)
+            FolderSource(
+              id: s.id,
+              label: s.cardLabel,
+              base: s.base,
+              headersOf: () => {'Authorization': _authFor(s)},
+            ),
+        ],
         onSaved: (_) async => load(),
       ),
     ));
@@ -7475,16 +7533,45 @@ class _HomePageState extends State<HomePage> {
     } catch (_) {}
   }
 
-  /// 「文件结构」：列出库下全部文件夹，勾选哪些是节点文件夹（单元库）。
+  /// 「文件结构」：勾选哪些目录是节点文件夹（单元库）。
+  ///
+  /// 0.9.327：与库页同一个入口口径——把磁盘上全部在线连接交给页面，
+  /// 由页面按服务器切换。此前只传 `cfg.base` / `cfg.headers`（当前库那条
+  /// 连接），第二台服务器在这页不可见。
   Future<void> _openFolders() async {
+    final all = await loadServersFromPrefs();
+    final live = liveServers(all);
+    final sources = <FolderSource>[
+      for (final s in live)
+        FolderSource(
+          id: s.id,
+          label: s.cardLabel,
+          base: s.base,
+          headersOf: () => {'Authorization': basicAuthHeader(s.user, s.pass)},
+        ),
+    ];
+    // 一条在线连接都读不到时仍要能打开页面：用当前连接兜底（地址/账号
+    // 都来自 `cfg`，这是唯一还知道的一份）。
+    if (sources.isEmpty && cfg.base.isNotEmpty) {
+      sources.add(FolderSource(
+        id: cfg.serverIdFor(),
+        label: cfg.serverLabelFor(),
+        base: cfg.base,
+        headersOf: () => cfg.headers,
+      ));
+    }
+    if (sources.isEmpty) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => FolderStructurePage(
-        urlOf: (path) => Uri.parse('${cfg.base}$path'),
-        headersOf: () => cfg.headers,
+        sources: sources,
+        // 保存成功已经会让首页重拉快照；返回时再 bump 一次是为了覆盖
+        // 「另一台服务器上改了节点、本页缓存还没过期」这一种——两处都只是
+        // 重读，不新增状态。
+        onSaved: (_) async {
+          if (mounted) setState(() => _libEpoch++);
+        },
       ),
     ));
-    if (!mounted) return;
-    setState(() => _libEpoch++);
   }
 
   @override

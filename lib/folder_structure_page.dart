@@ -21,17 +21,48 @@ import 'load_error_view.dart';
 ///
 /// 数据：`GET /api/folders` → { root, top:{name,rel}, folders:[{rel,name,depth,authors,isNode,dirs}] }
 /// 保存：`POST /api/nodes` body {nodes:[rel,...]}
-class FolderStructurePage extends StatefulWidget {
-  final Uri Function(String path) urlOf;
+///
+/// 页面按**服务器**工作：节点文件夹是每台服务器自己的 `nodes.json`。
+/// 0.9.327 之前本页只接受一份 `urlOf/headersOf`，两个调用点都写死「首条
+/// 连接」/「当前库的连接」——多连接时 owner 只能给其中一台勾节点文件夹，
+/// 第二台的节点永远设不了（首页却照常把它那台的卡片画出来）。
+/// 现在传入 [sources] 全部连接，页内按连接切换，保存写回**当前那台**。
+class FolderSource {
+  final String id;
+  final String label;
+  final String base;
   final Map<String, String> Function() headersOf;
+
+  const FolderSource({
+    required this.id,
+    required this.label,
+    required this.base,
+    required this.headersOf,
+  });
+
+  Uri urlOf(String path) => Uri.parse('$base$path');
+
+  /// 切换菜单里的名称：没填名称就用地址（这里**要**地址，否则无法区分两台）。
+  String get title => label.trim().isEmpty ? base : label.trim();
+}
+
+class FolderStructurePage extends StatefulWidget {
+  /// 可切换的服务器；第一项是打开页面时的那一台。
+  final List<FolderSource> sources;
+
+  /// 保存成功后的回调（参数是刚写进服务器的那份节点列表）。
   final Future<void> Function(List<String> nodes)? onSaved;
+
+  /// 可注入的 HTTP 客户端（测试用）。不传时页面自己建一个并在销毁时关闭
+  /// ——与周边五个项目页同一口径，不再每次请求新建。
+  final http.Client? client;
 
   const FolderStructurePage({
     super.key,
-    required this.urlOf,
-    required this.headersOf,
+    required this.sources,
     this.onSaved,
-  });
+    this.client,
+  }) : assert(sources.length > 0, '至少要有一条连接');
 
   @override
   State<FolderStructurePage> createState() => _FolderStructurePageState();
@@ -85,6 +116,19 @@ bool basicLocked({
 }
 
 class _FolderStructurePageState extends State<FolderStructurePage> {
+  /// 当前正在编辑的那台服务器（见 [FolderSource]）。
+  late int _active = 0;
+
+  FolderSource get _src => widget.sources[_active];
+
+  http.Client? _ownClient;
+
+  http.Client get _client => widget.client ?? (_ownClient ??= http.Client());
+
+  Uri _urlOf(String path) => _src.urlOf(path);
+
+  Map<String, String> _headers() => _src.headersOf();
+
   String topName = '';
   String topRel = '';
   List<_FolderRow> rows = [];
@@ -162,6 +206,33 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _ownClient?.close();
+    super.dispose();
+  }
+
+  /// 切到另一台服务器：节点列表属于各自服务器的 `nodes.json`，所以三份
+  /// 状态（节点勾选 / 已保存副本 / 展开状态）都先清掉再重新读。
+  /// 有未保存改动时先确认——否则切换会静默丢掉刚勾的那几项。
+  Future<void> _switchServer(int index) async {
+    if (index == _active || loading || saving) return;
+    if (!await _confirmDiscard('切换服务器')) return;
+    if (!mounted) return;
+    setState(() {
+      _active = index;
+      nodes.clear();
+      saved.clear();
+      expanded.clear();
+      basicRels = <String>{};
+      basicsKnown = false;
+      rows = const [];
+      topName = '';
+      topRel = '';
+    });
+    await _load();
+  }
+
   Future<void> _loadUnlocked() async {
     try {
       final sp = await SharedPreferences.getInstance();
@@ -206,8 +277,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     });
     try {
       final rs = await Future.wait<Object?>([
-        http
-            .get(widget.urlOf('/api/folders'), headers: widget.headersOf())
+        _client
+            .get(_urlOf('/api/folders'), headers: _headers())
             .timeout(const Duration(seconds: 20)),
         _fetchBasicRels().then<Object?>((v) => v),
       ]);
@@ -256,8 +327,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   /// 才能据此判断某个目录「已经不是基础库了」。
   Future<Set<String>?> _fetchBasicRels() async {
     try {
-      final r = await http
-          .get(widget.urlOf('/api/libraries.json'), headers: widget.headersOf())
+      final r = await _client
+          .get(_urlOf('/api/libraries.json'), headers: _headers())
           .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) return null;
       final j = jsonOf(r);
@@ -303,11 +374,11 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     try {
       // 双保险：基础库目录永远不进 nodes。
       nodes.removeWhere((e) => _isBasicRel(e));
-      final r = await http
+      final r = await _client
           .post(
-            widget.urlOf('/api/nodes'),
+            _urlOf('/api/nodes'),
             headers: {
-              ...widget.headersOf(),
+              ..._headers(),
               'Content-Type': 'application/json',
             },
             body: jsonEncode({'nodes': nodes.toList()}),
@@ -577,7 +648,13 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('文件结构'),
+          title: widget.sources.length <= 1
+              ? const Text('文件结构')
+              : _ServerPicker(
+                  sources: widget.sources,
+                  active: _active,
+                  onPick: _switchServer,
+                ),
           actions: [
             IconButton(
               tooltip: '刷新',
@@ -672,6 +749,57 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                     ],
                   ),
       ),
+    );
+  }
+}
+
+/// 标题位置的服务器切换器：多连接时点开列出全部连接。
+///
+/// 单连接时调用方直接显示「文件结构」（见 `build`），避免给只有一个库的人
+/// 多一个没有第二项的菜单。
+class _ServerPicker extends StatelessWidget {
+  final List<FolderSource> sources;
+  final int active;
+  final Future<void> Function(int index) onPick;
+
+  const _ServerPicker({
+    required this.sources,
+    required this.active,
+    required this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cur = sources[active];
+    return PopupMenuButton<int>(
+      key: const ValueKey('folder-server-picker'),
+      tooltip: '选择要设置节点文件夹的服务器',
+      onSelected: (i) => onPick(i),
+      itemBuilder: (_) => [
+        for (var i = 0; i < sources.length; i++)
+          PopupMenuItem<int>(
+            value: i,
+            child: Row(children: [
+              Icon(i == active ? Icons.check : Icons.dns_outlined,
+                  size: 16,
+                  color: i == active
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(sources[i].title,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+          ),
+      ],
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(
+          child: Text('文件结构 · ${cur.title}',
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+        const Icon(Icons.arrow_drop_down),
+      ]),
     );
   }
 }

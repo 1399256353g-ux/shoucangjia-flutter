@@ -77,9 +77,17 @@ void main() {
 
     test('封面指针按「这一条连接」查，不按某条全局连接查', () {
       final body = _loadTreeBody();
-      expect(body.contains('unitCoverKey(s.id, rel)'), isTrue,
-          reason: '封面键必须带本连接的 id：两台服务端同名 rel 都用 rel 查'
-              '会让 B 的卡片拿到 A 的指针');
+      // 0.9.327：优先级链收进 `multi_server.unitCoverTable`（首页与
+      // `LibMeta.load` 共用），但作用域仍是**这一条连接**——调用处必须把
+      // `serverId: s.id` 传进去。只按 rel 查会让 B 的卡片拿到 A 的指针。
+      expect(body.contains('unitCoverTable('), isTrue,
+          reason: '封面指针必须走唯一优先级链（与 LibMeta.load 同源）');
+      expect(body.contains('serverId: s.id'), isTrue,
+          reason: '封面表的作用域必须是本连接 id');
+      expect(body.contains('treeCovers: treeCovers'), isTrue,
+          reason: '整树指针要传进去：/api/nodes 的 covers 只覆盖被标记的节点');
+      expect(body.contains('nodesCovers: payload.covers'), isTrue,
+          reason: '节点权威来源是 /api/nodes 的 covers');
       expect(body.contains('nodeKeyHasServer(k, s.id)'), isTrue,
           reason: '反向补 rel 时也只能认本连接自己的键');
     });
@@ -90,14 +98,22 @@ void main() {
           'Future<Map<String, NodesPayload>> _fetchNodesPerServer()');
       expect(start, greaterThan(0), reason: '找不到 _fetchNodesPerServer');
       final body = src.substring(start, start + 1400);
-      expect(body.contains('for (final s in servers)'), isTrue,
-          reason: '必须遍历全部连接');
+      // 0.9.327：遍历改成有界并发（`mapConcurrent`，与爬虫设置页同一口径），
+      // 覆盖范围仍是**全部**连接；串行版会让 N 台服务器白等 N×8s。
+      expect(body.contains('mapConcurrent<ServerConn, NodesPayload?>('),
+          isTrue,
+          reason: '必须把全部连接都发出去（并发，不是只读一条）');
+      expect(body.contains('servers, 4,'), isTrue,
+          reason: '并发入口的输入必须是整张连接表');
       expect(body.contains('/api/nodes'), isTrue,
           reason: '取数地址必须是节点文件夹接口');
       expect(body.contains('_authFor(s)'), isTrue,
           reason: '每次请求都要带那台自己的账号');
       expect(body.contains('.timeout('), isTrue,
           reason: '请求必须有上限（与其它页面同一条口径）');
+      // 单条失败不能变成「那一台没有节点」以外的任何东西。
+      expect(body.contains('return null;'), isTrue,
+          reason: '读不到就缺席，不造假条目');
     });
 
     test('只读一条连接的旧实现已整体删除（不留第二份口径）', () {

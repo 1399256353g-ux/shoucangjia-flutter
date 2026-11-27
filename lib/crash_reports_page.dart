@@ -4,6 +4,7 @@
 // 「复制全部」方便 owner 直接把问题贴回来。
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import 'crash_guard.dart';
 import 'byte_size.dart';
@@ -226,15 +227,27 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
   bool loading = true;
   bool pruning = false;
 
+  /// 本卡片自己的 HTTP 客户端：与周边五个项目页同一口径（页面内复用、
+  /// 销毁时关闭）。不传时那两个函数会为每次调用新建一个再关掉——
+  /// 诊断页每刷新一次就白开一条连接池。
+  late final http.Client _client = http.Client();
+
   @override
   void initState() {
     super.initState();
     _refresh();
   }
 
+  @override
+  void dispose() {
+    _client.close();
+    super.dispose();
+  }
+
   Future<void> _refresh() async {
     if (mounted) setState(() => loading = true);
-    final s = await fetchResizeCacheStats(widget.statsUri, widget.headers);
+    final s = await fetchResizeCacheStats(widget.statsUri, widget.headers,
+        client: _client);
     if (!mounted) return;
     setState(() {
       stats = s;
@@ -263,7 +276,7 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
     );
     if (ok != true || !mounted) return;
     setState(() => pruning = true);
-    final msg = await pruneResizeCache(uri, widget.headers);
+    final msg = await pruneResizeCache(uri, widget.headers, client: _client);
     if (!mounted) return;
     setState(() => pruning = false);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
