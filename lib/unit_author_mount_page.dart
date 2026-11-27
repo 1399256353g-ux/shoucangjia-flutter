@@ -51,6 +51,13 @@ class UnitAuthorMountPage extends StatefulWidget {
 class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   UnitAuthorGroupsState state = const UnitAuthorGroupsState();
   UnitAuthorCards cards = const UnitAuthorCards();
+
+  /// 单元库下**全部**作者目录（来自 `/api/unit/authors` 的 `items`）。
+  ///
+  /// 候选池只能是它：`cards` 只含「已形成组」的目录，没成组的独立目录不在里面，
+  /// 用户就选不到「名字不同的另一个文件夹」——那正是挂载要解决的问题。
+  List<AuthorGroupFile> allFiles = const <AuthorGroupFile>[];
+
   bool loading = true;
   bool busy = false;
   String? err;
@@ -97,6 +104,12 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             .get(Uri.parse(unitAuthorsUrl(widget.base, _unitRel)),
                 headers: widget.headers)
             .timeout(const Duration(seconds: 10)),
+        // 候选池：该单元库下**全部**作者目录（含没成组的）。
+        // 失败不影响主流程：退回作者卡里的成员（旧行为）。
+        _client
+            .get(Uri.parse(unitAuthorsAllUrl(widget.base, _unitRel)),
+                headers: widget.headers)
+            .timeout(const Duration(seconds: 10)),
       ]);
       final g = jsonMapOf(results[0]);
       // 读接口收尾统一走 throwIfApiFailed：以前这里手拼
@@ -111,10 +124,16 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
         final cj = jsonOf(results[1]);
         if (cj is Map && !serviceSaidFail(cj)) c = UnitAuthorCards.fromJson(cj);
       }
+      // 候选池：优先用「全部目录」接口；拿不到时退回作者卡成员。
+      var pool = const <AuthorGroupFile>[];
+      if (results[2].statusCode == 200) {
+        pool = authorGroupFilesFromItems(jsonOf(results[2]));
+      }
       if (!mounted) return;
       setState(() {
         state = UnitAuthorGroupsState.fromJson(g);
         cards = c;
+        allFiles = pool.isNotEmpty ? pool : _filesFromCards(c);
         loading = false;
       });
     } catch (e) {
@@ -126,15 +145,25 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     }
   }
 
-  /// 所有「还没被任何手动组占用」的成员（来自作者卡）。
+  /// 作者卡里的成员（旧候选池；只在「全部目录」接口不可用时兜底）。
+  static List<AuthorGroupFile> _filesFromCards(UnitAuthorCards c) {
+    final seen = <String>{};
+    final out = <AuthorGroupFile>[];
+    for (final card in c.cards) {
+      for (final f in card.files) {
+        if (seen.add(f.key)) out.add(f);
+      }
+    }
+    return out;
+  }
+
+  /// 所有「还没被任何手动组占用」的成员。
   List<AuthorGroupFile> get _available {
     final claimed = state.claimedKeys;
     final out = <AuthorGroupFile>[];
-    for (final c in cards.cards) {
-      for (final f in c.files) {
-        if (claimed.contains(f.key)) continue;
-        out.add(f);
-      }
+    for (final f in allFiles) {
+      if (claimed.contains(f.key)) continue;
+      out.add(f);
     }
     return mergeableFiles(out);
   }

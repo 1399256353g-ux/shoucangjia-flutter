@@ -44,7 +44,7 @@ http.Response res(Object body, int code) => http.Response.bytes(
     );
 
 void main() {
-  testWidgets('首屏同时请求分组与作者卡，两个地址都带 unit', (t) async {
+  testWidgets('首屏同时请求分组、作者卡与全部目录，三个地址都带 unit', (t) async {
     final seen = <String>[];
     final client = MockClient((req) async {
       seen.add(req.url.path);
@@ -52,6 +52,17 @@ void main() {
       if (req.url.path == '/api/unit-author-groups.json') {
         return res(
             {'ok': true, 'unit': '(1) A', 'groups': [], 'auto': []}, 200);
+      }
+      if (req.url.path == '/api/unit/authors') {
+        // 候选池：该单元库下全部作者目录（owner 2026-11-27）。
+        return res({
+          'ok': true,
+          'unit': '(1) A',
+          'basics': [],
+          'items': [],
+          'autoGroups': [],
+          'groups': [],
+        }, 200);
       }
       expect(req.url.path, '/api/unit/authors.json');
       return res({'ok': true, 'unit': '(1) A', 'cards': []}, 200);
@@ -62,6 +73,7 @@ void main() {
     expect(seen, [
       '/api/unit-author-groups.json',
       '/api/unit/authors.json',
+      '/api/unit/authors',
     ]);
     expect(find.textContaining('已挂载的手动组 0'), findsOneWidget);
     expect(find.textContaining('可自动合并 0'), findsOneWidget);

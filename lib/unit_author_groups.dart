@@ -309,9 +309,42 @@ String unitAuthorsUrl(String base, String unit) => joinApiUrl(
       query: unit.trim().isEmpty ? null : {'unit': unit.trim()},
     );
 
+/// 单元库下**全部**作者目录（`/api/unit/authors?unit=`）。
+///
+/// 与 [unitAuthorsUrl] 的区别：那个返回的是「已经形成组的作者卡」（手动组 +
+/// 同名自动组），**没成组的独立作者目录不在里面**；这个返回该单元库范围内
+/// 每一个作者目录（`items`），是挂载候选池的正确来源。
+///
+/// owner 2026-11-27：「挂载设置页留个功能把一个单元库的树枝分叉都展现出来，
+/// 让用户自己选哪些树叶是属于同一个作者」——候选池必须是全部目录，
+/// 否则用户选不到「名字不同的另一个文件夹」。
+String unitAuthorsAllUrl(String base, String unit) => joinApiUrl(
+      base,
+      '/api/unit/authors',
+      query: unit.trim().isEmpty ? null : {'unit': unit.trim()},
+    );
+
 /// 新建作者目录地址（`POST /api/unit/authors/create`）。
 String unitAuthorCreateUrl(String base) =>
     joinApiUrl(base, '/api/unit/authors/create');
+
+/// 解析 `/api/unit/authors` 的 `items` 为候选成员。
+///
+/// 只取结构字段（lib / authorDir），名字不外传；同一 `lib|authorDir` 去重。
+List<AuthorGroupFile> authorGroupFilesFromItems(Object? json) {
+  if (json is! Map) return const <AuthorGroupFile>[];
+  final raw = json['items'];
+  if (raw is! List) return const <AuthorGroupFile>[];
+  final seen = <String>{};
+  final out = <AuthorGroupFile>[];
+  for (final it in raw) {
+    final f = AuthorGroupFile.fromJson(it);
+    if (f == null) continue;
+    if (!seen.add(f.key)) continue;
+    out.add(f);
+  }
+  return out;
+}
 
 /// 面板上「还没被任何组占用、可以参与合并」的成员。
 ///
