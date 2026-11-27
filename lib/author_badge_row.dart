@@ -313,7 +313,14 @@ class AuthorBadgeRow extends StatelessWidget {
             kind: LibraryBadge.entryKindOfUnit(unitId),
           ),
         if (g.isNotEmpty)
-          BadgeChipSpec(label: g, color: AuthorGrade.colorForGrade(g)),
+          BadgeChipSpec(
+            label: g,
+            color: AuthorGrade.colorForGrade(g),
+            // 第四类词条（作者）：此前漏了 kind，默认落到 `unit`，于是等级
+            // 词条长得跟单元库词条一模一样，设置页里的「作者」那一档
+            // 调了也没有任何东西变。
+            kind: LibEntryKind.author,
+          ),
         ...rest,
       ],
     );

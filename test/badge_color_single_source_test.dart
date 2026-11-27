@@ -143,8 +143,11 @@ void main() {
       LibraryBadge.topCustom['T1'] = topRed;
       LibraryBadge.colorSource['T1'] = 'auto';
 
-      expect(LibraryBadge.topEntryColor('T1'), isNull);
+      // 0.9.345：`topEntryColor` 已删——它是「顶级生效色」的第二份读法，
+      // 而真正决定卡片的只有 `colorForUnit`。判据改为直接看分发链：
+      // 顶级选自动后，下级既拿不到旧色，也不认为自己在继承它。
       expect(LibraryBadge.colorForUnit('C1'), isNot(topRed));
+      expect(LibraryBadge.inheritedColorFrom('C1'), isEmpty);
     });
 
     test('来源回到「继承顶级」后残留色恢复生效（不清表也能读）', () {
@@ -170,7 +173,7 @@ void main() {
       expect(label, '自动分配');
     });
 
-    test('基础库真的继承到顶级色时：「继承顶级」', () {
+    test('基础库真的继承到上级色时：文案带上来源', () {
       LibraryBadge.topOfUnit['lib-a'] = 'T1';
       LibraryBadge.topCustom['T1'] = topRed;
       final label = LibraryBadge.sourceLabelOf(
@@ -178,7 +181,14 @@ void main() {
         hasOwn: LibraryBadge.hasOwnBasicColor('base-a'),
         inherits: LibraryBadge.inheritsTopColor('lib-a'),
       );
-      expect(label, '继承顶级');
+      // 0.9.345：继承源可能是媒体库根，也可能是更近的一层单元库，「顶级」
+      // 是错误说法（「顶级单元库」只在设计结构设置页内部使用）。没有传入
+      // 来源名时文案是「继承上级」；传入名字时带出具体来源。
+      expect(label, '继承上级');
+      expect(
+          LibraryBadge.sourceLabelOf(LibraryBadge.sourceForBasic('base-a'),
+              hasOwn: false, inherits: true, sourceName: '媒体库A'),
+          '继承 媒体库A');
     });
 
     test('来源=自定义但色被清掉：文案不得说「自定义」', () {

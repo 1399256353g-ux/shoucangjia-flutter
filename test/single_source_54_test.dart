@@ -86,8 +86,13 @@ void main() {
     });
   });
 
-  group('词条只剩三种：文案与注释一致', () {
-    test('lib/ 内不再有「四种层级 / 四层级 / 四级词条」的措辞', () {
+  group('词条四种：文案与注释一致（PROJECT_RULES §2.1）', () {
+    // 0.9.345 修正：这里原本钉的是「只剩三种」。删掉 `other` 是对的（那一档
+    // 没有任何调用点），但把第四档一起取消就违反了规则原文——「词条共四种：
+    // 媒体库 / 单元库 / 基础库 / 作者」。作者等级词条于是长期借用 `unit`
+    // 外观，设置页里根本没有能改它的地方。第四档现在叫 `author`，
+    // 控制对象明确（作者卡上的等级词条），不是被删掉的那个 `other`。
+    test('lib/ 内不再有「四种层级 / 四层级」这类含糊说法', () {
       for (final f in const [
         'lib/main.dart',
         'lib/library_badge.dart',
@@ -97,15 +102,18 @@ void main() {
         final src = _raw(f);
         expect(src.contains('四种层级'), isFalse, reason: f);
         expect(src.contains('四层级'), isFalse, reason: f);
-        expect(src.contains('四种词条'), isFalse, reason: f);
       }
     });
 
-    test('设置页只列三种层级，且预览用的是真实外观', () {
-      expect(LibEntryKind.values.length, 3);
+    test('四种词条齐全，且没有复活没人用的 other 档', () {
+      expect(LibEntryKind.values.length, 4);
+      expect(LibEntryKind.values.map((e) => e.name).toList(),
+          ['top', 'unit', 'basic', 'author']);
       final main = _code('lib/main.dart');
-      expect(main.contains('三层级边框'), isTrue);
-      expect(main.contains('三种词条形状与尺寸一致'), isTrue);
+      expect(main.contains('四类边框'), isTrue);
+      expect(main.contains('四种词条形状与尺寸一致'), isTrue);
+      // 设置页必须给四种都留一行能点的入口。
+      expect(main.contains("LibEntryKind.author: '作者'"), isTrue);
     });
   });
 

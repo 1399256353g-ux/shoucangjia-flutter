@@ -92,7 +92,7 @@ void main() {
         LibraryBadge.colorFor('TOP/MID'));
   });
 
-  test('词条层级判定：只有媒体库 / 单元库 / 基础库三档', () {
+  test('词条层级判定：媒体库 / 单元库 / 基础库 / 作者四档，且无 other', () {
     final root = _tree();
     LibraryBadge.topOfUnit.addAll(topOfUnitIds(root));
     expect(LibraryBadge.entryKindOfUnit('TOP'), LibEntryKind.top);
@@ -103,8 +103,13 @@ void main() {
     expect(LibraryBadge.entryKindOfUnit('secret'), LibEntryKind.unit);
     expect(LibraryBadge.entryKindOfUnit(''), LibEntryKind.unit);
     expect(LibraryBadge.entryKindOfUnit('未知库'), LibEntryKind.unit);
-    expect(LibEntryKind.values.length, 3,
-        reason: '词条层级只有三种，多一档就是用户理解不了的设置项');
+    // 0.9.345：规则原文是四种（媒体库/单元库/基础库/作者）。删 `other`
+    // 是因为那一档没有调用点；作者那一档此前借用了 `unit` 的外观，
+    // 现在独立成 `author`，设置页能单独调它。
+    expect(LibEntryKind.values.length, 4,
+        reason: '规则规定四种词条；少一档就会有一类词条无法自定义');
+    expect(LibEntryKind.values.contains(LibEntryKind.author), isTrue);
+    expect(LibEntryKind.values.map((e) => e.name), isNot(contains('other')));
   });
 
   test('三层级词条外观：圆角与内边距一致，只有边框/底纹不同', () {

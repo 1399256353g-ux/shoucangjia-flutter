@@ -32,14 +32,21 @@ import 'lib_id.dart';
 import 'prefs_json.dart';
 import 'contrast.dart';
 
-/// 词条层级：**只有三种**（媒体库 / 单元库 / 基础库）。
+/// 词条种类：**四种**（媒体库 / 单元库 / 基础库 / 作者）。
 ///
-/// owner 2026-11-26：「我总共不就说了 4 种词条吗，没用赶紧删了」——
-/// 原来是 top/unit/basic/other 四种，其中 `other`（作者卡等非库语境）没有
-/// 任何用户可理解的含义，设置页里那条「其它（作者卡等）」也没人知道在控制
-/// 哪里。已删除；没有归属的词条按「单元库」处理，不再单列一档。
+/// PROJECT_RULES §2.1（owner 原话）：「词条共四种：媒体库 / 单元库 /
+/// 基础库 / 作者」。
 ///
-/// 三种词条**形状与尺寸完全一致**，差异靠边框粗细/颜色与底纹浓度区分。
+/// 历史上这里是 top/unit/basic/other 四种，其中 `other`（「其它（作者卡等）」）
+/// 是**无人使用的多余档**——没有任何页面会把词条画成它，设置页那一行也没人
+/// 知道在控制哪里，已删除且不得复活。删掉它之后作者词条一直借用 `unit` 的
+/// 外观：等级词条与单元库词条边框/底纹完全相同，于是「四种词条差异化」在
+/// 作者这一档上根本没落地（owner 提的第四种词条在界面上不存在）。
+///
+/// 现在第四档是 **author**（作者等级词条），不是那个被删掉的 `other`：
+/// 它有明确的控制对象（作者卡上那一枚等级词条），有独立外观，可单独恢复默认。
+///
+/// 四种词条**形状与尺寸完全一致**，差异只靠边框粗细/颜色与底纹浓度区分。
 enum LibEntryKind {
   /// 媒体库（连接的根）：最粗边框 + 最亮边框色 + 最浓底纹。
   top,
@@ -49,6 +56,9 @@ enum LibEntryKind {
 
   /// 末梢基础库：最细边框 + 最淡底纹。
   basic,
+
+  /// 作者（等级词条）：挂在作者卡/播放页信息区的 D–S 那一枚。
+  author,
 }
 
 /// 词条圆角：三种层级共用，**不可调**（形状一致是硬约束）。
@@ -174,6 +184,14 @@ const Map<LibEntryKind, EntryStyle> kDefaultEntryStyle =
       borderWidth: 0.5,
       borderAlpha: 0.18,
       fillAlpha: 0.86,
+      borderColor: 0xFF000000),
+  // 作者词条要能在同一排里与「基础库」分开，又不能抢过单元库/媒体库：
+  // 边宽取 0.65（介于 0.8 与 0.5 之间），底纹 0.88（介于 0.90 与 0.86 之间）。
+  // 形状/圆角/内边距/字号与其他三档完全相同（形状一致是硬约束）。
+  LibEntryKind.author: EntryStyle(
+      borderWidth: 0.65,
+      borderAlpha: 0.26,
+      fillAlpha: 0.88,
       borderColor: 0xFF000000),
 };
 
@@ -547,18 +565,6 @@ class LibraryBadge {
     return '';
   }
 
-  /// 顶级单元库**实际生效**的词条色；没有可继承色时返回 null。
-  ///
-  /// 与 [topColorFor] 的区别：后者只读存储，用于设置页判断「设没设过」。
-  /// 顶级自己选了「自动分配」时，`topCustom` 里可能还残留旧色（手工改过的
-  /// 配置、或从别的入口写的），继承链不能再拿它去染下级——否则用户给顶级
-  /// 选了自动、下级却仍是一片旧色，选项形同虚设。
-  static int? topEntryColor(String topId, {List<String> order = const []}) {
-    if (topId.isEmpty) return null;
-    if (sourceFor(topId) == BadgeColorSource.autoAssign) return null;
-    return topColorFor(topId);
-  }
-
   /// P1：词条外观。三种层级共用同一圆角与内边距，只改边框与底纹强度，
   /// 因此「形状与尺寸保持一致」由这一个函数保证，调用方不再各写一份。
   ///
@@ -698,13 +704,39 @@ class LibraryBadge {
     return basicCustom[basicId] != null;
   }
 
-  /// 本层此刻是否正在继承顶级色（没有本层色，且顶级有可继承色）。
+  /// 本层此刻是否从**上级**继承到颜色（没有本层色，且逐级上行有可继承色）。
+  ///
+  /// 判定必须走同一条分发链（[_upstreamOf]）：owner 2026-11-27 之后，颜色
+  /// 可以由**中间层**单元库分发，不再是「只有媒体库根一层」。旧实现只查
+  /// `topOfUnit` 那一跳，于是「基础库的色其实是从中间层单元库拿的」在设置页
+  /// 显示成「没有继承」——而卡片上明明是那个中间层的色。
   static bool inheritsTopColor(String unitId, {List<String> order = const []}) {
-    if (unitId.isEmpty || hasOwnColor(unitId)) return false;
-    final topId = lookupByLibId(topOfUnit, unitId);
-    if (topId == null) return false;
-    if (relOf(topId) == relOf(unitId)) return false;
-    return topEntryColor(topId, order: order) != null;
+    if (unitId.isEmpty || unitId == 'secret') return false;
+    if (hasOwnColor(unitId)) return false;
+    return inheritedColorFrom(unitId).isNotEmpty;
+  }
+
+  /// 本层实际从哪一层继承了颜色；没有（或本层自己就有色）返回空串。
+  ///
+  /// 唯一实现是 [_upstreamOf]——颜色、后缀、基础库颜色三处共用，设置页只读
+  /// 这个结果，不再自己写「查 topOfUnit 再看 topCustom」的短链。
+  static String inheritedColorFrom(String unitId) {
+    if (unitId.isEmpty || unitId == 'secret') return '';
+    if (hasOwnColor(unitId)) return '';
+    if (sourceFor(unitId) == BadgeColorSource.autoAssign) return '';
+    return _upstreamOf(unitId,
+        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null);
+  }
+
+  /// 基础库实际从哪一层继承了颜色（从所属单元库本层开始逐级上行）。
+  static String inheritedColorFromBasic(String basicId, String unitId) {
+    if (hasOwnBasicColor(basicId)) return '';
+    if (sourceForBasic(basicId) == BadgeColorSource.autoAssign) return '';
+    if (unitId.isEmpty || unitId == 'secret') return '';
+    return _upstreamOf(
+        unitId,
+        (id) => lookupByLibId(custom, id) != null || topColorFor(id) != null,
+        includeStart: true);
   }
 
   /// 设置页「来源」文案的**唯一**出口。
@@ -712,16 +744,14 @@ class LibraryBadge {
   /// 三处各写一遍 switch 之后必然分叉：基础库那行写成
   /// `own ? '自定义' : '继承'`，于是「来源=自动分配」被显示成「继承」，
   /// 用户改完看到文案没变，会以为开关没生效。
-  /// [hasOwn] 本层真有自定义色；[inherits] 本层当前从顶级继承到了色。
-  /// 来源文案：**自动就是自动、继承就是继承**，不许按「当前有没有顶级色」
-  /// 把继承说成自动。
+  /// [hasOwn] 本层真有自定义色；[inherits] 本层当前从上级继承到了色；
+  /// [sourceName] 实际分发源的名字（媒体库名 / 单元库名）。
   ///
-  /// owner 2026-11-26：「自动就是自动，继承就是继承，不要混淆说法，误导用户」。
-  /// 原来 `inheritTop` 在顶级没设色时返回「自动分配」——用户选的是「继承」，
-  /// 界面却告诉他现在是「自动」，于是他以为自己选的没生效，反复来回改。
-  /// 选了继承就显示继承；实际回落由颜色解析链负责，不该改写来源名称。
+  /// 「继承上级」不告诉用户跟谁一样——同一个设置页上并列着媒体库、若干个
+  /// 单元库与基础库，光说「继承」用户无法判断该去改哪一层。带上来源名
+  /// 才能回答「我现在的色是从哪里来的」。
   static String sourceLabelOf(BadgeColorSource src,
-      {required bool hasOwn, required bool inherits}) {
+      {required bool hasOwn, required bool inherits, String sourceName = ''}) {
     if (hasOwn) return '自定义';
     switch (src) {
       case BadgeColorSource.autoAssign:
@@ -730,7 +760,11 @@ class LibraryBadge {
         // 声明了自定义、但色被清掉：此时真实生效的是自动配色。
         return '自动分配';
       case BadgeColorSource.inheritTop:
-        return '继承顶级';
+        // 继承源可能是媒体库根，也可能是更近的一层单元库（逐级分发），
+        // 所以文案用「上级」而不是「顶级」——「顶级单元库」按 PROJECT_RULES
+        // 只能在设计结构设置页内部使用，界面上叫「媒体库」。
+        final n = sourceName.trim();
+        return n.isEmpty ? '继承上级' : '继承 $n';
     }
   }
 
@@ -1000,10 +1034,16 @@ class LibraryBadge {
 
   /// 设置或清除单元库 emoji 后缀；同一单元库的 `rel` / `node:rel` 形式
   /// 一起清掉，避免两种 id 各留一份导致显示不一致。
+  ///
+  /// 去重比较用的是 [ownEmoji]（本层设置）而不是 [emojiFor]（含继承）。
+  /// 旧写法比 `emojiFor`：本层没有自设后缀、刚好与上级继承来的那个相同时，
+  /// 写入被当成「没变」直接 return——用户在本层显式选了一个后缀，表里却没有
+  /// 这一条，之后上级改了后缀，这一层会跟着变。用户看到的是「我在这里设的
+  /// 后缀自己没了」。
   static Future<void> setEmoji(String unitId, String? value) async {
     if (unitId.isEmpty) return;
     final v = sanitizeEmoji(value ?? '');
-    if (emojiFor(unitId) == v) return;
+    if (ownEmoji(unitId) == v) return;
     removeByLibId(emoji, unitId);
     if (v.isNotEmpty) emoji[unitId] = v;
     _bump();

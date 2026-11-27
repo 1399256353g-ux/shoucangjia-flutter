@@ -2252,14 +2252,15 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
                     child: Text(
-                        '词条按三层组织：媒体库设色后向下继承给其下所有'
-                        '单元库/基础库；单元库可各自覆盖；基础库自己的颜色优先级最高。'
+                        '词条按四类组织：媒体库设色后向下继承给其下所有'
+                        '单元库/基础库；单元库可各自覆盖；基础库自己的颜色优先级最高；'
+                        '作者一档管作者卡上那枚等级词条。'
                         '分发规则：任何单元库设的色都会向下分发给它的基础库/作品/作者，'
                         '更近的一层设过色时以更近的那层为准。'
-                        '三种词条形状与尺寸一致，只用边框/底纹区分。',
+                        '四种词条形状与尺寸一致，只用边框/底纹区分。',
                         style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ),
-                  const _SectionHeader('词条外观（三层级边框 / 底纹）'),
+                  const _SectionHeader('词条外观（四类边框 / 底纹）'),
                   _entryStyleSection(),
                   const SizedBox(height: 8),
                   const _SectionHeader('按媒体库设置词条色'),
@@ -2289,6 +2290,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       LibEntryKind.top: '媒体库',
       LibEntryKind.unit: '单元库',
       LibEntryKind.basic: '基础库',
+      LibEntryKind.author: '作者',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2296,9 +2298,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
           child: Text(
-              '三种词条（媒体库 / 单元库 / 基础库）的圆角、内边距、字号固定一致，'
-              '只能调边框粗细、边框颜色、边框深浅与底纹浓度'
-              '（词条底色仍在下方按库设置）。'
+              '四种词条（媒体库 / 单元库 / 基础库 / 作者）的圆角、内边距、字号'
+              '固定一致，只能调边框粗细、边框颜色、边框深浅与底纹浓度'
+              '（词条底色仍在下方按库设置）。作者那一档指作者卡上的等级词条。'
               '边框加粗只改视觉、不改变词条占位。调完即时生效，也可单层级恢复默认。',
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
@@ -2455,12 +2457,18 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     final expanded = expandedTopSections.contains(top.id);
     // 折叠时也要能看出「这个媒体库设过什么」：按本组内已自定义的条目数
     // 给一句摘要，不展开也能判断要不要进去改。
+    //
+    // 判定必须走 `hasOwnColor` / `hasOwnBasicColor`，不能直接查色表：
+    // 来源选了「自动分配」的条目表里可能还留着旧色（手工改过的配置、
+    // 或从别的入口写过），那张色并不生效。旧写法按色表计数，于是一个
+    // 全部选自动的媒体库会显示「已自定义 5 项」，进去一看每一行都写着
+    // 「自动分配」——摘要与列表两个说法。
     final customized = <String>[
-      if (LibraryBadge.topColorFor(top.id) != null) '本库',
+      if (LibraryBadge.hasOwnColor(top.id)) '本库',
       for (final u in subUnits)
-        if (LibraryBadge.customColorFor(u.id) != null) u.name,
+        if (LibraryBadge.hasOwnColor(u.id)) u.name,
       for (final b in subBasics)
-        if (LibraryBadge.basicCustom[b.id] != null) b.name,
+        if (LibraryBadge.hasOwnBasicColor(b.id)) b.name,
     ];
     final emojiCount = <String>[
       if (LibraryBadge.ownEmoji(top.id).isNotEmpty) top.id,
@@ -2551,11 +2559,16 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     final emoji = LibraryBadge.ownEmoji(id);
     // 文案与颜色同源：本层有没有生效中的自定义色 / 是否正在继承顶级。
     final ownColor = LibraryBadge.hasOwnColor(id);
-    final inheritingTop = LibraryBadge.inheritsTopColor(id, order: _order);
+    // 继承来源直接从分发链读（不再看 `topOfUnit` 那一跳）：颜色可以由
+    // 中间层单元库分发，「我现在的色从哪来」必须与着色链是同一个答案。
+    final inheritedFrom = LibraryBadge.inheritedColorFrom(id);
     final sourceLabel = LibraryBadge.sourceLabelOf(
       LibraryBadge.sourceFor(id),
       hasOwn: ownColor,
-      inherits: inheritingTop,
+      inherits: inheritedFrom.isNotEmpty,
+      sourceName: inheritedFrom.isEmpty
+          ? ''
+          : LibraryBadge.stripIndex(meta?.unitNameOf(inheritedFrom) ?? ''),
     );
     // 分发语义只有一条（owner 2026-11-27）：从直接上级逐级上行，第一个设过色
     // 的那层就是分发源。因此任何单元库设的色都能被下级拿到，不再区分
@@ -2580,7 +2593,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             kind: isTop ? LibEntryKind.top : LibEntryKind.unit),
       ]),
       subtitle: Text(
-          '${u.basicCount} 个基础库 · $distributeNote · $id'
+          '${u.basicCount} 个基础库 · $distributeNote'
           '${emoji.isEmpty ? '' : ' · 后缀 $emoji'}',
           style: const TextStyle(fontSize: 11)),
       trailing: Column(
@@ -2595,7 +2608,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 fontSize: 12,
                 color: ownColor
                     ? Colors.lightBlueAccent
-                    : (inheritingTop ? Colors.amber : Colors.grey)),
+                    : (inheritedFrom.isNotEmpty
+                        ? Colors.amber
+                        : Colors.grey)),
           ),
         ],
       ),
@@ -2636,11 +2651,19 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     // 文案与颜色同源：以前这行写 `own ? '自定义' : '继承'`，
     // 于是「来源=自动分配」被显示成「继承」，改了来源看不出变化。
     final own = LibraryBadge.hasOwnBasicColor(b.id);
+    // 基础库的继承源从「所属单元库本层」开始逐级上行——中间层单元库设的色
+    // 会先于媒体库根被拿到的。旧写法只看 `inheritsTopColor(unitId)`（只到
+    // 媒体库根那一跳），于是「这张卡的色是从中间层单元库来的」在设置页
+    // 显示成「继承上级」但说不出来源，与卡片实际颜色对不上。
+    final inheritedFrom =
+        LibraryBadge.inheritedColorFromBasic(b.id, unitId);
     final sourceLabel = LibraryBadge.sourceLabelOf(
       LibraryBadge.sourceForBasic(b.id),
       hasOwn: own,
-      inherits: unitId.isNotEmpty &&
-          LibraryBadge.inheritsTopColor(unitId, order: _order),
+      inherits: inheritedFrom.isNotEmpty,
+      sourceName: inheritedFrom.isEmpty
+          ? ''
+          : LibraryBadge.stripIndex(meta?.unitNameOf(inheritedFrom) ?? ''),
     );
     final name = LibraryBadge.stripIndex(b.name);
     return ListTile(
@@ -2662,7 +2685,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             kind: LibEntryKind.basic),
       ]),
       subtitle: Text(
-          '${formatCount(b.authors)} 作者 · ${formatCount(b.works)} 作品 · ${b.id}',
+          '${formatCount(b.authors)} 作者 · ${formatCount(b.works)} 作品',
           style: const TextStyle(fontSize: 11)),
       trailing: Text(sourceLabel,
           style: TextStyle(
@@ -2754,7 +2777,12 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 LibBadgeChip(
                     label: name,
                     color: current,
+                    // 后缀只在**这一层真正设过**时才回传自己：`emojiFor` 会
+                    // 把上级继承来的后缀一起返回，拿去当 `unitId` 的短路值
+                    // 等于把「继承来的」写死在本层预览里。上级后缀仍由绘制层
+                    // 按同一链拿到，预览不会因此丢后缀。
                     unitId: currentEmoji.isEmpty ? '' : id,
+                    emoji: LibraryBadge.ownEmoji(id),
                     kind: kind),
                 if (note.isNotEmpty) ...[
                   const SizedBox(height: 10),
@@ -2773,7 +2801,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   segments: const [
                     ButtonSegment(
                         value: BadgeColorSource.inheritTop,
-                        label: Text('继承顶级', style: TextStyle(fontSize: 11))),
+                        label: Text('继承上级', style: TextStyle(fontSize: 11))),
                     ButtonSegment(
                         value: BadgeColorSource.autoAssign,
                         label: Text('自动分配', style: TextStyle(fontSize: 11))),
@@ -3070,6 +3098,7 @@ class LibBadges extends StatelessWidget {
           BadgeChipSpec(
             label: grade,
             color: AuthorGrade.colorForGrade(grade),
+            kind: LibEntryKind.author,
           ),
         ...basicChips,
       ],
@@ -3473,7 +3502,8 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
                   Row(mainAxisSize: MainAxisSize.min, children: [
                     LibBadgeChip(
                         label: AuthorGrade.grades[i],
-                        color: AuthorGrade.colors[i]),
+                        color: AuthorGrade.colors[i],
+                        kind: LibEntryKind.author),
                     const SizedBox(width: 4),
                     Text(i == 0 ? '0 起' : '≥${AuthorGrade.thresholds[i - 1]}',
                         style:
@@ -13385,7 +13415,14 @@ class _PlayerPageState extends State<PlayerPage>
         return KeyEventResult.handled;
       }
     }
-    // 固定键位：方向键翻页/切图，空格暂停，Esc 退出（不随自定义绑定变化）
+    // 固定键位。**空格不在这里**：它在默认绑定里就是 `playPause` 的主键，
+    // 也是可以改绑的普通键。
+    //
+    // 旧实现下面还有一段 `if (k == space) togglePause()`，与自定义绑定表
+    // 构成同一键的两条路径：用户把 `playPause` 改绑到别的键之后，空格明明
+    // 「未绑定」却仍然暂停（固定分支接住了），与「改绑生效」自相矛盾；
+    // 把空格改绑给别的动作时，又有两处都声称拥有这个键。
+    // 一个键只能有一条归属：空格属于绑定表，方向键/Esc 属于固定键位。
     final navKey = k == LogicalKeyboardKey.arrowDown ||
         k == LogicalKeyboardKey.arrowUp ||
         k == LogicalKeyboardKey.arrowRight ||
@@ -13412,10 +13449,6 @@ class _PlayerPageState extends State<PlayerPage>
       return KeyEventResult.handled;
     }
     if (!down) return KeyEventResult.ignored;
-    if (k == LogicalKeyboardKey.space) {
-      togglePause();
-      return KeyEventResult.handled;
-    }
     if (k == LogicalKeyboardKey.escape) {
       if (fs) {
         toggleFs();
