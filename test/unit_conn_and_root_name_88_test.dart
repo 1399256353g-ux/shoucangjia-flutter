@@ -100,6 +100,16 @@ void main() {
           reason: '作者挂载 + 爬虫配置各调用一次，且都只有一次');
     });
 
+    test('契约：单元库没有基础库时不拿默认库 id 猜（空串交给服务端）', () {
+      final main = _codeNoComments('lib/main.dart');
+      final start = main.indexOf('({String base, Map<String, String> headers, String libId}) _unitConn(');
+      final body = main.substring(start, main.indexOf('void _openUnitCrawler(', start));
+      expect(body.contains('libId: firstBasic ?? cfg.lib'), isFalse,
+          reason: '默认库可能属于另一台服务器');
+      expect(body.contains('sameBase(cfg.baseFor(cfg.lib), base)'), isTrue,
+          reason: '只有该库确实属于这条连接时才用它');
+    });
+
     test('契约：multi_server 里只有一个 serverOfOrigin 实现，带 id 与地址两级', () {
       final ms = _code('lib/multi_server.dart');
       expect('ServerConn? serverOfOrigin('.allMatches(ms).length, 1);

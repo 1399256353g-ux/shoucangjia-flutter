@@ -6093,7 +6093,14 @@ class _LibraryPageState extends State<LibraryPage> {
     final headers = s != null
         ? <String, String>{'Authorization': _authFor(s)}
         : cfg.headersFor(firstBasic);
-    return (base: base, headers: headers, libId: firstBasic ?? cfg.lib);
+    // 没有基础库时**不猜库 id**：`cfg.lib` 是默认注册库，可能属于另一台
+    // 服务器，把它当本页的 `lib=` 只会让服务端查一个不存在的库（空结果与
+    // 「真的没有记录」不可区分）。空串表示「该服务端自己决定」（不带 `lib`）。
+    final libId = firstBasic ??
+        (cfg.lib.isNotEmpty && sameBase(cfg.baseFor(cfg.lib), base)
+            ? cfg.lib
+            : '');
+    return (base: base, headers: headers, libId: libId);
   }
 
   /// L5-D：打开单元库级爬虫配置（顶级 SECRET 不提供）。
