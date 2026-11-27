@@ -316,6 +316,23 @@ class Cfg {
   Uri u(String path, {String? lib}) =>
       Uri.parse(libApiUrl(baseFor(lib ?? this.lib), path, lib ?? this.lib));
 
+  /// 跨库聚合请求（`lib=all`）的**地址与鉴权一起**取。
+  ///
+  /// `lib=all` 在绑定表里没有对应条目，地址因此回落 `base`——即**激活
+  /// 连接**；而 `headers` 是 `headersFor(lib)`，即**当前库**那条连接。
+  /// 用户切过连接但没切库时（`active_server_v1` 已指向 B，`cfg.lib` 仍是
+  /// A 的库），这两个值分属两台机器：拿 A 的密码去问 B 的 `/api/authors`
+  /// → 401，或两台恰好同账号时静默读到另一台的作者/推荐/排行。
+  ///
+  /// 返回 record 而不是「地址 getter + 头 getter」两个独立口子：调用方
+  /// 拿不到只取一半的组合，这类「地址 A、账号 B」的缺陷也就无处可写。
+  /// 鉴权用 `user`/`pass`——它们由 `_boot` / `_persist` 与 `base` 一起从
+  /// 激活连接写入，天然与地址同源。
+  ({Uri uri, Map<String, String> headers}) aggregate(String path) => (
+        uri: u(path, lib: 'all'),
+        headers: {'Authorization': basicAuthHeader(user, pass)},
+      );
+
   // 媒体路径统一带库前缀：/media/<lib>/<相对路径>
   String media(String p, {String? lib}) {
     final l = lib ?? this.lib;
@@ -373,9 +390,28 @@ Future<void> loadAppVersion() async {
 ///
 /// 作品的 `av` 只有部分条目带；没有时 `avatarFor` 之前会直接落到默认头像。
 /// 作者级头像在 authors.json 里是全的，这里补一层兜底。
+///
+/// 这张表属于**某一条连接**：`authors.json` 按 `lib=all` 读激活连接，索引里
+/// 记的是那台服务器的作者头像。此前「已加载」是一个进程级布尔值，切过激活
+/// 连接后仍然为 true：新连接的作者全部停在首字占位/旧服务器的头像上，直到
+/// 重启 App（或手动「刷新作者」）。现在加载标记记录**来源作用域**，连接一变
+/// 就当作没加载过。
 final Map<String, String> authorAvatarIndex = <String, String>{};
 bool _authorAvatarLoading = false;
-bool _authorAvatarLoaded = false;
+
+/// 索引来源（`<base>␁<user>`）：空串＝尚未加载。
+String _authorAvatarScope = '';
+
+/// 当前激活连接的索引作用域。用户与地址一起算：只换密码不必重拉，
+/// 换地址/账号就是换了一台机器或另一份作者表。
+///
+/// 分隔符不在这里手写：`node_key.scopedKey` 是作用域键的唯一拼装口
+/// （0.9.334 把五份 `\u0001` 字面量收成一处之后，再写一份就又回到
+/// 「某处被改成 `\u0001 `」时只有一处读不出来）。
+String get authorAvatarScopeKey => scopedKey(cfg.base, cfg.user);
+
+bool get _authorAvatarLoaded =>
+    _authorAvatarScope.isNotEmpty && _authorAvatarScope == authorAvatarScopeKey;
 
 /// B2：作者头像索引是异步补进来的，索引到位后通知已渲染的头像/播放页重建。
 ///
@@ -386,9 +422,15 @@ final ValueNotifier<int> authorAvatarRevision = ValueNotifier<int>(0);
 Future<void> ensureAuthorAvatarsLoaded() async {
   if (_authorAvatarLoaded || _authorAvatarLoading) return;
   _authorAvatarLoading = true;
+  // 连接已变：旧索引属于另一台服务器，留着就是串头像（同名作者带上别人
+  // 机器上的图，或本机有、对方没有的条目永远不消失）。
+  if (_authorAvatarScope.isNotEmpty) authorAvatarIndex.clear();
+  final scopeKey = authorAvatarScopeKey;
   try {
+    // 头像索引属于**激活连接**：地址与鉴权必须同源（`cfg.aggregate`）。
+    final scope = cfg.aggregate('/api/authors.json');
     final r = await http
-        .get(cfg.u('/api/authors.json', lib: 'all'), headers: cfg.headers)
+        .get(scope.uri, headers: scope.headers)
         .timeout(const Duration(seconds: 20));
     if (r.statusCode == 200) {
       final m = jsonOf(r);
@@ -399,7 +441,9 @@ Future<void> ensureAuthorAvatarsLoaded() async {
           final av = '${v['av'] ?? ''}'.trim();
           if (av.isNotEmpty) authorAvatarIndex['${e.key}'] = av;
         }
-        _authorAvatarLoaded = true;
+        // 作用域取**发请求时**那一份：请求途中用户可能又切了连接，
+        // 直接把当前值写进去等于把旧服务器的索引记成新连接的。
+        _authorAvatarScope = scopeKey;
       }
     }
   } catch (_) {
@@ -1002,11 +1046,12 @@ void clearAuthorTypeCache(String lib, {String serverId = ''}) {
 }
 
 /// [key] 是否属于库 [lib]（不带连接的旧键与任何作用域键都算）。
-bool authorTypeCacheKeyIsFor(String key, String lib) {
-  final l = lib.trim();
-  if (l.isEmpty) return false;
-  return key == l || key.startsWith('$l$kNodeKeySep');
-}
+///
+/// 判定只有一处（`node_key.scopedKeyIsFor`）：与 `metaKeyIsFor` 用的是**同
+/// 一个函数体**，两处各写一份时总有一处忘记 `lib-1` / `lib-10` 的前缀关系，
+/// 表现是「刷新了库 1，库 10 的旧 kinds 留到重启」。
+bool authorTypeCacheKeyIsFor(String key, String lib) =>
+    scopedKeyIsFor(key, lib);
 
 /// [libs] 的每一条各自属于哪台连接：[lib] → 连接 id。
 ///
@@ -7821,11 +7866,16 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
       } catch (_) {}
       coverRevision.value++;
     },
-    // 作者/头像：清「已加载」标记后再拉一次索引，并通知已渲染头像重建。
+    // 作者/头像：作废当前索引后重拉一次，并通知已渲染头像重建。
+    // 作用域标记一起清，否则 `ensureAuthorAvatarsLoaded` 会因为「已加载」
+    // 直接返回（刷新按钮什么都不做）。
     reloadAuthors: () async {
-      _authorAvatarLoaded = false;
+      final scopeKey = authorAvatarScopeKey;
+      _authorAvatarScope = '';
       authorAvatarIndex.clear();
       await ensureAuthorAvatarsLoaded();
+      // 请求途中连接又变了：那一份结果已经被新一轮覆盖，这里不再提升版本。
+      if (_authorAvatarScope != scopeKey) return;
       authorAvatarRevision.value++;
     },
   );
@@ -7953,9 +8003,11 @@ class _RankPageState extends State<RankPage> {
     if (mounted) setState(() => err = null);
     try {
       // 0.9.8：排行榜数据源改为全部基础库；大库筛选在本地按作者所属基础库收敛。
+      // `lib=all` 的地址是激活连接、`cfg.headers` 却是当前库那条；两者
+      // 分属两台机器时名次与数字来自 A、凭据是 B 的（401 或串库）。
+      final scope = cfg.aggregate('/api/rank?period=$period&metric=$metric');
       final r = await http
-          .get(cfg.u('/api/rank?period=$period&metric=$metric', lib: 'all'),
-              headers: cfg.headers)
+          .get(scope.uri, headers: scope.headers)
           .timeout(const Duration(seconds: 20));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonOf(r);
@@ -8904,8 +8956,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final auLibs = <String, List<String>>{};
     try {
       // 全部基础库合并索引（服务端 lib=all：同名作者作品数相加，libs 带出处）。
+      // 聚合请求的地址与鉴权必须同源，否则切过连接没切库时作者总览整页为空。
+      final arScope = cfg.aggregate('/api/authors.json');
       final ar = await http
-          .get(cfg.u('/api/authors.json', lib: 'all'), headers: cfg.headers)
+          .get(arScope.uri, headers: arScope.headers)
           .timeout(const Duration(seconds: 20));
       final sr = await http
           .get(cfg.u('/api/author_stats.json', lib: cfg.lib),
@@ -16072,9 +16126,10 @@ class _RecommendPageState extends State<RecommendPage> {
       authorFilter.value.isActive ? 600 : RecommendCountSettings.value;
 
   Future<List<Map<String, dynamic>>> _fetchPage(int seed, int n) async {
+    // 推荐池是 `lib=all`（激活连接），鉴权也必须取激活连接那份。
+    final scope = cfg.aggregate('/api/recommend?n=$n&seed=$seed');
     final r = await http
-        .get(cfg.u('/api/recommend?n=$n&seed=$seed', lib: 'all'),
-            headers: cfg.headers)
+        .get(scope.uri, headers: scope.headers)
         .timeout(const Duration(seconds: 20));
     if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     final j = jsonOf(r);

@@ -72,3 +72,19 @@ String nodeKeyNormalized(String serverId, String rel) =>
 /// 表现是「这条筛选/配置/缓存读不出来」，四处都自洽。
 String scopedKey(String a, String b) =>
     '${a.trim()}$kNodeKeySep${b.trim()}';
+
+/// 作用域键 [key] 是否属于标识 [id]（**裸键与带作用域键都算**）。
+///
+/// 两张进程级缓存（`LibMeta` 的元数据、作者类型索引）各自需要「作废这个库的
+/// 全部连接副本」，判定规则是同一句话：`key == id` 或 `key` 以
+/// `'<id>␁'` 开头。此前两处各写一遍、**函数体逐字节相同**——其中一处后来
+/// 加了判断（例如“不误伤 `lib-10`”）而另一处没跟，表现就是「刷新了这个库，
+/// 另一台的旧数据还在」，而两处单看都自洽。
+///
+/// 用 `startsWith('$id␁')` 而不是 `startsWith(id)`：后者会让 `lib-1` 认领
+/// `lib-10` 的缓存。
+bool scopedKeyIsFor(String key, String id) {
+  final i = id.trim();
+  if (i.isEmpty) return false;
+  return key == i || key.startsWith('$i$kNodeKeySep');
+}

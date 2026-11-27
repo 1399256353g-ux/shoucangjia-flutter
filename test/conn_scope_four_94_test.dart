@@ -118,9 +118,15 @@ void main() {
 
     test('归属判定读常量，不再写第二份分隔符', () {
       final src = _code('lib/meta_source.dart');
+      // 0.9.336：判定体与作者类型索引那边**逐字节相同**，已收成
+      // `node_key.scopedKeyIsFor`。这里钉「只有转发」：自己再写一遍
+      // `key == l || key.startsWith('$l...')` 就是第二份实现。
       final body = _body(
-          src, 'bool metaKeyIsFor(String key, String lib) {', '}');
-      expect(body.contains(r'$l$kNodeKeySep'), isTrue);
+          src, 'bool metaKeyIsFor(String key, String lib)', '\n');
+      expect(body.contains('scopedKeyIsFor(key, lib)'), isTrue,
+          reason: '键归属判定只有一处实现（与类型索引同源）');
+      expect(body.contains('startsWith('), isFalse,
+          reason: '转发型函数里不得再写一份前缀判定');
       expect(src.contains(r"'\u0001'"), isFalse);
     });
   });

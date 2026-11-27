@@ -31,6 +31,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shoucangjia/main.dart';
 
 /// 去掉整行注释后的源码（注释里引用旧写法是在解释为什么改）。
 String _code(String path) {
@@ -91,12 +92,18 @@ void main() {
 
     test('键归属判定同时认旧键与带作用域键', () {
       final main = _code('lib/main.dart');
-      final body = _body(
-          main,
-          'bool authorTypeCacheKeyIsFor(String key, String lib) {',
-          'typedef AuthorTypeScope');
-      expect(body.contains('key == l'), isTrue);
-      expect(body.contains(r"'$l$kNodeKeySep'"), isTrue);
+      // 0.9.336：函数体已收进 `node_key.scopedKeyIsFor`（与 `metaKeyIsFor`
+      // 同一个实现）。这里钉「只有转发」，并用真实输入钉住两种键都认。
+      final body = _body(main,
+          'bool authorTypeCacheKeyIsFor(String key, String lib)', 'typedef AuthorTypeScope');
+      expect(body.contains('scopedKeyIsFor(key, lib)'), isTrue);
+      expect(body.contains('startsWith('), isFalse,
+          reason: '转发型函数里不得再写一份前缀判定');
+      expect(authorTypeCacheKeyIsFor('lib-1', 'lib-1'), isTrue);
+      expect(authorTypeCacheKeyIsFor('lib-1\u0001s1', 'lib-1'), isTrue);
+      expect(authorTypeCacheKeyIsFor('lib-10', 'lib-1'), isFalse,
+          reason: '前缀相近的另一个库不能被认领');
+      expect(authorTypeCacheKeyIsFor('lib-1', ''), isFalse);
     });
 
     test('loadAuthorTypes 把每条库的来源交给缓存键', () {

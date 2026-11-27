@@ -21,7 +21,7 @@ library;
 
 import 'api_url.dart';
 import 'basic_auth.dart';
-import 'node_key.dart' show kNodeKeySep, scopedKey;
+import 'node_key.dart' show scopedKey, scopedKeyIsFor;
 import 'server_origin.dart';
 
 /// 一条读取来源：连接 id + 地址 + 账号。
@@ -110,8 +110,6 @@ String metaCacheKey(String lib, MetaSource source) {
 /// [key] 是否属于库 [lib]（不带来源的键与任何作用域键都算）。
 ///
 /// `invalidate(lib)` 要清掉该库**全部连接**的缓存，而不只是默认那一份。
-bool metaKeyIsFor(String key, String lib) {
-  final l = lib.trim();
-  if (l.isEmpty) return false;
-  return key == l || key.startsWith('$l$kNodeKeySep');
-}
+/// 判定只有一处（`node_key.scopedKeyIsFor`）：它与作者类型索引那边是**同一个
+/// 函数体**，两处各写一份时总有一处忘记排除 `lib-1` / `lib-10` 这类前缀关系。
+bool metaKeyIsFor(String key, String lib) => scopedKeyIsFor(key, lib);
