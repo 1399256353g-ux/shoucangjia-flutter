@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'prefs_json.dart';
+import 'playback_prefs.dart' show clampSpeed;
 import 'preload_policy.dart';
 import 'video_layout.dart';
 
@@ -118,6 +119,24 @@ class AppSettings {
   static int imageIntervalSec = 3;
   static int hideUiSec = 3;
 
+  /// 图文自动切换间隔的合法区间（秒）——**唯一一份**。
+  ///
+  /// 0.9.361：`1..20` 此前写了三遍（读盘 `applyJson` 夹紧、设置页 Slider 的
+  /// `value` 夹紧、Slider 的 `min`/`max`/`divisions`），`1..30` 同样写三遍
+  /// 给「全屏隐藏控制栏时间」。改上限时只改到 slider 而没改读盘，会出现
+  /// 「本次调到 20 生效、重启后又被读回 15」——因为边界本来就两份。
+  static const int imageIntervalMinSec = 1;
+  static const int imageIntervalMaxSec = 20;
+  static const int hideUiMinSec = 1;
+  static const int hideUiMaxSec = 30;
+
+  /// 图文间隔夹到合法区间。
+  static int clampImageInterval(int v) =>
+      v.clamp(imageIntervalMinSec, imageIntervalMaxSec);
+
+  /// 全屏隐藏时间夹到合法区间。
+  static int clampHideUi(int v) => v.clamp(hideUiMinSec, hideUiMaxSec);
+
   /// M6：滑动方向前后各预载多少条（0 = 关闭）。
   static int preloadPerSide = preloadDefaultPerSideFor(
       mobile: Platform.isAndroid || Platform.isIOS);
@@ -158,13 +177,16 @@ class AppSettings {
     // 那一个坏字段，表现是「重启后速度/预载/按键全丢」。
     // 用 null 判断「字段存在且可解析」，缺失字段保持 resetDefaults 的值。
     if (j['speed'] != null) {
-      defaultSpeed = doubleOf(j['speed'], defaultSpeed).clamp(0.5, 3.0).toDouble();
+      // 区间夹紧与显示层/写入层同一份（[clampSpeed]）——此前这里又写一遍
+      // `clamp(0.5, 3.0)`，改一处就漂移。
+      defaultSpeed = clampSpeed(doubleOf(j['speed'], defaultSpeed)).toDouble();
     }
     if (j['imageInterval'] != null) {
-      imageIntervalSec = intOf(j['imageInterval'], imageIntervalSec).clamp(1, 20);
+      imageIntervalSec =
+          clampImageInterval(intOf(j['imageInterval'], imageIntervalSec));
     }
     if (j['hideUi'] != null) {
-      hideUiSec = intOf(j['hideUi'], hideUiSec).clamp(1, 30);
+      hideUiSec = clampHideUi(intOf(j['hideUi'], hideUiSec));
     }
     if (j['preloadPerSide'] != null) {
       preloadPerSide = clampPreloadPerSide(intOf(j['preloadPerSide'], preloadPerSide));

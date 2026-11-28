@@ -13,6 +13,7 @@
 ///  3. 已合并的组可拆回去（拆出来的那份永远不再自动合并）。
 library;
 
+import 'ui_copy.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -355,7 +356,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
             child: Row(children: [
               const Icon(Icons.folder_shared_outlined, size: 18),
               const SizedBox(width: 8),
-              const Text('作者文件夹挂载',
+              const Text(kAuthorMountTitle,
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               const Spacer(),
               if (busy)

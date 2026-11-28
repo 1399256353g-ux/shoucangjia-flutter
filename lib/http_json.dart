@@ -124,6 +124,16 @@ String? serverErrorText(dynamic json) {
   return null;
 }
 
+/// 「请求没有拿到可读响应」的唯一文案。
+///
+/// 0.9.361：`serverErrorText(j) ?? '网络错误'` 与单独的 `'网络错误'` 在
+/// `main.dart` 里出现了 6 处，字面量各自一份。日后改成「连接失败」（与
+/// `error_text.errorText` 对 SocketException 的用词一致）就必须逐处找。
+const String kNoResponseText = '网络错误';
+
+/// 失败原因的唯一短信道：服务端说过的原因优先，否则「网络错误」。
+String failureTextOf(dynamic json) => serverErrorText(json) ?? kNoResponseText;
+
 /// 读接口的收尾：非成功就抛异常，消息可直接展示给用户。
 ///
 /// 调用点原来是「先算 `'${j['error'] ?? 'HTTP ${r.statusCode}'}'`，再 `throw`」

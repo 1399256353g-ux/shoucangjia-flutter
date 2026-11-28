@@ -19,6 +19,20 @@
 /// 写进了界面。与「无穷大不是间隔」一样，超限值当「不自动」。
 const int kMaxIntervalMinutes = 100 * 365 * 24 * 60; // 100 年，单位：分钟
 
+/// 库根爬虫频率的可选档位（分钟），`0` 表示不自动。
+///
+/// 0.9.361：设置页的 chip 列表此前是 `{0:'不自动', 30:'每 30 分钟', …}`
+/// ——档位与**文案**一起写死。同一页下面那行「当前：…抓取一次」走
+/// [everyMinutesLabel]，于是同一份数据在同一页有两个说法出口：改了
+/// [everyMinutesLabel] 的措辞（比如「每 30 分」）chip 不会跟，用户看到的
+/// 档位名和回显名不一样，还都是「看起来正常」。档位归这里，文案归
+/// [everyMinutesLabel]，不再各存一份。
+
+/// 库根爬虫频率档位：`0`（不自动）+ 30 分钟 … 24 小时。
+///
+/// 只放分钟数；文字一律由 [everyMinutesLabel] 生成（含 `0` → 「不自动」）。
+const List<int> kCrawlIntervalOptions = <int>[0, 30, 60, 360, 720, 1440];
+
 String everyMinutesLabel(int minutes) {
   if (minutes <= 0 || minutes > kMaxIntervalMinutes) return '不自动';
   if (minutes >= 60) return '每 ${minutes ~/ 60} 小时';

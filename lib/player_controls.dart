@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'volume_control.dart';
+import 'playback_prefs.dart' show clampSpeed;
 import 'media_path.dart' show stripMediaSuffix;
 import 'rel_path.dart' show lastRelName;
 import 'unit_fraction.dart';
@@ -94,6 +95,12 @@ bool showRotateButton({required bool isAndroid, required bool isIOS}) =>
 /// owner 2026-11-23：任务栏所有按钮的最小触达区（dp）。
 const double kTaskbarTouchTarget = 44;
 
+/// 播放器支持的倍速区间与可选档位都在 `playback_prefs`（同一个量的两个侧面），
+/// 这里只转发导入：显示层、写入层、读盘层读同一份边界。
+///
+/// 0.9.361：`0.5` / `3.0` 此前在三处各写一遍（`speedLabel` / `setSpeed` /
+/// `AppSettings.applyJson`），改一处就漂。
+
 /// 倍速文案：`1.0x` / `1.25x` / `2.0x`（保留一位或两位小数，不显示末尾 0）。
 ///
 /// 先用 `isFinite` 挡一道：`double.nan.toStringAsFixed(2)` 得到 **`"NaN"`**
@@ -104,8 +111,8 @@ String speedLabel(double speed) {
   if (!speed.isFinite || speed <= 0) return '1.0x';
   // 超出播放器支持范围的值同样是坏数据（`1e20` 之前显示成
   // `100000000000000000000.0x`，把任务栏整条撜开）。夹到与
-  // `setSpeed` 同一区间。
-  final s = speed.clamp(0.5, 3.0).toDouble();
+  // `setSpeed` 同一区间（`playback_prefs.clampSpeed` 一处）。
+  final s = clampSpeed(speed);
   var text = s.toStringAsFixed(2);
   if (text.endsWith('0')) text = text.substring(0, text.length - 1);
   return '${text}x';

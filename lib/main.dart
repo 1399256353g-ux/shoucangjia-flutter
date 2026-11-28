@@ -57,6 +57,7 @@ import 'author_filter_options.dart';
 import 'author_drag.dart';
 import 'author_merge.dart';
 import 'author_mount_sheet.dart';
+import 'ui_copy.dart';
 import 'author_dir_filter.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
@@ -1354,7 +1355,7 @@ Future<void> syncAllCollectionsFlow(BuildContext context,
   if (!context.mounted) return;
   if (j == null || !serviceSaidOk(j)) {
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('同步启动失败：${serverErrorText(j) ?? '网络错误'}')));
+        SnackBar(content: Text('同步启动失败：${failureTextOf(j)}')));
     return;
   }
   final exit = await showDialog<int>(
@@ -5122,13 +5123,17 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
               style: const TextStyle(color: Colors.amber)),
         ]),
         Slider(
-          value: AppSettings.imageIntervalSec.toDouble().clamp(1, 20),
-          min: 1,
-          max: 20,
-          divisions: 19,
+          // 区间与夹紧读同一份常量（`AppSettings.imageIntervalMinSec/MaxSec`）：
+          // 此前 slider 的 `1..20` 与读盘的 `clamp(1, 20)` 各写一遍。
+          value: AppSettings.clampImageInterval(AppSettings.imageIntervalSec)
+              .toDouble(),
+          min: AppSettings.imageIntervalMinSec.toDouble(),
+          max: AppSettings.imageIntervalMaxSec.toDouble(),
+          divisions: AppSettings.imageIntervalMaxSec -
+              AppSettings.imageIntervalMinSec,
           label: '${AppSettings.imageIntervalSec}s',
-          onChanged: (v) =>
-              setState(() => AppSettings.imageIntervalSec = v.round()),
+          onChanged: (v) => setState(() => AppSettings.imageIntervalSec =
+              AppSettings.clampImageInterval(v.round())),
           onChangeEnd: (_) => _persist(),
         ),
         const Text('图文作品停留多久后自动展示下一张（到末尾自动切下一条）。',
@@ -5142,12 +5147,14 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
               style: const TextStyle(color: Colors.amber)),
         ]),
         Slider(
-          value: AppSettings.hideUiSec.toDouble().clamp(1, 30),
-          min: 1,
-          max: 30,
-          divisions: 29,
+          value: AppSettings.clampHideUi(AppSettings.hideUiSec).toDouble(),
+          min: AppSettings.hideUiMinSec.toDouble(),
+          max: AppSettings.hideUiMaxSec.toDouble(),
+          divisions:
+              AppSettings.hideUiMaxSec - AppSettings.hideUiMinSec,
           label: '${AppSettings.hideUiSec}s',
-          onChanged: (v) => setState(() => AppSettings.hideUiSec = v.round()),
+          onChanged: (v) => setState(
+              () => AppSettings.hideUiSec = AppSettings.clampHideUi(v.round())),
           onChangeEnd: (_) => _persist(),
         ),
         const Text('全屏播放时无操作多久后自动隐藏进度条与控制栏；点击屏幕可再次呼出。',
@@ -7382,11 +7389,14 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     return '${_freqText(j)} · 脚本 ${_scriptCount(j)} 个';
   }
 
-  String _freqText(Map<String, dynamic>? j) {
-    final iv = intOf(_cfgOf(j)['intervalMin']);
-    if (iv <= 0) return '不自动抓取';
-    return everyMinutesLabel(iv);
-  }
+  /// 频率文案：与「当前：…」回显、档位 chip 同一个出口 [everyMinutesLabel]。
+  ///
+  /// 0.9.361：这里原写 `iv <= 0 ? '不自动抓取' : everyMinutesLabel(iv)`——
+  /// 同一状态（不自动）在一页里有两个说法：档位 chip 写「不自动」、
+  /// 列表行写「不自动抓取」、回显写「当前：不自动抓取（仍可手动同步）」。
+  /// 「不自动」这三个字现在只由 [everyMinutesLabel] 产出。
+  String _freqText(Map<String, dynamic>? j) =>
+      everyMinutesLabel(intOf(_cfgOf(j)['intervalMin']));
 
   /// 本页全部条目：按媒体库分节，节内先注册库、再单元库。
   ///
@@ -7766,25 +7776,17 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                           TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
                   Wrap(spacing: 8, runSpacing: 6, children: [
-                    for (final opt in const <int, String>{
-                      0: '不自动',
-                      30: '每 30 分钟',
-                      60: '每 1 小时',
-                      360: '每 6 小时',
-                      720: '每 12 小时',
-                      1440: '每 24 小时',
-                    }.entries)
+                    for (final m in kCrawlIntervalOptions)
                       ChoiceChip(
-                        label: Text(opt.value),
-                        selected: intervalMin == opt.key,
-                        onSelected: (_) =>
-                            setState(() => intervalMin = opt.key),
+                        label: Text(everyMinutesLabel(m)),
+                        selected: intervalMin == m,
+                        onSelected: (_) => setState(() => intervalMin = m),
                       ),
                   ]),
                   const SizedBox(height: 6),
                   Text(
                       intervalMin == 0
-                          ? '当前：不自动抓取（仍可手动同步）'
+                          ? '当前：${everyMinutesLabel(0)}（仍可手动同步）'
                           : '当前：${everyMinutesLabel(intervalMin)}抓取一次',
                       style: const TextStyle(fontSize: 11, color: Colors.grey)),
                   TextFormField(
@@ -9272,7 +9274,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     if (j == null || !serviceSaidOk(j)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('同步启动失败：${serverErrorText(j) ?? '网络错误'}')));
+            SnackBar(content: Text('同步启动失败：${failureTextOf(j)}')));
       }
       return;
     }
@@ -9359,7 +9361,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 controller: nameCtl,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  labelText: '作者名（会建成 @作者名 目录）',
+                  labelText: kAuthorNameFieldLabel,
                   isDense: true,
                 ),
                 onChanged: (_) => setD(() {}),
@@ -13277,8 +13279,11 @@ class _PlayerPageState extends State<PlayerPage>
   /// 在这里改倍速也应记成「下次进播放页的默认值」——owner 的原话是「沿用上次
   /// 的播放设置」；只写 `_persistPlaybackPrefs()` 的话，下次进页读的是
   /// AppSettings，这次改的倍速就白改了。
+  ///
+  /// 0.9.361：区间夹紧改调 [clampSpeed]（与显示层 `speedLabel`、读盘
+  /// `AppSettings.applyJson` 同一份边界），不再这里另一份 `0.5/3.0`。
   void setSpeed(double value) {
-    final next = value.clamp(0.5, 3.0).toDouble();
+    final next = clampSpeed(value);
     setState(() => speed = next);
     player.setRate(next);
     AppSettings.defaultSpeed = next;
@@ -18440,7 +18445,7 @@ class _AuthorPageState extends State<AuthorPage> {
         for (final id in e.value) {
           final j = await postWorkDelete(e.key, id);
           if (j == null) {
-            errors.add('网络错误');
+            errors.add(kNoResponseText);
             continue;
           }
           if (!serviceSaidOk(j)) {
@@ -18480,7 +18485,7 @@ class _AuthorPageState extends State<AuthorPage> {
           } else if (j != null) {
             errors.add(_deleteFailureText(j));
           } else {
-            errors.add('网络错误');
+            errors.add(kNoResponseText);
           }
         }
       }
@@ -18599,14 +18604,14 @@ class _AuthorPageState extends State<AuthorPage> {
         // 先 dry 预检（服务端校验同作者/同单元库），再确认执行。
         final dry = await postWorkMove(lib, id, target);
         if (dry == null || !serviceSaidOk(dry)) {
-          errors.add(serverErrorText(dry) ?? '网络错误');
+          errors.add(failureTextOf(dry));
           continue;
         }
         final j = await postWorkMove(lib, id, target, confirm: true);
         if (j != null && serviceSaidOk(j)) {
           done++;
         } else {
-          errors.add(serverErrorText(j) ?? '网络错误');
+          errors.add(failureTextOf(j));
         }
       }
       _exitSelect();

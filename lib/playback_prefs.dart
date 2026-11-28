@@ -107,6 +107,26 @@ Future<void> savePlaybackPrefs(PlaybackPrefs p) async {
   }
 }
 
+/// 播放器支持的倍速区间（**唯一一份**）。
+///
+/// 0.9.361：`0.5` / `3.0` 这对边界此前写了三遍：`speedLabel`（显示层夹紧）、
+/// 播放页 `setSpeed`（写入层夹紧）、`AppSettings.applyJson`（读盘夹紧）。
+/// 三处各自硬编码数字，改一处就漂——读盘那处漏改时，坏配置会被显示层
+/// 默默夹到另一个区间，用户看到的值与存下的值不一样。
+const double kSpeedMin = 0.5;
+const double kSpeedMax = 3.0;
+
+/// 倍速夹到 [kSpeedMin]..[kSpeedMax]。
+///
+/// 无法代表倍速的输入一律回到默认 1.0（不是夹到上限）：`NaN`、无穷、
+/// 非正数。这些值只可能来自坏配置或未初始化状态，夹到 3.0 会把
+/// 「这里的数据坏了」显示成一个像样的倍速。与 `speedLabel` 同一条判定，
+/// 所以界面文案与存盘值不会给出两个答案。
+double clampSpeed(double value) {
+  if (!value.isFinite || value <= 0) return 1.0;
+  return value.clamp(kSpeedMin, kSpeedMax).toDouble();
+}
+
 /// 界面上可选倍速的唯一清单（设置页「默认播放倍速」与播放页倍速菜单共用）。
 ///
 /// 此前两份字面量都是 `[0.75, 1.0, 1.25, 1.5, 2.0]`，改一处就会出现

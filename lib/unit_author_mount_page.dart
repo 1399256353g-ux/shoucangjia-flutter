@@ -27,6 +27,7 @@ import 'author_file_picker.dart';
 import 'http_json.dart';
 import 'label_fallback.dart';
 import 'load_error_view.dart';
+import 'ui_copy.dart';
 import 'unit_author_groups.dart';
 import 'unit_library.dart';
 import 'basic_lib.dart' show BasicLib;
@@ -247,7 +248,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
                 controller: nameCtl,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  labelText: '作者名（会建成 @作者名 目录）',
+                  labelText: kAuthorNameFieldLabel,
                   isDense: true,
                 ),
                 onChanged: (_) => setD(() {}),
@@ -323,7 +324,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('作者文件夹挂载'),
+        title: const Text(kAuthorMountTitle),
         actions: [
           IconButton(
             tooltip: '刷新',

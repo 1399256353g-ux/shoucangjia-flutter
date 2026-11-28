@@ -24,6 +24,7 @@ import 'scroll_viewport.dart';
 import 'star_store.dart';
 import 'text_clip.dart';
 import 'unit_cover_store.dart';
+import 'ui_copy.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
 
@@ -1388,7 +1389,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
             if (onMountAuthors != null && unit.rel.trim().isNotEmpty)
               IconButton(
                 key: ValueKey('unit-author-mount-${unit.id}'),
-                tooltip: '作者文件夹挂载',
+                tooltip: kAuthorMountTitle,
                 icon: const Icon(Icons.folder_shared_outlined),
                 onPressed: () => onMountAuthors(unit),
               ),

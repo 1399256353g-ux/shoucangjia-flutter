@@ -29,6 +29,7 @@ import 'work_card.dart';
 import 'work_forms.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
+import 'ui_copy.dart';
 import 'unit_author_groups.dart'
     show
         authorCreateSummary,
@@ -270,7 +271,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                 controller: nameCtl,
                 autofocus: true,
                 decoration: const InputDecoration(
-                  labelText: '作者名（会建成 @作者名 目录）',
+                  labelText: kAuthorNameFieldLabel,
                   isDense: true,
                 ),
                 onChanged: (_) => setD(() {}),
