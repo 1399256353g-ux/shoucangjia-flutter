@@ -25,6 +25,7 @@ import 'package:http/http.dart' as http;
 import 'error_text.dart';
 import 'author_file_picker.dart';
 import 'http_json.dart';
+import 'label_fallback.dart';
 import 'load_error_view.dart';
 import 'unit_author_groups.dart';
 import 'unit_library.dart';
@@ -182,12 +183,13 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   ///
   /// 只在本单元库的基础库表里找；找不到就回落 id——分支标题是导航信息，
   /// 宁可显示 id 也不要显示空标题。
+  ///
+  /// 0.9.352：回落判定收进 `libLabelOf`，与作者页那份面板、`displayLib` 同一条；
+  /// 此前这里只查 `unit.allBasics` 且自写 `trim().isEmpty`，而 `LibNode` 树上的
+  /// 同名库在另一页走的是 `items[].libName`，两页对「这个库叫什么」各答一次。
   String _libLabelOf(String lib) {
     for (final b in widget.unit.allBasics) {
-      if (b.id == lib) {
-        final n = b.name.trim();
-        if (n.isNotEmpty) return n;
-      }
+      if (b.id == lib) return libLabelOf(b.id, b.name);
     }
     return lib;
   }

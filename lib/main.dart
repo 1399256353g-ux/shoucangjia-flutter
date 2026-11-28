@@ -18709,15 +18709,16 @@ class _AuthorPageState extends State<AuthorPage> {
   /// 基础库展示名：优先当前库元数据里的名称，其次 id 本身。
   ///
   /// 只在多库合并时用（单库不显示筛选条），所以查不到名称时直接给 id 也能读。
+  ///
+  /// 0.9.352：这里原来自写两段「先 allBasics 再 basics」的循环——与它自己的
+  /// 文档（「优先**当前库**元数据」）正好相反，也与 `LibMeta.basicById`（先
+  /// `basics` 再 `allBasics`）的查找顺序相反。同一 id 在两份表里名字不同时
+  /// （跨连接聚合后常见），作者页的目录筛选词条会取到另一台服务器的名字，
+  /// 而这个库在排行榜/作者卡上显示的是本地名。现在只调 `basicById` 并走
+  /// 库名唯一出口 `libraryDisplayName`。
   String libLabel(String id) {
-    for (final b in (meta?.allBasics ?? const <BasicLib>[])) {
-      if (b.id == id) {
-        return displayLibraryName(b.id, b.name);
-      }
-    }
-    for (final b in (meta?.basics ?? const <BasicLib>[])) {
-      if (b.id == id) return displayLibraryName(b.id, b.name);
-    }
+    final b = meta?.basicById(id);
+    if (b != null) return libraryDisplayName(b.id, b.name);
     return displayLibraryName(id, id);
   }
 

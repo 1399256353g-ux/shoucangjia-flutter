@@ -31,3 +31,20 @@ String labelOrId(String id, String? name) {
   if (n.trim().isNotEmpty) return n;
   return id.trim();
 }
+
+/// 库 id + 服务端下发的名字 → 分支标题/导航用的显示名。
+///
+/// 0.9.352：这条「名字去空白后仍空就宁可用 id」的判定在挂载面板里写过三份：
+///  - `author_mount_sheet._libLabelOf`（遍历 `mounts.items` 找 `libName`）；
+///  - `unit_author_mount_page._libLabelOf`（遍历 `unit.allBasics` 找 `name`）；
+///  - `AuthorMountItem.displayLib`（裸 `isEmpty`，名字是纯空格时
+///    返回一个看不见的空串，列表行开头一片空白）。
+///
+/// 三份都在问同一件事（「这个库在这张列表里叫什么」），却各自找不同的数据源，
+/// 于是同一个库在作者页的挂载面板与单元库页的挂载面板上可能一个有名一个只剩 id。
+/// 这里只保留一条规则：**去空白后仍为空 → id**，非空则原样返回。
+///
+/// 本函数不改写展示文字（去序号/修 emoji 属于渲染层），也不猜数据源——
+/// 调用方把自己手里那份名字传进来。
+String libLabelOf(String id, String? rawName) =>
+    labelOrId(id, '${rawName ?? ''}');

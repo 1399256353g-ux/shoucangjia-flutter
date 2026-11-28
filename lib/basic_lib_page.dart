@@ -30,6 +30,7 @@ import 'work_cover.dart';
 import 'author_grade.dart';
 import 'author_badge_row.dart';
 import 'library_badge.dart';
+import 'lib_names.dart';
 import 'error_text.dart';
 
 /// 作者卡片头像：手动设置 > 爬虫脚本（服务端下发 `av`）> 自动生成（作品图兜底）。
@@ -438,7 +439,11 @@ class _BasicLibPageState extends State<BasicLibPage>
     final b = widget.basic;
     return Scaffold(
       appBar: AppBar(
-        title: Text(LibraryBadge.stripIndex(b.name),
+        // 0.9.352：这里原来自拼 `stripIndex(b.name)`，绕过了库名唯一出口。
+        // 名字是纯空格时标题整条空白；名字里带旧的「抖音收藏」时这一页仍
+        // 原样露出，而设置页/网络设置那页已经按 `displayLibraryName` 回落 id
+        // ——同一个库两页两个名字。现在与其它页同一个出口。
+        title: Text(libraryDisplayName(b.id, b.name),
             maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           const HomeAction(),

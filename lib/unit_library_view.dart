@@ -12,6 +12,7 @@ import 'lib_card_prefetch.dart';
 import 'library_badge.dart';
 import 'library_corner_badge.dart';
 import 'library_tree.dart';
+import 'lib_names.dart';
 import 'lib_cover.dart';
 import 'media_resize.dart';
 import 'home_action.dart';
@@ -116,6 +117,8 @@ class LibCardInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     // D2：所有库卡片标题统一去掉目录名前的排序序号（受「省略编号」开关控制）；
     // 再追加所属单元库的 emoji 后缀（与作者卡片词条同一套规则）。
+    // 0.9.352：名字的回落（空 → id）由调用方用 `libEntryTitle` 做好再传进来——
+    // 本组件不知道这个标题对应的是基础库还是单元库，不能自己猜一个 id 回落。
     final titleText =
         LibraryBadge.labelWithEmoji(LibraryBadge.stripIndex(title), unitId);
     return Container(
@@ -939,7 +942,7 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
           alignment: Alignment.centerLeft,
           child: LibBadgeChip(
             key: ValueKey('unit-top-entry-${unit.id}'),
-            label: LibraryBadge.stripIndex(unit.name),
+            label: libEntryTitle(unit.id, unit.name),
             color: argb,
             unitId: unit.id,
             kind: LibEntryKind.top,
@@ -1005,7 +1008,10 @@ class _UnitLibraryCardState extends State<UnitLibraryCard> {
                 // owner 2026-11-26：媒体库卡片要贴**带文字**的词条
                 // （含 emoji 后缀），不再是只有图案的色点。
                 badge: widget.topCard ? _topEntrySwatch(unit) : null,
-                title: unit.name,
+                // 0.9.352：标题先走「去序号 + 名字空回落 id」，不再直接传
+                // `unit.name`——名字没下发时卡片标题整条空白，而同一个库的
+                // 词条（`labels` → `labelOrId`）却显示 id。
+                title: libEntryTitle(unit.id, unit.name),
                 unitId: unit.id,
                 stats: '${formatCount(unit.authors)} 作者 · '
                     '${formatCount(unit.works)} 作品',
@@ -1366,7 +1372,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     return Scaffold(
       appBar: AppBar(
           title: Text(LibraryBadge.labelWithEmoji(
-              LibraryBadge.stripIndex(unit.name), unit.id)),
+              libEntryTitle(unit.id, unit.name), unit.id)),
           actions: [
             const HomeAction(),
             if (onMountAuthors != null && unit.rel.trim().isNotEmpty)
@@ -1638,7 +1644,8 @@ class _BasicLibCardState extends State<BasicLibCard> {
             bottom: 0,
             child: LibCardInfo(
               badge: _badge(),
-              title: basic.name,
+              // 0.9.352：同上，基础库卡片标题不允许因名字缺失而空白。
+              title: libEntryTitle(basic.id, basic.name),
               unitId: widget.unitKey,
               stats: '${formatCount(basic.authors)} 作者 · '
                   '${formatCount(basic.works)} 作品',

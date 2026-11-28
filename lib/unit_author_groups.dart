@@ -28,6 +28,7 @@ library;
 import 'api_url.dart';
 import 'count_label.dart';
 import 'json_num.dart';
+import 'label_fallback.dart';
 
 /// 一个被挂载的作者文件夹：基础库 id + 库内作者目录名。
 class AuthorGroupFile {
@@ -564,7 +565,12 @@ class AuthorMountItem {
     );
   }
 
-  String get displayLib => libName.isEmpty ? lib : libName;
+  /// 列表行里这个库叫什么。
+  ///
+  /// 0.9.352：此前是裸 `isEmpty`——名字是纯空格时把一个空串写到行首
+  /// （看起来像「这行没有库名」），而两个挂载面板用的是 `trim().isEmpty`
+  /// 回落 id。同一个库在列表里会一个有名一个消失。
+  String get displayLib => libLabelOf(lib, libName);
 }
 
 /// 该作者所在的某个手动组（用于判断是否已被手动合并/拆分）。

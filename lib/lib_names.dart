@@ -35,6 +35,20 @@ String displayLibraryName(String id, String? rawName) {
 String libraryDisplayName(String id, String? rawName) =>
     LibraryBadge.stripIndex(displayLibraryName(id, rawName));
 
+/// 卡片标题 / 页面标题里的库名：**去序号 + 名字空则回落 id**。
+///
+/// 0.9.352：各处原来直接写 `stripIndex(name)`——`stripIndex` 只做两件事
+/// （按开关去掉 `(1) ` 前缀、trim），**名字为空时返回空串**。服务端没下发名字
+/// 的基础库/单元库于是：卡片标题空白、页面标题只剩 emoji 后缀，而同一个库在
+/// 词条里（`LibraryBadge.labels` → `labelOrId`）显示的是 id。同一个库两处两个
+/// 样子，其中一处看起来像「没有名字的卡片」。
+///
+/// 与 [libraryDisplayName] 的分工：那个用于「库」这一层（含旧「抖音收藏」
+/// 收敛与破碎 emoji 修复）；本函数用于**目录节点**（单元库/基础库）的标题，
+/// 只做去序号与回落 id，不改变任何现有显示文字。
+String libEntryTitle(String id, String? rawName) =>
+    LibraryBadge.stripIndex(labelOrId(id, rawName));
+
 /// 复制一份库列表并把每项的 `name` 换成展示文案（不改原 map）。
 List<Map<String, dynamic>> librariesWithDisplayNames(
     List<Map<String, dynamic>> libs) {

@@ -24,6 +24,7 @@ import 'http_error_text.dart';
 import 'http_json.dart';
 import 'json_num.dart';
 import 'count_label.dart';
+import 'label_fallback.dart';
 import 'rel_path.dart';
 import 'unit_author_groups.dart';
 
@@ -116,11 +117,13 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
   ///
   /// 名称来源是 `/api/author/mounts` 的 `items[].libName`：本面板只拿到这一个
   /// 接口的数据，不能像单元库页那样查 `LibMeta`。拿不到就用 id。
+  ///
+  /// 0.9.352：回落判定收进 `libLabelOf`——旧写法用裸 `isEmpty`，名字是纯空格时
+  /// 返回一个看不见的空串；而单元库页那份面板走 `trim().isEmpty` 回落 id。
+  /// 同一个库在两个入口上一个有名字一个空白。
   String _libLabelOf(String lib) {
     for (final i in mounts.items) {
-      if (i.lib != lib) continue;
-      final n = i.libName.trim();
-      if (n.isNotEmpty) return n;
+      if (i.lib == lib) return libLabelOf(i.lib, i.libName);
     }
     return lib;
   }
