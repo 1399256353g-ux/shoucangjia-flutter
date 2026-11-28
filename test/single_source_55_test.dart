@@ -68,11 +68,13 @@ void main() {
           reason: '勾选的基础库要能翻译成建目录请求');
       // 新结构：按基础库勾选 + 按基础库拆出。
       expect(page.contains("'uag-scope-"), isTrue);
-      expect(page.contains('uag-split-lib-'), isTrue);
+      // 拆出的勾选项 Key 由共用对话框按前缀拼出（`uag-split-lib-<lib>`），
+      // 页面本身只传前缀。
+      expect(page.contains("keyPrefix: 'uag'"), isTrue);
 
       final sheet = _code('lib/author_mount_sheet.dart');
-      expect(sheet.contains('ams-split-lib-'), isTrue,
-          reason: '作者页拆出也必须按基础库勾选');
+      expect(sheet.contains("keyPrefix: 'ams'"), isTrue,
+          reason: '作者页拆出也必须按基础库勾选（走共用对话框，只换 Key 前缀）');
     });
   });
 

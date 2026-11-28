@@ -265,8 +265,10 @@ void main() {
     ]) {
       expect(src.contains(gone), isFalse, reason: '旧逻辑残留：$gone');
     }
-    // `uag-split-ok` 保留：它是**新**的基础库拆出确认键，与旧目录树无关。
-    expect(src.contains('uag-split-lib-'), isTrue);
+    // 拆出对话框已收成 `split_libs_dialog` 的唯一实现（0.9.376），本页只
+    // 传 Key 前缀；`uag-split-ok` / `uag-split-lib-<lib>` 由前缀拼出，
+    // 与旧目录树无关。
+    expect(src.contains("keyPrefix: 'uag'"), isTrue);
     expect(src.contains("'uag-scope-"), isTrue);
   });
 }

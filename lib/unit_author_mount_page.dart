@@ -33,6 +33,7 @@ import 'loading_view.dart';
 import 'text_styles.dart';
 import 'toast.dart';
 import 'ui_copy.dart';
+import 'split_libs_dialog.dart';
 import 'unit_author_groups.dart';
 import 'unit_library.dart';
 
@@ -278,63 +279,13 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       _toast('这个组只有一个基础库，无需拆分', bad: true);
       return;
     }
-    final picked = <String>{};
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setD) => AlertDialog(
-          title: const Text('拆出基础库'),
-          content: SizedBox(
-            width: 420,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                    '勾选要分出去的基础库（至少 1 个，且不能全选——全部分开请用「解散」）。'
-                    '只改分组，不动任何作者目录与作品文件。',
-                    style: kHintTextStyle),
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    for (final lib in libs)
-                      CheckboxListTile(
-                        key: ValueKey('uag-split-lib-$lib'),
-                        dense: true,
-                        value: picked.contains(lib),
-                        title: Text(_libLabelOf(lib),
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        onChanged: (v) => setD(() {
-                          if (v == true) {
-                            picked.add(lib);
-                          } else {
-                            picked.remove(lib);
-                          }
-                        }),
-                      ),
-                  ]),
-                ),
-              ),
-            ]),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(c, false),
-                child: const Text('取消')),
-            FilledButton(
-              key: const ValueKey('uag-split-ok'),
-              onPressed: (picked.isEmpty || picked.length >= libs.length)
-                  ? null
-                  : () => Navigator.pop(c, true),
-              child: const Text('拆出'),
-            ),
-          ],
-        ),
-      ),
+    final picked = await pickLibsToSplit(
+      context,
+      libs: libs,
+      labelOf: _libLabelOf,
+      keyPrefix: 'uag',
     );
-    if (ok != true) return;
+    if (picked == null) return;
     final files = <AuthorGroupFile>[
       for (final f in g.files)
         if (picked.contains(f.lib)) f,

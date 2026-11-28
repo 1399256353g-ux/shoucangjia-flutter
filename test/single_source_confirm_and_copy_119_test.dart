@@ -116,6 +116,10 @@ void main() {
         'lib/main.dart', // 表单类：添加连接/添加媒体库/推荐数量/新建作者/裁切等
         'lib/sync_log_panel.dart', // 日志正文 + 复制，非一句话
         'lib/unit_author_mount_page.dart', // 合并/编辑组成员（文件选择器）
+        // 0.9.376：拆出基础库——正文是「勾选哪几个基础库」的多选列表，
+        // 且确认键带「至少一个、不能全选」的禁用条件，不是一句话确认框。
+        // 它本身已是唯一实现（两个挂载入口都转发它）。
+        'lib/split_libs_dialog.dart',
       };
       final offenders = <String>[];
       for (final f in _libFiles()) {

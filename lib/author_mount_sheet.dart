@@ -34,6 +34,8 @@ import 'rel_path.dart' show lastRelName;
 import 'text_styles.dart';
 import 'toast.dart';
 import 'ui_copy.dart';
+import 'confirm_dialog.dart';
+import 'split_libs_dialog.dart';
 import 'unit_author_groups.dart';
 
 /// 一个单元库里「这位作者」的合并卡。
@@ -271,63 +273,13 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
       _toast('这个作者只有一个基础库，无需拆分', bad: true);
       return;
     }
-    final picked = <String>{};
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) => AlertDialog(
-          title: const Text('拆出基础库'),
-          content: SizedBox(
-            width: 420,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                    '勾选要分出去的基础库（至少 1 个，不能全选——全部分开请用「解散」）。'
-                    '只改分组，不动任何作者目录与作品文件。',
-                    style: kHintTextStyle),
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    for (final lib in libs)
-                      CheckboxListTile(
-                        key: ValueKey('ams-split-lib-$lib'),
-                        dense: true,
-                        value: picked.contains(lib),
-                        title: Text(_libLabelOf(lib),
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        onChanged: (v) => setD(() {
-                          if (v == true) {
-                            picked.add(lib);
-                          } else {
-                            picked.remove(lib);
-                          }
-                        }),
-                      ),
-                  ]),
-                ),
-              ),
-            ]),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('取消')),
-            FilledButton(
-              key: const ValueKey('ams-split-ok'),
-              onPressed: (picked.isEmpty || picked.length >= libs.length)
-                  ? null
-                  : () => Navigator.pop(ctx, true),
-              child: const Text('拆出'),
-            ),
-          ],
-        ),
-      ),
+    final picked = await pickLibsToSplit(
+      context,
+      libs: libs,
+      labelOf: _libLabelOf,
+      keyPrefix: 'ams',
     );
-    if (ok != true || !mounted) return;
+    if (picked == null || !mounted) return;
 
     // 服务端 split 的语义：`files` 是要搬进新组的那一份，原组留其余。
     final moveOut = <AuthorGroupFile>[
@@ -398,26 +350,18 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
       _toast('这个作者还没合并成分组，无需解散', bad: true);
       return;
     }
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('解散合并'),
-        content: Text('把「${c.name.isEmpty ? widget.authorName : c.name}」'
-            '在 ${c.libs.length} 个基础库的目录拆回各自独立？'
-            '只删分组记录，不动任何作者目录与作品文件。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
-          FilledButton(
-            key: const ValueKey('ams-dissolve-ok'),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('解散'),
-          ),
-        ],
-      ),
+    // 纯文本确认框走 `confirmAction`（唯一实现）：这个文件此前自己拼了一份，
+    // 与另外十几处只差按钮颜色与「取消在左」的约定靠手抄。
+    final ok = await confirmAction(
+      context,
+      title: '解散合并',
+      message: '把「${c.name.isEmpty ? widget.authorName : c.name}」'
+          '在 ${c.libs.length} 个基础库的目录拆回各自独立？'
+          '只删分组记录，不动任何作者目录与作品文件。',
+      confirmLabel: '解散',
+      confirmKey: const ValueKey('ams-dissolve-ok'),
     );
-    if (ok != true) return;
+    if (!ok) return;
     await _send(
       UnitAuthorRequest(
         unit: c.unit,
