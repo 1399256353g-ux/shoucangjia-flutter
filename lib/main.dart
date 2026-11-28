@@ -1723,30 +1723,24 @@ class _AppState extends State<App> with WidgetsBindingObserver {
 
   Future<void> _boot() async {
     final sp = await SharedPreferences.getInstance();
-    final legacyBase = sp.getString('base') ?? '';
-    cfg.user = sp.getString('user') ?? 'zzx';
-    cfg.pass = sp.getString('pass') ?? '';
+    final legacyBase = sp.getString(ConnPrefsKeys.legacyBase) ?? '';
+    cfg.user = sp.getString(ConnPrefsKeys.legacyUser) ?? 'zzx';
+    cfg.pass = sp.getString(ConnPrefsKeys.legacyPass) ?? '';
     // 解析（含旧单 base 迁移）只有 serversFromPrefs 一处。
     final servers = serversFromPrefs(sp,
         fallbackBase: legacyBase, fallbackUser: cfg.user, fallbackPass: cfg.pass);
     if (servers.isNotEmpty) {
-      await savePrefString('servers_v1', encodeServers(servers));
+      await savePrefString(ConnPrefsKeys.servers, encodeServers(servers));
     }
-    final activeId = sp.getString('active_server_v1') ?? '';
-    ServerConn? active;
-    for (final s in servers) {
-      if (s.id == activeId) {
-        active = s;
-        break;
-      }
-    }
-    active ??= servers.isEmpty ? null : servers.first;
+    final activeId = sp.getString(ConnPrefsKeys.active) ?? '';
+    // 「激活的是哪一条」只有 activeServerOf 一处判定。
+    final active = activeServerOf(servers, activeId);
     if (active != null) {
       cfg.base = active.base;
       cfg.user = active.user;
       cfg.pass = active.pass;
     }
-    final loaded = decodeBindings(sp.getString('lib_bindings_v1'));
+    final loaded = decodeBindings(sp.getString(ConnPrefsKeys.bindings));
     cfg.setBindings(loaded);
     // P5：断连清密码必须在**重启后**仍然成立。`_disconnect` 只改了内存与
     // 连接表，绑定表（含旧密码）还落在 `lib_bindings_v1` 里；这里按在线
@@ -1755,9 +1749,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
     final pruned = pruneBindings(loaded, liveServers(servers));
     if (encodeBindings(pruned) != encodeBindings(loaded)) {
       cfg.setBindings(pruned);
-      await savePrefString('lib_bindings_v1', encodeBindings(pruned));
+      await savePrefString(ConnPrefsKeys.bindings, encodeBindings(pruned));
     }
-    cfg.lib = sp.getString('lib') ?? '';
+    cfg.lib = sp.getString(ConnPrefsKeys.lib) ?? '';
     await AppSettings.load();
     await LibraryCornerBadge.load();
     // P1：词条配色与三层级外观必须在首帧前就位，否则首屏卡片会先闪默认色。
@@ -1827,38 +1821,31 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _load() async {
     final sp = await SharedPreferences.getInstance();
     final list = serversFromPrefs(sp);
-    final active = sp.getString('active_server_v1') ?? '';
+    final active = sp.getString(ConnPrefsKeys.active) ?? '';
     if (!mounted) return;
     setState(() {
       servers = list;
-      activeId = list.any((s) => s.id == active)
-          ? active
-          : (list.isEmpty ? '' : list.first.id);
+      activeId = activeServerOf(list, active)?.id ?? '';
     });
   }
 
   Future<void> _persist() async {
-    await savePrefString('servers_v1', encodeServers(servers));
-    await savePrefString('active_server_v1', activeId);
+    await savePrefString(ConnPrefsKeys.servers, encodeServers(servers));
+    await savePrefString(ConnPrefsKeys.active, activeId);
     // 当前连接必须是在线的：断连的那条不能继续带着旧地址/密码当全局默认。
-    final live = liveServers(servers);
-    ServerConn? active;
-    for (final s in live) {
-      if (s.id == activeId) active = s;
-    }
-    active ??= live.isEmpty ? null : live.first;
+    final active = activeServerOf(liveServers(servers), activeId);
     if (active != null) {
       cfg.base = active.base;
       cfg.user = active.user;
       cfg.pass = active.pass;
-      await savePrefString('base', active.base);
-      await savePrefString('user', active.user);
-      await savePrefString('pass', active.pass);
+      await savePrefString(ConnPrefsKeys.legacyBase, active.base);
+      await savePrefString(ConnPrefsKeys.legacyUser, active.user);
+      await savePrefString(ConnPrefsKeys.legacyPass, active.pass);
     } else {
       cfg.base = '';
       cfg.pass = '';
-      await savePrefString('base', '');
-      await savePrefString('pass', '');
+      await savePrefString(ConnPrefsKeys.legacyBase, '');
+      await savePrefString(ConnPrefsKeys.legacyPass, '');
     }
     connectionRevision.value++;
   }
@@ -4654,21 +4641,13 @@ class RecommendCountSettings {
   static int get value => recommendRequestCount(raw);
 
   static Future<void> load() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      raw = parseRecommendCount(sp.get(kRecommendCountPrefsKey));
-    } catch (_) {
-      raw = kRecommendDefaultCount;
-    }
+    raw = parseRecommendCount(await readPrefInt(kRecommendCountPrefsKey));
   }
 
   /// 保存并返回夹紧后的原始值。
   static Future<int> save(dynamic input) async {
     raw = parseRecommendCount(input);
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setInt(kRecommendCountPrefsKey, raw);
-    } catch (_) {}
+    await savePrefInt(kRecommendCountPrefsKey, raw);
     return raw;
   }
 }
@@ -5973,8 +5952,7 @@ class _LibraryPageState extends State<LibraryPage> {
       }
     });
     try {
-      final sp = await SharedPreferences.getInstance();
-      final all = serversFromPrefs(sp,
+      final all = await loadServersFromPrefs(
           fallbackBase: cfg.base, fallbackUser: cfg.user, fallbackPass: cfg.pass);
       // P5：断连的连接不参与聚合，也不发任何请求。
       final visible = liveServers(all);
@@ -6071,7 +6049,7 @@ class _LibraryPageState extends State<LibraryPage> {
         }
       }
       cfg.setBindings(bindings);
-      await savePrefString('lib_bindings_v1', encodeBindings(bindings));
+      await savePrefString(ConnPrefsKeys.bindings, encodeBindings(bindings));
       final failures =
           snaps.where((s) => s.error != null).map((s) => s.server.title);
       if (!mounted) return;
@@ -6729,8 +6707,8 @@ class _LibraryPageState extends State<LibraryPage> {
           server: origin.id,
           label: origin.label);
     }
-    await savePrefString('lib', cfg.lib);
-    await savePrefString('lib_bindings_v1', encodeBindings(cfg._bindings));
+    await savePrefString(ConnPrefsKeys.lib, cfg.lib);
+    await savePrefString(ConnPrefsKeys.bindings, encodeBindings(cfg._bindings));
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
@@ -6855,12 +6833,8 @@ class _LibraryPageState extends State<LibraryPage> {
       // 界面只写「添加失败」。同理不再附带 `lib=<默认库>` 查询参数：注册库是
       // 服务器级操作，不属于任何一个库。
       final at = await () async {
-        final sp = await SharedPreferences.getInstance();
-        final active = sp.getString('active_server_v1') ?? '';
-        for (final s in servers) {
-          if (s.id == active) return s;
-        }
-        return servers.isEmpty ? null : servers.first;
+        final activeId = await readActiveServerId();
+        return activeServerOf(servers, activeId);
       }();
       final atBase = at?.base ?? cfg.base;
       final atHeaders = at == null
@@ -7146,8 +7120,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   /// 本次请求的连接表：**在线**连接优先，没有配置时用当前连接。
   Future<List<ServerConn>> _liveServers() async {
     try {
-      final sp = await SharedPreferences.getInstance();
-      final all = serversFromPrefs(sp,
+      final all = await loadServersFromPrefs(
           fallbackBase: cfg.base, fallbackUser: cfg.user, fallbackPass: cfg.pass);
       final visible = liveServers(all);
       if (visible.isNotEmpty) return visible;
@@ -8005,7 +7978,7 @@ class _HomePageState extends State<HomePage> {
       cfg.libName =
           libraryDisplayName('${pick['id']}', '${pick['name'] ?? ''}');
       if (changed) {
-        await savePrefString('lib', cfg.lib);
+        await savePrefString(ConnPrefsKeys.lib, cfg.lib);
       }
     } catch (_) {}
   }
@@ -8135,8 +8108,7 @@ class _HomePageState extends State<HomePage> {
 Future<TotalRefreshOutcome> performTotalRefresh() async {
   List<ServerConn> servers = const <ServerConn>[];
   try {
-    final sp = await SharedPreferences.getInstance();
-    servers = liveServers(serversFromPrefs(sp,
+    servers = liveServers(await loadServersFromPrefs(
         fallbackBase: cfg.base,
         fallbackUser: cfg.user,
         fallbackPass: cfg.pass));
@@ -9069,15 +9041,12 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   Size? _gridViewport;
 
   Future<void> _loadSort() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final v = sp.getString(_sortPrefsKey);
-      if (!mounted || v == null || !_sorts.containsKey(v) || v == sort) return;
-      setState(() {
-        sort = v;
-        _applyOrder();
-      });
-    } catch (_) {}
+    final v = await readPrefString(_sortPrefsKey);
+    if (!mounted || v == null || !_sorts.containsKey(v) || v == sort) return;
+    setState(() {
+      sort = v;
+      _applyOrder();
+    });
   }
 
   Future<void> _saveSort(String value) => savePrefString(_sortPrefsKey, value);

@@ -14,7 +14,6 @@ import 'unit_fraction.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_json.dart';
 import 'work_key.dart';
 
@@ -191,14 +190,10 @@ class WatchProgressStore {
   static Future<void> ensureLoaded() async {
     if (_loaded) return;
     _loaded = true;
-    try {
-      final sp = await SharedPreferences.getInstance();
-      _items = pruneWatchProgress(
-          parseWatchProgress(sp.getString(kWatchProgressPrefsKey)));
-      revision.value++;
-    } catch (_) {
-      _items = <String, WatchProgress>{};
-    }
+    // 读盘只有 `readPrefString` 一处（缺键 / 读失败都是 null，解析层退化为空表）。
+    _items = pruneWatchProgress(
+        parseWatchProgress(await readPrefString(kWatchProgressPrefsKey)));
+    revision.value++;
   }
 
   static WatchProgress? of(String lib, String id) {

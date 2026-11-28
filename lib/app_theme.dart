@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'emoji_text.dart';
 import 'prefs_json.dart';
@@ -190,12 +189,8 @@ class AppTheme {
   static ThemeData get themeData => buildThemeData(themeSpec(current.value));
 
   static Future<void> load() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      current.value = normalizeThemeId(sp.getString(kThemePrefsKey));
-    } catch (_) {
-      current.value = kDefaultThemeId;
-    }
+    current.value =
+        normalizeThemeId(await readPrefString(kThemePrefsKey) ?? '');
   }
 
   static Future<void> select(String id) {

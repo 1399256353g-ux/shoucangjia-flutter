@@ -16,7 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'json_num.dart';
 import 'media_path.dart' show isMediaPath;
 import 'node_key.dart' show nodeKey;
-import 'prefs_json.dart' show decodePrefJson;
+import 'prefs_json.dart' show decodePrefJson, readPrefString;
 import 'rel_path.dart' show normalizeRelPath;
 import 'server_origin.dart';
 import 'text_fold.dart';
@@ -608,8 +608,61 @@ List<ServerConn> serversFromPrefs(
   String fallbackPass = '',
 }) =>
     migrateLegacy(
-      servers: decodeServers(sp.getString('servers_v1')),
-      base: sp.getString('base') ?? fallbackBase,
-      user: sp.getString('user') ?? fallbackUser,
-      pass: sp.getString('pass') ?? fallbackPass,
+      servers: decodeServers(sp.getString(ConnPrefsKeys.servers)),
+      base: sp.getString(ConnPrefsKeys.legacyBase) ?? fallbackBase,
+      user: sp.getString(ConnPrefsKeys.legacyUser) ?? fallbackUser,
+      pass: sp.getString(ConnPrefsKeys.legacyPass) ?? fallbackPass,
     );
+
+/// 本机连接表相关的四个偏好键——**只有这里一处定义**。
+///
+/// 第一百二十五批之前 `'servers_v1'` / `'lib_bindings_v1'` /
+/// `active_server_v1` / `'lib'` 四个键在 `main` 与 `connection_status` 里
+/// 散着十处字面量：写的时候一处、读的时候另一处，改一个键名就会变成
+/// 「写进去读不回来」——正是 `hidden_works_v1` 那次已经踩过的坏法。
+class ConnPrefsKeys {
+  const ConnPrefsKeys._();
+
+  /// 连接表（JSON 数组，[encodeServers]）。
+  static const servers = 'servers_v1';
+
+  /// 库 → 连接的绑定表（JSON 对象，[encodeBindings]）。
+  static const bindings = 'lib_bindings_v1';
+
+  /// 当前激活的连接 id（单值字符串）。
+  static const active = 'active_server_v1';
+
+  /// 当前库 id（单值字符串）。
+  static const lib = 'lib';
+
+  /// 旧版单连接留下的三个键（只读，用于 [migrateLegacy]）。
+  static const legacyBase = 'base';
+  static const legacyUser = 'user';
+  static const legacyPass = 'pass';
+}
+
+/// 「激活的连接是哪一条」——**唯一判定**。
+///
+/// `main` 里这段「读 `active_server_v1` → 在列表里找 id → 找不到取第一条」
+/// 此前抄了四遍（`_boot` / 设置页 `_load` / 注册新库时选服务器 / 其它读表处），
+/// 每份都自己决定「id 不在列表里时怎么办」：三份取第一条、一份返回 null。
+/// 那点差别在设置页是「当前连接显示错了」，在注册库是「写到了另一台服务器」。
+///
+/// 规则固定为：id 命中就用它；否则取第一条；列表为空返回 null。
+ServerConn? activeServerOf(List<ServerConn> servers, String activeId) {
+  if (servers.isEmpty) return null;
+  for (final s in servers) {
+    if (s.id == activeId) return s;
+  }
+  return servers.first;
+}
+
+/// 从偏好读「激活的连接 id」（缺键 / 读盘失败都为空串）。
+Future<String> readActiveServerId() async =>
+    await readPrefString(ConnPrefsKeys.active) ?? '';
+
+/// 「激活的连接」从偏好一步取到（读 id + 在给定列表里解析）。
+///
+/// 给不持有 `sp` 的调用点用；持有 `sp` 的地方走 [activeServerOf] 即可。
+Future<ServerConn?> activeServerFromPrefs(List<ServerConn> servers) async =>
+    activeServerOf(servers, await readActiveServerId());

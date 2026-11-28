@@ -28,7 +28,6 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'cover_ext.dart' show isServerImagePath;
 import 'http_error_text.dart';
 import 'media_path.dart';
@@ -251,12 +250,8 @@ class AuthorAvatarStore extends ChangeNotifier {
 
   /// 从 SharedPreferences 读一次；失败按空处理。
   Future<void> load() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      _paths = parseAuthorAvatarOverrides(sp.getString(kAuthorAvatarPrefsKey));
-    } catch (_) {
-      _paths = <String, String>{};
-    }
+    _paths = parseAuthorAvatarOverrides(
+        await readPrefString(kAuthorAvatarPrefsKey));
     _ready = true;
     notifyListeners();
   }

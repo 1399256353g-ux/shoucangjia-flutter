@@ -14,7 +14,6 @@ import 'stable_order.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_json.dart';
 import 'watch_progress.dart';
 import 'work_key.dart';
@@ -247,13 +246,8 @@ class ContinueWatchingStore {
   static Future<void> ensureLoaded() async {
     if (_loaded) return;
     _loaded = true;
-    try {
-      final sp = await SharedPreferences.getInstance();
-      _items = parseContinueItems(sp.getString(kContinuePrefsKey));
-      revision.value++;
-    } catch (_) {
-      _items = <ContinueItem>[];
-    }
+    _items = parseContinueItems(await readPrefString(kContinuePrefsKey));
+    revision.value++;
   }
 
   /// 记录一次观看位置（内部按 key 合并；位置不足 1 秒时跳过；

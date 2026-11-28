@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'json_num.dart';
 import 'unit_fraction.dart';
 
+import 'api_timeout.dart';
 import 'byte_size.dart';
 import 'http_json.dart';
 
@@ -159,15 +160,20 @@ class ResizeCacheStats {
 }
 
 /// 读取统计；网络/解析失败返回 null（页面显示「读取失败」）。
+///
+/// 超时默认走 [kTimeoutRead] 档，不再自带一个 8s 的第二套上限（第一百二十五批）。
+/// 这里原来的 8s 是 `api_timeout` 十六档之外唯一的额外上限：同一台服务器在
+/// 别的页面有 12s 的余量，在诊断页却 8s 就报「读取失败」。放宽到该档不改变
+/// 任何「读得出来」的结果，只是掉线时晚几秒报错。
 Future<ResizeCacheStats?> fetchResizeCacheStats(
   Uri uri,
   Map<String, String> headers, {
   http.Client? client,
-  Duration timeout = const Duration(seconds: 8),
+  Duration? timeout,
 }) async {
   final c = client ?? http.Client();
   try {
-    final r = await c.get(uri, headers: headers).timeout(timeout);
+    final r = await c.get(uri, headers: headers).timeout(timeout ?? kTimeoutRead);
     if (r.statusCode != 200) return null;
     return ResizeCacheStats.fromJson(jsonOf(r));
   } catch (_) {
@@ -179,12 +185,14 @@ Future<ResizeCacheStats?> fetchResizeCacheStats(
 
 /// 手动清理缩图缓存（服务端只删 `~/.cache/gallery-resize`，不动媒体原图）。
 /// 返回一句话结果，失败返回 null。
+///
+/// 超时默认走 [kTimeoutWrite] 档（20s，与原值一致），不再另写一个常量。
 Future<String?> pruneResizeCache(
   Uri uri,
   Map<String, String> headers, {
   bool dryRun = false,
   http.Client? client,
-  Duration timeout = const Duration(seconds: 20),
+  Duration? timeout,
 }) async {
   final c = client ?? http.Client();
   final target = dryRun
@@ -194,7 +202,7 @@ Future<String?> pruneResizeCache(
         })
       : uri;
   try {
-    final r = await c.get(target, headers: headers).timeout(timeout);
+    final r = await c.get(target, headers: headers).timeout(timeout ?? kTimeoutWrite);
     if (r.statusCode != 200) return null;
     final j = jsonOf(r);
     if (j is! Map) return null;

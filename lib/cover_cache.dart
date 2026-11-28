@@ -18,11 +18,11 @@ import 'package:flutter/painting.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'byte_size.dart';
 import 'json_num.dart';
 import 'media_resize.dart';
+import 'prefs_json.dart';
 
 // `formatBytes` 的唯一定义在 `byte_size.dart`（第十二批收口）；
 // 这里 re-export，使既有 import 'cover_cache.dart' 的调用点与测试不必改。
@@ -243,16 +243,14 @@ class DiziCache {
       const Duration(minutes: 30), (_) => unawaited(sweep(light: true)));
   }
 
+  /// 三个键一律走 `readPrefInt` / `readPrefBool`（唯一读盘入口）。
   static Future<void> _loadPrefs() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final m = sp.getInt(prefMaxMb);
-      if (m != null && maxMbOptions.contains(m)) maxMb = m;
-      final d = sp.getInt(prefKeepDays);
-      if (d != null && keepDayOptions.contains(d)) keepDays = d;
-      final a = sp.getBool(prefAutoClean);
-      if (a != null) autoClean = a;
-    } catch (_) {}
+    final m = await readPrefInt(prefMaxMb);
+    if (m != null && maxMbOptions.contains(m)) maxMb = m;
+    final d = await readPrefInt(prefKeepDays);
+    if (d != null && keepDayOptions.contains(d)) keepDays = d;
+    final a = await readPrefBool(prefAutoClean);
+    if (a != null) autoClean = a;
   }
 
   static Future<void> setMaxMb(int v) async {
@@ -276,12 +274,9 @@ class DiziCache {
   }
 
   static Future<void> _persist() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setInt(prefMaxMb, maxMb);
-      await sp.setInt(prefKeepDays, keepDays);
-      await sp.setBool(prefAutoClean, autoClean);
-    } catch (_) {}
+    await savePrefInt(prefMaxMb, maxMb);
+    await savePrefInt(prefKeepDays, keepDays);
+    await savePrefBool(prefAutoClean, autoClean);
   }
 
   /// 删除旧版本默认落到 `%TEMP%` 的缓存目录（只这两个，不碰其它临时文件）。

@@ -12,7 +12,6 @@ import 'json_num.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'prefs_json.dart';
 import 'work_key.dart';
 
@@ -192,12 +191,7 @@ class WorkPlaysStore {
   static Future<void> ensureLoaded() async {
     if (_loaded) return;
     _loaded = true;
-    try {
-      final sp = await SharedPreferences.getInstance();
-      _items = pruneWorkPlays(parseWorkPlays(sp.getString(kWorkPlaysPrefsKey)));
-    } catch (_) {
-      _items = <String, WorkPlay>{};
-    }
+    _items = pruneWorkPlays(parseWorkPlays(await readPrefString(kWorkPlaysPrefsKey)));
   }
 
   static WorkPlay? of(String lib, String id) {

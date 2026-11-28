@@ -5,11 +5,11 @@
 //  - 有连接被关闭（与服务器断连）→ 图标变叉号，并在 tooltip 里给出条数；
 //  - 点击图标进入「网络连接」设置。
 //
-// 状态来源只有一处：SharedPreferences 的 `servers_v1`（与设置页同源）。
+// 状态来源只有一处：[serversFromPrefs]（与设置页同源，键名由
+// `ConnPrefsKeys.servers` 定义）。
 // 设置页改动后 bump [connectionRevision]，主页图标立即重读，不加定时器。
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'multi_server.dart';
 import 'status_color.dart';
@@ -20,9 +20,7 @@ final ValueNotifier<int> connectionRevision = ValueNotifier<int>(0);
 /// 读取当前已断连的连接数量。
 Future<int> loadDisconnectedCount() async {
   try {
-    final sp = await SharedPreferences.getInstance();
-    final all = decodeServers(sp.getString('servers_v1'));
-    return disconnectedCount(all);
+    return disconnectedCount(await loadServersFromPrefs());
   } catch (_) {
     return 0;
   }

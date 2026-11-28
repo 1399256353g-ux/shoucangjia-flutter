@@ -112,3 +112,48 @@ Future<void> savePrefStringList(String key, List<String> values) async {
     // 存储不可用时保留进程内状态，下次写入再试。
   }
 }
+
+/// 读一个整数键；不存在 / 读取失败返回 null（**唯一实现**）。
+///
+/// 第一百二十五批：`cover_cache`（三项）、推荐数量、排序偏好等一共五处
+/// 各写一遍 `final sp = await getInstance(); sp.getInt(key)`，其中只有
+/// `cover_cache` 带 try。三者对「读不出来怎么办」的口径因此不同：
+/// 有的退回默认值、有的保持内存值、有的直接抛到外层。
+Future<int?> readPrefInt(String key) async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    return sp.getInt(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 写一个整数键；失败静默。
+Future<void> savePrefInt(String key, int value) async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setInt(key, value);
+  } catch (_) {
+    // 存储不可用时保留进程内状态，下次写入再试。
+  }
+}
+
+/// 读一个布尔键；不存在 / 读取失败返回 null（**唯一实现**）。
+Future<bool?> readPrefBool(String key) async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    return sp.getBool(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 写一个布尔键；失败静默。
+Future<void> savePrefBool(String key, bool value) async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(key, value);
+  } catch (_) {
+    // 存储不可用时保留进程内状态，下次写入再试。
+  }
+}
