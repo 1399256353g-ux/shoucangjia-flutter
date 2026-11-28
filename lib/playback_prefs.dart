@@ -89,13 +89,8 @@ const String kPlaybackPrefsKey = 'playback_prefs_v1';
 
 /// 读回上次的播放设置；无记录或坏数据返回 [PlaybackPrefs.defaults]。
 Future<PlaybackPrefs> loadPlaybackPrefs() async {
-  final raw = await readPrefString(kPlaybackPrefsKey);
-  if (raw == null || raw.trim().isEmpty) return PlaybackPrefs.defaults;
-  try {
-    return PlaybackPrefs.fromJson(jsonDecode(raw));
-  } catch (_) {
-    return PlaybackPrefs.defaults;
-  }
+  // 读盘判定只有 `readPrefJson` 一处；`fromJson` 不吃 null/非对象（回落默认）。
+  return PlaybackPrefs.fromJson(await readPrefJson(kPlaybackPrefsKey));
 }
 
 /// 保存播放设置；写失败不影响播放（下次进页面回落默认值）。

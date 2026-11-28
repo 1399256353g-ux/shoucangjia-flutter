@@ -4,8 +4,8 @@ import 'count_label.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'http_json.dart';
+import 'prefs_json.dart';
 import 'http_error_text.dart';
 
 import 'home_action.dart';
@@ -240,22 +240,16 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   }
 
   Future<void> _loadUnlocked() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final list = sp.getStringList(_unlockedKey) ?? const <String>[];
-      if (!mounted) return;
-      setState(() => unlocked
-        ..clear()
-        ..addAll(list.map(normalizeRel).where((e) => e.isNotEmpty)));
-    } catch (_) {}
+    // 读盘判定只有 `prefs_json.readPrefStringList` 一处（读不到 = 空）。
+    final list = await readPrefStringList(_unlockedKey);
+    if (!mounted) return;
+    setState(() => unlocked
+      ..clear()
+      ..addAll(list.map(normalizeRel).where((e) => e.isNotEmpty)));
   }
 
-  Future<void> _saveUnlocked() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setStringList(_unlockedKey, unlocked.toList());
-    } catch (_) {}
-  }
+  Future<void> _saveUnlocked() =>
+      savePrefStringList(_unlockedKey, unlocked.toList());
 
   /// 有效「基础库锁定」：目录仍具基础库特征（有作者）且未被手动解锁。
   /// 已经没有作者、或注册表里已不再登记它（改成单元库后只剩 @作者 残留）

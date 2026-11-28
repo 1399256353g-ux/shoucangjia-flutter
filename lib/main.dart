@@ -1881,7 +1881,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 headers: headers)
             .timeout(kTimeoutProbe),
       ]);
-      if (rs[0].statusCode != 200) throw Exception(httpErrorText(rs[0].statusCode));
+      throwIfHttpFailed(rs[0].statusCode);
       final cols = listLengthOf(jsonOf(rs[0])['collections']);
       var basics = 0;
       if (rs[1].statusCode == 200) {
@@ -4076,7 +4076,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         final r = await http
             .get(uri, headers: _headers)
             .timeout(kTimeoutRead);
-        if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+        throwIfHttpFailed(r.statusCode);
         dynamic raw;
         try {
           // 解析放 isolate：删除记录可能很多，避免在 UI 线程解码 JSON。
@@ -4179,7 +4179,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         _toast(kDeletedNotLocalMessage);
         return;
       }
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       dynamic raw;
       try {
         raw = await parseJsonMapAsync(r.bodyBytes);
@@ -4562,6 +4562,9 @@ class _StripIndexTileState extends State<_StripIndexTile> {
 const int kRecommendDefaultCount = 40;
 const int kRecommendMaxCount = 500;
 const String kRecommendCountPrefsKey = 'recommend_n_v1';
+
+/// 播放页「不感兴趣」本机集合的落盘键（读写都走 `prefs_json` 的列表入口）。
+const String kHiddenWorksPrefsKey = 'hidden_works_v1';
 
 /// 容错解析用户输入：空/非数字 → 默认 40；数字夹紧到 0..500。
 ///
@@ -5494,7 +5497,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       final r = await http
           .get(cfg.u('/api/settings'), headers: cfg.headers)
           .timeout(kTimeoutRead);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       _apply(jsonMapOf(r), setLoading: true);
     } catch (e) {
       if (mounted) setState(() => err = errorText(e));
@@ -5523,7 +5526,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
             headers: {...cfg.headers, 'Content-Type': 'application/json'},
             body: jsonEncode(body))
         .timeout(kTimeoutWrite);
-    if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+    throwIfHttpFailed(r.statusCode);
     return jsonMapOf(r);
   }
 
@@ -6744,7 +6747,7 @@ class _LibraryPageState extends State<LibraryPage> {
               },
               body: jsonEncode({'id': l['id']}))
           .timeout(kTimeoutWrite);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       if (!mounted) return;
       showToast(this, '已将「${libraryDisplayName(id, '${l['name'] ?? ''}')}」'
                   '设为默认媒体库');
@@ -8295,7 +8298,7 @@ class _RankPageState extends State<RankPage> {
       final r = await http
           .get(scope.uri, headers: scope.headers)
           .timeout(kTimeoutReadHeavy);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       final j = jsonOf(r);
       await _ensureMeta(cfg.lib);
       if (!mounted) return;
@@ -8600,7 +8603,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
       final r = await http
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
           .timeout(kTimeoutReadSlow);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       final j = jsonMapOf(r);
       final list = librariesWithDisplayNames(mapsOf(j['libraries']));
       defaultId = '${j['default'] ?? ''}'.trim();
@@ -9366,7 +9369,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
           .get(cfg.u('/api/author_stats.json', lib: cfg.lib),
               headers: cfg.headers)
           .timeout(kTimeoutRead);
-      if (ar.statusCode != 200) throw Exception(httpErrorText(ar.statusCode));
+      throwIfHttpFailed(ar.statusCode);
       // 作者索引可能上千作者：解析放 isolate。
       final m = await parseJsonMapAsync(ar.bodyBytes);
       for (final e in m.entries) {
@@ -10418,7 +10421,7 @@ class _PlayerPageState extends State<PlayerPage>
       vsync: this,
       duration: const Duration(milliseconds: kOverlayAnimMs),
       value: 1);
-  // 本机「不感兴趣」集合（写入 hidden_works_v1，刷新列表后不再出现）。
+  // 本机「不感兴趣」集合（键 `kHiddenWorksPrefsKey`，刷新列表后不再出现）。
   final Set<String> _hiddenKeys = <String>{};
   // P0 §3：进度条是否处于「按住/拖动」态（与拖动 seek 合并为一次按下）。
   bool _seeking = false;
@@ -12359,12 +12362,10 @@ class _PlayerPageState extends State<PlayerPage>
     }
     setState(() => _hiddenKeys.add(key));
     _toast('已隐藏该作品');
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final list = <String>{...sp.getStringList('hidden_works_v1') ?? const []}
-        ..add(key);
-      await sp.setStringList('hidden_works_v1', list.toList());
-    } catch (_) {}
+    // 列表偏好只有一个读写入口；读-改-写不再自己拿 sp。
+    final list = <String>{...await readPrefStringList(kHiddenWorksPrefsKey)}
+      ..add(key);
+    await savePrefStringList(kHiddenWorksPrefsKey, list.toList());
     if (mounted && cur < widget.works.length - 1) _step(1);
   }
 
@@ -16585,7 +16586,7 @@ class _RecommendPageState extends State<RecommendPage> {
     final r = await http
         .get(scope.uri, headers: scope.headers)
         .timeout(kTimeoutReadHeavy);
-    if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+    throwIfHttpFailed(r.statusCode);
     final j = jsonOf(r);
     final out = <Map<String, dynamic>>[];
     for (final w in listOf(j is Map ? j['works'] : null)) {

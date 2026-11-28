@@ -32,3 +32,19 @@ String httpErrorText(int status, {Map<int, String> overrides = const {}}) {
       return 'HTTP $status';
   }
 }
+
+/// 读接口的收尾：`status != 200` 就抛出**已翻译好的**原因（**唯一实现**）。
+///
+/// 第一百二十四批：`if (r.statusCode != 200) throw Exception(httpErrorText(...))`
+/// 这一行在 `lib/` 里写了 **15 遍**（设置页、收藏同步面板、同步日志、排行榜、
+/// 爬虫页、推荐页、删除监测……）。重复本身不是最坏的：真正的隐患是这行
+/// 藏在各个 catch 分支的不同位置，日后要「带上服务端的 error 字段」或
+/// 「401 单独提示登录失效」时，改到的那几处会与漏掉的十几处给出两种说法。
+///
+/// [status] 之外不接受响应体：能给出更准原因的写接口走
+/// `http_json.throwIfApiFailed`（那边要判 `ok`/`error`）。这里只处理
+/// 「纯读、只看状态码」的那一类。
+void throwIfHttpFailed(int status, {Map<int, String> overrides = const {}}) {
+  if (status == 200) return;
+  throw Exception(httpErrorText(status, overrides: overrides));
+}

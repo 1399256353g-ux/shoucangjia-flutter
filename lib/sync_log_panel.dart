@@ -83,7 +83,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
           .get(syncLogsUri(widget.base, lib: widget.libId, limit: widget.limit),
               headers: widget.headers)
           .timeout(kTimeoutRead);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       dynamic raw;
       try {
         raw = decodeSyncJson(r.bodyBytes);
@@ -299,9 +299,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
       } catch (_) {
         parsed = null;
       }
-      if (r.statusCode != 200) {
-        throw Exception(httpErrorText(r.statusCode));
-      }
+      throwIfHttpFailed(r.statusCode);
       final saved = parseKeepDays(parsed, fallback: picked);
       if (!mounted) return;
       showToast(this, '已设为保留 $saved 天');

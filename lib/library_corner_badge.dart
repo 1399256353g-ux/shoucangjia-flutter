@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'color_codec.dart';
 import 'contrast.dart';
@@ -159,13 +158,9 @@ class LibraryCornerBadge {
   }
 
   static Future<void> load() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      final raw = sp.getString(prefsKey);
-      if (raw == null || raw.isEmpty) return;
-      final j = jsonDecode(raw);
-      if (j is Map<String, dynamic>) applyJson(j);
-    } catch (_) {}
+    // 读盘判定只有 `readPrefJson` 一处（空串 / 纯空格 / 坏 JSON 都是 null）。
+    final j = await readPrefJson(prefsKey);
+    if (j is Map) applyJson(Map<String, dynamic>.from(j));
   }
 
   static Future<void> save() => savePrefString(prefsKey, jsonEncode(toJson()));

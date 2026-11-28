@@ -136,7 +136,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
           .get(Uri.parse(authorMountsUrl(widget.base, widget.authorName)),
               headers: widget.headers)
           .timeout(kTimeoutRead);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       final m = AuthorMounts.fromJson(jsonOf(r));
       // 合并结果只体现在 `/api/unit/authors.json`：逐单元取一次。
       final found = <String, _UnitCard?>{};

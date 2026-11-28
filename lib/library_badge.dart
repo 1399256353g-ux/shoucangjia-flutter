@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter/material.dart'
     show
@@ -891,16 +890,14 @@ class LibraryBadge {
 
   static Map<String, int> parse(String? raw) {
     final m = <String, int>{};
-    if (raw == null || raw.isEmpty) return m;
-    try {
-      final j = jsonDecode(raw);
-      if (j is Map) {
-        for (final e in j.entries) {
-          final n = argbFromJson(e.value);
-          if (n != null) m['${e.key}'] = n;
-        }
+    // 读盘判定只有 `decodePrefJson` 一处；本函数只判结构（必须是对象）。
+    final j = decodePrefJson(raw);
+    if (j is Map) {
+      for (final e in j.entries) {
+        final n = argbFromJson(e.value);
+        if (n != null) m['${e.key}'] = n;
       }
-    } catch (_) {}
+    }
     return m;
   }
 
@@ -987,19 +984,16 @@ class LibraryBadge {
 
   static Map<String, String> parseEmoji(String? raw) {
     final m = <String, String>{};
-    if (raw == null || raw.isEmpty) return m;
-    try {
-      final j = jsonDecode(raw);
-      if (j is Map) {
-        for (final e in j.entries) {
-          final v = e.value;
-          if (v is String) {
-            final s = sanitizeEmoji(v);
-            if (s.isNotEmpty) m['${e.key}'] = s;
-          }
+    final j = decodePrefJson(raw);
+    if (j is Map) {
+      for (final e in j.entries) {
+        final v = e.value;
+        if (v is String) {
+          final s = sanitizeEmoji(v);
+          if (s.isNotEmpty) m['${e.key}'] = s;
         }
       }
-    } catch (_) {}
+    }
     return m;
   }
 
@@ -1017,54 +1011,42 @@ class LibraryBadge {
 
   static Future<void> load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
+      // 读盘本身也只走 `prefs_json`：这里不再自己拿 sp 逐个 `getString`。
+      // 七个键里四个是 JSON 表（走 [decodePrefJson]），三个是同一条「读出来
+      // → 解析」的链路，用 [readPrefString] 取原文即可。
       custom
         ..clear()
-        ..addAll(parse(sp.getString(prefsKey)));
+        ..addAll(parse(await readPrefString(prefsKey)));
       topCustom
         ..clear()
-        ..addAll(parse(sp.getString(topPrefsKey)));
+        ..addAll(parse(await readPrefString(topPrefsKey)));
       basicCustom
         ..clear()
-        ..addAll(parse(sp.getString(basicPrefsKey)));
-      final rawSrc = sp.getString(colorSourcePrefsKey);
+        ..addAll(parse(await readPrefString(basicPrefsKey)));
+      // 四张「字符串 → 表」的读盘判定都走 `decodePrefJson` 一处；
+      // 这里只判「是不是对象」这个结构差异。
+      final srcMap = decodePrefJson(await readPrefString(colorSourcePrefsKey));
       colorSource.clear();
-      if (rawSrc != null && rawSrc.isNotEmpty) {
-        try {
-          final m = jsonDecode(rawSrc);
-          if (m is Map) {
-            for (final e in m.entries) {
-              colorSource[e.key.toString()] = e.value.toString();
-            }
-          }
-        } catch (_) {}
+      if (srcMap is Map) {
+        for (final e in srcMap.entries) {
+          colorSource[e.key.toString()] = e.value.toString();
+        }
       }
-      final rawBasicSrc = sp.getString(basicSourcePrefsKey);
+      final basicSrcMap =
+          decodePrefJson(await readPrefString(basicSourcePrefsKey));
       basicSource.clear();
-      if (rawBasicSrc != null && rawBasicSrc.isNotEmpty) {
-        try {
-          final m = jsonDecode(rawBasicSrc);
-          if (m is Map) {
-            for (final e in m.entries) {
-              basicSource[e.key.toString()] = e.value.toString();
-            }
-          }
-        } catch (_) {}
+      if (basicSrcMap is Map) {
+        for (final e in basicSrcMap.entries) {
+          basicSource[e.key.toString()] = e.value.toString();
+        }
       }
       emoji
         ..clear()
-        ..addAll(parseEmoji(sp.getString(emojiPrefsKey)));
+        ..addAll(parseEmoji(await readPrefString(emojiPrefsKey)));
       // P1：三层级外观（边框粗细/透明度 + 底纹浓度）。
-      final rawStyle = sp.getString(stylePrefsKey);
-      if (rawStyle != null && rawStyle.isNotEmpty) {
-        try {
-          applyStyleJson(jsonDecode(rawStyle));
-        } catch (_) {
-          applyStyleJson(null);
-        }
-      } else {
-        applyStyleJson(null);
-      }
+      // `applyStyleJson` 自己判 `is! Map`（含 null），不需要这里再包一层 try：
+      // 坏 JSON 已经在 `decodePrefJson` 里变成 null，不会抛。
+      applyStyleJson(decodePrefJson(await readPrefString(stylePrefsKey)));
     } catch (_) {}
   }
 

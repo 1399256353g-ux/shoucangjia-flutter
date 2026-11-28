@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'library_tree.dart' show toggleStar;
+import 'prefs_json.dart';
 
 /// 0.9.6：星标（单元库）全局状态。
 ///
@@ -34,12 +34,8 @@ class StarStore extends ChangeNotifier {
 
   /// 从 SharedPreferences 读取一次；失败按空处理，不影响首页其它内容。
   Future<void> load() async {
-    try {
-      final sp = await SharedPreferences.getInstance();
-      _ids = List<String>.from(sp.getStringList(prefKey) ?? const <String>[]);
-    } catch (_) {
-      _ids = const <String>[];
-    }
+    // 读盘判定只有 `prefs_json.readPrefStringList` 一处（读不到 = 空）。
+    _ids = await readPrefStringList(prefKey);
     _ready = true;
     notifyListeners();
   }
@@ -49,10 +45,7 @@ class StarStore extends ChangeNotifier {
     _ids = toggleStar(_ids, id);
     _ready = true;
     notifyListeners();
-    try {
-      final sp = await SharedPreferences.getInstance();
-      await sp.setStringList(prefKey, _ids);
-    } catch (_) {}
+    await savePrefStringList(prefKey, _ids);
   }
 
   /// 仅供测试：注入初始状态。

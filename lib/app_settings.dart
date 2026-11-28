@@ -302,14 +302,12 @@ class AppSettings {
 
   static Future<void> load() async {
     try {
-      final sp = await SharedPreferences.getInstance();
-      final raw = sp.getString(prefsKey);
-      if (raw != null && raw.isNotEmpty) {
-        final j = jsonDecode(raw);
-        if (j is Map<String, dynamic>) applyJson(j);
-      }
+      // 读盘判定只有 `readPrefJson` 一处（空串 / 纯空格 / 坏 JSON 都是 null）。
+      final j = await readPrefJson(prefsKey);
+      if (j is Map) applyJson(Map<String, dynamic>.from(j));
       // Windows 上多路视频预载会让整机明显卡顿：老配置一次性降为「不预载」，
       // 用户仍可在「播放设置」里手动开回来。
+      final sp = await SharedPreferences.getInstance();
       if (Platform.isWindows && sp.getBool('lowload_migrated_v1') != true) {
         preloadPerSide = 0;
         await save();

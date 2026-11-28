@@ -61,3 +61,54 @@ Object? decodePrefJson(String? raw) {
     return null;
   }
 }
+
+/// 「读一个键 + 判能不能用」的**唯一入口**：读盘与解析不再由调用方各拼一次。
+///
+/// 第一百二十三批把六张表（连接 / 绑定 / 进度 / 继续观看 / 播放量 / 头像覆盖）
+/// 的读盘判定收到了 [decodePrefJson]，但**设置类**的七处仍是自己那套：
+///
+/// ```
+/// final sp = await SharedPreferences.getInstance();
+/// final raw = sp.getString(key);
+/// if (raw != null && raw.isNotEmpty) {
+///   final j = jsonDecode(raw);      // 有的还再套一层 try/catch
+///   if (j is Map) apply(j);
+/// }
+/// ```
+///
+/// 于是同一件事出现三种口径：空串判 `isNotEmpty`（纯空格放行 → 解析抛异常
+/// 被吞）、`try { jsonDecode } catch` 有的写有的不写、`j is Map` 之后是否
+/// `Map<String, dynamic>.from` 各不相同。加第八个设置项时没人知道该抄哪份。
+///
+/// 现在只有这里一处：键读不到 / 坏 JSON 一律返回 null，结构判断留给调用方
+/// （那才是各表真正的差异）。读盘失败（存储不可用）同样返回 null，与「没有
+/// 存过」等价——两者的正确处理都是「保持默认值」。
+Future<Object?> readPrefJson(String key) async =>
+    decodePrefJson(await readPrefString(key));
+
+/// 读一个字符串列表键；没有 / 读取失败返回空列表（**唯一实现**）。
+///
+/// 本机三处列表偏好（星标 `lib_tree_stars_v1`、文件结构解锁
+/// `folder_unlocked_v1`、不感兴趣 `hidden_works_v1`）此前各写一遍
+/// `try { final sp = await SharedPreferences.getInstance(); sp.getStringList(k)
+/// ?? const [] } catch`：一处失败退化为空、一处退化为「保持内存值」、
+/// 一处完全没有 catch。这里统一成「存不了就是没有」，与 [readPrefJson]
+/// 的同一条口径——读不到与读坏了，正确处理都是空。
+Future<List<String>> readPrefStringList(String key) async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    return sp.getStringList(key) ?? const <String>[];
+  } catch (_) {
+    return const <String>[];
+  }
+}
+
+/// 写一个字符串列表键；失败静默（偏好是尽力而为，不阻断交互）。
+Future<void> savePrefStringList(String key, List<String> values) async {
+  try {
+    final sp = await SharedPreferences.getInstance();
+    await sp.setStringList(key, values);
+  } catch (_) {
+    // 存储不可用时保留进程内状态，下次写入再试。
+  }
+}

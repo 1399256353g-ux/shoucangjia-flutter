@@ -110,7 +110,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
       final r = await _client
           .get(_settingsUri, headers: widget.headers)
           .timeout(kTimeoutRead);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
       if (!mounted) return;
@@ -149,7 +149,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
                 ],
               }))
           .timeout(kTimeoutWrite);
-      if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
+      throwIfHttpFailed(r.statusCode);
       final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
       if (!mounted) return;

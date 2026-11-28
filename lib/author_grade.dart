@@ -209,11 +209,10 @@ class AuthorGrade {
   }
 
   static Map<String, dynamic> parse(String? raw) {
-    if (raw == null || raw.isEmpty) return <String, dynamic>{};
-    try {
-      final j = jsonDecode(raw);
-      if (j is Map) return Map<String, dynamic>.from(j);
-    } catch (_) {}
+    // 「读盘 → 能不能用」只有 `prefs_json.decodePrefJson` 一处：空串 / 纯空格 /
+    // 坏 JSON 都是 null，这里只判结构（等级表必须是对象）。
+    final j = decodePrefJson(raw);
+    if (j is Map) return Map<String, dynamic>.from(j);
     return <String, dynamic>{};
   }
 
@@ -225,8 +224,7 @@ class AuthorGrade {
   /// 真正生效的配置由 [applyRemote] 套用，本地不再写回服务端。
   static Future<void> load() async {
     try {
-      final raw = await readPrefString(prefsKey);
-      final j = parse(raw);
+      final j = _fromJson(await readPrefJson(prefsKey));
       if (j.isEmpty) {
         reset();
       } else {
@@ -247,6 +245,10 @@ class AuthorGrade {
       reset();
     }
   }
+
+  /// [readPrefJson] 的返回值 → 等级表（非对象按空表处理）。
+  static Map<String, dynamic> _fromJson(Object? raw) =>
+      raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
 
   /// P6：只写本机只读缓存，供下次启动首帧使用；服务端配置由 PUT 接口写。
   ///
