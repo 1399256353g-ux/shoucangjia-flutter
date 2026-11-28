@@ -8820,6 +8820,13 @@ class AuthorGridCard extends StatelessWidget {
   final String name;
   final String avatar;
   final String lib;
+
+  /// 该作者的全部来源基础库（页面手里的 `authorLibs[name]`）。
+  ///
+  /// 与作者页 `basicIds: _libs` 同一口径：挂了几处文件夹就贴几条基础库词条。
+  /// 只给 `lib` 时它只作「路径解析不出归属」的回落值，多来源作者在这张卡上
+  /// 永远只有一条词条。常态折叠（`CollapsibleBadgeWrap`）保证不会挤出卡片。
+  final List<String> libs;
   final LibMeta? meta;
   final Map<String, dynamic> stats;
   final int works;
@@ -8831,6 +8838,7 @@ class AuthorGridCard extends StatelessWidget {
     required this.name,
     required this.avatar,
     required this.lib,
+    this.libs = const <String>[],
     required this.meta,
     required this.stats,
     required this.works,
@@ -8908,6 +8916,7 @@ class AuthorGridCard extends StatelessWidget {
                 name: name,
                 mediaPath: avatar,
                 fallbackId: lib,
+                basicIds: libs,
                 works: works,
                 stats: stats,
                 // 150dp 卡只放得下一行词条：单条上限必须比信息区小，
@@ -9630,6 +9639,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       name: e.key,
       avatar: shownAv,
       lib: lib,
+      libs: authorLibs[e.key] ?? const <String>[],
       meta: meta,
       stats: _s(e.key),
       works: intOf(e.value['n']),
