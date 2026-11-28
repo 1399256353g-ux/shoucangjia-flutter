@@ -79,6 +79,7 @@ import 'cover_badges.dart';
 import 'decode_fallback.dart';
 import 'home_action.dart';
 import 'lib_names.dart';
+import 'level_names.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
 import 'lib_id.dart';
@@ -2429,12 +2430,6 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
 
   /// P2：一个顶级单元库的分组——它自己的词条、下级单元库、基础库。
   Widget _entryStyleSection() {
-    const labels = <LibEntryKind, String>{
-      LibEntryKind.top: '媒体库',
-      LibEntryKind.unit: '单元库',
-      LibEntryKind.basic: '基础库',
-      LibEntryKind.author: '作者',
-    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2448,7 +2443,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
               style: TextStyle(fontSize: 12, color: Colors.grey)),
         ),
         for (final kind in LibEntryKind.values)
-          _entryStyleTile(kind, labels[kind] ?? kind.name),
+          _entryStyleTile(kind, levelName(kind)),
       ],
     );
   }
@@ -2958,16 +2953,18 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 ),
                 const SizedBox(height: 6),
                 SegmentedButton<BadgeColorSource>(
-                  segments: const [
-                    ButtonSegment(
-                        value: BadgeColorSource.inheritTop,
-                        label: Text('继承上级', style: TextStyle(fontSize: 11))),
-                    ButtonSegment(
-                        value: BadgeColorSource.autoAssign,
-                        label: Text('自动分配', style: TextStyle(fontSize: 11))),
-                    ButtonSegment(
-                        value: BadgeColorSource.fixedCustom,
-                        label: Text('自定义', style: TextStyle(fontSize: 11))),
+                  // 三个名字都读 `sourceShortLabel`：列表摘要走的是同一个
+                  // 出口，两处不会出现「片段写继承上级、这行写继承」。
+                  segments: [
+                    for (final v in const [
+                      BadgeColorSource.inheritTop,
+                      BadgeColorSource.autoAssign,
+                      BadgeColorSource.fixedCustom,
+                    ])
+                      ButtonSegment(
+                          value: v,
+                          label: Text(LibraryBadge.sourceShortLabel(v),
+                              style: const TextStyle(fontSize: 11))),
                   ],
                   selected: <BadgeColorSource>{source},
                   showSelectedIcon: false,
@@ -5382,10 +5379,11 @@ class CornerBadgeSettingsPage extends StatefulWidget {
 }
 
 class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
-  static const _kindLabels = <LibBadgeKind, String>{
-    LibBadgeKind.top: '媒体库',
-    LibBadgeKind.unit: '单元库',
-    LibBadgeKind.basic: '基础库',
+  /// 角标页沿用词条层级的同一套中文名（`level_names.dart` 唯一一份）。
+  static const _kindLabels = <LibBadgeKind, LibEntryKind>{
+    LibBadgeKind.top: LibEntryKind.top,
+    LibBadgeKind.unit: LibEntryKind.unit,
+    LibBadgeKind.basic: LibEntryKind.basic,
   };
 
   @override
@@ -5412,7 +5410,7 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       ListTile(
         leading: LibCornerBadge(kind: kind),
-        title: Text(_kindLabels[kind] ?? kind.name),
+        title: Text(levelName(_kindLabels[kind] ?? LibEntryKind.basic)),
         subtitle: Text(
             '图案：${kCornerPatternNames[LibraryCornerBadge.patternFor(kind)]}'),
         trailing: TextButton(
@@ -5462,7 +5460,10 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         child: Wrap(spacing: 10, runSpacing: 10, children: [
-          for (final c in LibraryBadge.palette)
+          // 默认色自带一格：否则「恢复默认」后整排没有高亮（默认色不在
+          // 词条调色板里）。候选清单只由 colorChoices 生成。
+          for (final c in LibraryCornerBadge.colorChoices(
+              kind: kind, palette: LibraryBadge.palette))
             GestureDetector(
               onTap: () async {
                 await LibraryCornerBadge.setColor(kind, c);

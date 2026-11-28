@@ -1,7 +1,22 @@
-import 'package:flutter/material.dart' show Border, BorderRadius, Color;
+import 'package:flutter/material.dart'
+    show Border, BorderRadius, BoxDecoration, Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shoucangjia/library_badge.dart';
+
+/// 0.9.359：渲染层把底纹与边框拆成两层（边框不参与布局测量），
+/// `LibraryBadge.decorationFor` 已删。测试要「一眼看形状」时用这个本地合成体：
+/// 圆角取两层中任一（两层的圆角必须相同），边框取前景层，底纹取填充层。
+BoxDecoration _entryDeco(LibEntryKind kind, int argb) {
+  final fill = LibraryBadge.fillDecorationFor(kind, argb);
+  final border = LibraryBadge.borderDecorationFor(kind);
+  return BoxDecoration(
+    color: fill.color,
+    borderRadius: fill.borderRadius,
+    border: border.border,
+  );
+}
+
 
 // P1 剩余：四层级词条的**边框 / 底纹**可自定义，但形状与尺寸必须保持一致。
 // 这里只断言结构与数值，不涉及任何 UI 截图或目录名文本。
@@ -14,7 +29,7 @@ void main() {
 
   test('默认外观：三层级圆角一致，边框与底纹逐级递减', () {
     final decos = [
-      for (final k in LibEntryKind.values) LibraryBadge.decorationFor(k, 0xFF336699)
+      for (final k in LibEntryKind.values) _entryDeco(k, 0xFF336699)
     ];
     // 圆角必须完全一致（形状硬约束）
     final radii = {
@@ -41,12 +56,12 @@ void main() {
     final topWidthBefore = LibraryBadge.styleFor(LibEntryKind.top).borderWidth;
     LibraryBadge.entryStyle[LibEntryKind.unit] =
         LibraryBadge.styleFor(LibEntryKind.unit).copyWith(borderWidth: 2.4);
-    final after = LibraryBadge.decorationFor(LibEntryKind.unit, 0xFF336699);
+    final after = _entryDeco(LibEntryKind.unit, 0xFF336699);
 
     expect((after.border as Border).top.width, closeTo(2.4, 1e-9));
     expect((after.borderRadius as BorderRadius).topLeft.x, kEntryRadius);
     // 其它层级不受影响
-    final topDeco = LibraryBadge.decorationFor(LibEntryKind.top, 0xFF336699);
+    final topDeco = _entryDeco(LibEntryKind.top, 0xFF336699);
     expect((topDeco.border as Border).top.width,
         closeTo(topWidthBefore, 1e-9));
   });
@@ -57,7 +72,7 @@ void main() {
         .copyWith(fillAlpha: 5.0); // 越界输入
     expect(LibraryBadge.styleFor(LibEntryKind.basic).fillAlpha, 1.0);
     final deco =
-        LibraryBadge.decorationFor(LibEntryKind.basic, 0xFF336699);
+        _entryDeco(LibEntryKind.basic, 0xFF336699);
     expect((deco.color as Color).a, closeTo(1.0, 1e-6));
   });
 
@@ -116,7 +131,7 @@ void main() {
     for (final k in LibEntryKind.values) {
       LibraryBadge.entryStyle[k] = const EntryStyle(
           borderWidth: 3, borderAlpha: 1, fillAlpha: 0.1);
-      final d = LibraryBadge.decorationFor(k, 0xFF112233);
+      final d = _entryDeco(k, 0xFF112233);
       expect((d.borderRadius as BorderRadius).topLeft.x, kEntryRadius);
     }
   });

@@ -7,6 +7,20 @@ import 'package:shoucangjia/app_settings.dart';
 import 'package:shoucangjia/author_badge_row.dart';
 import 'package:shoucangjia/library_badge.dart';
 
+/// 0.9.359：渲染层把底纹与边框拆成两层（边框不参与布局测量），
+/// `LibraryBadge.decorationFor` 已删。测试要「一眼看形状」时用这个本地合成体：
+/// 圆角取两层中任一（两层的圆角必须相同），边框取前景层，底纹取填充层。
+BoxDecoration _entryDeco(LibEntryKind kind, int argb) {
+  final fill = LibraryBadge.fillDecorationFor(kind, argb);
+  final border = LibraryBadge.borderDecorationFor(kind);
+  return BoxDecoration(
+    color: fill.color,
+    borderRadius: fill.borderRadius,
+    border: border.border,
+  );
+}
+
+
 /// 第一百批（0.9.345）：**第四类词条（作者）没有独立外观**、
 /// **继承来源只认媒体库根**、**「继承顶级」这个界面上不该出现的叫法**、
 /// **空格有两条归属**、**折叠摘要按色表计数而不是按生效来源**。
@@ -44,7 +58,7 @@ void main() {
     test('四种圆角完全一致（形状一致是硬约束）', () {
       final radii = <double>{
         for (final k in LibEntryKind.values)
-          (LibraryBadge.decorationFor(k, 0xFF336699).borderRadius
+          (_entryDeco(k, 0xFF336699).borderRadius
                   as BorderRadius)
               .topLeft
               .x,
@@ -100,13 +114,24 @@ void main() {
 
     test('设置页四种都有可点的行，且层级名是日常叫法', () {
       final main = libRaw('lib/main.dart');
+      // 0.9.359：层级中文名只允许有一份表（`lib/level_names.dart`）。
+      final names = libRaw('lib/level_names.dart');
       for (final label in <String>['媒体库', '单元库', '基础库', '作者']) {
-        expect(main.contains("LibEntryKind.$label"), isFalse,
-            reason: '标签表按枚举键写，不该出现中文键');
+        expect(names.contains("'$label'"), isTrue, reason: label);
+        // 中文名不得在 main.dart 的**层级标签表**里再写一份。页面标题
+        // （首页 AppBar 的「媒体库」）是另一件事，不算层级标签。
+        expect(
+            RegExp("LibEntryKind\\.\\w+:\\s*'$label'").hasMatch(main), isFalse,
+            reason: '$label 的层级标签不得在 main.dart 再写一份');
+        expect(
+            RegExp("LibBadgeKind\\.\\w+:\\s*'$label'").hasMatch(main), isFalse,
+            reason: '$label 的角标标签不得在 main.dart 再写一份');
       }
-      expect(main.contains("LibEntryKind.author: '作者'"), isTrue);
+      expect(names.contains('LibEntryKind.author:'), isTrue);
       // 设置页遍历的必须是全部四档（少一档 = 少一个可点入口）。
       expect(main.contains('for (final kind in LibEntryKind.values)'), isTrue);
+      // 两处标签入口都读同一份表（角标页与词条外观页）。
+      expect(main.contains('levelName('), isTrue);
     });
   });
 
@@ -210,9 +235,12 @@ void main() {
         expect(src.contains("'继承顶级'"), isFalse, reason: f);
         expect(src.contains('"继承顶级"'), isFalse, reason: f);
       }
-      // 同时确认分段按钮与来源标签用的是「上级」。
+      // 分段按钮与来源标签都读同一个短名出口（0.9.359）：界面上的字样
+      // 来自 `sourceShortLabel`，main.dart 不再自己写这三个词。
       final main = libRaw('lib/main.dart');
-      expect(main.contains("Text('继承上级'"), isTrue);
+      expect(main.contains('LibraryBadge.sourceShortLabel('), isTrue);
+      expect(LibraryBadge.sourceShortLabel(BadgeColorSource.inheritTop)
+          .contains('上级'), isTrue);
     });
   });
 

@@ -10,6 +10,8 @@ library;
 
 import 'package:flutter/foundation.dart';
 import 'author_grade.dart';
+import 'level_names.dart';
+import 'library_badge.dart' show LibEntryKind;
 import 'http_json.dart';
 import 'json_num.dart';
 
@@ -174,9 +176,12 @@ class AuthorFilterState {
     final parts = <String>[
       // 0.9.313：界面上不再出现「顶级节点」「大库」这类内部叫法。
       // 一级 = 每个连接的库根 → 「媒体库」；旧 `bigs` 只剩历史筛选。
-      if (tops.isNotEmpty) _namesPart('媒体库', tops, topNames),
-      if (units.isNotEmpty) _namesPart('单元库', units, unitNames),
-      if (basics.isNotEmpty) _namesPart('基础库', basics, basicNames),
+      if (tops.isNotEmpty)
+        _namesPart(levelName(LibEntryKind.top), tops, topNames),
+      if (units.isNotEmpty)
+        _namesPart(levelName(LibEntryKind.unit), units, unitNames),
+      if (basics.isNotEmpty)
+        _namesPart(levelName(LibEntryKind.basic), basics, basicNames),
       if (bigs.isNotEmpty) _namesPart(kLegacyFilterLabel, bigs, bigNames),
       if (grades.isNotEmpty)
         '等级 ${AuthorGrade.gradesDescending.where(grades.contains).join('/')}',

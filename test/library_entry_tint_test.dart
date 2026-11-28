@@ -1,8 +1,23 @@
-import 'package:flutter/material.dart' show Border, BorderRadius, Color;
+import 'package:flutter/material.dart'
+    show Border, BorderRadius, BoxDecoration, Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/library_badge.dart';
 import 'package:shoucangjia/library_tree.dart';
 import 'package:shoucangjia/unit_library.dart';
+
+/// 0.9.359：渲染层把底纹与边框拆成两层（边框不参与布局测量），
+/// `LibraryBadge.decorationFor` 已删。测试要「一眼看形状」时用这个本地合成体：
+/// 圆角取两层中任一（两层的圆角必须相同），边框取前景层，底纹取填充层。
+BoxDecoration _entryDeco(LibEntryKind kind, int argb) {
+  final fill = LibraryBadge.fillDecorationFor(kind, argb);
+  final border = LibraryBadge.borderDecorationFor(kind);
+  return BoxDecoration(
+    color: fill.color,
+    borderRadius: fill.borderRadius,
+    border: border.border,
+  );
+}
+
 
 UnitLibrary _tree() {
   BasicLib b(String id, String name, String rel) =>
@@ -115,7 +130,7 @@ void main() {
   test('三层级词条外观：圆角与内边距一致，只有边框/底纹不同', () {
     final kinds = LibEntryKind.values;
     final decos = [
-      for (final k in kinds) LibraryBadge.decorationFor(k, 0xFF336699)
+      for (final k in kinds) _entryDeco(k, 0xFF336699)
     ];
     // 圆角完全一致（形状一致）
     final radii = {

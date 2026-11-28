@@ -69,8 +69,11 @@ class KeyCombo {
 
   bool get isBound => keyId != 0;
 
-  KeyCombo copyWith({int? keyId, int? mods}) =>
-      KeyCombo(keyId ?? this.keyId, mods ?? this.mods);
+  // 0.9.359：`copyWith` 已删。lib/ 与 test/ 双零调用——它是「一个组合
+  // 拆成两步改」的入口，而绑定层只有「整条替换」（[AppSettings.bindCombo]）
+  // 与「互换」两种动作。留着它意味着将来有人用 `c.copyWith(mods: …)` 造出
+  // 一个**未经准入**的组合（`bindComboError` 拦不住），而 `==` 又认为它
+  // 与合法组合等价。
 
   Map<String, dynamic> toJson() => {'k': keyId, 'm': mods};
 
@@ -323,9 +326,10 @@ class AppSettings {
     return null;
   }
 
-  /// [combo] 是否已被 [action] 之外的动作占用。
-  static bool isComboTakenByOther(PlayerAction action, KeyCombo combo) =>
-      conflictOwner(action, combo) != null;
+  // 0.9.359：`isComboTakenByOther` 已删。它是 [conflictOwner] 的布尔包装，
+  // `lib/` 内零调用，只有一条测试在断言它——而那条断言紧跟在
+  // `conflictOwner(...) != null` 之后，两者永远同真同假。判定只有一处
+  // 才保证「写路径互换 / 读路径丢弃重复」不会出现两个说法。
 
   /// 组合能否成为绑定；不能时给出用户可读的原因（单一判定口）。
   ///

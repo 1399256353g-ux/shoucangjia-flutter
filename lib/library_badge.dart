@@ -561,23 +561,18 @@ class LibraryBadge {
     return '';
   }
 
-  /// P1：词条外观。三种层级共用同一圆角与内边距，只改边框与底纹强度，
-  /// 因此「形状与尺寸保持一致」由这一个函数保证，调用方不再各写一份。
+  /// 0.9.359：`decorationFor(kind, argb)` 已删。
   ///
-  /// 边框粗细与底纹浓度可在「设置 → 自定义 → 库词条配色」里按层级调整；
-  /// 圆角与内边距**不可调**，形状尺寸永远一致。
-
-  static BoxDecoration decorationFor(LibEntryKind kind, int argb) {
-    // 组合视图（设置页预览与既有测试读的是「一个带边框的 BoxDecoration」）。
-    // 渲染层**不再**用它：见 [fillDecorationFor] / [borderDecorationFor]。
-    final fill = fillDecorationFor(kind, argb);
-    final border = borderDecorationFor(kind);
-    return BoxDecoration(
-      color: fill.color,
-      borderRadius: fill.borderRadius,
-      border: border.border,
-    );
-  }
+  /// 它把底纹与边框合成一个 `BoxDecoration`，而渲染层从 0.9.356 起就分两层
+  /// 画（`fillDecorationFor` 进 `decoration`、`borderDecorationFor` 进
+  /// `foregroundDecoration`）——原因写在 [borderDecorationFor] 里：边框不能
+  /// 参与布局测量。合成版于是成了**第三个入口**：`lib/` 内零调用，只有六个
+  /// 测试文件在读它。留着它的坏处不是「多一个函数」，而是测试对着一个
+  /// 生产路径上不存在的组合体断言「边框在 decoration 里」——真正渲染出来的
+  /// 词条根本没有那条边框，断言永远绿。
+  ///
+  /// 现在测试一律分别断言两层：边框看 [borderDecorationFor]（宽度/颜色/圆角），
+  /// 底纹看 [fillDecorationFor]（浓度/圆角）。
 
   /// 词条底纹（**不含边框**）。
   ///
@@ -781,15 +776,30 @@ class LibraryBadge {
   /// 「继承上级」不告诉用户跟谁一样——同一个设置页上并列着媒体库、若干个
   /// 单元库与基础库，光说「继承」用户无法判断该去改哪一层。带上来源名
   /// 才能回答「我现在的色是从哪里来的」。
+  /// 颜色来源的**短名**（片段按钮与列表摘要共用一份）。
+  ///
+  /// 0.9.359：设置页的 `SegmentedButton` 自己写了一遍
+  /// `'继承上级' / '自动分配' / '自定义'`，[sourceLabelOf] 里又写一遍
+  /// （还多一个「声明自定义但色被清掉 → 自动分配」的分支）。两处只要有一处
+  /// 改动，用户在片段上看到的和列表里读到的那行就会是两个词。
+  ///
+  /// [fixedCustom] 在这里是「自定义」；「声明了自定义但没有值」那种状态由
+  /// [sourceLabelOf] 负责显示成自动——那是**生效结果**，不是来源的名字。
+  static String sourceShortLabel(BadgeColorSource src) => switch (src) {
+        BadgeColorSource.inheritTop => '继承上级',
+        BadgeColorSource.autoAssign => '自动分配',
+        BadgeColorSource.fixedCustom => '自定义',
+      };
+
   static String sourceLabelOf(BadgeColorSource src,
       {required bool hasOwn, required bool inherits, String sourceName = ''}) {
-    if (hasOwn) return '自定义';
+    if (hasOwn) return sourceShortLabel(BadgeColorSource.fixedCustom);
     switch (src) {
       case BadgeColorSource.autoAssign:
-        return '自动分配';
+        return sourceShortLabel(BadgeColorSource.autoAssign);
       case BadgeColorSource.fixedCustom:
         // 声明了自定义、但色被清掉：此时真实生效的是自动配色。
-        return '自动分配';
+        return sourceShortLabel(BadgeColorSource.autoAssign);
       case BadgeColorSource.inheritTop:
         // 继承源可能是媒体库根，也可能是更近的一层单元库（逐级分发），
         // 所以文案用「上级」而不是「顶级」——「顶级单元库」按 PROJECT_RULES

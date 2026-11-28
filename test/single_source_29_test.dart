@@ -123,9 +123,10 @@ void main() {
       final fsKey = AppSettings.keyBindings[PlayerAction.fullscreen]!;
       expect(AppSettings.conflictOwner(PlayerAction.mute, fsKey),
           PlayerAction.fullscreen);
-      expect(AppSettings.isComboTakenByOther(PlayerAction.mute, fsKey), isTrue);
-      expect(AppSettings.isComboTakenByOther(PlayerAction.fullscreen, fsKey),
-          isFalse);
+      // 「是否被别人占用」只由 conflictOwner 一处回答（0.9.359 删掉了
+      // 它的布尔包装 isComboTakenByOther：那样同一判定就有两个名字）。
+      expect(AppSettings.conflictOwner(PlayerAction.fullscreen, fsKey),
+          isNot(PlayerAction.fullscreen));
     });
 
     test('单键与组合键不互相冲突（Ctrl+J ≠ J）', () {

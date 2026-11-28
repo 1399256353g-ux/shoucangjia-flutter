@@ -6,6 +6,20 @@ import 'package:shoucangjia/library_tree.dart';
 import 'package:shoucangjia/unit_library.dart';
 import 'package:shoucangjia/unit_library_view.dart';
 
+/// 0.9.359：渲染层把底纹与边框拆成两层（边框不参与布局测量），
+/// `LibraryBadge.decorationFor` 已删。测试要「一眼看形状」时用这个本地合成体：
+/// 圆角取两层中任一（两层的圆角必须相同），边框取前景层，底纹取填充层。
+BoxDecoration _entryDeco(LibEntryKind kind, int argb) {
+  final fill = LibraryBadge.fillDecorationFor(kind, argb);
+  final border = LibraryBadge.borderDecorationFor(kind);
+  return BoxDecoration(
+    color: fill.color,
+    borderRadius: fill.borderRadius,
+    border: border.border,
+  );
+}
+
+
 BasicLib basic(String id, String rel) => BasicLib(
       id: id,
       name: rel.split('/').last,
@@ -121,7 +135,7 @@ void main() {
     expect(chipColor(), isNot(before));
     // 词条底色不是满不透明（底纹浓度由 LibEntryKind.top 决定）。
     final argb = LibraryBadge.colorForUnit('top-1');
-    final deco = LibraryBadge.decorationFor(LibEntryKind.top, argb);
+    final deco = _entryDeco(LibEntryKind.top, argb);
     expect(deco, isNotNull, reason: '词条外观必须能取到');
   });
 

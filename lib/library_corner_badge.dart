@@ -100,6 +100,21 @@ class LibraryCornerBadge {
   static int colorFor(LibBadgeKind kind) =>
       color[kind] ?? kDefaultCornerColor[kind] ?? 0xFF6B7280;
 
+  /// 设置页的候选色：调色板 + 「该层级当前/默认色（若不在调色板里）」。
+  ///
+  /// 0.9.359：设置页的色块此前只铺 `LibraryBadge.palette`（12 个词条色），
+  /// 而三档角标的**默认色**（`0xFF1D4ED8` / `0xFF047857` / `0xFF6B7280`）
+  /// 一个都不在里面。于是「恢复默认」之后整排色块没有任何一个高亮——用户
+  /// 看到的是「当前颜色」那一行还写着旧的、色块区像什么都没选中。
+  ///
+  /// 默认色必须自带一个格子；已在调色板里的（基础库那档的灰恰好是
+  /// `LibraryBadge.gray`）不重复加，避免同一颜色两个格子。
+  static List<int> colorChoices({required LibBadgeKind kind, List<int> palette = const <int>[]}) {
+    final cur = colorFor(kind);
+    final out = <int>[if (!palette.contains(cur)) cur, ...palette];
+    return out;
+  }
+
   /// 图案 id 夹到合法范围（非法值回默认，不抛异常）。
   static int clampPattern(LibBadgeKind kind, int id) {
     if (id < 0 || id >= kCornerPatternNames.length) {

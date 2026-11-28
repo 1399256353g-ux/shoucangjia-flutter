@@ -112,8 +112,11 @@ void main() {
       final main = _code('lib/main.dart');
       expect(main.contains('四类边框'), isTrue);
       expect(main.contains('四种词条形状与尺寸一致'), isTrue);
-      // 设置页必须给四种都留一行能点的入口。
-      expect(main.contains("LibEntryKind.author: '作者'"), isTrue);
+      // 设置页必须给四种都留一行能点的入口。层级中文名只有一份表
+      // （lib/level_names.dart，0.9.359），设置页读它。
+      final names = _code('lib/level_names.dart');
+      expect(names.contains("LibEntryKind.author: '作者'"), isTrue);
+      expect(main.contains('levelName('), isTrue);
     });
   });
 
