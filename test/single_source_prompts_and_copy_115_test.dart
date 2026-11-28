@@ -134,10 +134,24 @@ void main() {
       expect(offenders, isEmpty,
           reason: '又有地方手拼「X失败：」了（应走 failureLine）：\n${offenders.join('\n')}');
       // 真实路径仍在：调用点不能掉。
+      //
+      // 第一百二十批（0.9.371）：原来只数 `failureLine(`。那一批把 24 处
+      // 「提示一条失败」的调用点换成了 `failureToast(this, 动作, 原因)`——
+      // 文案仍由 `failureLine` 拼、但拼在 `toast.dart` 内部，调用点不再出现
+      // 这个名字。只数字面量会把「收口更彻底」误判成「绕开了唯一出口」，
+      // 所以这里数「产出这句文案的两个入口」，并单独钉住 `failureLine`
+      // 本身仍在 `toast.dart` 里被调用（不是被整段复制过去）。
       final all = libFiles().map((f) => codeOf(f.path)).join('\n');
-      final uses = RegExp(r'failureLine\(').allMatches(all).length;
+      final uses = RegExp(r'failureLine\(|failureToast\(|failureToastIn\(')
+          .allMatches(all)
+          .length;
       expect(uses, greaterThanOrEqualTo(50),
-          reason: 'failureLine 调用点掉到 $uses 处，说明有人绕开了唯一出口');
+          reason: '失败文案的调用点掉到 $uses 处，说明有人绕开了唯一出口');
+      expect(
+          RegExp(r'failureLine\(action, reason\)')
+              .hasMatch(codeOnly(codeOf('lib/toast.dart'))),
+          isTrue,
+          reason: 'failureToast 必须转发 failureLine，而不是自己拼一遍');
     });
   });
 

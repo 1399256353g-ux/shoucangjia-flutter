@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shoucangjia/multi_server.dart';
 
 ServerConn _s(String id, String base,
@@ -211,6 +213,56 @@ void main() {
       final src = {'lib-1': bindingEntry(a)};
       expect(encodeBindings(pruneBindings(src, [a])),
           encodeBindings(src));
+    });
+  });
+
+  group('连接表读取：解析只有一处', () {
+    // 第一百二十批（0.9.371）。`main` 里有五处「已经拿着 sp 的人」各自
+    // 写了 `decodeServers(sp.getString('servers_v1'))` + `migrateLegacy`，
+    // 与 `loadServersFromPrefs` 是同一条解析的第二份。两份的差别不会报错：
+    // 旧单 base 的迁移补位值（`fallbackBase`）任一处写死成空串，那个入口
+    // 就看不到旧配置里的连接，其余入口正常——表现是「这一页没有库」。
+    test('serversFromPrefs 直接吃已读到的 sp，含旧单 base 迁移', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'base': '192.168.2.4:8090',
+        'user': 'zzx',
+        'pass': 'pw',
+      });
+      final sp = await SharedPreferences.getInstance();
+      final list = serversFromPrefs(sp);
+      expect(list.single.base, 'http://192.168.2.4:8090');
+      expect(list.single.pass, 'pw');
+    });
+
+    test('servers_v1 存在时优先于旧单 base', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'base': 'http://legacy:8090',
+        'servers_v1': encodeServers([
+          _s('a', 'http://a:8090'),
+          _s('b', 'http://b:8090'),
+        ]),
+      });
+      final sp = await SharedPreferences.getInstance();
+      expect(serversFromPrefs(sp).map((e) => e.id), ['a', 'b']);
+    });
+
+    test('loadServersFromPrefs 与 serversFromPrefs 同一份解析', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{
+        'servers_v1': encodeServers([_s('a', 'http://a:8090')]),
+      });
+      final viaSp = serversFromPrefs(await SharedPreferences.getInstance());
+      final viaHelper = await loadServersFromPrefs();
+      expect(encodeServers(viaHelper), encodeServers(viaSp));
+    });
+
+    test('main 里不再自己 decodeServers + migrateLegacy', () {
+      final src = File('lib/main.dart')
+          .readAsStringSync()
+          .replaceAll('\r\n', '\n');
+      expect(src.contains("getString('servers_v1')"), isFalse,
+          reason: '连接表解析应走 serversFromPrefs，不在页面里重写一遍');
+      expect(src.contains('migrateLegacy('), isFalse,
+          reason: '旧单 base 迁移只在 multi_server 一处');
     });
   });
 }

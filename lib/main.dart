@@ -1350,7 +1350,7 @@ Future<void> syncAllCollectionsFlow(BuildContext context,
   final j = await startServerSync(target: 'all');
   if (!context.mounted) return;
   if (j == null || !serviceSaidOk(j)) {
-    showToastIn(context, failureLine('同步启动', failureTextOf(j)));
+    failureToastIn(context, '同步启动', failureTextOf(j));
     return;
   }
   final exit = await showDialog<int>(
@@ -1727,12 +1727,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
     final legacyBase = sp.getString('base') ?? '';
     cfg.user = sp.getString('user') ?? 'zzx';
     cfg.pass = sp.getString('pass') ?? '';
-    final servers = migrateLegacy(
-      servers: decodeServers(sp.getString('servers_v1')),
-      base: legacyBase,
-      user: cfg.user,
-      pass: cfg.pass,
-    );
+    // 解析（含旧单 base 迁移）只有 serversFromPrefs 一处。
+    final servers = serversFromPrefs(sp,
+        fallbackBase: legacyBase, fallbackUser: cfg.user, fallbackPass: cfg.pass);
     if (servers.isNotEmpty) {
       await savePrefString('servers_v1', encodeServers(servers));
     }
@@ -1830,12 +1827,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _load() async {
     final sp = await SharedPreferences.getInstance();
-    final list = migrateLegacy(
-      servers: decodeServers(sp.getString('servers_v1')),
-      base: sp.getString('base') ?? '',
-      user: sp.getString('user') ?? 'zzx',
-      pass: sp.getString('pass') ?? '',
-    );
+    final list = serversFromPrefs(sp);
     final active = sp.getString('active_server_v1') ?? '';
     if (!mounted) return;
     setState(() {
@@ -4039,7 +4031,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       if (mounted) await load();
     } catch (e) {
       if (!mounted) return;
-      showToast(this, failureLine('检测启动', errorText(e)));
+      failureToast(this, '检测启动', errorText(e));
     } finally {
       if (mounted) setState(() => checking = false);
     }
@@ -4225,7 +4217,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         builder: (_) => PlayerPage(works: list, start: start, lib: lib),
       ));
     } catch (err) {
-      if (mounted) _toast(failureLine('打开作品', errorText(err)));
+      if (mounted) failureToast(this, '打开作品', errorText(err));
     }
   }
 
@@ -4253,7 +4245,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       } catch (_) {}
       _toast(syncRetryResultLabel(r.statusCode, parsed));
     } catch (err) {
-      _toast(failureLine('重试', errorText(err)));
+      failureToast(this, '重试', errorText(err));
     }
   }
 
@@ -5556,7 +5548,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       if (!mounted || seq != _seq) return;
       _apply(j);
     } catch (e) {
-      if (mounted && seq == _seq) _toast(failureLine('保存', errorText(e)));
+      if (mounted && seq == _seq) failureToast(this, '保存', errorText(e));
     } finally {
       if (mounted && seq == _seq) setState(() => saving = false);
     }
@@ -5643,7 +5635,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       });
       _apply(j);
     } catch (e) {
-      _toast(failureLine('重命名', errorText(e)));
+      failureToast(this, '重命名', errorText(e));
     }
   }
 
@@ -5662,7 +5654,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       _apply(j);
       _toast('已移除「${c.name}」并关闭同步');
     } catch (e) {
-      _toast(failureLine('删除', errorText(e)));
+      failureToast(this, '删除', errorText(e));
     }
   }
 
@@ -5980,12 +5972,8 @@ class _LibraryPageState extends State<LibraryPage> {
     });
     try {
       final sp = await SharedPreferences.getInstance();
-      final all = migrateLegacy(
-        servers: decodeServers(sp.getString('servers_v1')),
-        base: sp.getString('base') ?? cfg.base,
-        user: sp.getString('user') ?? cfg.user,
-        pass: sp.getString('pass') ?? cfg.pass,
-      );
+      final all = serversFromPrefs(sp,
+          fallbackBase: cfg.base, fallbackUser: cfg.user, fallbackPass: cfg.pass);
       // P5：断连的连接不参与聚合，也不发任何请求。
       final visible = liveServers(all);
       final use = visible.isEmpty
@@ -6764,7 +6752,7 @@ class _LibraryPageState extends State<LibraryPage> {
       await load();
     } catch (e) {
       if (mounted) {
-        showToast(this, failureLine('设置', errorText(e)));
+        failureToast(this, '设置', errorText(e));
       }
     }
   }
@@ -6796,7 +6784,7 @@ class _LibraryPageState extends State<LibraryPage> {
       await load();
     } catch (e) {
       if (mounted) {
-        showToast(this, failureLine('删除', errorText(e)));
+        failureToast(this, '删除', errorText(e));
       }
     }
   }
@@ -6896,7 +6884,7 @@ class _LibraryPageState extends State<LibraryPage> {
       await load();
     } catch (e) {
       if (mounted) {
-        showToast(this, failureLine('添加', errorText(e)));
+        failureToast(this, '添加', errorText(e));
       }
     }
   }
@@ -7157,12 +7145,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   Future<List<ServerConn>> _liveServers() async {
     try {
       final sp = await SharedPreferences.getInstance();
-      final all = migrateLegacy(
-        servers: decodeServers(sp.getString('servers_v1')),
-        base: sp.getString('base') ?? cfg.base,
-        user: sp.getString('user') ?? cfg.user,
-        pass: sp.getString('pass') ?? cfg.pass,
-      );
+      final all = serversFromPrefs(sp,
+          fallbackBase: cfg.base, fallbackUser: cfg.user, fallbackPass: cfg.pass);
       final visible = liveServers(all);
       if (visible.isNotEmpty) return visible;
     } catch (_) {}
@@ -7686,7 +7670,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
       await load();
     } catch (e) {
       if (mounted) {
-        showToast(this, failureLine('保存', errorText(e)));
+        failureToast(this, '保存', errorText(e));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -7833,7 +7817,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
       showToast(this, '爬虫已启动（进程 ${j['pid']}），日志：${j['log']}');
     } catch (e) {
       if (mounted) {
-        showToast(this, failureLine('启动', errorText(e)));
+        failureToast(this, '启动', errorText(e));
       }
     }
     if (mounted) setState(() => running = false);
@@ -8150,12 +8134,10 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
   List<ServerConn> servers = const <ServerConn>[];
   try {
     final sp = await SharedPreferences.getInstance();
-    servers = liveServers(migrateLegacy(
-      servers: decodeServers(sp.getString('servers_v1')),
-      base: sp.getString('base') ?? cfg.base,
-      user: sp.getString('user') ?? cfg.user,
-      pass: sp.getString('pass') ?? cfg.pass,
-    ));
+    servers = liveServers(serversFromPrefs(sp,
+        fallbackBase: cfg.base,
+        fallbackUser: cfg.user,
+        fallbackPass: cfg.pass));
   } catch (_) {}
 
   Future<int> probe(ServerConn s) async {
@@ -9204,7 +9186,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final j = await startServerSync(target: 'authors');
     if (j == null || !serviceSaidOk(j)) {
       if (mounted) {
-        showToast(this, failureLine('同步启动', failureTextOf(j)));
+        failureToast(this, '同步启动', failureTextOf(j));
       }
       return;
     }
@@ -9336,7 +9318,9 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       await load(quiet: true);
     } catch (e) {
       if (!mounted) return;
-      showToast(this, errorText(e));
+      // 失败要说「失败了」：此前这里只弹 errorText（如「该目录已存在」），
+      // 与成功提示同一个底色，用户看不出这次到底成没成。
+      failureToast(this, '新建作者目录', errorText(e));
     }
   }
 
@@ -12436,13 +12420,13 @@ class _PlayerPageState extends State<PlayerPage>
           .get(Uri.parse(url), headers: cfg.headersFor(_libFor(w)))
           .timeout(const Duration(minutes: 5));
       if (resp.statusCode != 200) {
-        _toast(failureLine('保存', httpErrorText(resp.statusCode)));
+        failureToast(this, '保存', httpErrorText(resp.statusCode));
         return;
       }
       await file.writeAsBytes(resp.bodyBytes, flush: true);
       _toast('已保存到 ${file.path}');
     } catch (e) {
-      _toast(failureLine('保存', errorText(e)));
+      failureToast(this, '保存', errorText(e));
     }
   }
 
@@ -13071,6 +13055,19 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  /// 音量读数「再停留一会儿」：静音切换与拖动松手两条路径共用。
+  ///
+  /// 第一百二十批（0.9.371）：这段 `cancel → Timer(800ms) → mounted 守卫 →
+  /// showVol = false` 在两处逐字各写一遍。两处的时长必须一致（一是读数停留
+  /// 多久的唯一定义），分叉后「点静音」与「拖完松手」的读数会在不同时刻消失，
+  /// 而两处各自都看不出错。这里只留一个计时器、一个时长、一个守卫。
+  void _keepVolHint() {
+    _volHintTimer?.cancel();
+    _volHintTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted) setState(() => showVol = false);
+    });
+  }
+
   void toggleMute() {
     _volHintTimer?.cancel();
     setState(() {
@@ -13083,9 +13080,7 @@ class _PlayerPageState extends State<PlayerPage>
       showVol = true; // 轻量反馈，不弹模块
     });
     player.setVolume(volume);
-    _volHintTimer = Timer(const Duration(milliseconds: 800), () {
-      if (mounted) setState(() => showVol = false);
-    });
+    _keepVolHint();
   }
 
   // H14：统一设置音量（0–100），静音状态跟随音量归零/恢复。
@@ -13166,9 +13161,7 @@ class _PlayerPageState extends State<PlayerPage>
       _volAdjusting = false;
       showVol = true; // 松手后短暂保留读数
     });
-    _volHintTimer = Timer(const Duration(milliseconds: 800), () {
-      if (mounted) setState(() => showVol = false);
-    });
+    _keepVolHint();
   }
 
   void toggleLoop() {
@@ -17582,7 +17575,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      showToast(this, failureLine('生成头像', errorText(e)), replace: true);
+      failureToast(this, '生成头像', errorText(e), replace: true);
     }
   }
 
@@ -17904,7 +17897,7 @@ class _AuthorPageState extends State<AuthorPage> {
                     Navigator.of(ctx).pop();
                     if (!mounted) return;
                     if (!r.ok) {
-                      _toast(r.message);
+                      showToast(this, r.message, bad: true);
                       return;
                     }
                     // 服务端已生效：清掉同作者的本机覆盖，避免旧图压住新图。
@@ -17975,7 +17968,7 @@ class _AuthorPageState extends State<AuthorPage> {
         XTypeGroup(label: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp']),
       ]);
     } catch (e) {
-      _toast(failureLine('打开文件选择器', errorText(e)));
+      failureToast(this, '打开文件选择器', errorText(e));
       return;
     }
     if (picked == null) return;
@@ -17983,7 +17976,7 @@ class _AuthorPageState extends State<AuthorPage> {
     try {
       bytes = await picked.readAsBytes();
     } catch (e) {
-      _toast(failureLine('读取图片', errorText(e)));
+      failureToast(this, '读取图片', errorText(e));
       return;
     }
     // 与封面选图同一条判定（`imageBytesError`）：上限与魔数只该有一处。
@@ -18000,7 +17993,7 @@ class _AuthorPageState extends State<AuthorPage> {
         libId: lib, author: widget.name, pngBytes: png);
     if (!mounted) return;
     if (!r.ok) {
-      _toast(r.message);
+      showToast(this, r.message, bad: true);
       return;
     }
     // 清掉本机覆盖，避免旧的手动头像继续遮住服务端新图。
@@ -18028,7 +18021,7 @@ class _AuthorPageState extends State<AuthorPage> {
     if (lib.isNotEmpty) {
       final r = await clearAuthorAvatar(libId: lib, author: widget.name);
       if (!r.ok) {
-        if (mounted) _toast(r.message);
+        if (mounted) showToast(this, r.message, bad: true);
         return;
       }
     }
@@ -18124,7 +18117,7 @@ class _AuthorPageState extends State<AuthorPage> {
         await uploadAuthorBio(libId: lib, author: widget.name, bio: result);
     if (!mounted) return;
     if (!r.ok) {
-      _toast(r.message);
+      showToast(this, r.message, bad: true);
       return;
     }
     setState(() {
@@ -18360,7 +18353,7 @@ class _AuthorPageState extends State<AuthorPage> {
         }
       }
       if (errors.isNotEmpty) {
-        _toast(failureLine('预检', errors.first));
+        failureToast(this, '预检', errors.first);
         return;
       }
       if (!mounted) return;
@@ -18400,7 +18393,7 @@ class _AuthorPageState extends State<AuthorPage> {
           .get(cfg.u('/api/cat/tree', lib: lib), headers: cfg.headersFor(lib))
           .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) {
-        _toast(failureLine('读取目录', httpErrorText(r.statusCode)));
+        failureToast(this, '读取目录', httpErrorText(r.statusCode));
         return null;
       }
       dynamic tree = jsonOf(r);
@@ -18458,7 +18451,7 @@ class _AuthorPageState extends State<AuthorPage> {
         ),
       );
     } catch (e) {
-      _toast(failureLine('读取目录', errorText(e)));
+      failureToast(this, '读取目录', errorText(e));
       return null;
     }
   }

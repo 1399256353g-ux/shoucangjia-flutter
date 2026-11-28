@@ -580,6 +580,16 @@ String nextServerId(List<ServerConn> servers) {
 /// 爬虫设置页 / 首页总刷新），每份都自带「读 pref → migrateLegacy」两行。
 /// 0.9.327 新增「文件结构页要全部在线连接」的调用点，收成一处再复用它，
 /// 避免第六份。
+///
+/// 第一百二十批（0.9.371）：调用点确实只剩这两处了，但 `main` 里还有
+/// **五处**自己 `decodeServers(sp.getString('servers_v1'))` 再 `migrateLegacy`
+/// ——它们不是「忘了用这个函数」，而是**已经拿着 `sp`**（同一个函数里还要
+/// 读 `active_server_v1` / `lib_bindings_v1` / 版本标记），再调一次
+/// `getInstance()` 只是多一次异步等待，于是各自把这两行又写了一遍。
+///
+/// 现在拆成「拿 sp 的入口」与「解析 sp 的函数」两层：[loadServersFromPrefs]
+/// 给只要连接表的人；[serversFromPrefs] 给已经拿着 sp 的人。两者内部同一条
+/// 解析，旧 base 迁移规则（`migrateLegacy`）不可能只改到一边。
 Future<List<ServerConn>> loadServersFromPrefs({
   String fallbackBase = '',
   String fallbackUser = 'zzx',
@@ -587,13 +597,28 @@ Future<List<ServerConn>> loadServersFromPrefs({
 }) async {
   try {
     final sp = await SharedPreferences.getInstance();
-    return migrateLegacy(
+    return serversFromPrefs(sp,
+        fallbackBase: fallbackBase,
+        fallbackUser: fallbackUser,
+        fallbackPass: fallbackPass);
+  } catch (_) {
+    return const <ServerConn>[];
+  }
+}
+
+/// 用**已经读到的** `sp` 解析连接表（含旧版单 base 迁移）。
+///
+/// [fallbackBase] 等三项是旧格式（只有 `base`/`user`/`pass` 三个键、没有
+/// `servers_v1`）时的补位值。调用方手里有什么就用什么，不猜。
+List<ServerConn> serversFromPrefs(
+  SharedPreferences sp, {
+  String fallbackBase = '',
+  String fallbackUser = 'zzx',
+  String fallbackPass = '',
+}) =>
+    migrateLegacy(
       servers: decodeServers(sp.getString('servers_v1')),
       base: sp.getString('base') ?? fallbackBase,
       user: sp.getString('user') ?? fallbackUser,
       pass: sp.getString('pass') ?? fallbackPass,
     );
-  } catch (_) {
-    return const <ServerConn>[];
-  }
-}

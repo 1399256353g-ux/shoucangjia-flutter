@@ -402,7 +402,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => saving = false);
-      showToast(this, failureLine('保存', errorText(e)));
+      failureToast(this, '保存', errorText(e));
     }
   }
 

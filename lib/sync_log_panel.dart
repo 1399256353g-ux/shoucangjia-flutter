@@ -130,7 +130,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
       }
     } catch (e) {
       if (!mounted) return;
-      showToast(this, failureLine('重试', errorText(e)));
+      failureToast(this, '重试', errorText(e));
     } finally {
       if (mounted) setState(() => retrying = false);
     }
@@ -308,7 +308,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
       await load();
     } catch (e) {
       if (!mounted) return;
-      showToast(this, failureLine('设置', errorText(e)));
+      failureToast(this, '设置', errorText(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }

@@ -29,6 +29,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'error_text.dart';
+
 /// 失败提示的底色。只在这里出现一次：此前四个页面各写 `Colors.red.shade700`。
 final Color kToastErrorBackground = Colors.red.shade700;
 
@@ -64,4 +66,32 @@ void showToastIn(BuildContext context, String msg,
     backgroundColor: bad ? kToastErrorBackground : null,
     duration: duration ?? const Duration(milliseconds: 4000),
   ));
+}
+
+/// 失败提示的唯一入口：`failureLine` 拼文案 + 红底。
+///
+/// 第一百二十批（0.9.371）：`bad: true` 这个参数此前只有挂载面板两处在用，
+/// 而 `lib/` 里 **24 处**「确定失败了」的提示（`showToast(this,
+/// failureLine('保存', …))`）全都走默认底色。形态一致所以一直没人发现：
+/// 上传封面失败、保存同步源失败、批量删除失败——用户看到的都是一条和
+/// 「已保存」长得一模一样的灰条。
+///
+/// 收口方式不是让 `showToast` 去猜文案里有没有「失败：」（那是靠字符串形状
+/// 反推语义，任何一处换成「未能保存」就失效），而是把「这是一次失败」这件
+/// 事写进**函数名**：调用点直接给出动作与原因，文案与红底一起由这里决定，
+/// 两处不可能再分叉。
+///
+/// 句子中间夹着「失败：」（如「已删除 3 个，失败：原因」）不算，仍用
+/// [failureLine] 拼——那种提示的主体是「删了几个」，不是一次失败。
+void failureToast(State state, String action, String reason,
+    {bool replace = false, Duration? duration}) {
+  showToast(state, failureLine(action, reason),
+      bad: true, replace: replace, duration: duration);
+}
+
+/// [failureToast] 的 context 版本（已判过 `context.mounted` 的回调里用）。
+void failureToastIn(BuildContext context, String action, String reason,
+    {bool replace = false, Duration? duration}) {
+  showToastIn(context, failureLine(action, reason),
+      bad: true, replace: replace, duration: duration);
 }

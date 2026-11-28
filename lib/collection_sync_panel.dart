@@ -162,7 +162,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
     } catch (e) {
       if (!mounted) return;
       setState(() => saving = false);
-      showToast(this, failureLine('同步源保存', errorText(e)));
+      failureToast(this, '同步源保存', errorText(e));
     }
   }
 

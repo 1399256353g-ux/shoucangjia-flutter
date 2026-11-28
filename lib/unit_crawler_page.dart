@@ -144,7 +144,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       showToast(this, '单元库爬虫配置已保存');
     } catch (e) {
       if (mounted) {
-        showToast(this, failureLine('保存', errorText(e)));
+        failureToast(this, '保存', errorText(e));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -166,7 +166,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => running = false);
-      showToast(this, failureLine('启动', errorText(e)));
+      failureToast(this, '启动', errorText(e));
     }
   }
 

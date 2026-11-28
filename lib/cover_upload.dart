@@ -4,8 +4,11 @@ import 'dart:io' show Platform;
 import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter/widgets.dart' show State;
+
 import 'cover_admin.dart';
 import 'error_text.dart';
+import 'toast.dart';
 import 'http_json.dart';
 import 'media_path.dart';
 import 'api_timeout.dart';
@@ -35,6 +38,23 @@ typedef CoverUploader = Future<CoverUploadResult> Function({
   required String libId,
   String unitRel,
 });
+
+/// 「选图上传封面 → 弹出结果」的**唯一入口**。
+///
+/// 第一百二十批（0.9.371）：这个方法在 `unit_library_view.dart` 里逐字写了
+/// **三份**（媒体库卡片 / 单元库卡片 / 基础库卡片三个 State 各一份），三份
+/// 都只写了 `showToast(this, r.message)`——成功与失败同一个底色，上传失败
+/// 用户看到的是一条和「封面已更新」长得一样的灰条。
+///
+/// 收成一处之后 `ok` 只在这里读一次：失败红底、成功默认色，三个入口同时正确。
+/// `coverUploader` 为 null 表示这个页面没有注入上传能力（只读视图），静默返回。
+Future<void> pickCoverWithToast(
+    State host, CoverUploader? uploader, String libId, String unitRel) async {
+  if (uploader == null) return;
+  final r = await uploader(libId: libId, unitRel: unitRel);
+  if (!host.mounted) return;
+  showToast(host, r.message, bad: !r.ok);
+}
 
 /// 与服务端 `/api/cover/upload` 保持一致的单图上限。
 const int kCoverUploadMaxBytes = 12 * 1024 * 1024;

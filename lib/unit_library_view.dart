@@ -440,14 +440,9 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
     _schedulePrefetch();
   }
 
-  /// C2：选本地图上传单元库封面，结果用 SnackBar 提示。
-  Future<void> _pickCover(String libId, String unitRel) async {
-    final up = widget.coverUploader;
-    if (up == null) return;
-    final r = await up(libId: libId, unitRel: unitRel);
-    if (!mounted) return;
-    showToast(this, r.message);
-  }
+  /// C2：选本地图上传封面（媒体库根/单元库/基础库），结果提示。
+  Future<void> _pickCover(String libId, String unitRel) =>
+      pickCoverWithToast(this, widget.coverUploader, libId, unitRel);
 
   @override
   void didUpdateWidget(covariant UnitLibraryHomeView old) {
@@ -697,14 +692,9 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _prefetchCovers());
   }
 
-  /// C2：选本地图上传封面（单元库或基础库），结果用 SnackBar 提示。
-  Future<void> _pickCover(String libId, String unitRel) async {
-    final up = widget.coverUploader;
-    if (up == null) return;
-    final r = await up(libId: libId, unitRel: unitRel);
-    if (!mounted) return;
-    showToast(this, r.message);
-  }
+  /// C2：选本地图上传封面（媒体库根/单元库/基础库），结果提示。
+  Future<void> _pickCover(String libId, String unitRel) =>
+      pickCoverWithToast(this, widget.coverUploader, libId, unitRel);
 
   void _prefetchCovers() {
     if (!mounted || units.isEmpty) return;
@@ -1263,14 +1253,9 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     _schedulePrefetch();
   }
 
-  /// C2：选本地图上传封面（单元库/基础库），结果用 SnackBar 提示。
-  Future<void> _pickCover(String libId, String unitRel) async {
-    final up = widget.coverUploader;
-    if (up == null) return;
-    final r = await up(libId: libId, unitRel: unitRel);
-    if (!mounted) return;
-    showToast(this, r.message);
-  }
+  /// C2：选本地图上传封面（媒体库根/单元库/基础库），结果提示。
+  Future<void> _pickCover(String libId, String unitRel) =>
+      pickCoverWithToast(this, widget.coverUploader, libId, unitRel);
 
   @override
   void didUpdateWidget(covariant UnitLibraryPage old) {

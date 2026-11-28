@@ -133,7 +133,7 @@ Future<CoverMenuOutcome?> showCoverMenu(
     case 'local':
       final r = await actions.pickLocal();
       if (!context.mounted) return null;
-      _toast(context, r.message);
+      _toastResult(context, ok: r.ok, message: r.message);
       if (!r.ok) return null;
       actions.onChanged?.call();
       return r.url.isEmpty ? null : CoverMenuOutcome.forUrl(actions.urlOf(r.url));
@@ -142,7 +142,7 @@ Future<CoverMenuOutcome?> showCoverMenu(
     case 'auto':
       final r = await actions.restoreAuto();
       if (!context.mounted) return null;
-      _toast(context, r.message);
+      _toastResult(context, ok: r.ok, message: r.message);
       if (!r.ok) return null;
       actions.onChanged?.call();
       return const CoverMenuOutcome.auto();
@@ -151,7 +151,7 @@ Future<CoverMenuOutcome?> showCoverMenu(
       if (ok != true || !context.mounted) return null;
       final r = await actions.clearAll();
       if (!context.mounted) return null;
-      _toast(context, r.message);
+      _toastResult(context, ok: r.ok, message: r.message);
       if (!r.ok) return null;
       actions.onChanged?.call();
       return const CoverMenuOutcome.auto();
@@ -261,7 +261,7 @@ Future<CoverMenuOutcome?> _pickHistory(
   if (picked == null) return null;
   final r = await actions.restore(picked);
   if (!context.mounted) return null;
-  _toast(context, r.message);
+  _toastResult(context, ok: r.ok, message: r.message);
   if (!r.ok) return null;
   actions.onChanged?.call();
   final u = r.url.isNotEmpty ? r.url : picked.url;
@@ -284,5 +284,11 @@ Future<bool?> _confirmClear(BuildContext context) async =>
         ? true
         : false;
 
-void _toast(BuildContext context, String text) =>
-    showToastIn(context, text);
+/// 封面操作的结果提示：**成功与失败用两种底色**。
+///
+/// 这批之前 `_toast(context, r.message)` 在三个分支（本地上传 / 恢复自动 /
+/// 切换历史封面）里各写一遍，全都走默认底色——上传失败（读图失败、服务端
+/// 413/500）弹的是一条和「封面已更新」一模一样的灰条。`CoverUploadResult`
+/// 本来就带 `ok`，只是没人用它决定底色。
+void _toastResult(BuildContext context, {required bool ok, required String message}) =>
+    showToastIn(context, message, bad: !ok);
