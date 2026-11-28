@@ -136,7 +136,8 @@ void main() {
       final labels = unitLabelByBasic(tree);
       final keys = unitKeyByBasic(tree);
       // 基础库卡：词条文本＝所属单元库名去掉前缀序号
-      final cardText = BasicLibCard.badgeText(labels['lib-015']!);
+      final cardText =
+          BasicLibCard.badgeText('lib-015', labels['lib-015']!);
       await tester.pumpWidget(MaterialApp(
           home: Scaffold(
               body: Column(children: [

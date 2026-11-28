@@ -87,7 +87,10 @@ void main() {
     expect(find.byKey(const ValueKey('basic-card-l1')), findsOneWidget);
     expect(find.byKey(const ValueKey('star-card-l1')), findsNothing);
     // 词条文本去掉「(序号) 」前缀
-    expect(BasicLibCard.badgeText('(8) 🦶'), '🦶');
+    expect(BasicLibCard.badgeText('l1', '(8) 🦶'), '🦶');
+    // 名字空/纯空格 → 回落传进来的那一层 id，不再画一条空白词条。
+    expect(BasicLibCard.badgeText('l1', ''), 'l1');
+    expect(BasicLibCard.badgeText('l1', '   '), 'l1');
   });
 
   testWidgets('基础库卡片封面铺满整卡（非缩略图）', (t) async {

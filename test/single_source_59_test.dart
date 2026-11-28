@@ -88,9 +88,12 @@ void main() {
 
     test('标题仍带单元库名（作用域不丢）', () {
       final s = codeOf('lib/unit_crawler_page.dart');
+      // 0.9.353：标题走 `libEntryTitle`（去序号 + 名字空回落 id），
+      // 不再只剥序号——服务端下发空名时标题只剩「爬虫配置 ·」。
       expect(
-          s.contains("'爬虫配置 · \${LibraryBadge.stripIndex(widget.unit.name)}'"),
+          s.contains("'爬虫配置 · \${libEntryTitle(widget.unit.id, widget.unit.name)}'"),
           isTrue);
+      expect(s.contains('LibraryBadge.stripIndex(widget.unit.name)'), isFalse);
     });
   });
 

@@ -445,9 +445,16 @@ class AppSettings {
     if (id == LogicalKeyboardKey.arrowRight.keyId) return '→';
     final k = LogicalKeyboardKey.findKeyByKeyId(id);
     final label = k?.keyLabel ?? '';
-    // 能绑但叫不出名字（媒体键/厂商自定义键）时给出键码，而不是回「未绑定」——
+    // 能绑但叫不出名字（媒体键/厂商自定义键）时给出可读键码，而不是回「未绑定」——
     // 「未绑定」会让用户以为这一项没设置，进而反复重按。
-    if (label.isEmpty || label == 'Unidentified') return '按键#$id';
+    //
+    // 0.9.353：这里原来拼 `按键#$id`，`$id` 是十进制的 Flutter 内部键码
+    // （如 `按键#99999999`），界面上就是一串看不懂的数字——与 owner 说的
+    // 「不要出现不明所以的代号」同类。改成十六进制并带单位说明，用户至少
+    // 能认出来「这是一个没名字的自定义键」，而不是一串内部 id。
+    if (label.isEmpty || label == 'Unidentified') {
+      return '自定义键 0x${id.toRadixString(16).toUpperCase()}';
+    }
     return label.length == 1 ? label.toUpperCase() : label;
   }
 

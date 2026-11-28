@@ -1536,8 +1536,16 @@ class BasicLibCard extends StatefulWidget {
     this.coverMenu,
   });
 
-  /// 词条文本：与作者词条共用同一套「去序号」规则。
-  static String badgeText(String name) => LibraryBadge.stripIndex(name);
+  /// 词条文本：与卡片标题/作者词条同一个出口（去序号 + 名字空回落 id）。
+  ///
+  /// 0.9.353：这里原来只调 `LibraryBadge.stripIndex(name)`——服务端把单元库
+  /// 名字下发成空串/纯空格时，卡片词条变成一条没有文字的色块，而同一个库的
+  /// 标题（`libEntryTitle`）显示的是 id。`badgeText` 是「名字空就回落」这条
+  /// 规则在同一张卡上的第二个入口，现在直接转发 [libEntryTitle]。
+  /// [idForFallback] 传这条词条**代表的那一层**的 id（有单元库就是单元库 id，
+  /// 没有才是基础库 id），否则会回落成另一层的 id。
+  static String badgeText(String idForFallback, String? name) =>
+      libEntryTitle(idForFallback, name);
 
   @override
   State<BasicLibCard> createState() => _BasicLibCardState();
@@ -1589,7 +1597,7 @@ class _BasicLibCardState extends State<BasicLibCard> {
     // 后缀在这张卡上永远不出现（作者卡那排基础库词条却会出现）——同为
     // 「基础库词条」，两张卡的后缀来源不同。
     final emoji = LibraryBadge.basicEmojiFor(widget.basic.id, unitId);
-    final text = BasicLibCard.badgeText(
+    final text = BasicLibCard.badgeText(hasUnit ? unitId : widget.basic.id,
         hasUnit ? widget.unitLabel : widget.basic.name);
     final color = Color(LibraryBadge.basicColorFor(widget.basic.id, unitId,
         order: UnitBadgeRegistry.order));

@@ -5,7 +5,6 @@ import 'package:shoucangjia/app_settings.dart';
 import 'package:shoucangjia/basic_lib.dart';
 import 'package:shoucangjia/label_fallback.dart';
 import 'package:shoucangjia/lib_names.dart';
-import 'package:shoucangjia/library_badge.dart';
 import 'package:shoucangjia/unit_author_groups.dart';
 
 /// 0.9.352 第一百零七批契约。

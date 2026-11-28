@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'byte_size.dart';
-import 'library_badge.dart';
 import 'json_num.dart';
 
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import 'http_json.dart';
 
 import 'home_action.dart';
 import 'interval_label.dart';
+import 'lib_names.dart';
 import 'collection_sync_panel.dart';
 import 'sync_ledger.dart';
 import 'sync_log_panel.dart';
@@ -175,8 +175,9 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     return Scaffold(
       appBar: AppBar(
         // owner 2026-11-26：库名要跟「省略序号」开关走，与卡片/词条同一口径。
-        // 这里原来直接贴 widget.unit.name，目录名带 `(1) ` 前缀就原样显示了。
-        title: Text('爬虫配置 · ${LibraryBadge.stripIndex(widget.unit.name)}'),
+        // 0.9.353：再补上「名字空 → 回落 id」——只剥序号的写法在服务端下发
+        // 空名时标题只剩一个「爬虫配置 ·」。
+        title: Text('爬虫配置 · ${libEntryTitle(widget.unit.id, widget.unit.name)}'),
         actions: [
           const HomeAction(),
           TextButton(

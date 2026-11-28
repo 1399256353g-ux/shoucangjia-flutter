@@ -2605,7 +2605,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     final subBasics = basicsByTop[top.id] ?? const <BasicLib>[];
     // 回落规则只有 `labelOrId` 一处：这里旧写法是裸 `isEmpty`，
     // 与筛选面板的 `trim().isEmpty` 在「名字是纯空格」那条数据上不一致。
-    final name = labelOrId(top.id, top.name);
+    // 0.9.353：分组头与行内词条都走 `libEntryTitle`，这里的中间变量随之删掉。
     final expanded = expandedTopSections.contains(top.id);
     // 折叠时也要能看出「这个媒体库设过什么」：按本组内已自定义的条目数
     // 给一句摘要，不展开也能判断要不要进去改。
@@ -2653,7 +2653,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('媒体库 · ${LibraryBadge.stripIndex(name)}',
+                    Text('媒体库 · ${libEntryTitle(top.id, top.name)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -2709,11 +2709,16 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   String _inheritedSourceName(String inheritedFrom) =>
       inheritedFrom.isEmpty
           ? ''
-          : LibraryBadge.stripIndex(meta?.unitNameOf(inheritedFrom) ?? '');
+          : libEntryTitle(
+              inheritedFrom, meta?.unitNameOf(inheritedFrom) ?? '');
 
   Widget _libTile(UnitLibrary u, {bool isTop = false, bool indent = false}) {
     final id = u.id;
-    final name = labelOrId(id, u.name);
+    // 0.9.353：这一行原来写 `labelOrId(id, u.name)`——只做回落、**不剥序号**，
+    // 于是设置页里单元库行显示 `(1) 名称`，而同一个单元库在卡片/词条/爬虫页
+    // 都是 `名称`（owner 2026-11-25：「省略序号设置要同步应用」）。
+    // 与其余入口同一个出口。
+    final name = libEntryTitle(id, u.name);
     // D1：自定义色可能以 rel / node:rel 任一形式落盘，统一走归一化查询。
     // 顶级与下级各写一遍 `topColorFor(...) ?? …` 是两处口径：顶级换了来源
     // 之后其中一处必然漏（实测顶级选「自动分配」仍显示旧自定义色）。
@@ -2824,7 +2829,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       inherits: inheritedFrom.isNotEmpty,
       sourceName: _inheritedSourceName(inheritedFrom),
     );
-    final name = LibraryBadge.stripIndex(b.name);
+    final name = libEntryTitle(b.id, b.name);
     return ListTile(
       dense: true,
       contentPadding: indent ? const EdgeInsets.fromLTRB(48, 0, 16, 0) : null,
@@ -7423,7 +7428,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(LibraryBadge.stripIndex(section.title),
+                Text(libEntryTitle(section.key, section.title),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -7496,7 +7501,9 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       ),
       // owner 2026-11-25：「爬虫设置还有任何地方里也都同步应用省略序号设置」。
       // 这里原来直接显示 u.name，序号 `(1) ` 会露出来，与卡片/词条不一致。
-      title: Text(LibraryBadge.stripIndex(u.name),
+      // 0.9.353：只剥序号不够——名字下发成空串时这一行整条空白，与卡片
+      // 标题（同一个出口 `libEntryTitle`）不符。
+      title: Text(libEntryTitle(u.id, u.name),
           maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         has

@@ -83,13 +83,17 @@ void main() {
           LogicalKeyboardKey.keyM.keyId);
     });
 
-    test('叫不出名字的键码显示键码本身，不冒充「未绑定」', () {
+    test('叫不出名字的键码显示可读键码，不冒充「未绑定」', () {
       // 真实硬件上会冒出媒体键/厂商自定义键，它们的 keyLabel 可能是空。
       // 显示「未绑定」会让用户以为这一项没设置，进而反复重按。
       const odd = 99999999;
       expect(LogicalKeyboardKey.findKeyByKeyId(odd), isNull);
-      expect(AppSettings.keyLabelById(odd), contains('$odd'));
-      expect(AppSettings.keyLabelById(odd), isNot('未绑定'));
+      final label = AppSettings.keyLabelById(odd);
+      // 0.9.353：不再拼十进制内部 id（`按键#99999999`），用带前缀的十六进制，
+      // 用户看得出「这是一个没名字的自定义键」。
+      expect(label, contains('0x${odd.toRadixString(16).toUpperCase()}'));
+      expect(label, isNot(contains('按键#')));
+      expect(label, isNot('未绑定'));
     });
   });
 
