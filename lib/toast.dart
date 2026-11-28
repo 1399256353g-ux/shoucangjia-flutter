@@ -14,9 +14,17 @@
 /// 请求返回前被关掉时，`ScaffoldMessenger.of` 会抛「deactivated widget's
 /// ancestor」；没有空文本守卫的会弹出一条只有背景色的空白提示。
 ///
+/// 0.9.363：0.9.362 只把五个入口转发过来，其余 **62 处**仍在页面里直接
+/// `ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(...)))`。
+/// 那 62 处形态一致（所以没坏），但它们是同一件事的第二份实现：
+/// 想改一下提示的形态（去掉重复提示、加底部安全区、限制队列长度）就得
+/// 一个个找。现在全部转发到这里，`lib/` 里除本文件外**没有任何
+/// `showSnackBar`**。
+///
 /// 这里只保留一条规则：**mount 检查 + 空文本跳过 + 失败态红底**。
-/// 各页面保留自己的 `_toast(...)` 一行转发，调用点不用改——
-/// 提示的形态只有这一个出口，页面不再各自决定「要不要检查、要不要上色」。
+/// 页面不再各自决定「要不要检查、要不要上色」；`_toast(...)` 这类私有
+/// 转发保留（有些页面需要 `hideCurrentSnackBar` 的替换语义），但它们
+/// 内部也只有一行。
 library;
 
 import 'package:flutter/material.dart';
@@ -28,9 +36,11 @@ final Color kToastErrorBackground = Colors.red.shade700;
 ///
 /// 空文本直接跳过：`SnackBar` 只带背景没有文字时，用户看到的是
 /// 一条什么都没有的横条，比不弹更糟。
-void showToast(State state, String msg, {bool bad = false}) {
+void showToast(State state, String msg,
+    {bool bad = false, bool replace = false, Duration? duration}) {
   if (!state.mounted || msg.isEmpty) return;
-  showToastIn(state.context, msg, bad: bad);
+  showToastIn(state.context, msg,
+      bad: bad, replace: replace, duration: duration);
 }
 
 /// 已知上下文仍有效时的入口（弹窗回调里已经判过 `context.mounted`）。
@@ -38,10 +48,20 @@ void showToast(State state, String msg, {bool bad = false}) {
 /// 走 `maybeOf`：拿不到 `ScaffoldMessenger` 时静默返回，不再抛
 /// 「No ScaffoldMessenger widget found」——提示是尽力而为，不该让一次
 /// 提示失败变成一次崩溃。
-void showToastIn(BuildContext context, String msg, {bool bad = false}) {
+///
+/// [replace] 对应原 `..hideCurrentSnackBar()..showSnackBar(...)` 的写法：
+/// 连续操作（连点星标、连改设置）只留最后一条，不在队列里堆十条。
+/// [duration] 只给确实需要更短停留的提示用（例如星标切换 900ms）；
+/// 默认值仍是 Flutter 的 4 秒。
+void showToastIn(BuildContext context, String msg,
+    {bool bad = false, bool replace = false, Duration? duration}) {
   if (msg.isEmpty) return;
-  ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  if (replace) messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(SnackBar(
     content: Text(msg),
     backgroundColor: bad ? kToastErrorBackground : null,
+    duration: duration ?? const Duration(milliseconds: 4000),
   ));
 }

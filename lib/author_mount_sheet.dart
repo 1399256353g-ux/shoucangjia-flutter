@@ -29,6 +29,7 @@ import 'label_fallback.dart';
 import 'rel_path.dart';
 import 'unit_author_groups.dart';
 import 'toast.dart';
+import 'loading_view.dart';
 
 /// 打开作者挂载面板。
 Future<bool?> showAuthorMountSheet({
@@ -360,7 +361,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
                 const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2)),
+                    child: InlineSpinner()),
             ]),
           ),
           Padding(
@@ -382,7 +383,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
     if (loading) {
       return const Padding(
         padding: EdgeInsets.all(28),
-        child: Center(child: CircularProgressIndicator()),
+        child: const LoadingView(),
       );
     }
     if (err != null) {

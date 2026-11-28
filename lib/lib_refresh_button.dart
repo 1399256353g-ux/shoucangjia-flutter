@@ -8,6 +8,8 @@ library;
 import 'package:flutter/material.dart';
 
 import 'error_text.dart';
+import 'toast.dart';
+import 'loading_view.dart';
 
 /// 与封面按钮同风格、同尺寸（30×30 触达区，18dp 图标）。
 class LibQuickRefreshButton extends StatefulWidget {
@@ -49,8 +51,7 @@ class _LibQuickRefreshButtonState extends State<LibQuickRefreshButton> {
     setState(() => _busy = false);
     final host = widget.feedbackOf ?? context;
     if (msg != null && msg.isNotEmpty && host.mounted) {
-      ScaffoldMessenger.maybeOf(host)
-          ?.showSnackBar(SnackBar(content: Text(msg)));
+      showToastIn(host, msg);
     }
   }
 
@@ -68,7 +69,7 @@ class _LibQuickRefreshButtonState extends State<LibQuickRefreshButton> {
           ? const SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: const InlineSpinner(),
             )
           : const Icon(Icons.refresh),
     );

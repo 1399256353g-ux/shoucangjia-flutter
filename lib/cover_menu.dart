@@ -18,6 +18,7 @@ import 'cover_history.dart';
 import 'cover_upload.dart';
 import 'media_resize.dart';
 import 'toast.dart';
+import 'loading_view.dart';
 
 /// 菜单执行成功后告诉卡片该怎么显示：
 /// - [url] 非空：直接换成这张封面；
@@ -174,7 +175,7 @@ Future<CoverMenuOutcome?> _pickHistory(
           future: actions.listVersions(),
           builder: (ctx2, snap) {
             if (snap.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
+              return const LoadingView();
             }
             final res = snap.data;
             if (res == null || !res.ok) {

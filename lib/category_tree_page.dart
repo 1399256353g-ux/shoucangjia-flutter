@@ -11,6 +11,7 @@ import 'lib_names.dart';
 import 'library_tree.dart';
 import 'error_text.dart';
 import 'toast.dart';
+import 'loading_view.dart';
 
 /// J14：通用分类树页面。
 ///
@@ -196,7 +197,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
                   child: SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))),
+                      child: InlineSpinner())),
             ),
           IconButton(
             tooltip: '刷新',
@@ -233,7 +234,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
   }
 
   Widget _body(CategoryNode? node) {
-    if (loading) return const Center(child: CircularProgressIndicator());
+    if (loading) return const LoadingView();
     if (node == null) {
       return Center(
           child: Padding(

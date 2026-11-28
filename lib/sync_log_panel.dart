@@ -16,6 +16,8 @@ import 'http_json.dart';
 
 import 'sync_ledger.dart';
 import 'error_text.dart';
+import 'toast.dart';
+import 'loading_view.dart';
 
 class SyncLogPanel extends StatefulWidget {
   final String base;
@@ -120,16 +122,14 @@ class SyncLogPanelState extends State<SyncLogPanel> {
         parsed = null;
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(syncRetryResultLabel(r.statusCode, parsed))));
+      showToast(this, syncRetryResultLabel(r.statusCode, parsed));
       if (r.statusCode == 200) {
         await Future<void>.delayed(const Duration(milliseconds: 800));
         if (mounted) await load();
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failureLine('重试', errorText(e)))));
+      showToast(this, failureLine('重试', errorText(e)));
     } finally {
       if (mounted) setState(() => retrying = false);
     }
@@ -187,7 +187,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
                 child: SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))),
+                    child: InlineSpinner())),
           )
         else if (err != null)
           Padding(
@@ -303,13 +303,11 @@ class SyncLogPanelState extends State<SyncLogPanel> {
       }
       final saved = parseKeepDays(parsed, fallback: picked);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('已设为保留 $saved 天')));
+      showToast(this, '已设为保留 $saved 天');
       await load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failureLine('设置', errorText(e)))));
+      showToast(this, failureLine('设置', errorText(e)));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -331,7 +329,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+                  child: InlineSpinner())
               : Icon(
                   switch (r.mode) {
                     'quick' => Icons.bolt,

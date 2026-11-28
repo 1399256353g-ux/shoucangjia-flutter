@@ -145,7 +145,7 @@ void main() {
     test('注册库是服务器级动作：不再附带 lib 查询参数', () {
       final main = _code('lib/main.dart');
       final body = _body(main, 'Future<void> _add() async {',
-          'final j = jsonOf(r);\n      throwIfApiFailed(r.statusCode, j);\n      if (!mounted) return;\n      ScaffoldMessenger.of(context)');
+          "showToast(this, '媒体库已添加')");
       expect(body.contains("_u('/api/libraries', '', atBase)"), isTrue,
           reason: '空 lib 表示「不带 lib=」，由该服务器自己决定');
       expect(body.contains("_u('/api/libraries', null, atBase)"), isFalse,

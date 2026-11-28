@@ -40,6 +40,8 @@ import 'author_badge_row.dart';
 import 'library_badge.dart';
 import 'lib_names.dart';
 import 'error_text.dart';
+import 'toast.dart';
+import 'loading_view.dart';
 
 /// 作者卡片头像：手动设置 > 爬虫脚本（服务端下发 `av`）> 自动生成（作品图兜底）。
 /// 同级按时间新→旧；都为空时由调用方回退到「首字」占位。
@@ -361,12 +363,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     if (made > 0) await _loadAuthors();
   }
 
-  void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg)));
-  }
+  void _snack(String msg) => showToast(this, msg, replace: true);
 
   Future<void> _loadAuthors() async {    try {
       final r = await http
@@ -637,7 +634,7 @@ class _BasicLibPageState extends State<BasicLibPage>
 
   Widget _authorsView() {
     if (loadingAuthors) {
-      return const Center(child: CircularProgressIndicator());
+      return const LoadingView();
     }
     if (authors.isEmpty) {
       return Center(
@@ -925,7 +922,7 @@ class _BasicLibPageState extends State<BasicLibPage>
 
   Widget _worksView() {
     if (loadingWorks && works.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const LoadingView();
     }
     if (works.isEmpty) {
       return Center(
@@ -976,7 +973,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                   child: SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2)));
+                      child: InlineSpinner()));
             }
             final w = filtered[i];
             final cover = _coverOf(w);

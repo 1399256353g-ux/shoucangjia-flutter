@@ -7,6 +7,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'author_filter.dart';
+import 'loading_view.dart';
 
 class AuthorFilterBar extends StatelessWidget {
   final AuthorFilterState filter;
@@ -39,7 +40,7 @@ class AuthorFilterBar extends StatelessWidget {
               ? const SizedBox(
                   width: 14,
                   height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+                  child: InlineSpinner())
               : const Icon(Icons.filter_alt_outlined, size: 16),
           label: Text(filter.isActive ? '筛选 ${filter.activeCount}' : '筛选'),
           style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),

@@ -11,6 +11,8 @@ import 'byte_size.dart';
 import 'count_label.dart';
 import 'resize_cache_api.dart';
 import 'thumb_prefetch.dart';
+import 'toast.dart';
+import 'loading_view.dart';
 
 class CrashReportsPage extends StatelessWidget {
   /// 顶部一行环境信息（如服务器地址），可为空。
@@ -48,8 +50,7 @@ class CrashReportsPage extends StatelessWidget {
               await Clipboard.setData(
                   ClipboardData(text: CrashLog.instance.dump()));
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('已复制错误记录')));
+              showToastIn(context, '已复制错误记录');
             },
           );
         },
@@ -184,7 +185,7 @@ class CrashReportsPage extends StatelessWidget {
               ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+                  child: InlineSpinner())
               : const Icon(Icons.bolt_outlined),
           title: Text(s.requested == 0
               ? '首屏缩略图：尚未预热'
@@ -279,8 +280,7 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
     final msg = await pruneResizeCache(uri, widget.headers, client: _client);
     if (!mounted) return;
     setState(() => pruning = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(msg ?? '清理失败，检查服务器连接')));
+    showToast(this, msg ?? '清理失败，检查服务器连接');
     if (msg != null) await _refresh();
   }
 
@@ -309,7 +309,7 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
           ? const SizedBox(
               width: 20,
               height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2))
+              child: InlineSpinner())
           : const Icon(Icons.photo_size_select_small_outlined),
       title: Text(title),
       subtitle: Text(subtitle,
@@ -329,7 +329,7 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: InlineSpinner())
                   : const Icon(Icons.cleaning_services_outlined, size: 20),
               onPressed: pruning ? null : _prune,
             ),
@@ -388,7 +388,7 @@ class _CrashLogFileTileState extends State<_CrashLogFileTile> {
               ? const SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2))
+                  child: InlineSpinner())
               : Icon(hasFile
                   ? Icons.description_outlined
                   : Icons.note_alt_outlined),
@@ -414,8 +414,7 @@ class _CrashLogFileTileState extends State<_CrashLogFileTile> {
                     : () async {
                         await Clipboard.setData(ClipboardData(text: _tail));
                         if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('已复制日志内容')));
+                        showToast(this, '已复制日志内容');
                       },
               ),
             ],

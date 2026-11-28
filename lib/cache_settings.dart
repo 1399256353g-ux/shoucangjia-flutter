@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'cover_cache.dart';
 import 'home_action.dart';
+import 'toast.dart';
 
 class CacheSettingsPage extends StatefulWidget {
   const CacheSettingsPage({super.key});
@@ -54,8 +55,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
     final freed = await DiziCache.clearAll();
     await _refresh();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已释放 ${formatBytes(freed)}')));
+    showToast(this, '已释放 ${formatBytes(freed)}');
   }
 
   @override

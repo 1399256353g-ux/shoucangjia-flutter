@@ -16,6 +16,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'layout_metric.dart';
+import 'loading_view.dart';
 
 /// 顶部单个动作。
 class TopBarAction {
@@ -166,7 +167,7 @@ class HomeTopBar extends StatelessWidget {
             ? const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2))
+                child: InlineSpinner())
             : Icon(a.icon),
       );
     }

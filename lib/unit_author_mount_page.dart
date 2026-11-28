@@ -32,6 +32,7 @@ import 'unit_author_groups.dart';
 import 'unit_library.dart';
 import 'toast.dart';
 import 'basic_lib.dart' show BasicLib;
+import 'loading_view.dart';
 
 /// 作者文件夹挂载面板。
 class UnitAuthorMountPage extends StatefulWidget {
@@ -357,7 +358,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   }
 
   Widget _body() {
-    if (loading) return const Center(child: CircularProgressIndicator());
+    if (loading) return const LoadingView();
     if (err != null) return LoadErrorView(message: err!, onRetry: load);
 
     final manual = state.groups;

@@ -9,6 +9,8 @@ import 'http_error_text.dart';
 import 'api_url.dart';
 import 'collection_sync.dart';
 import 'error_text.dart';
+import 'toast.dart';
+import 'loading_view.dart';
 
 /// 单元库爬虫设置里的「同步源」区块（owner 2026-11-21 要求）。
 ///
@@ -159,8 +161,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
     } catch (e) {
       if (!mounted) return;
       setState(() => saving = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failureLine('同步源保存', errorText(e)))));
+      showToast(this, failureLine('同步源保存', errorText(e)));
     }
   }
 
@@ -211,7 +212,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
             const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2)),
+                child: InlineSpinner()),
         ]),
         const SizedBox(height: 4),
         Text(

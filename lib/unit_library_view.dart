@@ -27,6 +27,7 @@ import 'unit_cover_store.dart';
 import 'ui_copy.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
+import 'toast.dart';
 
 /// L5-C：卡片封面（空串表示用默认图）。由调用方解析 `_cover/` 与播放量。
 typedef CoverOf = String Function(BasicLib basic);
@@ -444,8 +445,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
     if (up == null) return;
     final r = await up(libId: libId, unitRel: unitRel);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(r.message)));
+    showToast(this, r.message);
   }
 
   @override
@@ -702,8 +702,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
     if (up == null) return;
     final r = await up(libId: libId, unitRel: unitRel);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(r.message)));
+    showToast(this, r.message);
   }
 
   void _prefetchCovers() {
@@ -1181,9 +1180,7 @@ class _StarButtonState extends State<_StarButton> {
       onPressed: () {
         setState(() => _on = !_on);
         widget.onTap();
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
-            duration: const Duration(milliseconds: 900),
-            content: Text(_on ? '已加入星标单元库' : '已取消星标')));
+        showToast(this, _on ? '已加入星标单元库' : '已取消星标', duration: const Duration(milliseconds: 900));
       },
     );
   }
@@ -1271,8 +1268,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     if (up == null) return;
     final r = await up(libId: libId, unitRel: unitRel);
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(r.message)));
+    showToast(this, r.message);
   }
 
   @override

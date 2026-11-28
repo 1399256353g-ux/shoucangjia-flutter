@@ -81,6 +81,7 @@ import 'cover_badges.dart';
 import 'decode_fallback.dart';
 import 'home_action.dart';
 import 'lib_names.dart';
+import 'registry_lib_id.dart';
 import 'level_names.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
@@ -159,6 +160,7 @@ import 'http_error_text.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
 import 'unit_fraction.dart';
+import 'loading_view.dart';
 
 /// `encodeMediaPath` 的唯一实现在 `media_path.dart`；main.dart 继续转发，
 /// 免得既有 import 点（含测试）全部改路径。
@@ -1355,8 +1357,7 @@ Future<void> syncAllCollectionsFlow(BuildContext context,
   final j = await startServerSync(target: 'all');
   if (!context.mounted) return;
   if (j == null || !serviceSaidOk(j)) {
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(failureLine('同步启动', failureTextOf(j)))));
+    showToastIn(context, failureLine('同步启动', failureTextOf(j)));
     return;
   }
   final exit = await showDialog<int>(
@@ -1366,8 +1367,7 @@ Future<void> syncAllCollectionsFlow(BuildContext context,
   );
   if (!context.mounted) return;
   if (exit != null) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(exit == 0 ? '全部同步源同步完成' : '同步结束（退出码 $exit），请查看日志')));
+    showToastIn(context, exit == 0 ? '全部同步源同步完成' : '同步结束（退出码 $exit），请查看日志');
   }
   if (onFinished != null) await onFinished();
 }
@@ -1426,7 +1426,7 @@ class _SyncAllProgressDialogState extends State<_SyncAllProgressDialog> {
         SizedBox(
             width: 22,
             height: 22,
-            child: CircularProgressIndicator(strokeWidth: 2)),
+            child: InlineSpinner()),
         SizedBox(width: 14),
         Expanded(
             child: Text('同步任务已在 NAS 后台启动，完成后会自动刷新。',
@@ -1785,7 +1785,7 @@ class _AppState extends State<App> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     if (!ready) {
       return const MaterialApp(
-          home: Scaffold(body: Center(child: CircularProgressIndicator())));
+          home: Scaffold(body: const LoadingView()));
     }
     // 主题选取即时生效：AppTheme.current 变化会重建 MaterialApp（设置页预览用）。
     return ValueListenableBuilder<String>(
@@ -1971,16 +1971,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final b = normalizeBase(base.text);
     if (b.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('地址不能为空')));
+        showToast(this, '地址不能为空');
       }
       return;
     }
     final dup = servers.any((s) => s.base == b && s.id != old?.id);
     if (dup) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('该地址已添加')));
+        showToast(this, '该地址已添加');
       }
       return;
     }
@@ -2098,8 +2096,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (pw == null) return;
     if (pw.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('密码不能为空')));
+        showToast(this, '密码不能为空');
       }
       return;
     }
@@ -2389,7 +2386,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             icon: const Icon(Icons.refresh)),
       ]),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : err != null
               ? LoadErrorView.loadFailed(err!, onRetry: _loadLibs)
               : ListView(children: [
@@ -3642,7 +3639,7 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
             icon: const Icon(Icons.refresh)),
       ]),
       body: !_ready
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : ListView(padding: const EdgeInsets.all(16), children: [
               const Text('等级词条', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
@@ -3845,7 +3842,7 @@ class _BreadcrumbTabState extends State<_BreadcrumbTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) return const LoadingView();
     return Column(children: [
       Align(
         alignment: Alignment.centerRight,
@@ -4053,14 +4050,12 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已开始检测平台删除的作品，完成后自动刷新')));
+      showToast(this, '已开始检测平台删除的作品，完成后自动刷新');
       await Future<void>.delayed(const Duration(seconds: 5));
       if (mounted) await load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failureLine('检测启动', errorText(e)))));
+      showToast(this, failureLine('检测启动', errorText(e)));
     } finally {
       if (mounted) setState(() => checking = false);
     }
@@ -4380,8 +4375,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                       : () async {
                           await Clipboard.setData(ClipboardData(text: e.link));
                           if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('链接已复制')));
+                          showToast(this, '链接已复制');
                         },
                 ),
                 IconButton(
@@ -4448,7 +4442,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    child: InlineSpinner())
                 : const Icon(Icons.travel_explore)),
         IconButton(
             tooltip: '刷新',
@@ -4457,7 +4451,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         const HomeAction(),
       ]),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : err != null
               ? LoadErrorView.loadFailed(err!, onRetry: load)
               : Column(children: [
@@ -4740,8 +4734,7 @@ class _RecommendCountTileState extends State<_RecommendCountTile> {
     final v = await RecommendCountSettings.save(ctrl.text);
     if (!mounted) return;
     setState(() {});
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(content: Text(v == 0 ? '已设为默认 40' : '已设为 $v 个')));
+    showToast(this, v == 0 ? '已设为默认 40' : '已设为 $v 个');
   }
 
   @override
@@ -5231,8 +5224,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
     if (combo == null || !mounted) return;
     final bad = AppSettings.bindComboError(combo);
     if (bad != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(bad)));
+      showToast(this, bad);
       return;
     }
     AppSettings.bindCombo(action, combo);
@@ -5556,10 +5548,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     return jsonMapOf(r);
   }
 
-  void _toast(String s) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
-  }
+  void _toast(String s) => showToast(this, s);
 
   Future<void> _save() async {
     final seq = ++_seq;
@@ -5726,11 +5715,11 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
                 child: SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))),
+                    child: InlineSpinner())),
           ),
       ]),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : err != null
               ? LoadErrorView.loadFailed(err!, onRetry: load)
               : cols.isEmpty
@@ -6792,15 +6781,12 @@ class _LibraryPageState extends State<LibraryPage> {
           .timeout(const Duration(seconds: 15));
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(
-              content: Text('已将「${libraryDisplayName(id, '${l['name'] ?? ''}')}」'
-                  '设为默认媒体库')));
+      showToast(this, '已将「${libraryDisplayName(id, '${l['name'] ?? ''}')}」'
+                  '设为默认媒体库');
       await load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failureLine('设置', errorText(e)))));
+        showToast(this, failureLine('设置', errorText(e)));
       }
     }
   }
@@ -6835,13 +6821,11 @@ class _LibraryPageState extends State<LibraryPage> {
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已移除库注册（数据保留）')));
+      showToast(this, '已移除库注册（数据保留）');
       await load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failureLine('删除', errorText(e)))));
+        showToast(this, failureLine('删除', errorText(e)));
       }
     }
   }
@@ -6888,18 +6872,19 @@ class _LibraryPageState extends State<LibraryPage> {
       ),
     );
     if (ok != true) return;
-    final lid = id.text.trim().toLowerCase();
-    if (!RegExp(r'^[a-z0-9][a-z0-9_-]{0,31}$').hasMatch(lid)) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('库 ID 格式不正确')));
+    // 归一化 + 校验 + 提示都归 `registry_lib_id.dart`：与服务端 `libIdOk()` 同一条
+    // 规则，此前这里自己写了一份 `RegExp` 和一句提示。
+    final lid = normalizeRegistryLibId(id.text);
+    final idBad = registryLibIdError(lid);
+    if (idBad != null) {
+      showToast(this, idBad);
       return;
     }
     if (name.text.trim().isEmpty) {
       // 与目录/分类建的「名称不能为空」同句不同源：这里是注册新库
       // （服务端 `/api/libraries`），那里是分类目录。同类校验只保留
       // 一个措辞常量，避免以后改成「名称不能为空」以外的说法时漏掉一处。
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text(kEmptyNameText)));
+      showToast(this, kEmptyNameText);
       return;
     }
     try {
@@ -6936,13 +6921,11 @@ class _LibraryPageState extends State<LibraryPage> {
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('媒体库已添加')));
+      showToast(this, '媒体库已添加');
       await load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failureLine('添加', errorText(e)))));
+        showToast(this, failureLine('添加', errorText(e)));
       }
     }
   }
@@ -6986,7 +6969,7 @@ class _LibraryPageState extends State<LibraryPage> {
   /// 内容区：主页内嵌与独立「媒体库」页共用。
   Widget _body() {
     if (err != null) return LoadErrorView.loadFailed(err!);
-    if (loading) return const Center(child: CircularProgressIndicator());
+    if (loading) return const LoadingView();
     final list = ListView(
       controller: _menuScroll,
       key: const PageStorageKey<String>('lib-menu-list'),
@@ -7622,7 +7605,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         const HomeAction(),
       ]),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : err != null
               ? LoadErrorView.loadFailed(err!)
               : ListView(children: [
@@ -7724,13 +7707,11 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('爬虫配置已保存')));
+      showToast(this, '爬虫配置已保存');
       await load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failureLine('保存', errorText(e)))));
+        showToast(this, failureLine('保存', errorText(e)));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -7752,7 +7733,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
       body: err != null
           ? LoadErrorView.loadFailed(err!)
           : loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const LoadingView()
               : ListView(padding: const EdgeInsets.all(16), children: [
                   Text('库根：${widget.lib['base']}',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
@@ -7874,12 +7855,10 @@ class _MaintenancePageState extends State<MaintenancePage> {
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('爬虫已启动（进程 ${j['pid']}），日志：${j['log']}')));
+      showToast(this, '爬虫已启动（进程 ${j['pid']}），日志：${j['log']}');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failureLine('启动', errorText(e)))));
+        showToast(this, failureLine('启动', errorText(e)));
       }
     }
     if (mounted) setState(() => running = false);
@@ -7911,7 +7890,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
       body: err != null
           ? LoadErrorView.loadFailed(err!)
           : loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const LoadingView()
               : ListView(padding: const EdgeInsets.all(16), children: [
                   Row(children: [
                     Icon(ok ? Icons.check_circle : Icons.warning_amber,
@@ -8038,10 +8017,7 @@ class _HomePageState extends State<HomePage> {
       _refreshing = false;
       _libEpoch++;
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      duration: const Duration(seconds: 2),
-      content: Text(out.message),
-    ));
+    showToast(this, out.message, duration: const Duration(seconds: 2));
   }
 
   /// 只同步「当前库」指向服务端默认库，用于播放/同步路由；不拉收藏夹列表。
@@ -8604,11 +8580,11 @@ class _RankPageState extends State<RankPage> {
               });
             }
             return loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const LoadingView()
               : err != null
                   ? LoadErrorView.loadFailed(err!, onRetry: load)
                   : visible.isEmpty && metaLoading
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const LoadingView()
                   : visible.isEmpty
                       ? Center(
                           child: Text(
@@ -8829,7 +8805,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
         ),
         Expanded(
           child: loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const LoadingView()
               : err != null
                   ? LoadErrorView.loadFailed(err!, onRetry: load)
                   : rows.isEmpty
@@ -9264,15 +9240,13 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final j = await startServerSync(target: 'authors');
     if (j == null || !serviceSaidOk(j)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(failureLine('同步启动', failureTextOf(j)))));
+        showToast(this, failureLine('同步启动', failureTextOf(j)));
       }
       return;
     }
     setState(() => syncing = true);
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已开始同步作者，完成后自动刷新')));
+      showToast(this, '已开始同步作者，完成后自动刷新');
     }
     syncTimer?.cancel();
     var tries = 0;
@@ -9295,8 +9269,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       setState(() => syncing = false);
       final code = s['exit'];
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(code == 0 ? '作者同步完成' : '作者同步结束（退出码 $code）')));
+        showToast(this, code == 0 ? '作者同步完成' : '作者同步结束（退出码 $code）');
       }
       await load();
     });
@@ -9317,8 +9290,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final basics =
         meta == null ? const <BasicLib>[] : meta.filterBasics;
     if (basics.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('还没有可用的基础库')));
+      showToast(this, '还没有可用的基础库');
       return;
     }
     var lib = basics.first.id;
@@ -9378,8 +9350,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     final dir = authorDirForName(nameCtl.text);
     final bad = authorDirError(dir);
     if (bad != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(bad)));
+      showToast(this, bad);
       return;
     }
     try {
@@ -9397,13 +9368,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       if (r.statusCode == 409) throw Exception('该作者目录已存在');
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已创建作者目录')));
+      showToast(this, '已创建作者目录');
       await load(quiet: true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(errorText(e))));
+      showToast(this, errorText(e));
     }
   }
 
@@ -9762,7 +9731,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    child: InlineSpinner())
                 : const Icon(Icons.cloud_sync_outlined)),
         IconButton(
             tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
@@ -14916,8 +14885,7 @@ class _PlayerPageState extends State<PlayerPage>
                     const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white54))
+                        child: InlineSpinner(color: Colors.white54))
                   else
                     Icon(Icons.water_drop,
                         size: fs ? 20 : kTaskbarIconSize,
@@ -16840,7 +16808,7 @@ class _RecommendPageState extends State<RecommendPage> {
             onPressed: loading ? null : () => load(refresh: true)),
       ]),
       body: loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const LoadingView()
           : err != null
               ? LoadErrorView.loadFailed(err!, onRetry: () => load(refresh: false))
               : Column(children: [
@@ -17659,9 +17627,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _busy = false);
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(failureLine('生成头像', errorText(e)))));
+      showToast(this, failureLine('生成头像', errorText(e)), replace: true);
     }
   }
 
@@ -17720,7 +17686,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2))
+                          child: InlineSpinner())
                       : const Text('确定'),
                 ),
               ),
@@ -17952,9 +17918,7 @@ class _AuthorPageState extends State<AuthorPage> {
       if (cands.length >= 36) break;
     }
     if (cands.isEmpty) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(const SnackBar(content: Text('该作者还没有可用作品图')));
+      showToast(this, '该作者还没有可用作品图', replace: true);
       return;
     }
     showDialog(
@@ -18010,14 +17974,11 @@ class _AuthorPageState extends State<AuthorPage> {
                   if (!mounted) return;
                   authorAvatarRevision.value++;
                   setState(() {});
-                  ScaffoldMessenger.of(context)
-                    ..hideCurrentSnackBar()
-                    ..showSnackBar(SnackBar(
-                        content: Text(!ok
+                  showToast(this, !ok
                             ? '这张图不能作头像'
                             : localOnly
                                 ? '已设为头像（该格式服务端不收，仅本机生效）'
-                                : '已设为该作者头像')));
+                                : '已设为该作者头像', replace: true);
                 },
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -18120,9 +18081,7 @@ class _AuthorPageState extends State<AuthorPage> {
     if (!mounted) return;
     setState(() => av = _crawledAv);
     authorAvatarRevision.value++;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('已恢复自动头像')));
+    showToast(this, '已恢复自动头像', replace: true);
   }
 
   /// owner 2026-11-25：作者文件夹挂载入口（作者主页）。
@@ -18392,12 +18351,7 @@ class _AuthorPageState extends State<AuthorPage> {
     });
   }
 
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(msg)));
-  }
+  void _toast(String msg) => showToast(this, msg, replace: true);
 
   /// 把选中作品按库分组（删除时逐库逐作品调用）。
   Map<String, List<String>> _selectedByLib() {
@@ -18914,8 +18868,7 @@ class _AuthorPageState extends State<AuthorPage> {
                             await Clipboard.setData(
                                 ClipboardData(text: platformUid));
                             if (!mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('已复制 UID')));
+                            showToast(this, '已复制 UID');
                           },
                           borderRadius: BorderRadius.circular(4),
                           child: const Padding(

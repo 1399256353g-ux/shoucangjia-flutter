@@ -17,6 +17,8 @@ import 'unit_crawler.dart';
 import 'unit_library.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
+import 'toast.dart';
+import 'loading_view.dart';
 
 /// L5-D：单个单元库的爬虫配置页。
 ///
@@ -136,12 +138,10 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         config = UnitCrawlerConfig.fromJson(mapOrNull(j['crawler']));
         scripts = UnitCrawlerScript.listFrom(j['scripts']);
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('单元库爬虫配置已保存')));
+      showToast(this, '单元库爬虫配置已保存');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(failureLine('保存', errorText(e)))));
+        showToast(this, failureLine('保存', errorText(e)));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -157,16 +157,13 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:
-              Text('已启动 ${j['script'] ?? config.script}（进程 ${j['pid']}）')));
+      showToast(this, '已启动 ${j['script'] ?? config.script}（进程 ${j['pid']}）');
       await Future<void>.delayed(const Duration(milliseconds: 600));
       await load();
     } catch (e) {
       if (!mounted) return;
       setState(() => running = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failureLine('启动', errorText(e)))));
+      showToast(this, failureLine('启动', errorText(e)));
     }
   }
 
@@ -189,7 +186,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       body: err != null
           ? _errorView()
           : loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const LoadingView()
               : ListView(
                   padding: const EdgeInsets.all(16),
                   children: [

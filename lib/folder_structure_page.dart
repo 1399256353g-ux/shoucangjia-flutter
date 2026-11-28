@@ -13,6 +13,8 @@ import 'rel_path.dart';
 import 'top_node.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
+import 'toast.dart';
+import 'loading_view.dart';
 
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
 /// 供 owner 指定「节点文件夹」（单元库）。
@@ -266,8 +268,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     final n = normalizeRel(r.rel);
     setState(() => unlocked.add(n));
     _saveUnlocked();
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('已解锁「${r.name}」，可设为节点文件夹')));
+    showToast(this, '已解锁「${r.name}」，可设为节点文件夹');
   }
 
   Future<void> _load() async {
@@ -393,13 +394,11 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       await widget.onSaved?.call(nodes.toList());
       if (!mounted) return;
       setState(() => saving = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('节点设置已保存')));
+      showToast(this, '节点设置已保存');
     } catch (e) {
       if (!mounted) return;
       setState(() => saving = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(failureLine('保存', errorText(e)))));
+      showToast(this, failureLine('保存', errorText(e)));
     }
   }
 
@@ -489,9 +488,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     final candidates = _nodeCandidates;
     final basicsInNodes = nodes.where((e) => _isBasicRel(e)).toList();
     if (candidates.isEmpty && basicsInNodes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('没有可设为节点的文件夹')),
-      );
+      showToast(this, '没有可设为节点的文件夹');
       return;
     }
     final before = nodes.length;
@@ -500,10 +497,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       nodes.addAll(candidates);
     });
     final added = nodes.length - (before - basicsInNodes.length);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('已选入 ${candidates.length} 个非基础库文件夹'
-          '（新增 ${added > 0 ? added : 0}，共 ${nodes.length} 个节点），点「保存」生效'),
-    ));
+    showToast(this, '已选入 ${candidates.length} 个非基础库文件夹'
+        '（新增 ${added > 0 ? added : 0}，共 ${nodes.length} 个节点），点「保存」生效');
   }
 
   Future<void> _confirmUnlock(_FolderRow r) async {
@@ -668,13 +663,13 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: InlineSpinner())
                   : const Text('保存'),
             ),
           ],
         ),
         body: loading
-            ? const Center(child: CircularProgressIndicator())
+            ? const LoadingView()
             : err != null
                 ? LoadErrorView.loadFailed(err!)
                 : ListView(
