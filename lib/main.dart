@@ -162,6 +162,7 @@ import 'error_text.dart';
 import 'load_error_view.dart';
 import 'unit_fraction.dart';
 import 'loading_view.dart';
+import 'status_color.dart';
 
 /// `encodeMediaPath` 的唯一实现在 `media_path.dart`；main.dart 继续转发，
 /// 免得既有 import 点（含测试）全部改路径。
@@ -1995,6 +1996,8 @@ class _SettingsPageState extends State<SettingsPage> {
             user: user.text.trim(),
             pass: pass.text,
           );
+    // 地址/账号对话框也是 await 点：同一类「回来先看宿主在不在」。
+    if (!mounted) return;
     setState(() {
       if (old == null) {
         servers = [...servers, s];
@@ -2026,6 +2029,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (ok != true) return;
+    // 对话框期间页面可能已被 pop（连接设置从别处关掉/窗口被切走）：
+    // 不检查宿主是否还在就 setState，会把「关一个连接」变成一次框架异常。
+    if (!mounted) return;
     setState(() {
       servers = servers.where((x) => x.id != s.id).toList();
       if (activeId == s.id) activeId = servers.isEmpty ? '' : servers.first.id;
@@ -2052,6 +2058,8 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (ok != true) return;
+    // 与 [_delete] 同一条：await 回来后先确认宿主还在，再改状态。
+    if (!mounted) return;
     setState(() {
       servers = [
         for (final x in servers) x.id == s.id ? disconnectServer(x) : x,
@@ -2100,6 +2108,8 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
     final next = reconnectServer(s, pw);
+    // 密码框是 await 点：关掉后这个页面可能已经不在栈上。
+    if (!mounted) return;
     setState(() {
       servers = [for (final x in servers) x.id == s.id ? next : x];
       testMsg.remove(s.id);
@@ -2178,7 +2188,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ? Icons.link_off
                     : (isActive ? Icons.check_circle : Icons.dns_outlined),
                 size: 20,
-                color: !live ? Colors.grey : (isActive ? Colors.green : null)),
+                color: !live ? Colors.grey : (isActive ? kStatusOk : null)),
             const SizedBox(width: 8),
             Expanded(
                 child: Text(s.title,
@@ -2197,7 +2207,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 // owner 2026-11-27：「主页多库并列，没有『当前』」——
                 // 这里指服务端注册表里的默认库，措辞统一为「默认」。
                 child: Text('默认',
-                    style: TextStyle(fontSize: 11, color: Colors.green)),
+                    style: TextStyle(fontSize: 11, color: kStatusOk)),
               ),
             Switch(
                 value: live,
@@ -2218,7 +2228,7 @@ class _SettingsPageState extends State<SettingsPage> {
               child: Text(msg,
                   style: TextStyle(
                       fontSize: 11,
-                      color: ok == true ? Colors.green : Colors.redAccent)),
+                      color: ok == true ? kStatusOk : kStatusBad)),
             ),
           const SizedBox(height: 4),
           Wrap(spacing: 4, children: [
@@ -2236,7 +2246,7 @@ class _SettingsPageState extends State<SettingsPage> {
             TextButton(
                 onPressed: () => _delete(s),
                 child: const Text('删除',
-                    style: TextStyle(color: Colors.redAccent))),
+                    style: TextStyle(color: kStatusBad))),
           ]),
         ]),
       ),
@@ -5408,6 +5418,8 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
         trailing: TextButton(
           onPressed: () async {
             await LibraryCornerBadge.resetKind(kind);
+            // 设置页可能已被关掉（改完即返）：await 回来先确认宿主还在。
+            if (!mounted) return;
             setState(() {});
           },
           child: const Text('恢复默认'),
@@ -5420,6 +5432,7 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
             GestureDetector(
               onTap: () async {
                 await LibraryCornerBadge.setPattern(kind, i);
+                if (!mounted) return;
                 setState(() {});
               },
               child: Container(
@@ -5459,6 +5472,7 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
             GestureDetector(
               onTap: () async {
                 await LibraryCornerBadge.setColor(kind, c);
+                if (!mounted) return;
                 setState(() {});
               },
               child: Container(
@@ -6975,16 +6989,16 @@ class _LibraryPageState extends State<LibraryPage> {
       children: [
         if (warn != null)
           Container(
-            color: Colors.orange.withValues(alpha: 0.12),
+            color: statusTint(kStatusWarn),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Row(children: [
               const Icon(Icons.warning_amber_rounded,
-                  size: 16, color: Colors.orange),
+                  size: 16, color: kStatusWarn),
               const SizedBox(width: 6),
               Expanded(
                   child: Text(warn!,
                       style:
-                          const TextStyle(fontSize: 11, color: Colors.orange))),
+                          const TextStyle(fontSize: 11, color: kStatusWarn))),
             ]),
           ),
         Padding(
@@ -7072,7 +7086,7 @@ class _LibraryPageState extends State<LibraryPage> {
               style: TextStyle(
                   fontSize: 11,
                   color:
-                      boolOf(l['indexOk']) ? Colors.grey : Colors.redAccent)),
+                      boolOf(l['indexOk']) ? Colors.grey : kStatusBad)),
         ],
       ),
       isThreeLine: true,
@@ -7487,7 +7501,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-              fontSize: 11, color: failed ? Colors.orange : null)),
+              fontSize: 11, color: failed ? kStatusWarn : null)),
       trailing: PopupMenuButton<String>(
         onSelected: (v) async {
           if (v == 'crawler') {
@@ -7533,8 +7547,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
             : '该单元库没有爬虫脚本，因此不支持同步设置',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style:
-            TextStyle(fontSize: 11, color: has ? Colors.grey : Colors.orange),
+        style: TextStyle(
+            fontSize: 11, color: has ? Colors.grey : kStatusWarn),
       ),
       trailing: Icon(Icons.chevron_right,
           color: has ? null : Colors.grey.withValues(alpha: 0.4)),
@@ -7893,7 +7907,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
               : ListView(padding: const EdgeInsets.all(16), children: [
                   Row(children: [
                     Icon(ok ? Icons.check_circle : Icons.warning_amber,
-                        color: ok ? Colors.green : Colors.orange),
+                        color: ok ? kStatusOk : kStatusWarn),
                     const SizedBox(width: 8),
                     Text(ok ? '基础检查通过' : '发现问题',
                         style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -7915,7 +7929,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
                     const Divider(height: 24),
                     Row(children: [
                       Icon(deepOk ? Icons.check_circle : Icons.error,
-                          color: deepOk ? Colors.green : Colors.red),
+                          color: deepOk ? kStatusOk : kStatusBad),
                       const SizedBox(width: 8),
                       Text('媒体一致性巡检',
                           style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -19172,10 +19186,10 @@ class _AuthorPageState extends State<AuthorPage> {
                                     ? null
                                     : _batchDelete,
                             icon: const Icon(Icons.delete_outline,
-                                size: 16, color: Colors.redAccent),
+                                size: 16, color: kStatusBad),
                             label: const Text('删除',
                                 style: TextStyle(
-                                    fontSize: 12, color: Colors.redAccent))),
+                                    fontSize: 12, color: kStatusBad))),
                       ]),
                     ),
                   ),

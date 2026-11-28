@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'multi_server.dart';
+import 'status_color.dart';
 
 /// 连接配置版本号：任何「断开 / 重连 / 增删」都要 bump。
 final ValueNotifier<int> connectionRevision = ValueNotifier<int>(0);
@@ -68,7 +69,7 @@ class _ConnectionStatusIconState extends State<ConnectionStatusIcon> {
       onPressed: widget.onTap,
       icon: Icon(
         off ? Icons.link_off : Icons.cloud_done_outlined,
-        color: off ? Colors.redAccent : Colors.green,
+        color: off ? kStatusBad : kStatusOk,
       ),
     );
   }

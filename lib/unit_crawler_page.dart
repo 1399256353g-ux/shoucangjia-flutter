@@ -20,6 +20,7 @@ import 'load_error_view.dart';
 import 'toast.dart';
 import 'loading_view.dart';
 import 'api_timeout.dart';
+import 'status_color.dart';
 
 /// L5-D：单个单元库的爬虫配置页。
 ///
@@ -365,12 +366,12 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       key: const ValueKey('unit-crawler-capability'),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: (ok ? Colors.green : Colors.orange).withValues(alpha: 0.12),
+        color: statusTint(ok ? kStatusOk : kStatusWarn),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(children: [
         Icon(ok ? Icons.check_circle : Icons.warning_amber,
-            size: 18, color: ok ? Colors.green : Colors.orange),
+            size: 18, color: ok ? kStatusOk : kStatusWarn),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -407,7 +408,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         ok ? '本单元库已删除 / 取消收藏的作品记录 · 只读日志，不动媒体' : '该单元库没有爬虫脚本，因此不支持删除监测',
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 11, color: ok ? Colors.grey : Colors.orange),
+        style: TextStyle(fontSize: 11, color: ok ? Colors.grey : kStatusWarn),
       ),
       trailing: Icon(Icons.chevron_right,
           color: ok ? null : Colors.grey.withValues(alpha: 0.4)),
