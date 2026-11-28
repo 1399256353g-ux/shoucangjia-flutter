@@ -30,7 +30,11 @@ import 'work_forms.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
 import 'unit_author_groups.dart'
-    show authorDirForName, authorDirError, unitAuthorCreateUrl;
+    show
+        authorCreateSummary,
+        authorDirForName,
+        authorDirError,
+        unitAuthorCreateUrl;
 import 'author_badge_row.dart';
 import 'library_badge.dart';
 import 'lib_names.dart';
@@ -351,12 +355,8 @@ class _BasicLibPageState extends State<BasicLibPage>
       }
     }
     if (!mounted) return;
-    final parts = <String>[
-      if (made > 0) '新建 $made 个',
-      if (existed > 0) '已存在 $existed 个',
-      if (failed.isNotEmpty) '失败 ${failed.length} 个',
-    ];
-    _snack(parts.isEmpty ? '未创建任何目录' : parts.join(' · '));
+    _snack(authorCreateSummary(
+        made: made, existed: existed, failed: failed.length));
     if (made > 0) await _loadAuthors();
   }
 

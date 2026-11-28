@@ -28,3 +28,10 @@ const Map<LibEntryKind, String> kLevelNames = <LibEntryKind, String>{
 
 /// 取某层级的中文名；未知层级回落枚举名（不编造文案）。
 String levelName(LibEntryKind kind) => kLevelNames[kind] ?? kind.name;
+
+/// 「不属于任何媒体库」那一节的名字（**唯一一份**）。
+///
+/// 0.9.360：这句在三个地方各写了一遍——`crawler_sections.CrawlerSection.title`
+/// 的默认值、库词条配色页的节标题、爬虫设置页「其它」节标题。改一个字的
+/// 时候只会改到其中一处，同一个节在三个页面上就可能有三个名字。
+const String kOtherSectionTitle = '其它（不属于任何媒体库）';

@@ -569,13 +569,29 @@ double taskbarSpacingFor(double screenWidth) {
 const int kStageLongPressMs = 500;
 const double kStageLongPressMaxMove = 12;
 
-/// §8 长按菜单项文案（顺序即展示顺序）。
-const List<String> kStageMenuLabels = <String>[
-  '不感兴趣',
-  '保存到本机',
-  '复制文案',
-  '举报',
-];
+/// §8 长按菜单项：**动作是身份，文案只是显示**。
+///
+/// 0.9.360：此前菜单项只有一份中文文案表，动作分发靠
+/// `switch (label) { case '不感兴趣': … }`、控件键也拼 `'stage-menu-$label'`。
+/// 文案于是同时充当了三个角色：显示文字、动作 id、控件键。改一次字
+/// （比如「保存到本机」→「保存到本地」）就会同时改掉键与分发分支——
+/// 分发里漏改一处时 switch 落空，点了没反应，而界面看起来完全正常。
+///
+/// 现在动作由枚举承担，文案是枚举的一个字段：改名不影响分发，
+/// 加项必须同时给文案（不加就不编译）。
+enum StageMenuAction {
+  notInterested('不感兴趣'),
+  saveToDevice('保存到本机'),
+  copyCaption('复制文案'),
+  report('举报');
+
+  final String label;
+  const StageMenuAction(this.label);
+}
+
+/// §8 长按菜单项文案（顺序即展示顺序），由枚举派生，不再单独维护。
+List<String> get kStageMenuLabels =>
+    <String>[for (final a in StageMenuAction.values) a.label];
 
 /// §9 评论面板：初始 60% 屏高，再次上滑到全屏，下滑关闭。
 const double kCommentPanelInitialFraction = 0.6;

@@ -49,6 +49,21 @@ bool isSupportedCoverBytes(List<int> b) {
   return riff && webp;
 }
 
+/// 选到的图片字节为什么不能用；能用返回 null（**唯一判定口**）。
+///
+/// 0.9.360：这三条判定（空 / 超 12MB / 不是 JPG-PNG-WebP）此前写了三份——
+/// 封面选图、封面直传，外加播放页头像选图那段内联检查。三份的文案逐字
+/// 相同，所以改上限（比如 12MB → 20MB）时只会改到其中两处：头像仍然把
+/// 8MB 的图拒掉，提示却写着「超过 12MB」，用户看到的数字和实际规则不一致。
+///
+/// 判定与文案都收到这里；调用方只负责把返回值显示出来。
+String? imageBytesError(List<int> bytes) {
+  if (bytes.isEmpty) return '图片为空';
+  if (bytes.length > kCoverUploadMaxBytes) return '图片超过 12MB，请先压缩';
+  if (!isSupportedCoverBytes(bytes)) return '只支持 JPG/PNG/WebP 图片';
+  return null;
+}
+
 /// 打开选图失败时的可读文案：不把原始异常字符串暴露给用户。
 String coverPickErrorText(Object e) {
   final s = '$e'.toLowerCase();
@@ -102,13 +117,8 @@ Future<CoverUploadResult> pickAndUploadCover({
   } catch (e) {
     return const CoverUploadResult(false, '读取图片失败，请重试');
   }
-  if (bytes.isEmpty) return const CoverUploadResult(false, '图片为空');
-  if (bytes.length > kCoverUploadMaxBytes) {
-    return const CoverUploadResult(false, '图片超过 12MB，请先压缩');
-  }
-  if (!isSupportedCoverBytes(bytes)) {
-    return const CoverUploadResult(false, '只支持 JPG/PNG/WebP 图片');
-  }
+  final bad = imageBytesError(bytes);
+  if (bad != null) return CoverUploadResult(false, bad);
 
   return uploadCoverBytes(
     bytes: bytes,
@@ -127,13 +137,8 @@ Future<CoverUploadResult> uploadCoverBytes({
   required String libId,
   String unitRel = '',
 }) async {
-  if (bytes.isEmpty) return const CoverUploadResult(false, '图片为空');
-  if (bytes.length > kCoverUploadMaxBytes) {
-    return const CoverUploadResult(false, '图片超过 12MB，请先压缩');
-  }
-  if (!isSupportedCoverBytes(bytes)) {
-    return const CoverUploadResult(false, '只支持 JPG/PNG/WebP 图片');
-  }
+  final bad = imageBytesError(bytes);
+  if (bad != null) return CoverUploadResult(false, bad);
   http.Response r;
   try {
     r = await http

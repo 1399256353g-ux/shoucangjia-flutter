@@ -2419,7 +2419,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                           style: TextStyle(fontSize: 12, color: Colors.grey)),
                     ),
                   if (otherUnits.isNotEmpty || otherBasics.isNotEmpty) ...[
-                    const _SectionHeader('其它（不属于任何媒体库）'),
+                    const _SectionHeader(kOtherSectionTitle),
                     for (final u in otherUnits) _libTile(u),
                     for (final b in otherBasics) _basicTile(b),
                   ],
@@ -2663,9 +2663,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
         if (expanded) ...[
           _libTile(top, isTop: true),
           if (subUnits.isNotEmpty)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
-              child: Text('单元库',
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+              child: Text(levelName(LibEntryKind.unit),
                   style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -2673,9 +2673,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
             ),
           for (final u in subUnits) _libTile(u, indent: true),
           if (subBasics.isNotEmpty)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 6, 16, 2),
-              child: Text('基础库（优先级最高）',
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+              child: Text('${levelName(LibEntryKind.basic)}（优先级最高）',
                   style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
@@ -7412,7 +7412,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         // 「其它」节不折叠：条目本来就少，且没有可点开的媒体库标题。
         out.add(const Padding(
           padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-          child: Text('其它（不属于任何媒体库）',
+          child: Text(kOtherSectionTitle,
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
         ));
         for (final l in s.libraries) {
@@ -12426,17 +12426,18 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// §8 菜单项：只在本地生效，不上传任何数据。
-  Future<void> _onStageMenuAction(String label) async {
+  ///
+  /// 分发按 [StageMenuAction] 枚举，不按文案：文案改名是显示层的事，
+  /// 不该让动作静默落空（0.9.360，此前 `switch (label)` 绑着中文串）。
+  Future<void> _onStageMenuAction(StageMenuAction action) async {
     _closeStageMenu();
     final w = _workAt(cur);
-    switch (label) {
-      case '不感兴趣':
+    switch (action) {
+      case StageMenuAction.notInterested:
         await _hideCurrentWork(w);
-        break;
-      case '保存到本机':
+      case StageMenuAction.saveToDevice:
         await _saveCurrentMedia(w);
-        break;
-      case '复制文案':
+      case StageMenuAction.copyCaption:
         final text = _infoCaptionFor(w);
         if (text.isEmpty) {
           _toast('当前作品没有文案');
@@ -12444,12 +12445,10 @@ class _PlayerPageState extends State<PlayerPage>
         }
         await Clipboard.setData(ClipboardData(text: text));
         _toast('文案已复制');
-        break;
-      case '举报':
+      case StageMenuAction.report:
         // 举报只做本地记录，不联网、不上报服务端。
         debugPrint('[report] local-only work=${_workKeyFor(w)}');
         _toast('已记录举报（仅本地，未联网）');
-        break;
     }
   }
 
@@ -12641,14 +12640,15 @@ class _PlayerPageState extends State<PlayerPage>
                               color: Colors.white24,
                               borderRadius: BorderRadius.circular(2)),
                         ),
-                        for (final label in kStageMenuLabels)
+                        // 键用枚举名（稳定，不随文案改），文案读枚举字段。
+                        for (final a in StageMenuAction.values)
                           ListTile(
-                            key: Key('stage-menu-$label'),
+                            key: Key('stage-menu-${a.name}'),
                             dense: true,
-                            title: Text(label,
+                            title: Text(a.label,
                                 style: const TextStyle(
                                     fontSize: 15, color: Colors.white)),
-                            onTap: () => _onStageMenuAction(label),
+                            onTap: () => _onStageMenuAction(a),
                           ),
                         const Divider(height: 1, color: Colors.white12),
                         ListTile(
@@ -18078,16 +18078,10 @@ class _AuthorPageState extends State<AuthorPage> {
       _toast('读取图片失败：${errorText(e)}');
       return;
     }
-    if (bytes.isEmpty) {
-      _toast('图片为空');
-      return;
-    }
-    if (bytes.length > kCoverUploadMaxBytes) {
-      _toast('图片超过 12MB，请先压缩');
-      return;
-    }
-    if (!isSupportedCoverBytes(bytes)) {
-      _toast('只支持 JPG/PNG/WebP 图片');
+    // 与封面选图同一条判定（`imageBytesError`）：上限与魔数只该有一处。
+    final bad = imageBytesError(bytes);
+    if (bad != null) {
+      _toast(bad);
       return;
     }
     if (!mounted) return;

@@ -177,7 +177,11 @@ void main() {
       final src = _code('lib/main.dart');
       expect(src.contains("单元库（中间层）"), isFalse,
           reason: '「中间层」是代码结构叫法，用户看的是媒体库/单元库/基础库');
-      expect(src.contains("'单元库',"), isTrue);
+      // 0.9.360：这一处不再写死字面量，改读 `level_names` 的唯一一份表；
+      // 断言改成「确实走了表」，否则这条用例会永远要求把字面量写回来。
+      expect(src.contains('levelName(LibEntryKind.unit)'), isTrue);
+      expect(_code('lib/level_names.dart').contains("LibEntryKind.unit: '单元库'"),
+          isTrue);
     });
   });
 

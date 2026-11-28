@@ -11,6 +11,7 @@ import 'grid_spec.dart';
 import 'lib_card_prefetch.dart';
 import 'library_badge.dart';
 import 'library_corner_badge.dart';
+import 'level_names.dart';
 import 'library_tree.dart';
 import 'lib_names.dart';
 import 'lib_cover.dart';
@@ -514,18 +515,23 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
             const Icon(Icons.layers_outlined, size: 18),
             const SizedBox(width: 6),
             // P3：首页只列顶级单元库（＝各连接的媒体库根）。
-            const Text('媒体库',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            //
+            // 0.9.360：这一行标题与右上角计数此前各自写死「媒体库」
+            // （13 号与「N 个媒体库」两处）。改名时只改到一处，就会变成
+            // 「媒体库 … 3 个单元库」；两处都读 [levelName] 同一份表。
+            Text(levelName(LibEntryKind.top),
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600)),
             const Spacer(),
-            Text('${units.length} 个媒体库',
+            Text('${units.length} 个${levelName(LibEntryKind.top)}',
                 style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ]),
         ),
         StarredEntryCard(count: liveStars.length, onTap: widget.onOpenStars),
         if (units.isEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 24, 16, 24),
-            child: Text('当前连接下没有可显示的媒体库',
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
+            child: Text('当前连接下没有可显示的${levelName(LibEntryKind.top)}',
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
           ),
         // 与其他卡片一样铺成网格，单元库卡片尺寸更大。
@@ -1450,9 +1456,9 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                 ),
               ],
               if (sorted.isNotEmpty) ...[
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
-                  child: Text('基础库',
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                  child: Text(levelName(LibEntryKind.basic),
                       style:
                           TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 ),

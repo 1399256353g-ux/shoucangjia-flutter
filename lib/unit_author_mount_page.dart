@@ -306,12 +306,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       if (mounted) setState(() => busy = false);
     }
     if (!mounted) return;
-    final parts = <String>[
-      if (made > 0) '新建 $made 个',
-      if (existed > 0) '已存在 $existed 个',
-      if (failed.isNotEmpty) '失败 ${failed.length} 个',
-    ];
-    _toast(parts.isEmpty ? '未创建任何目录' : parts.join(' · '),
+    _toast(
+        authorCreateSummary(
+            made: made, existed: existed, failed: failed.length),
         bad: failed.isNotEmpty);
     if (made > 0 || existed > 0) await load();
   }

@@ -742,3 +742,25 @@ List<Map<String, String>> createAuthorBodies({
   }
   return out;
 }
+
+/// 建目录结果的**唯一**汇总文案。
+///
+/// 0.9.360：这段「新建 N 个 · 已存在 N 个 · 失败 N 个，一个都没有时说明
+/// 未创建」在三处逐字重复（作者页、基础库页、单元库挂载页）。三份都
+/// 「看起来正常」，于是往里加一项统计时只会加到一个页面：另外两处仍然
+/// 只报两个数字，用户换个入口建目录就少看到一类结果。
+///
+/// 三个计数都为零时返回「未创建任何目录」——不同的措辞会让用户以为
+/// 「这次和上次不一样」，其实是同一件事（一个请求都没发出去）。
+String authorCreateSummary({
+  required int made,
+  required int existed,
+  required int failed,
+}) {
+  final parts = <String>[
+    if (made > 0) '新建 $made 个',
+    if (existed > 0) '已存在 $existed 个',
+    if (failed > 0) '失败 $failed 个',
+  ];
+  return parts.isEmpty ? '未创建任何目录' : parts.join(' · ');
+}

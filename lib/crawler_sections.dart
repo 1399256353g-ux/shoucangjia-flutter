@@ -17,6 +17,7 @@ library;
 
 import 'rel_path.dart' show normalizeRelPath;
 import 'node_key.dart' show scopedKey;
+import 'level_names.dart' show kOtherSectionTitle;
 import 'stable_order.dart';
 import 'unit_library.dart';
 
@@ -43,7 +44,7 @@ class CrawlerSection {
   /// 空串只出现在「其它」节——那一节不折叠（条目本来就少）。
   String get key => top == null ? '' : unitScopeKey(top!);
 
-  String get title => top?.name ?? '其它（不属于任何媒体库）';
+  String get title => top?.name ?? kOtherSectionTitle;
 
   String get serverId => top?.node.serverId.trim() ?? '';
 

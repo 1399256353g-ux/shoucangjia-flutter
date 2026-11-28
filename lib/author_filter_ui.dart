@@ -1,12 +1,14 @@
 /// J10：作者筛选工具的统一底部面板。
 ///
-/// 供作者总览与排行榜复用：多选大库/基础库、等级、作品类型，
+/// 供作者总览与排行榜复用：多选媒体库/单元库/基础库、等级、作品类型，
 /// 实时显示命中数量，并支持一键清空。
 library;
 
 import 'package:flutter/material.dart';
 
 import 'author_filter.dart';
+import 'level_names.dart';
+import 'library_badge.dart' show LibEntryKind;
 import 'work_forms.dart';
 
 /// 打开筛选面板；返回 null 表示取消（保持原筛选）。
@@ -219,12 +221,12 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
                   // 说的是同一棵树上的两个不同层级，用户无从分辨：
                   //   一级 = 每个连接的库根 → 「媒体库」
                   //   二级往下 = 节点文件夹   → 「单元库」
-                  _section('媒体库', topChips),
-                  _section('单元库', unitChips),
+                  _section(levelName(LibEntryKind.top), topChips),
+                  _section(levelName(LibEntryKind.unit), unitChips),
                   // 旧 `big_id` 分组已并入单元库维度；只有搬不动的历史选择
                   // （节点已不在树里）还会出现在这里，标题写明它是什么。
                   _section(kLegacyFilterLabel, bigChips),
-                  _section('基础库', basicChips),
+                  _section(levelName(LibEntryKind.basic), basicChips),
                   _section('作者等级', gradeChips),
                   _section('作品类型', typeChips),
                   if (widget.basics.isEmpty &&
