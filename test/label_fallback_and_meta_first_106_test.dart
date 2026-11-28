@@ -66,12 +66,25 @@ void main() {
         expect(src.contains(bad), isFalse, reason: '旧写法仍在：$bad');
       }
       // 四个入口都转发 labelOrId。
-      expect(codeOf('lib/author_big_nodes.dart').contains('labelOrId('), isTrue);
-      expect(codeOf('lib/author_filter_options.dart').contains('labelOrId('),
-          isTrue);
+      // 0.9.354：这两处改为转发 `libEntryTitle`（体内仍只有 `labelOrId`，
+      // 外加去序号那一步）——判定唯一，出口名字只是多包了一层。
+      for (final f in [
+        'lib/author_big_nodes.dart',
+        'lib/author_filter_options.dart'
+      ]) {
+        final c = codeOf(f);
+        expect(c.contains('labelOrId(') || c.contains('libEntryTitle('), isTrue,
+            reason: '$f 没有走名字回落出口');
+      }
       expect(codeOf('lib/library_badge.dart').contains('labelOrId('), isTrue);
       expect(codeOf('lib/library_rank.dart').contains('labelOrId('), isTrue);
-      expect(codeOf('lib/main.dart').contains('labelOrId('), isTrue);
+      // 0.9.354：main.dart 现在经由 `libEntryTitle`（去序号 + 回落 id）转发，
+      // 不再直接调 `labelOrId`——两个出口并存时，去序号那一步会在部分入口
+      // 被漏掉。规则仍是同一个（`libEntryTitle` 体内只有 `labelOrId`）。
+      expect(
+          codeOf('lib/main.dart').contains('libEntryTitle(') ||
+              codeOf('lib/main.dart').contains('labelOrId('),
+          isTrue);
     });
 
     test('行为钉住差异：纯空格名字在旧写法下是空白，新写法下是 id', () {

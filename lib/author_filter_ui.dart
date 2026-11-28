@@ -223,7 +223,7 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
                   _section('单元库', unitChips),
                   // 旧 `big_id` 分组已并入单元库维度；只有搬不动的历史选择
                   // （节点已不在树里）还会出现在这里，标题写明它是什么。
-                  _section('其他历史筛选', bigChips),
+                  _section(kLegacyFilterLabel, bigChips),
                   _section('基础库', basicChips),
                   _section('作者等级', gradeChips),
                   _section('作品类型', typeChips),

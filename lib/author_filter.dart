@@ -161,7 +161,7 @@ class AuthorFilterState {
     return true;
   }
 
-  /// 生成一行简短摘要，例如「基础库 2 · 大库 1 · 等级 A/S · 视频/图文」。
+  /// 生成一行简短摘要，例如「基础库 2 · 其他历史筛选 1 · 等级 A/S · 视频/图文」。
   ///
   /// 四个库维度（top/unit/basic/big）此前各自写了一遍「取名字 → 排序 → 拼接」
   /// ——同一段 5 行代码四份拷贝，改一处就分叉。这里只留一条：[_namesPart]。
@@ -177,7 +177,7 @@ class AuthorFilterState {
       if (tops.isNotEmpty) _namesPart('媒体库', tops, topNames),
       if (units.isNotEmpty) _namesPart('单元库', units, unitNames),
       if (basics.isNotEmpty) _namesPart('基础库', basics, basicNames),
-      if (bigs.isNotEmpty) _namesPart('历史分组', bigs, bigNames),
+      if (bigs.isNotEmpty) _namesPart(kLegacyFilterLabel, bigs, bigNames),
       if (grades.isNotEmpty)
         '等级 ${AuthorGrade.gradesDescending.where(grades.contains).join('/')}',
       if (types.isNotEmpty)
@@ -186,6 +186,13 @@ class AuthorFilterState {
     return parts.isEmpty ? '未筛选' : parts.join(' · ');
   }
 }
+
+/// 旧 `big_id` 维度在界面上的叫法（**唯一一处**）。
+///
+/// 0.9.354：面板分节标题写「其他历史筛选」、摘要写「历史分组」，同一个筛选
+/// 条件在一处叫一个名字。用户按摘要里的词去面板里找，找不到「历史分组」。
+/// 现在两处都读这个常量：改名只改一行，不会再分叉。
+const String kLegacyFilterLabel = '其他历史筛选';
 
 /// 单个库维度的摘要片段：`<标题> 名字/名字`。
 ///

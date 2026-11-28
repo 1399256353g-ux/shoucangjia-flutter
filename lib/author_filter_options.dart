@@ -23,7 +23,7 @@ library;
 import 'author_filter.dart';
 import 'author_big_nodes.dart';
 import 'basic_lib.dart';
-import 'label_fallback.dart';
+import 'lib_names.dart';
 import 'source_lib.dart' show basicLibLabel;
 import 'unit_library.dart';
 
@@ -87,10 +87,8 @@ AuthorFilterOptions authorFilterOptionsFrom({
     // 解析器优先，但它给空串时用节点自身的名字（`LibMeta.unitNameOf` 只在
     // 认识这个 id 时才非空；`secret` 之外的一律回落节点名），最后才回落 id。
     final resolved = unitNameOf?.call(u.id) ?? '';
-    final name = resolved.trim().isNotEmpty
-        ? resolved
-        : (u.name.trim().isNotEmpty ? u.name : u.id);
-    unitNodes.add(AuthorLibNode(id: u.id, name: name));
+    final name = resolved.trim().isNotEmpty ? resolved : u.name;
+    unitNodes.add(AuthorLibNode(id: u.id, name: libEntryTitle(u.id, name)));
   }
 
   // 顶级节点（＝媒体库根）：同上，跨连接聚合后可能来自不同 meta。
@@ -98,7 +96,7 @@ AuthorFilterOptions authorFilterOptionsFrom({
   final topSeen = <String>{};
   for (final t in tops) {
     if (t.id.isEmpty || !topSeen.add(t.id)) continue;
-    topNodes.add(AuthorLibNode(id: t.id, name: labelOrId(t.id, t.name)));
+    topNodes.add(AuthorLibNode(id: t.id, name: libEntryTitle(t.id, t.name)));
   }
 
   return AuthorFilterOptions(

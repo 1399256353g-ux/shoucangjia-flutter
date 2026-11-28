@@ -49,6 +49,20 @@ String libraryDisplayName(String id, String? rawName) =>
 String libEntryTitle(String id, String? rawName) =>
     LibraryBadge.stripIndex(labelOrId(id, rawName));
 
+/// 名字 → 词条/标题上的展示文字：**只做去序号与空白折叠，不回落 id**。
+///
+/// 0.9.354：`source_lib.basicLibLabel` 此前用 `normalizeLibLabel`，而那个函数
+/// 走的是 `stripIndexPrefix`——**无条件**去序号，与设置里的「省略编号」开关
+/// 无关。于是关掉开关后出现两个说法：卡片标题显示 `(1) 名称`，同一页的筛选
+/// 面板/作者卡词条显示 `名称`；用户以为那是两个库。
+///
+/// 现在去序号这件事只由 [LibraryBadge.stripIndex] 一处判断（它读开关），
+/// 空白折叠仍在这里做一次（`( 14 )  擦边` 这种名字里有多余空格）。
+String libDisplayName(String? rawName) {
+  final s = LibraryBadge.stripIndex('${rawName ?? ''}');
+  return s.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
 /// 复制一份库列表并把每项的 `name` 换成展示文案（不改原 map）。
 List<Map<String, dynamic>> librariesWithDisplayNames(
     List<Map<String, dynamic>> libs) {

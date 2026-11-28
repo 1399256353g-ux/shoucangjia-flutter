@@ -78,7 +78,6 @@ import 'continue_watching.dart';
 import 'cover_badges.dart';
 import 'decode_fallback.dart';
 import 'home_action.dart';
-import 'label_fallback.dart';
 import 'lib_names.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
@@ -1041,7 +1040,7 @@ class LibMeta {
   String topLabelFor(String topId) {
     if (topId.isEmpty) return '';
     for (final t in tops) {
-      if (t.id == topId) return labelOrId(topId, t.name);
+      if (t.id == topId) return libEntryTitle(topId, t.name);
     }
     return topId;
   }
@@ -3395,8 +3394,12 @@ class UnitBadges extends StatelessWidget {
     final basicChips = <BadgeChipSpec>[];
     for (final basic in sources) {
       if (basic.isEmpty) continue;
-      final label = (meta?.basicById(basic)?.name ?? '').trim();
-      if (label.isEmpty) continue;
+      // 0.9.354：这里原来是 `(meta?.basicById(basic)?.name ?? '').trim()` +
+      // `if (label.isEmpty) continue`——只剥空白、名字空就整条跳过。服务端把
+      // 基础库名字下发成空串时，同一个基础库在卡片标题/词条里显示 id
+      // （`libEntryTitle`），在这张作者卡上却**一条词条都没有**：用户看到的
+      // 不是「名字缺失」，而是「这个作者没挂在这个基础库」。
+      final label = libEntryTitle(basic, meta?.basicById(basic)?.name);
       // 同一基础库只贴一条（多来源可能重复传入同一个库）。
       if (basicChips.any((c) => c.unitId == basic)) continue;
       basicChips.add(BadgeChipSpec(
@@ -4514,7 +4517,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                               child: FilterChip(
                                   key: ValueKey('deleted-top-${o.key}'),
                                   label: Text(
-                                      '${LibraryBadge.stripIndex(_topLabel(o.key))} ${o.value}',
+                                      '${_topLabel(o.key)} ${o.value}',
                                       style: const TextStyle(fontSize: 12)),
                                   selected: topFilter == o.key,
                                   showCheckmark: false,
@@ -19023,7 +19026,7 @@ class _AuthorPageState extends State<AuthorPage> {
                           child: FilterChip(
                               key: ValueKey('author-top-${o.key}'),
                               label: Text(
-                                  '${LibraryBadge.stripIndex(_topLabel(o.key))} ${o.value}',
+                                  '${_topLabel(o.key)} ${o.value}',
                                   style: const TextStyle(fontSize: 12)),
                               selected: topFilter == o.key,
                               showCheckmark: false,

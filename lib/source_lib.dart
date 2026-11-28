@@ -4,6 +4,7 @@ import 'rel_path.dart';
 import 'stable_order.dart';
 
 import 'basic_lib.dart';
+import 'lib_names.dart' show libDisplayName;
 
 /// 作者来源词条（J9）的纯逻辑：
 /// 从作品/头像的媒体路径反查所属「基础库」，词条显示基础库名称而不是大库名。
@@ -125,8 +126,13 @@ String basicIdForMedia(List<BasicLib> basics, String mediaPath) {
 }
 
 /// 词条显示名：基础库名去掉编号前缀，例如「(8) 🦶」→「🦶」。
+///
+/// 0.9.354：这里原来自调 `normalizeLibLabel`（无条件去序号），于是「省略编号」
+/// 开关关掉后，同一份名字在卡片标题上带 `(1) `、在筛选面板/作者词条上去掉
+/// ——两个入口对同一份数据给出两个名字。去序号只有一个判断点（读开关的
+/// `LibraryBadge.stripIndex`），经由 [libDisplayName] 转发。
 String basicLibLabel(BasicLib? lib, String fallback) {
   if (lib == null) return fallback;
-  final n = normalizeLibLabel(lib.name);
+  final n = libDisplayName(lib.name);
   return n.isEmpty ? fallback : n;
 }
