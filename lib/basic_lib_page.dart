@@ -21,6 +21,7 @@ import 'author_letter_bar.dart';
 import 'home_action.dart';
 import 'category_tree_page.dart';
 import 'library_revision.dart';
+import 'lib_id.dart' show relOf;
 import 'library_tree.dart';
 import 'stable_order.dart';
 import 'media_priority.dart';
@@ -35,7 +36,8 @@ import 'unit_author_groups.dart'
         authorCreateSummary,
         authorDirForName,
         authorDirError,
-        unitAuthorCreateUrl;
+        unitAuthorCreateUrl,
+        unitAuthorsUrl;
 import 'author_badge_row.dart';
 import 'library_badge.dart';
 import 'lib_names.dart';
@@ -76,6 +78,68 @@ String pickAuthorAvatar({
 /// 基础库单页几十到上百条，主线程解析会直接卡住首帧。
 Map<String, dynamic> _parseWorksPayload(List<int> bytes) =>
     jsonOfBytes(bytes) as Map<String, dynamic>;
+
+/// 把 `/api/unit/authors.json` 的合并卡片转成和单库 `index.json` 同形的
+/// `{authors:[{id,name,works,...}]}`，且**只保留在本库有目录的那些作者**。
+///
+/// owner 2026-11-28：「作者没有真正在 app 中合并」。本页是「一个基础库的作者
+/// 列表」：同名作者在兄弟库也有目录时应该只有一张卡（作品数是合计）。
+/// 单元库接口给的是合并后的行（`files` 里有多个 `lib|authorDir`），
+/// 而本页只展示“在本库有目录”的作者——否则同一个单元库下每个基础库页
+/// 都会把所有作者列一遍。
+///
+/// 返回 null 表示这份响应不可用（形状不对），调用方回退单库索引。
+/// 仅供单测：不导出任何新语义，只是把私有解析器暴露给测试。
+///
+/// 用 `ForTest` 后缀而不是把它改成公开：生产代码里应该只有一处调用点
+/// （本页 `_loadAuthors`），公开出去就会有人从别的页面再叫一次。
+Map<String, dynamic>? mergedAuthorsInLibForTest(
+        List<int> bytes, String libId) =>
+    _mergedAuthorsInLib(bytes, libId);
+
+Map<String, dynamic>? _mergedAuthorsInLib(List<int> bytes, String libId) {
+  Object? raw;
+  try {
+    raw = jsonOfBytes(bytes);
+  } catch (_) {
+    return null;
+  }
+  if (raw is! Map) return null;
+  final cards = raw['cards'];
+  if (cards is! List) return null;
+  final want = libId.trim();
+  final out = <Map<String, dynamic>>[];
+  for (final c in cards) {
+    if (c is! Map) continue;
+    final files = c['files'];
+    if (files is! List) continue;
+    // 本库的成员：取该库那条（同一作者在一个库里理论上只有一条）。
+    Map? mine;
+    for (final f in files) {
+      if (f is Map && '${f['lib'] ?? ''}'.trim() == want) {
+        mine = f;
+        break;
+      }
+    }
+    if (mine == null) continue;
+    final name = '${c['name'] ?? ''}'.trim();
+    final dir = '${mine['authorDir'] ?? ''}'.trim();
+    if (name.isEmpty && dir.isEmpty) continue;
+    out.add(<String, dynamic>{
+      'name': name.isNotEmpty ? name : dir,
+      'authorDir': dir,
+      // 作品数是**合计**（同名作者跨库相加），与本页以前的口径不同但正确：
+      // 用户看到的是这个人的总量。
+      'works': intOf(c['works']),
+      'av': '${c['av'] ?? ''}',
+      'bio': '${c['bio'] ?? ''}',
+      // 来源标记：告诉调用方这是单元库范围合并后的行。
+      '_merged': true,
+      '_fileCount': files.length,
+    });
+  }
+  return <String, dynamic>{'authors': out};
+}
 
 class BasicLibPage extends StatefulWidget {
   final BasicLib basic;
@@ -375,7 +439,32 @@ class _BasicLibPageState extends State<BasicLibPage>
           .timeout(kTimeoutRead);
       if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       // 解析放到 isolate：避免大 payload 在 UI 线程卡顿/掉帧。
-      final j = await compute(_parseWorksPayload, r.bodyBytes);
+      var j = await compute(_parseWorksPayload, r.bodyBytes);
+      // owner 2026-11-28：「作者没有真正在 app 中合并」。
+      //
+      // 根因：本页读 `/api/lib/<本库>/index.json`，它只含**本库**作者，
+      // 天然不知道同名作者在别的基础库也有目录，于是同一人被拆成多张卡。
+      // 合并信息只在单元库范围：`/api/unit/authors.json?unit=<直接上级单元库>`
+      // ——实测一个单元库 21 张卡里 3 张是多文件夹合并的。
+      //
+      // 现在：先按单元库取合并后的作者行，再只保留“在本库有目录”的那些。
+      // 拿不到单元库标识时保持旧行为（不猜）。
+      final unitRel = relOf(widget.sourceUnitId);
+      if (unitRel.isNotEmpty) {
+        try {
+          final ur = await http
+              .get(
+                  Uri.parse(unitAuthorsUrl(widget.urlOf('').toString(), unitRel)),
+                  headers: widget.headersOf(widget.basic.id))
+              .timeout(kTimeoutReadSlow);
+          if (ur.statusCode == 200) {
+            final merged = _mergedAuthorsInLib(ur.bodyBytes, widget.basic.id);
+            if (merged != null) j = merged;
+          }
+        } catch (_) {
+          // 合并接口取不到时退回单库索引：宁可少合并，不要空白。
+        }
+      }
       final list = <Map<String, dynamic>>[];
       for (final a in listOf(j['authors'])) {
         if (a is Map) list.add(Map<String, dynamic>.from(a));
