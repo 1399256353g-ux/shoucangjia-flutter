@@ -1,53 +1,75 @@
-/// 作者主页的「作者文件夹挂载」面板（owner 2026-11-25）。
+/// 作者页的「作者挂载」面板：**按基础库**，没有目录树。
 ///
-/// owner：「这套机制怎么想挂载入口也应该在作者主页吧，单元库点进去再选哪个
-/// 作者吗？搞笑」。
+/// owner 2026-11-28（第三次提同一件事）：
+/// > 「差分合并点了没用，分开的还是分开，旧逻辑和新的还是一起混在一起」
 ///
-/// 挂载是**作者维度**的事：打开某个人，才该看到这个人存在于哪些基础库、
-/// 哪些文件夹，以及是否已经合并。原来的入口在单元库页，要先进库再在几百个
-/// 作者里找一个，方向就是错的。
+/// 旧实现有三个致命问题，全在本文件里：
+///  1. 渲染的数据是 `/api/author/mounts` 的 `items`——**逐个目录**的平铺列表；
+///     合并只会写一个 group 记录，`items` 永远不变，所以「点了没用」。
+///  2. 合并 / 拆出 / 编辑成员三套对话框并存，都要用户理解「文件夹」这一层。
+///  3. `AuthorFilePicker`（目录树）在这里也有第四份拷贝。
 ///
-/// 本面板只做三件事：
-///  1. 列出这个作者在哪些「基础库 / 文件夹」里（只读，来自 `/api/author/mounts`）；
-///  2. 同一单元库内 ≥2 处时，可一键合并成一张作者卡；
-///  3. 已合并的组可拆回去（拆出来的那份永远不再自动合并）。
+/// 现在只按**基础库**说话：
+///  - 已合并 → 一张卡显示「N 个基础库」，可拆出某几个库；
+///  - 未合并 → 列出这些库，点「合并成一个作者」。
+///
+/// 合并结果从 `/api/unit/authors.json?unit=` 读（那是唯一会变的地方）。
 library;
 
 import 'dart:convert';
 
-import 'ui_copy.dart';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-import 'author_file_picker.dart';
+import 'api_timeout.dart';
+import 'count_label.dart';
 import 'error_text.dart';
 import 'http_error_text.dart';
 import 'http_json.dart';
 import 'json_num.dart';
-import 'count_label.dart';
 import 'label_fallback.dart';
-import 'rel_path.dart';
-import 'unit_author_groups.dart';
-import 'toast.dart';
 import 'loading_view.dart';
-import 'api_timeout.dart';
+import 'rel_path.dart' show lastRelName;
 import 'text_styles.dart';
+import 'toast.dart';
+import 'ui_copy.dart';
+import 'unit_author_groups.dart';
+
+/// 一个单元库里「这位作者」的合并卡。
+class _UnitCard {
+  final String unit;
+  final String groupId;
+  final String name;
+  final List<AuthorGroupFile> files;
+  final bool auto;
+  final int works;
+
+  const _UnitCard({
+    required this.unit,
+    required this.groupId,
+    required this.name,
+    required this.files,
+    this.auto = false,
+    this.works = 0,
+  });
+
+  /// 卡里出现的不同基础库（保持出现顺序）。
+  List<String> get libs {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final f in files) {
+      if (seen.add(f.lib)) out.add(f.lib);
+    }
+    return out;
+  }
+}
 
 /// 打开作者挂载面板。
-///
-/// [scopeBasics]：该作者所属**直接上级单元库**下的全部基础库。
-///
-/// owner 2026-11-28：「作者页挂载功能也改为基础库制」。挂载不再按目录树
-/// 勾选，而是先列出这些基础库，由用户选「作者的作品存在于哪些基础库」。
-/// 空列表＝拿不到单元库树，面板只展示现状、不出新建入口（不拿单个库猜）。
 Future<bool?> showAuthorMountSheet({
   required BuildContext context,
   required String authorName,
   required String base,
   required Map<String, String> headers,
-  List<({String id, String name})> scopeBasics =
-      const <({String id, String name})>[],
   http.Client? client,
 }) {
   return showModalBottomSheet<bool>(
@@ -58,7 +80,6 @@ Future<bool?> showAuthorMountSheet({
       authorName: authorName,
       base: base,
       headers: headers,
-      scopeBasics: scopeBasics,
       client: client,
     ),
   );
@@ -69,16 +90,12 @@ class _AuthorMountSheet extends StatefulWidget {
     required this.authorName,
     required this.base,
     required this.headers,
-    this.scopeBasics = const <({String id, String name})>[],
     this.client,
   });
 
   final String authorName;
   final String base;
   final Map<String, String> headers;
-
-  /// 直接上级单元库下的全部基础库（id + 显示名）。
-  final List<({String id, String name})> scopeBasics;
   final http.Client? client;
 
   @override
@@ -87,14 +104,14 @@ class _AuthorMountSheet extends StatefulWidget {
 
 class _AuthorMountSheetState extends State<_AuthorMountSheet> {
   AuthorMounts mounts = AuthorMounts.empty;
+
+  /// 单元库 rel → 该作者在那里的合并卡（没有则为 null：说明目录还没归组）。
+  Map<String, _UnitCard?> cards = <String, _UnitCard?>{};
+
   bool loading = true;
   bool busy = false;
   String? err;
 
-  /// 「按基础库挂载」里勾选的基础库 id（owner 2026-11-28）。
-  final Set<String> _picked = <String>{};
-
-  /// 注入的客户端优先；否则本页自建一个并在 dispose 关闭。
   http.Client? _ownClient;
   http.Client get _client => widget.client ?? (_ownClient ??= http.Client());
 
@@ -118,11 +135,16 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
               headers: widget.headers)
           .timeout(kTimeoutRead);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
-      // 解码走唯一出口 jsonOf（字符集策略只有一处，见 http_json.dart）。
-      final raw = jsonOf(r);
+      final m = AuthorMounts.fromJson(jsonOf(r));
+      // 合并结果只体现在 `/api/unit/authors.json`：逐单元取一次。
+      final found = <String, _UnitCard?>{};
+      for (final unit in m.units) {
+        found[unit] = await _cardOf(unit, m);
+      }
       if (!mounted) return;
       setState(() {
-        mounts = AuthorMounts.fromJson(raw);
+        mounts = m;
+        cards = found;
         err = null;
         loading = false;
       });
@@ -135,14 +157,52 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
     }
   }
 
-  /// 基础库 id → 显示名（分支标题）。
+  /// 从单元库的合并卡里找出「这位作者」的那一张。
   ///
-  /// 名称来源是 `/api/author/mounts` 的 `items[].libName`：本面板只拿到这一个
-  /// 接口的数据，不能像单元库页那样查 `LibMeta`。拿不到就用 id。
-  ///
-  /// 0.9.352：回落判定收进 `libLabelOf`——旧写法用裸 `isEmpty`，名字是纯空格时
-  /// 返回一个看不见的空串；而单元库页那份面板走 `trim().isEmpty` 回落 id。
-  /// 同一个库在两个入口上一个有名字一个空白。
+  /// 判定用 `lib|authorDir` 集合相交：作者改名后目录名可能和显示名不同，
+  /// 名字比对会漏；目录身份才是稳定的。
+  Future<_UnitCard?> _cardOf(String unit, AuthorMounts m) async {
+    final mine = <String>{
+      for (final i in m.items)
+        if (i.unitRel == unit) '${i.lib}|${i.authorDir}',
+    };
+    if (mine.isEmpty) return null;
+    try {
+      final ur = await _client
+          .get(Uri.parse(unitAuthorsUrl(widget.base, unit)),
+              headers: widget.headers)
+          .timeout(kTimeoutRead);
+      if (ur.statusCode != 200) return null;
+      final raw = jsonOf(ur);
+      if (raw is! Map) return null;
+      final list = raw['cards'];
+      if (list is! List) return null;
+      for (final c in list) {
+        if (c is! Map) continue;
+        final fs = c['files'];
+        if (fs is! List) continue;
+        final files = <AuthorGroupFile>[];
+        var hit = false;
+        for (final f in fs) {
+          final g = AuthorGroupFile.fromJson(f);
+          if (g == null) continue;
+          files.add(g);
+          if (mine.contains(g.key)) hit = true;
+        }
+        if (!hit) continue;
+        return _UnitCard(
+          unit: unit,
+          groupId: '${c['groupId'] ?? ''}'.trim(),
+          name: '${c['name'] ?? ''}'.trim(),
+          files: files,
+          auto: boolOf(c['auto']),
+          works: intOf(c['works']),
+        );
+      }
+    } catch (_) {}
+    return null;
+  }
+
   String _libLabelOf(String lib) {
     for (final i in mounts.items) {
       if (i.lib == lib) return libLabelOf(i.lib, i.libName);
@@ -150,241 +210,8 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
     return lib;
   }
 
-  /// 把该单元库内的全部来源合并成一组。
-  Future<void> _mergeAll(String unit) async {
-    if (busy) return;
-    final files = <AuthorGroupFile>[
-      for (final i in mounts.items)
-        if (i.unitRel == unit) AuthorGroupFile(lib: i.lib, authorDir: i.authorDir),
-    ];
-    if (files.length < 2) return;
-    final req = UnitAuthorRequest(
-      unit: unit,
-      action: UnitAuthorAction.merge,
-      name: widget.authorName,
-      files: files,
-    );
-    final bad = req.error;
-    if (bad != null) {
-      _toast(bad, bad: true);
-      return;
-    }
-    await _send(req, unit);
-  }
-
-  /// 把这个组拆成「只留第一个成员」，其余成员各自独立。
-  Future<void> _split(AuthorMountGroup g) async {
-    if (busy) return;
-    if (g.files.length < 2) {
-      _toast('这个组只有一个文件夹，无需拆分', bad: true);
-      return;
-    }
-    final keep = g.files.first;
-    final req = UnitAuthorRequest(
-      unit: g.unit,
-      action: UnitAuthorAction.split,
-      groupId: g.groupId,
-      files: <AuthorGroupFile>[keep],
-      groupFiles: g.files,
-    );
-    final bad = req.error;
-    if (bad != null) {
-      _toast(bad, bad: true);
-      return;
-    }
-    await _send(req, g.unit);
-  }
-
-  /// 解散一个手动组（成员回到各自独立状态）。
-  Future<void> _dissolve(AuthorMountGroup g) async {
-    if (busy) return;
-    final req = UnitAuthorRequest(
-      unit: g.unit,
-      action: UnitAuthorAction.delete,
-      groupId: g.groupId,
-    );
-    final bad = req.error;
-    if (bad != null) {
-      _toast(bad, bad: true);
-      return;
-    }
-    await _send(req, g.unit);
-  }
-
-  /// owner 2026-11-26：「主页只能看挂载的作者文件夹，不能设置修改」。
-  ///
-  /// 作者页此前只有「合并 / 拆分 / 解散」三个整组动作，没法精确指定
-  /// 「这个作者的这几处里，哪几处算同一个」。补 `setFiles`：
-  /// 勾上的成员组成一组，取消勾选即移出（**不会删任何目录**）。
-  ///
-  /// 只在同一单元库内可见可选——跨单元库服务端不合并（语料已在面板顶部说明）。
-  Future<void> _editMembers(String unit, AuthorMountGroup? group) async {
-    if (busy) return;
-    final pool = <AuthorGroupFile>[
-      for (final i in mounts.items)
-        if (i.unitRel == unit)
-          AuthorGroupFile(lib: i.lib, authorDir: i.authorDir),
-    ];
-    if (pool.length < 2) {
-      _toast('这个单元库里只有一处，无需编辑', bad: true);
-      return;
-    }
-    final picked = <String>{
-      if (group != null)
-        for (final f in group.files) f.key
-      else
-        for (final f in pool) f.key,
-    };
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setD) => AlertDialog(
-          title: const Text('编辑组成员'),
-          content: SizedBox(
-            width: 460,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                    '勾选的文件夹算同一位作者（合并显示）；取消勾选即移出该组。'
-                    '只改显示与归类，不会删除或移动任何目录。',
-                    style: kHintTextStyle),
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(children: [
-                    // owner 2026-11-27：与单元库挂载页同一个多选控件——
-                    // 候选按基础库分叉展开，两处不再各写一份平铺列表。
-                    AuthorFilePicker(
-                      leafKeyPrefix: 'ams-setfiles',
-                      files: pool,
-                      picked: picked,
-                      labelOf: _libLabelOf,
-                      onToggle: (f, on) => setD(() {
-                        if (on) {
-                          picked.add(f.key);
-                        } else {
-                          picked.remove(f.key);
-                        }
-                      }),
-                      onToggleBranch: (branch, on) => setD(() {
-                        for (final f in branch) {
-                          if (on) {
-                            picked.add(f.key);
-                          } else {
-                            picked.remove(f.key);
-                          }
-                        }
-                      }),
-                    ),
-                  ]),
-                ),
-              ),
-            ]),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(c).pop(false),
-                child: const Text('取消')),
-            FilledButton(
-                onPressed: picked.isEmpty
-                    ? null
-                    : () => Navigator.of(c).pop(true),
-                child: const Text('保存')),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    final files = <AuthorGroupFile>[
-      for (final f in pool)
-        if (picked.contains(f.key)) f,
-    ];
-    final req = UnitAuthorRequest(
-      unit: unit,
-      action: UnitAuthorAction.setFiles,
-      // 新建组没有 groupId：setFiles 语义要求已有组，所以没组时先走 merge。
-      groupId: group?.groupId ?? '',
-      name: widget.authorName,
-      files: files,
-      groupFiles: group?.files ?? const <AuthorGroupFile>[],
-    );
-    if (group == null) {
-      final mergeReq = UnitAuthorRequest(
-        unit: unit,
-        action: UnitAuthorAction.merge,
-        name: widget.authorName,
-        files: files,
-      );
-      final bad = mergeReq.error;
-      if (bad != null) {
-        _toast(bad, bad: true);
-        return;
-      }
-      await _send(mergeReq, unit);
-      return;
-    }
-    final bad = req.error;
-    if (bad != null) {
-      _toast(bad, bad: true);
-      return;
-    }
-    await _send(req, unit);
-  }
-
-  /// 在勾选的基础库下建 `@作者` 目录（已存在直接用）。
-  ///
-  /// owner 2026-11-28：「选择后在对应基础库下创建作者文件夹，若已经存在则直接使用」。
-  /// 只调 `POST /api/unit/authors/create`（幂等：已存在返回 409），不删不改任何文件。
-  Future<void> _createDirs() async {
-    if (_picked.isEmpty || busy) return;
-    final dir = authorDirForName(widget.authorName);
-    final bad = authorDirError(dir);
-    if (bad != null) {
-      _toast(bad, bad: true);
-      return;
-    }
+  Future<void> _send(UnitAuthorRequest req, String unit) async {
     setState(() => busy = true);
-    var made = 0;
-    var existed = 0;
-    var failed = 0;
-    try {
-      final bodies = createAuthorBodies(authorDir: dir, libs: _picked);
-      for (final body in bodies) {
-        try {
-          final r = await _client
-              .post(
-                Uri.parse(unitAuthorCreateUrl(widget.base)),
-                headers: {...widget.headers, 'Content-Type': 'application/json'},
-                body: jsonEncode(body),
-              )
-              .timeout(kTimeoutWrite);
-          if (r.statusCode == 409) {
-            existed++;
-          } else if (r.statusCode == 200) {
-            made++;
-          } else {
-            failed++;
-          }
-        } catch (_) {
-          failed++;
-        }
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-    if (!mounted) return;
-    final parts = <String>[
-      if (made > 0) '新建 $made 个',
-      if (existed > 0) '已存在 $existed 个',
-      if (failed > 0) '失败 $failed 个',
-    ];
-    _toast(parts.isEmpty ? '未创建任何目录' : parts.join(' · '), bad: failed > 0);
-    if (made > 0 || existed > 0) await load();
-  }
-
-  Future<void> _send(UnitAuthorRequest req, String unit) async {    setState(() => busy = true);
     try {
       final r = await _client
           .post(
@@ -409,6 +236,197 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
   void _toast(String msg, {bool bad = false}) =>
       showToast(this, msg, bad: bad);
 
+  /// 把该单元库里的这几处合并成一位作者。
+  ///
+  /// 服务端 `merge` 需要一个**落盘的组**；合并后 `/api/unit/authors.json`
+  /// 才会显示成一张卡——所以这里合并完必须重新 load。
+  Future<void> _mergeUnit(String unit) async {
+    final files = <AuthorGroupFile>[
+      for (final i in mounts.items)
+        if (i.unitRel == unit) AuthorGroupFile(lib: i.lib, authorDir: i.authorDir),
+    ];
+    if (files.length < 2) return;
+    final req = UnitAuthorRequest(
+      unit: unit,
+      action: UnitAuthorAction.merge,
+      name: widget.authorName,
+      files: files,
+    );
+    final bad = req.error;
+    if (bad != null) {
+      _toast(bad, bad: true);
+      return;
+    }
+    await _send(req, unit);
+  }
+
+  /// 拆出：选出要**分出去**的基础库。
+  ///
+  /// 一个作者在一个基础库里只有一个目录，所以按基础库勾与按目录勾等价。
+  /// 自动合并的卡没有落盘组，先 `merge` 固定成组再 `split`。
+  Future<void> _splitCard(_UnitCard c) async {
+    final libs = c.libs;
+    if (libs.length < 2) {
+      _toast('这个作者只有一个基础库，无需拆分', bad: true);
+      return;
+    }
+    final picked = <String>{};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('拆出基础库'),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                    '勾选要分出去的基础库（至少 1 个，不能全选——全部分开请用「解散」）。'
+                    '只改分组，不动任何作者目录与作品文件。',
+                    style: kHintTextStyle),
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    for (final lib in libs)
+                      CheckboxListTile(
+                        key: ValueKey('ams-split-lib-$lib'),
+                        dense: true,
+                        value: picked.contains(lib),
+                        title: Text(_libLabelOf(lib),
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        onChanged: (v) => setD(() {
+                          if (v == true) {
+                            picked.add(lib);
+                          } else {
+                            picked.remove(lib);
+                          }
+                        }),
+                      ),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消')),
+            FilledButton(
+              key: const ValueKey('ams-split-ok'),
+              onPressed: (picked.isEmpty || picked.length >= libs.length)
+                  ? null
+                  : () => Navigator.pop(ctx, true),
+              child: const Text('拆出'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    // 服务端 split 的语义：`files` 是要搬进新组的那一份，原组留其余。
+    final moveOut = <AuthorGroupFile>[
+      for (final f in c.files)
+        if (picked.contains(f.lib)) f,
+    ];
+    final keep = <AuthorGroupFile>[
+      for (final f in c.files)
+        if (!picked.contains(f.lib)) f,
+    ];
+    if (moveOut.isEmpty || keep.isEmpty) return;
+
+    // 还没落盘的手动组（自动合并 / 无 groupId）：先 merge 出一个真组。
+    if (c.groupId.isEmpty || c.auto) {
+      final before = c.groupId;
+      await _send(
+        UnitAuthorRequest(
+          unit: c.unit,
+          action: UnitAuthorAction.merge,
+          name: c.name.isEmpty ? widget.authorName : c.name,
+          files: c.files,
+        ),
+        c.unit,
+      );
+      if (!mounted) return;
+      // merge 建的是新组：重新读一次拿到它的 id，再拆分。
+      final fresh = cards[c.unit];
+      final gid = (fresh != null && fresh.groupId.isNotEmpty)
+          ? fresh.groupId
+          : before;
+      if (gid.isEmpty) {
+        _toast('合并后没有拿到组标识，请重新打开面板再拆', bad: true);
+        return;
+      }
+      // 用新组成员重新拆：搬走 moveOut，其余留原组。
+      await _send(
+        UnitAuthorRequest(
+          unit: c.unit,
+          action: UnitAuthorAction.split,
+          groupId: gid,
+          name: widget.authorName,
+          files: moveOut,
+          groupFiles: c.files,
+        ),
+        c.unit,
+      );
+      return;
+    }
+
+    final req = UnitAuthorRequest(
+      unit: c.unit,
+      action: UnitAuthorAction.split,
+      groupId: c.groupId,
+      name: widget.authorName,
+      files: moveOut,
+      groupFiles: c.files,
+    );
+    final bad = req.error;
+    if (bad != null) {
+      _toast(bad, bad: true);
+      return;
+    }
+    await _send(req, c.unit);
+  }
+
+  Future<void> _dissolve(_UnitCard c) async {
+    if (c.groupId.isEmpty) {
+      _toast('这个作者还没合并成分组，无需解散', bad: true);
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('解散合并'),
+        content: Text('把「${c.name.isEmpty ? widget.authorName : c.name}」'
+            '在 ${c.libs.length} 个基础库的目录拆回各自独立？'
+            '只删分组记录，不动任何作者目录与作品文件。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+            key: const ValueKey('ams-dissolve-ok'),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('解散'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _send(
+      UnitAuthorRequest(
+        unit: c.unit,
+        action: UnitAuthorAction.delete,
+        groupId: c.groupId,
+      ),
+      c.unit,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -427,17 +445,14 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               const Spacer(),
               if (busy)
-                const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: InlineSpinner()),
+                const SizedBox(width: 16, height: 16, child: InlineSpinner()),
             ]),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(
-              '同一个作者可能被放在多个基础库或文件夹里。这里列出全部分布，'
-              '可把它们合并成一张作者卡（只影响显示与归类，不动任何文件）。',
+              '同一单元库里同名的作者目录默认就是同一位作者。这里按基础库列出他的分布：'
+              '要分开某几个库，点「拆出」；要合回去，点「合并」。',
               style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant),
             ),
           ),
@@ -450,18 +465,13 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
 
   Widget _body(ColorScheme cs) {
     if (loading) {
-      return const Padding(
-        padding: EdgeInsets.all(28),
-        child: const LoadingView(),
-      );
+      return const Padding(padding: EdgeInsets.all(28), child: LoadingView());
     }
     if (err != null) {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(failureLine('读取', err!),
-              textAlign: TextAlign.center,
-              style: kHintTextStyle),
+          Text(err!, textAlign: TextAlign.center, style: kHintTextStyle),
           const SizedBox(height: 12),
           FilledButton(onPressed: load, child: const Text('重试')),
         ]),
@@ -471,8 +481,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
       return const Padding(
         padding: EdgeInsets.all(24),
         child: Text('没有找到这个作者的目录',
-            textAlign: TextAlign.center,
-            style: kHintTextStyle),
+            textAlign: TextAlign.center, style: kHintTextStyle),
       );
     }
 
@@ -481,55 +490,6 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
       shrinkWrap: true,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
       children: [
-        // owner 2026-11-28：「作者页挂载功能也改为基础库制」。
-        // 与挂载设置页同一套：先列直属单元库下的基础库，勾哪些有他的作品。
-        if (widget.scopeBasics.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
-            child: Row(children: [
-              const Icon(Icons.create_new_folder_outlined, size: 15),
-              const SizedBox(width: 6),
-              const Expanded(
-                child: Text('按基础库挂载',
-                    style:
-                        TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-              ),
-              TextButton(
-                key: const ValueKey('ams-scope-create'),
-                onPressed: busy ? null : _createDirs,
-                child: Text('建目录'
-                    '${_picked.isEmpty ? '' : '（${_picked.length}）'}'),
-              ),
-            ]),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
-            child: Text(
-              '勾选该作者在哪些基础库有作品，点「建目录」在对应库里建 '
-              '@${widget.authorName}（已存在则直接用）。同名目录视为同一作者。',
-              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
-            ),
-          ),
-          for (final b in widget.scopeBasics)
-            CheckboxListTile(
-              key: ValueKey('ams-scope-${b.id}'),
-              dense: true,
-              value: _picked.contains(b.id),
-              title: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-              controlAffinity: ListTileControlAffinity.leading,
-              onChanged: busy
-                  ? null
-                  : (v) => setState(() {
-                        if (v == true) {
-                          _picked.add(b.id);
-                        } else {
-                          _picked.remove(b.id);
-                        }
-                      }),
-            ),
-          const Divider(height: 20),
-        ],
-        // 概要：几库几处
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
           child: Text(
@@ -539,35 +499,23 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
           ),
         ),
         for (final u in units) _unitSection(u, cs),
-        if (!mounts.sameUnitOnly)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
-            child: Text(
-              '这些文件夹分属不同单元库，服务端只会在同一单元库内合并——'
-              '跨单元库的同名作者各自独立显示。',
-              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
-            ),
-          ),
       ],
     );
   }
 
   Widget _unitSection(String unit, ColorScheme cs) {
     final items = [for (final i in mounts.items) if (i.unitRel == unit) i];
-    final gid = mounts.groupIdIn(unit);
-    AuthorMountGroup? group;
-    for (final g in mounts.groups) {
-      if (g.unit == unit) {
-        group = g;
-        break;
-      }
+    final libs = <String>[];
+    for (final i in items) {
+      if (!libs.contains(i.lib)) libs.add(i.lib);
     }
-    // 拆分走 `rel_path.dart` 唯一实现（连 `\` 一起认）：旧写法 `split('/').last`
-    // 遇到服务端下发的 `A\B` 会把整条路径当名字贴在分组标题上。
-    final unitTail = lastRelName(unit);
-    final unitLabel = unit.isEmpty
-        ? '无归属'
-        : (unitTail.isEmpty ? unit : unitTail);
+    final card = cards[unit];
+    // 「已合并」= 这张卡里包含 ≥2 个基础库。单库没有可合并的东西。
+    final merged = card != null && card.libs.length >= 2;
+    // 未合并但分布在多个基础库：可以合并。
+    final splittable = libs.length >= 2;
+    final unitLabel = unit.isEmpty ? '无归属' : lastRelName(unit);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -577,75 +525,68 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
             Icon(Icons.layers_outlined, size: 15, color: cs.primary),
             const SizedBox(width: 6),
             Expanded(
-              child: Text(unitLabel,
+              child: Text(unitLabel.isEmpty ? unit : unitLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 12.5, fontWeight: FontWeight.w600)),
             ),
-            if (gid.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: cs.primary.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(boolOf(group?.split) ? '已拆分' : '已合并',
-                    style: TextStyle(fontSize: 10, color: cs.primary)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: (merged ? cs.primary : Colors.grey).withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(4),
               ),
+              child: Text(merged ? '已合并' : '分开 ${libs.length} 处',
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: merged ? cs.primary : Colors.grey)),
+            ),
           ]),
           const SizedBox(height: 6),
-          for (final i in items)
+          Wrap(spacing: 4, runSpacing: 4, children: [
+            for (final lib in (merged ? card.libs : libs))
+              Chip(
+                label: Text(_libLabelOf(lib),
+                    style: const TextStyle(fontSize: 11)),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+          ]),
+          if (card != null && card.files.length > (merged ? 0 : 1))
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(children: [
-                Icon(Icons.folder_outlined, size: 13, color: Colors.grey),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '${i.displayLib} · ${i.authorDir}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11.5),
-                  ),
-                ),
-                if (i.works > 0)
-                  Text('${formatCount(i.works)} 作品',
-                      style:
-                          const TextStyle(fontSize: 10.5, color: Colors.grey)),
-              ]),
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${card.files.length} 个目录 · '
+                '${card.name.isEmpty ? widget.authorName : card.name}'
+                '${card.works > 0 ? ' · ${formatCount(card.works)} 作品' : ''}',
+                style: const TextStyle(fontSize: 10.5, color: Colors.grey),
+              ),
             ),
-          if (items.length >= 2) ...[
-            const SizedBox(height: 8),
-            Wrap(spacing: 4, runSpacing: 4, children: [
-              if (gid.isEmpty)
+          if (splittable) ...[
+            const SizedBox(height: 6),
+            Wrap(spacing: 4, children: [
+              if (!merged)
                 FilledButton.tonalIcon(
-                  onPressed: busy ? null : () => _mergeAll(unit),
+                  key: ValueKey('ams-merge-$unit'),
+                  onPressed: busy ? null : () => _mergeUnit(unit),
                   icon: const Icon(Icons.merge_type, size: 16),
-                  label: Text('合并这 ${items.length} 处'),
+                  label: Text('合并这 ${libs.length} 处'),
                 )
               else ...[
-                if (group != null && group.files.length >= 2)
-                  TextButton.icon(
-                    onPressed: busy ? null : () => _split(group!),
-                    icon: const Icon(Icons.call_split, size: 16),
-                    label: const Text('拆分'),
-                  ),
                 TextButton.icon(
-                  onPressed: busy ? null : () => _dissolve(group!),
+                  key: ValueKey('ams-split-$unit'),
+                  onPressed: busy ? null : () => _splitCard(card),
+                  icon: const Icon(Icons.call_split, size: 16),
+                  label: const Text('拆出'),
+                ),
+                TextButton.icon(
+                  key: ValueKey('ams-dissolve-$unit'),
+                  onPressed: busy ? null : () => _dissolve(card),
                   icon: const Icon(Icons.link_off, size: 16),
-                  label: const Text('解散合并'),
+                  label: const Text('解散'),
                 ),
               ],
-              // owner 2026-11-26：「主页只能看挂载的作者文件夹，不能设置修改」。
-              // 「合并这 N 处」只能一把梭全并；要精确挑哪几处算同一位作者，
-              // 走这里。已合并的组也能进来改成员。
-              TextButton.icon(
-                key: ValueKey('ams-edit-members-$unit'),
-                onPressed: busy ? null : () => _editMembers(unit, group),
-                icon: const Icon(Icons.checklist_rtl, size: 16),
-                label: const Text('编辑组成员'),
-              ),
             ]),
           ],
         ]),

@@ -18032,19 +18032,11 @@ class _AuthorPageState extends State<AuthorPage> {
   /// 任何挂载”与“请求本身发错了”长得一模一样，界面上看不出区别。
   Future<void> _openAuthorMount() async {
     final lib = primaryLib.isEmpty ? cfg.lib : primaryLib;
-    // owner 2026-11-28：「作者页挂载功能也改为基础库制」。
-    // 范围＝该作者所属直接上级单元库下的全部基础库（作品不得跨出这个集合）。
-    final unit = meta?.unitTree == null ? null : unitForBasic(meta!.unitTree!, lib);
-    final scopeBasics = <({String id, String name})>[
-      if (unit != null)
-        for (final b in unit.allBasics) (id: b.id, name: b.name),
-    ];
     await showAuthorMountSheet(
       context: context,
       authorName: widget.name,
       base: cfg.baseFor(lib),
       headers: cfg.headersFor(lib),
-      scopeBasics: scopeBasics,
     );
     // 面板里可能做过合并/拆分：关掉后一律重载，不依赖它是否回传结果
     // （用户也可能中途按返回键关掉，那条路径不会有返回值）。

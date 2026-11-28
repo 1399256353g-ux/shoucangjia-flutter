@@ -1065,18 +1065,28 @@ void main() {
       expect(main.contains('UnitBadgeRegistry.orderOr('), isTrue);
     });
 
-    test('setFiles 必须有真实入口（否则等于协议层摆设）', () {
-      // owner 2026-11-28 把「挂载设置页」的目录树那套整体删了（「删掉啊还留着干嘛」），
-      // setFiles 的真实入口现在只在**作者页挂载面板**（`author_mount_sheet`）：
-      // 那里按单个作者编辑「哪几处算同一人」，setFiles 才是对的动作。
+    test('setFiles 的旧 UI 入口已整体删除（随目录树那套一起）', () {
+      // owner 2026-11-28：
+      // > 「差分合并点了没用，分开的还是分开，旧逻辑和新的还是一起混在一起」
+      // > 「原来的那些设置逻辑特别混乱啊根本没法用，删掉啊还留着干嘛」
+      //
+      // 「编辑成员」（setFiles）与树形勾选是同一套旧逻辑：它让用户逐个数
+      // 「哪几个文件夹算同一人」，而真正要回答的只是「哪些基础库有他」。
+      // 现在合并/拆出/解散已覆盖全部需求，setFiles 不再有 UI 入口。
+      //
+      // 协议枚举保留（服务端仍支持），但界面不得再长出第四个对话框。
+      for (final f in const [
+        'lib/author_mount_sheet.dart',
+        'lib/unit_author_mount_page.dart',
+      ]) {
+        final src = codeOf(f);
+        expect(src.contains('UnitAuthorAction.setFiles'), isFalse,
+            reason: '$f 又把「编辑成员」加回来了；合并/拆出已覆盖该需求');
+      }
+      // 合并与拆出必须在（否则挂载真的什么都做不了）。
       final sheet = codeOf('lib/author_mount_sheet.dart');
-      expect(sheet.contains('UnitAuthorAction.setFiles'), isTrue,
-          reason: '作者页没有 setFiles 入口，编辑组成员无从下手');
-      expect(sheet.contains('_editMembers'), isTrue);
-      // 挂载设置页不得再留着旧入口（旧目录树已整体删除）。
-      final page = codeOf('lib/unit_author_mount_page.dart');
-      expect(page.contains('UnitAuthorAction.setFiles'), isFalse,
-          reason: '挂载设置页的目录树对话框已删除，不该再有 setFiles');
+      expect(sheet.contains('UnitAuthorAction.merge'), isTrue);
+      expect(sheet.contains('UnitAuthorAction.split'), isTrue);
     });
 
     test('不得再出现「仅本层 / 非末梢」这类与真实分发规则相反的文案', () {
