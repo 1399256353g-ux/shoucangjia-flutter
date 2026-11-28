@@ -193,8 +193,11 @@ void main() {
       }
       expect(literals, 1,
           reason: '键名有两份就会有一天「写进 A、读的是 B」');
+      // 0.9.381：三把本机偏好键（含这一把）搬到了 `lib/pref_keys.dart` 的
+      // 同一处，`main` 只 import 转发——「只有一份」的判定从「只写在 main」
+      // 改为「只写在 pref_keys」，仍然只有一份。
       expect(_code('lib/main.dart').contains('kHiddenWorksPrefsKey'), isTrue);
-      expect(_code('lib/main.dart')
+      expect(_code('lib/pref_keys.dart')
           .contains('const String kHiddenWorksPrefsKey = \'hidden_works_v1\''), isTrue);
     });
 

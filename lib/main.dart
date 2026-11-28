@@ -20,6 +20,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'api_timeout.dart';
 import 'api_url.dart';
+import 'pref_keys.dart' show kHiddenWorksPrefsKey;
 import 'basic_auth.dart';
 import 'rank_medal.dart';
 import 'time_labels.dart';
@@ -4551,7 +4552,7 @@ const int kRecommendMaxCount = 500;
 const String kRecommendCountPrefsKey = 'recommend_n_v1';
 
 /// 播放页「不感兴趣」本机集合的落盘键（读写都走 `prefs_json` 的列表入口）。
-const String kHiddenWorksPrefsKey = 'hidden_works_v1';
+// 本机偏好键名（含 `kHiddenWorksPrefsKey`）只在 `pref_keys.dart` 定义一处。
 
 /// 容错解析用户输入：空/非数字 → 默认 40；数字夹紧到 0..500。
 ///
@@ -5184,9 +5185,17 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
       showToast(this, bad);
       return;
     }
+    final oldOwner = AppSettings.conflictOwner(action, combo);
     AppSettings.bindCombo(action, combo);
     setState(() {});
     await AppSettings.save();
+    // 互换是既定语义（同一组合只能对应一个动作），但用户在点下去之前
+    // 看不到「这个键已经有主了」——把被换走的那一项报出来，避免「我的
+    // 静音怎么自己变了」。
+    if (mounted && oldOwner != null) {
+      showToast(this,
+          '${AppSettings.comboLabel(combo)} 原属「${actionLabels[oldOwner]!}」，已与其互换');
+    }
   }
 
   @override
@@ -5274,6 +5283,8 @@ class _KeyCaptureDialogState extends State<_KeyCaptureDialog> {
     }
     final combo = KeyCombo(k.keyId, AppSettings.currentMods());
     // 保留键当场提示，不关闭弹窗（与绑定层同一条准入规则）。
+    // 这里**不**把「已被占用」当错误：占用走互换（[AppSettings.bindCombo]
+    // 的既定语义），占用方由 _rebind 事后报出来。
     final bad = AppSettings.bindComboError(combo);
     if (bad != null) {
       setState(() => _hint = bad);
@@ -13492,6 +13503,11 @@ class _PlayerPageState extends State<PlayerPage>
     final down = e is KeyDownEvent;
     final repeat = e is KeyRepeatEvent;
     if (!down && !repeat) return KeyEventResult.ignored;
+    // 修饰键本身不是「一次按键」：按住 Ctrl 只该让下一次 F 变成 Ctrl+F。
+    // 落到下面的分支会有两个副作用——（1）恢复沉浸的悬浮条被修饰键闪出来，
+    // （2）`actionForCombo(F, Ctrl) == null` 后继续往下走固定键位。
+    // 直接放行（ignored），让 Shift 等仍能交给输入框/快捷键层处理。
+    if (AppSettings.isModifierKeyId(k.keyId)) return KeyEventResult.ignored;
     // P2：任何按键都先恢复非全屏沉浸（全屏逻辑不动）。
     if (down && !fs) _immersiveTouch();
     // 自定义键位只在按下时触发一次，长按重复不再连发。

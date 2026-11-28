@@ -76,11 +76,23 @@ void main() {
       expect(AppSettings.bindCombo(PlayerAction.mute, const KeyCombo(70)),
           isFalse);
       // 读盘同一条规则：坏条目回落默认，不会留在表里。
+      //
+      // 0.9.381：读入路径会把 70 归一成小写 F 再准入（历史大写码要能恢复），
+      // 于是「整条丢掉」不再是唯一结果——**真正要钉的是落点**：这条历史
+      // 条目不能以原样占据某个动作的绑定而不触发，也不能和单键 F 同时存在。
+      // 旧断言（mute 退回默认 M）用的是「丢弃」这一种实现细节。
       AppSettings.applyJson({
         'keys': {'mute': KeyCombo(70).toJson()},
       });
-      expect(AppSettings.keyBindings[PlayerAction.mute]!.keyId,
-          LogicalKeyboardKey.keyM.keyId);
+      final mute = AppSettings.keyBindings[PlayerAction.mute]!;
+      expect(LogicalKeyboardKey.findKeyByKeyId(mute.keyId), isNotNull);
+      expect(mute.keyId, LogicalKeyboardKey.keyF.keyId);
+      expect(AppSettings.actionForCombo(LogicalKeyboardKey.keyF.keyId, 0),
+          isNotNull);
+      // 这条历史条目的落点仍然是 mute 自己的位置（不是被静默挪到别的动作）。
+      expect(
+          AppSettings.actionForCombo(LogicalKeyboardKey.keyF.keyId, 0),
+          PlayerAction.mute);
     });
 
     test('叫不出名字的键码显示可读键码，不冒充「未绑定」', () {

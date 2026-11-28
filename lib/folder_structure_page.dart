@@ -5,6 +5,7 @@ import 'count_label.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'http_json.dart';
+import 'pref_keys.dart' show kFolderUnlockedPrefsKey;
 import 'prefs_json.dart';
 import 'http_error_text.dart';
 
@@ -150,7 +151,8 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
 
   /// 手动强制解锁的基础库目录（持久化）：允许把它们设为节点文件夹。
   final Set<String> unlocked = <String>{};
-  static const String _unlockedKey = 'folder_unlocked_v1';
+  /// 键名只在 `pref_keys.dart` 一处定义（本机偏好键同属一件资产）。
+  static const String _unlockedKey = kFolderUnlockedPrefsKey;
   bool loading = true;
   bool saving = false;
   String? err;

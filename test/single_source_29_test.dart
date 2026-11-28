@@ -51,23 +51,31 @@ void main() {
       AppSettings.bindCombo(PlayerAction.fullscreen, KeyCombo(f, 16));
       // 拒绝后应保持默认（F），而不是被写成 m=16 的死绑定。
       expect(AppSettings.keyBindings[PlayerAction.fullscreen], KeyCombo(f));
-      expect(AppSettings.actionForCombo(f, 16), isNull);
+      // 归一后 `16` 与 `0` 是同一个组合（16 在已知位域里没有任何位），
+      // 所以按 F 命中全屏；**不存在**一个只有 16 才能命中的死组合。
+      expect(AppSettings.actionForCombo(f, 16), PlayerAction.fullscreen);
       expect(AppSettings.actionForCombo(f, 0), PlayerAction.fullscreen);
     });
 
-    test('落盘里的越界掩码在读入时被丢弃，回落默认', () {
+    test('落盘里的越界掩码读入时只保留已知位（不会成为按不出来的死绑定）', () {
       AppSettings.applyJson({
         'keys': {
           'mute': {'k': f, 'm': 16},
           'back': {'k': j, 'm': -1},
         }
       });
-      // 两条都非法 → 各自保持默认（M / H），不会被写成「已绑定但按不出来」。
-      expect(AppSettings.keyBindings[PlayerAction.mute],
-          KeyCombo(LogicalKeyboardKey.keyM.keyId));
+      // 0.9.381：越界位**不是**未知修饰键，只是同一位域的无效值。读入时按
+      // `& modAll` 归一，剩下的已知低位就是真正参与比较的那部分：
+      //   `m=16` 只剩 0 位             → 等价于单键 F；
+      //   `m=-1` 在已知位域内全为 1    → 等价于 Ctrl+Shift+Alt+Win+J。
+      // 关键不变量：不会再存在「界面说已绑定、按键永远匹配不上」的条目——
+      // 归一后的组合与真实按键算出来的掩码可以精确相等。
+      expect(AppSettings.keyBindings[PlayerAction.mute], KeyCombo(f));
       expect(AppSettings.keyBindings[PlayerAction.back],
-          KeyCombo(LogicalKeyboardKey.keyH.keyId));
-      expect(AppSettings.actionForCombo(f, 16), isNull);
+          KeyCombo(j, KeyCombo.modAll));
+      expect(AppSettings.actionForCombo(f, 16), PlayerAction.mute);
+      expect(AppSettings.actionForCombo(f, 0), PlayerAction.mute);
+      expect(AppSettings.actionForCombo(j, KeyCombo.modAll), PlayerAction.back);
     });
 
     test('显示层只读已知位，不产出四个修饰键的假标签', () {

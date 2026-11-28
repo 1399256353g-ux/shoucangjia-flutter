@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'library_tree.dart' show toggleStar;
+import 'pref_keys.dart' show kStarredLibsPrefsKey;
 import 'prefs_json.dart';
 
 /// 0.9.6：星标（单元库）全局状态。
@@ -15,7 +16,8 @@ class StarStore extends ChangeNotifier {
   static final StarStore instance = StarStore._();
 
   /// 与既有偏好键保持一致，升级时不丢用户星标。
-  static const String prefKey = 'lib_tree_stars_v1';
+  /// 键名只在 `pref_keys.dart` 一处定义（本机偏好键同属一件资产）。
+  static const String prefKey = kStarredLibsPrefsKey;
 
   List<String> _ids = const <String>[];
   bool _ready = false;

@@ -77,6 +77,16 @@ class KeyCombo {
 
   Map<String, dynamic> toJson() => {'k': keyId, 'm': mods};
 
+  /// 把任意掩码归一到已知位域（`0..modAll`）。
+  ///
+  /// 越界/负数**不是**「未知的修饰键」，而是同一位域的无效值：
+  /// Flutter 只为 Shift/Ctrl/Alt/Meta 置位，`_currentMods` 也已 `& modAll`。
+  /// 历史落盘里有 `{"k":102,"m":16}` / `m:-1`（手工改过 / 旧版本），
+  /// 这两种组合真实键盘永远算不出来，又被 `bindComboError` 拒绝——若不归一，
+  /// 用户按下 Ctrl+F 也匹配不上，只能靠重绑一次才恢复。归一本身不改语义：
+  /// 越界位描述的不是任何真实按键，剩下的低位就是参与比较的那部分。
+  static int normalizeMods(int raw) => raw & modAll;
+
   /// 兼容三种历史/新格式：纯数字（旧单键）、`{k,m}`、以及带 `id` 的对象。
   ///
   /// 键码/修饰键一律走 [intOf]，不用 `as num?`：落盘 JSON 里这两个字段可能是
@@ -93,7 +103,11 @@ class KeyCombo {
       if (rawKey == null || '${rawKey}'.trim().isEmpty) return null;
       final k = intOf(rawKey);
       if (k == 0) return null;
-      return KeyCombo(k, intOf(v['m'] ?? v['mods']));
+      // 大写字母码归一小写（`'F' == 70` → 102）：否则这条历史配置
+      // 「显示得像已绑定、按下永远不匹配」。归一放在**读入**这一步，
+      // 落盘与运行期只有一种键码。
+      return KeyCombo(AppSettings.normalizeKeyId(k),
+          normalizeMods(intOf(v['m'] ?? v['mods'])));
     }
     return null;
   }
@@ -237,8 +251,12 @@ class AppSettings {
       // 落盘配置同样要过准入：旧版本允许把动作绑到保留键/越界掩码，
       // 读入时丢弃该条，让固定键位保持可用。
       if (c == null || bindComboError(c) != null) continue;
-      if (!used.add(c)) continue;
-      picked[a] = c;
+      // 去重键用归一后的组合：`{k:102,m:0}` 与 `{k:70,m:0}`（大写 F）
+      // 指向同一个真实按键，配置里两条都写时必须只留一条。
+      final norm = KeyCombo(normalizeKeyId(c.keyId),
+          KeyCombo.normalizeMods(c.mods));
+      if (!used.add(norm)) continue;
+      picked[a] = norm;
     }
     // 第二趟：按写入顺序套用，冲突走互换（与 [bindCombo] 同一条规则）。
     for (final a in PlayerAction.values) {
@@ -324,7 +342,16 @@ class AppSettings {
   /// 若目标组合已被别的动作占用则互换，保证一个组合只对应一个动作。
   /// 只有修饰键（Shift/Ctrl/Alt/Meta）不能单独成为组合，直接忽略。
   static bool bindCombo(PlayerAction action, KeyCombo combo) {
+    // 准入按**传入的形状**判，归一放在准入之后。
+    //
+    // 顺序不能反：把 `KeyCombo(70)`（大写 F 的历史码）先归一再准入，
+    // 它就变成合法的小写 `F`，于是「写进一个键盘发不出来的键码」这条
+    // 陈旧配置被悄悄接受——准入层存在的意义正是拦住这种条目。
+    // 归一只解决「历史落盘里已经有的条目怎么读」（`fromJson` / 匹配 / 冲突），
+    // 不改变「什么可以写」。
     if (bindComboError(combo) != null) return false;
+    combo = KeyCombo(normalizeKeyId(combo.keyId),
+        KeyCombo.normalizeMods(combo.mods));
     final old = keyBindings[action];
     final conflict = conflictOwner(action, combo);
     if (conflict != null && old != null) keyBindings[conflict] = old;
@@ -339,8 +366,16 @@ class AppSettings {
   /// 总有一处忘记排除 [action] 自身，于是「重绑到当前同一个键」被判成自我
   /// 冲突——点一次没反应，点两次才生效。
   static PlayerAction? conflictOwner(PlayerAction action, KeyCombo combo) {
+    // 先归一：否则落盘里的大写键码/越界掩码条目在写路径上「看不见」，
+    // 两个动作会同时拿到同一个真实按键。
+    final k = normalizeKeyId(combo.keyId);
+    final m = KeyCombo.normalizeMods(combo.mods);
     for (final e in keyBindings.entries) {
-      if (e.key != action && e.value == combo) return e.key;
+      if (e.key == action) continue;
+      if (normalizeKeyId(e.value.keyId) == k &&
+          KeyCombo.normalizeMods(e.value.mods) == m) {
+        return e.key;
+      }
     }
     return null;
   }
@@ -384,6 +419,18 @@ class AppSettings {
       return '修饰键组合无法识别，请重新按下按键';
     }
     return null;
+  }
+
+  /// 读取层的键码归一：落盘/历史配置里键码可能是**大写**字母码。
+  ///
+  /// 键位表已改成本小写码（见 `defaultKeyIds` 的注释），但旧配置里
+  /// `{"k":70}` 这类大写码还在。它们不是「坏数据」，只是同一只手按下的
+  /// `F`；归一后能正常触发，而不是让那一项永远哑掉、还得逐条重绑。
+  /// 只处理 A–Z 这一个区间，其它键码原样返回（媒体键/厂商键没有这种大小写对）。
+  /// 见 [KeyCombo.fromJson]：只归一大写字母区间。
+  static int normalizeKeyId(int id) {
+    const int a = 0x41, z = 0x5A, lower = 0x20;
+    return (id >= a && id <= z) ? id + lower : id;
   }
 
   /// 固定保留键：方向键（翻页/切图）与 Esc（退出全屏/返回）。
@@ -485,9 +532,20 @@ class AppSettings {
   ///
   /// 精确匹配是有意的：`Ctrl+J` 不会触发绑定在 `J` 上的动作，
   /// 避免带修饰键的系统快捷键（Ctrl+C 等）误触发播放动作。
+  /// 按下「键码 + 当前修饰键」时应触发的动作；没有精确匹配返回 null。
+  ///
+  /// 两侧都先归一（[KeyCombo.normalizeMods] / [normalizeKeyId]）：
+  /// 「按下」与「绑定」用的必须是同一把尺子，否则历史大写键码永远撞不上，
+  /// 而界面上还显示得好好的。单键与组合键在这里是同一条比较——
+  /// `Ctrl+J` 的 `mods` 与单键 `J` 的 `0` 天然不等，不需要额外分支。
   static PlayerAction? actionForCombo(int keyId, int mods) {
+    final k = normalizeKeyId(keyId);
+    final m = KeyCombo.normalizeMods(mods);
     for (final e in keyBindings.entries) {
-      if (e.value.keyId == keyId && e.value.mods == mods) return e.key;
+      if (normalizeKeyId(e.value.keyId) == k &&
+          KeyCombo.normalizeMods(e.value.mods) == m) {
+        return e.key;
+      }
     }
     return null;
   }
