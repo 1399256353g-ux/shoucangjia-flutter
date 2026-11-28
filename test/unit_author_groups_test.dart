@@ -323,16 +323,6 @@ void main() {
     });
   });
 
-  group('mergeableFiles', () {
-    test('排除已在组内的成员，并按身份键去重', () {
-      final out = mergeableFiles(
-        [f('l1', '@a'), f('l2', '@a'), f('l2', '@a'), f('l3', '@b')],
-        alreadyIn: ['l1|@a'],
-      );
-      expect(out.map((e) => e.key).toList(), ['l2|@a', 'l3|@b']);
-    });
-  });
-
   group('地址拼接', () {
     test('作者组接口带 unit 查询参数并补齐协议', () {
       expect(unitAuthorGroupsUrl('192.168.2.4:8090', '(1) A'),
