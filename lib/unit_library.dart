@@ -50,6 +50,20 @@ class LibNode {
   final String serverBase;
   final String serverLabel;
 
+  /// 子树里**未被设为单元库**的目录上的手动封面指针：`rel → cover.u`。
+  ///
+  /// owner 2026-11-28：「看起来自动取下级单元库封面只能取到下级的自动封面，
+  /// 下级改成手动后还是取的下级的自动封面」。
+  ///
+  /// 根因：`unit-covers.json` 里可以有「从没被勾选成单元库」的目录的手动封面
+  /// （实测 5 条里有 2 条是三级目录）。这类目录不生成卡片（owner 同日另一条
+  /// 要求），所以不在树的节点里，`firstManualCoverUnit` 遍历子树时找不到
+  /// 它们——上级选自动时就只能落到下级自动封面。
+  ///
+  /// 这里把它们的指针随**所属节点**带进来（只读，不建卡片），供
+  /// `UnitLibrary.firstManualCoverUnit` 在子节点里找不到时取用。
+  final Map<String, String> childCoverUrls;
+
   const LibNode({
     required this.id,
     required this.rel,
@@ -60,6 +74,7 @@ class LibNode {
     this.serverId = '',
     this.serverBase = '',
     this.serverLabel = '',
+    this.childCoverUrls = const <String, String>{},
   });
 
   List<String> get segments => splitRel(rel);
@@ -187,6 +202,12 @@ class UnitLibrary {
     for (final c in children) {
       final hit = c.firstManualCover;
       if (hit.isNotEmpty) return hit;
+    }
+    // owner 2026-11-28：子树里「没被设为单元库」的目录上的手动封面也要算。
+    // 这类目录不生成卡片（不建节点），所以不在 `children` 里。
+    for (final v in node.childCoverUrls.values) {
+      final u = v.trim();
+      if (u.isNotEmpty) return u;
     }
     return '';
   }

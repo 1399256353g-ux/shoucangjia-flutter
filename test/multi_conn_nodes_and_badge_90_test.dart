@@ -92,10 +92,13 @@ void main() {
       // 旧断言要求这里存在「按本连接反向补 rel」的写法（`nodeKeyHasServer`）；
       // 那正是「没设成单元库的文件夹却出现卡片」的成因，已删除。
       // 现在 rels 只能来自 `/api/nodes`。
-      expect(body.contains('nodeKeyHasServer'), isFalse,
-          reason: '不得再用「树里带封面」反推节点（那会把未勾选的目录变成卡片）');
+      // owner 2026-11-28：`nodeKeyHasServer` 现在只用于把「非节点目录的手动
+      // 封面」挂到最近祖先（`childCoverUrls`），**不再**用来反推节点。
+      // 「未勾选的目录不得变成卡片」这条仍由 `payload.rels` 单独保证。
       expect(body.contains('payload.rels'), isTrue,
           reason: '节点来源只能是 /api/nodes 的勾选列表');
+      expect(body.contains('childCoverUrls'), isTrue,
+          reason: '非节点目录的手动封面要能挂到祖先，供上级取用');
     });
 
     test('逐连接读取真的发给每一条连接（不是换个名字照旧读一条）', () {

@@ -230,9 +230,12 @@ void main() {
       // 结果把**从未勾选**的目录也做成了单元库卡片。节点来源现在只有
       // `/api/nodes`，`main` 不再需要反解任何键。两个函数保留在 node_key.dart
       // 供其它模块使用。
-      expect(mainSrc.contains('nodeKeyRel('), isFalse);
-      expect(mainSrc.contains('nodeKeyHasServer('), isFalse,
-          reason: '不得再用「树里带封面」反推节点（会把未勾选的目录做成卡片）');
+      // owner 2026-11-28：这两个反解函数**只允许**用于「把非节点目录的手动
+      // 封面挂到最近祖先节点」这一件事（childCoverUrls），不得再用来反推节点。
+      // 反推节点的后果是「未勾选的目录变成卡片」，已成契约（下面那条断言）。
+      expect(mainSrc.contains('nodeKeyRel('), isTrue);
+      expect(mainSrc.contains('nodeKeyHasServer('), isTrue);
+      expect(mainSrc.contains('childCoverUrls'), isTrue);
     });
 
     test('树节点键与封面键各只有一处实现', () {

@@ -6260,6 +6260,23 @@ class _LibraryPageState extends State<LibraryPage> {
         treeCovers: treeCovers,
         nodesCovers: payload.covers,
       );
+      // owner 2026-11-28：带手动封面但**不是节点**的目录（不建卡）的指针，
+      // 按「最近的祖先节点」挂上去，供上级取「下级手动封面」。
+      // 键是连接作用域（`<sid>␁<rel>`），这里按本连接筛出并去掉前缀。
+      Map<String, String> childCoversOf(String rel) {
+        final out = <String, String>{};
+        for (final e in treeCovers.entries) {
+          if (!nodeKeyHasServer(e.key, s.id)) continue;
+          final r = nodeKeyRel(e.key);
+          if (r.isEmpty) continue;
+          // 只收本节点子树里、且本身不是节点的目录。
+          if (r == rel || !r.startsWith('$rel/')) continue;
+          if (payload.rels.contains(r)) continue;
+          out[r] = e.value;
+        }
+        return out;
+      }
+
       return [
         for (final rel in rels)
           LibNode(
@@ -6274,6 +6291,7 @@ class _LibraryPageState extends State<LibraryPage> {
             serverId: s.id,
             serverBase: s.base,
             serverLabel: s.cardLabel,
+            childCoverUrls: childCoversOf(rel),
           ),
       ];
     }
