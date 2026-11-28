@@ -84,6 +84,16 @@ void main() {
           isTrue);
     });
 
+    test('新建作者目录的基础库下拉也走同一个出口', () {
+      // 这里原来直接贴 `b.name`：名字空时下拉项是一条空白，还带 `(1) ` 序号。
+      final main = codeOnly(codeOf('lib/main.dart'));
+      expect(main.contains('child: Text(b.name, overflow: TextOverflow.ellipsis)'),
+          isFalse);
+      expect(
+          main.contains('child: Text(libEntryTitle(b.id, b.name),'),
+          isTrue);
+    });
+
     test('设置页继承源名字也走同一个出口', () {
       final main = codeOnly(codeOf('lib/main.dart'));
       final start = main.indexOf('String _inheritedSourceName(');

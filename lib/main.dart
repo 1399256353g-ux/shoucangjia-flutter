@@ -9311,7 +9311,10 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                   for (final b in basics)
                     DropdownMenuItem(
                         value: b.id,
-                        child: Text(b.name, overflow: TextOverflow.ellipsis)),
+                        // 与其它库名入口一样：去序号 + 名字空回落 id。
+                        // 这里原来直接贴 `b.name`，下拉项可能是一条空白。
+                        child: Text(libEntryTitle(b.id, b.name),
+                            overflow: TextOverflow.ellipsis)),
                 ],
                 onChanged: (v) => setD(() => lib = v ?? lib),
               ),
