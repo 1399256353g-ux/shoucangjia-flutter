@@ -7236,6 +7236,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
   Future<_CrawlerServerPart> _loadServerPart(ServerConn s) async {
     final headers = {'Authorization': basicAuthHeader(s.user, s.pass)};
     var libs = const <Map<String, dynamic>>[];
+    var allLibs = const <Map<String, dynamic>>[];
     final crawlers = <String, Map<String, dynamic>>{};
     CrawlerMetaUnits? meta;
     var flags = const <String, bool>{};
@@ -7248,13 +7249,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         // `CrawlerConfigPage` / `MaintenancePage`，那两页的地址与鉴权由
         // `libraryBaseOf` / `libraryHeadersOf` 从记录自身取；不打标就只能
         // 回落绑定表，而绑定表里没有第二台服务器的库——请求打到默认那台。
-        //
-        // owner 2026-11-28：遗留元数据库 `douyin` 不是媒体库，这一页把它
-        // 单独顶到最上面「其它」节里当一条爬虫配置——用户看到的是「当前
-        // 根本没有这个媒体库」。入口就滤掉（`visibleLibraries`）。
-        libs = [
-          for (final raw in visibleLibraries(
-              mapsOf(jsonMapOf(r)['libraries'])))
+        allLibs = [
+          for (final raw in mapsOf(jsonMapOf(r)['libraries']))
             withServerOrigin(raw,
                 id: s.id,
                 base: s.base,
@@ -7262,11 +7258,19 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                 user: s.user,
                 pass: s.pass),
         ];
+        // owner 2026-11-28：遗留元数据库 `douyin` 不是媒体库，不该在界面上
+        // 占一行。但它**不能从数据层滤**：实测这台服务端 `/api/libraries`
+        // 只有一条记录，`id` 就是 `douyin`。之前直接滤掉后 `ids` 为空 →
+        // 不加载 `LibMeta` → 单元库树空 → **整页空白**（owner 报的
+        // 「爬虫设置页空了」）。所以 `allLibs` 供取数，`libs` 只决定显示行。
+        libs = visibleLibraries(allLibs);
       }
     } catch (_) {}
 
+    // 取数与取元数据用**全部**注册库：即使唯一那条是遗留元数据库，它的
+    // `id` 仍是这台服务端有效的库 id（`LibMeta.load` 靠它建单元库树）。
     final ids = [
-      for (final l in libs) '${l['id'] ?? ''}'.trim()
+      for (final l in allLibs) '${l['id'] ?? ''}'.trim()
     ].where((id) => id.isNotEmpty).toList(growable: false);
     // 读失败的库要单独记下来：`null` 与「真的没有配置」在界面上是两件事。
     // 此前两者都落成「不自动抓取 · 脚本 0 个」——401/超时看起来像一条真设置。
