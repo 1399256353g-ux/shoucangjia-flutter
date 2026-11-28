@@ -18,6 +18,7 @@ import 'sync_ledger.dart';
 import 'error_text.dart';
 import 'toast.dart';
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 class SyncLogPanel extends StatefulWidget {
   final String base;
@@ -81,7 +82,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
       final r = await _client
           .get(syncLogsUri(widget.base, lib: widget.libId, limit: widget.limit),
               headers: widget.headers)
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutRead);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       dynamic raw;
       try {
@@ -114,7 +115,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
           .post(syncRetryUri(widget.base),
               headers: {...widget.headers, 'Content-Type': 'application/json'},
               body: jsonEncode(body))
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutWrite);
       dynamic parsed;
       try {
         parsed = decodeSyncJson(r.bodyBytes);
@@ -291,7 +292,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
             headers: {...widget.headers, 'Content-Type': 'application/json'},
             body: jsonEncode({'keepDays': picked}),
           )
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutWrite);
       dynamic parsed;
       try {
         parsed = decodeSyncJson(r.bodyBytes);

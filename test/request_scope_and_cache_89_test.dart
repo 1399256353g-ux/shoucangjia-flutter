@@ -106,7 +106,7 @@ void main() {
       final src = _code('lib/collection_sync_panel.dart');
       final save = src.substring(src.indexOf('Future<void> _save() async {'));
       expect(save.contains('_client'), isTrue);
-      expect(save.contains('.timeout(const Duration(seconds: 15))'), isTrue,
+      expect(save.contains('.timeout(kTimeoutWrite)'), isTrue,
           reason: '断网时这个 POST 永不返回，界面停在「保存中…」');
     });
 

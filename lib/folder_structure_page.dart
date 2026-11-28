@@ -15,6 +15,7 @@ import 'error_text.dart';
 import 'load_error_view.dart';
 import 'toast.dart';
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
 /// 供 owner 指定「节点文件夹」（单元库）。
@@ -280,7 +281,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       final rs = await Future.wait<Object?>([
         _client
             .get(_urlOf('/api/folders'), headers: _headers())
-            .timeout(const Duration(seconds: 20)),
+            .timeout(kTimeoutReadHeavy),
         _fetchBasicRels().then<Object?>((v) => v),
       ]);
       final r = rs[0] as http.Response;
@@ -330,7 +331,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
     try {
       final r = await _client
           .get(_urlOf('/api/libraries.json'), headers: _headers())
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) return null;
       final j = jsonOf(r);
       if (j is! Map) return null;
@@ -384,7 +385,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
             },
             body: jsonEncode({'nodes': nodes.toList()}),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutWrite);
       final j = r.statusCode == 200 ? jsonOf(r) : null;
       final bad = apiFailureText(r.statusCode, j);
       if (bad != null) throw bad;

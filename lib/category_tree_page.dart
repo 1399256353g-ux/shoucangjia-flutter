@@ -12,6 +12,7 @@ import 'library_tree.dart';
 import 'error_text.dart';
 import 'toast.dart';
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 /// J14：通用分类树页面。
 ///
@@ -79,7 +80,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
                   .urlOf('/api/cat/tree', lib: widget.basic.id)
                   .replace(queryParameters: {'lib': widget.basic.id}),
               headers: widget.headersOf(widget.basic.id))
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       final j = jsonOf(r);
       final t = j is Map<String, dynamic> ? parseCategoryTree(j) : null;
@@ -154,7 +155,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
             },
             body: jsonEncode({'rel': node.rel, 'name': clean}),
           )
-          .timeout(const Duration(seconds: 30));
+          .timeout(kTimeoutHeavyWrite);
       final j = r.statusCode == 200 ? jsonOf(r) : null;
       final bad = apiFailureText(r.statusCode, j);
       if (bad != null) throw bad;

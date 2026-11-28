@@ -208,7 +208,7 @@ void main() {
       final main = _code('lib/main.dart');
       final body = _body(main, 'void postStat(String type, String author,',
           'Future<Map<String, dynamic>?> fetchDropStatus(');
-      expect(body.contains('.timeout(const Duration(seconds: 8))'), isTrue);
+      expect(body.contains('.timeout(kTimeoutProbe)'), isTrue);
       expect(body.contains('.ignore()'), isTrue,
           reason: '仍然不关心结果，只是不再无限挂起');
     });

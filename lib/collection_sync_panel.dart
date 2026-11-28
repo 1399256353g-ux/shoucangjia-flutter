@@ -11,6 +11,7 @@ import 'collection_sync.dart';
 import 'error_text.dart';
 import 'toast.dart';
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 /// 单元库爬虫设置里的「同步源」区块（owner 2026-11-21 要求）。
 ///
@@ -108,7 +109,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
     try {
       final r = await _client
           .get(_settingsUri, headers: widget.headers)
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutRead);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
@@ -147,7 +148,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
                     {'idx': c.idx, 'name': c.name, 'sync': c.sync}
                 ],
               }))
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = parseCollectionSettings(j);
