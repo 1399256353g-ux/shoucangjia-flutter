@@ -33,6 +33,7 @@ import 'unit_library.dart';
 import 'toast.dart';
 import 'basic_lib.dart' show BasicLib;
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 /// 作者文件夹挂载面板。
 class UnitAuthorMountPage extends StatefulWidget {
@@ -109,17 +110,17 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
         _client
             .get(Uri.parse(unitAuthorGroupsUrl(widget.base, _unitRel)),
                 headers: widget.headers)
-            .timeout(const Duration(seconds: 10)),
+            .timeout(kTimeoutRead),
         _client
             .get(Uri.parse(unitAuthorsUrl(widget.base, _unitRel)),
                 headers: widget.headers)
-            .timeout(const Duration(seconds: 10)),
+            .timeout(kTimeoutRead),
         // 候选池：该单元库下**全部**作者目录（含没成组的）。
         // 失败不影响主流程：退回作者卡里的成员（旧行为）。
         _client
             .get(Uri.parse(unitAuthorsAllUrl(widget.base, _unitRel)),
                 headers: widget.headers)
-            .timeout(const Duration(seconds: 10)),
+            .timeout(kTimeoutRead),
       ]);
       final g = jsonMapOf(results[0]);
       // 读接口收尾统一走 throwIfApiFailed：以前这里手拼
@@ -212,7 +213,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             headers: {...widget.headers, 'Content-Type': 'application/json'},
             body: jsonEncode(req.toBody()),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       final j = jsonOf(r);
       // requireOk:false = 老契约（200 且无显式 ok:false 即成功）。
       throwIfApiFailed(r.statusCode, j);
@@ -293,7 +294,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
                 headers: {...widget.headers, 'Content-Type': 'application/json'},
                 body: jsonEncode(body),
               )
-              .timeout(const Duration(seconds: 15));
+              .timeout(kTimeoutWrite);
           if (r.statusCode == 409) {
             existed++;
           } else if (r.statusCode == 200) {

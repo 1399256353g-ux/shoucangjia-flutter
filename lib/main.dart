@@ -18,6 +18,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'api_timeout.dart';
 import 'api_url.dart';
 import 'basic_auth.dart';
 import 'rank_medal.dart';
@@ -466,7 +467,7 @@ Future<void> ensureAuthorAvatarsLoaded() async {
     final scope = cfg.aggregate('/api/authors.json');
     final r = await http
         .get(scope.uri, headers: scope.headers)
-        .timeout(const Duration(seconds: 20));
+        .timeout(kTimeoutReadHeavy);
     if (r.statusCode == 200) {
       final m = jsonOf(r);
       if (m is Map) {
@@ -723,7 +724,7 @@ class LibMeta {
         Map<String, String> h() => hdr ?? cfg.headersFor(lib);
         final rs = await Future.wait([
           http.get(
-              u('/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+              u(cacheBusted('/api/libraries.json')),
               // 地址按 `lib` 路由，鉴权头也必须按 `lib`（`cfg.headers` 是
               // **当前库**那条连接的账号）：从另一个服务端的库进来时，两者
               // 不同源就是拿 A 的密码去敲 B 的门（401），整棵库树退回空。
@@ -732,7 +733,7 @@ class LibMeta {
           http.get(u('/api/author_stats.json'),
               headers: h()),
           http.get(u('/api/nodes'), headers: h()),
-        ]).timeout(const Duration(seconds: 10));
+        ]).timeout(kTimeoutBatch);
         if (rs[0].statusCode == 200 && rs[1].statusCode == 200) {
           final lj = jsonOf(rs[0]);
           final reg = jsonOf(rs[1]);
@@ -1153,15 +1154,13 @@ Future<Map<String, Set<String>>> _authorTypesForLib(String lib,
     try {
       final reg = await http
           .get(cfg.u('/api/libraries', lib: lib), headers: cfg.headersFor(lib))
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutReadSlow);
       if (reg.statusCode != 200) return _typesFailed(key);
       final lj = await http
           .get(
-              cfg.u(
-                  '/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}',
-                  lib: lib),
+              cfg.u(cacheBusted('/api/libraries.json'), lib: lib),
               headers: cfg.headersFor(lib))
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutReadHeavy);
       if (lj.statusCode != 200) return _typesFailed(key);
       final regJson = jsonOf(reg);
       var base = '';
@@ -1206,7 +1205,7 @@ Future<Map<String, Set<String>>> _typesFromLibIndex(
     final r = await http
         .get(cfg.u('/api/lib/$basicId/index.json', lib: lib),
             headers: cfg.headersFor(lib))
-        .timeout(const Duration(seconds: 12));
+        .timeout(kTimeoutRead);
     if (r.statusCode != 200) return <String, Set<String>>{};
     return authorTypesFromIndex(jsonOf(r));
   } catch (_) {
@@ -1271,7 +1270,7 @@ void postStat(String type, String author, {String? lib}) {
         .post(cfg.u('/api/stats', lib: lib),
             headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
             body: jsonEncode({'type': type, 'author': author}))
-        .timeout(const Duration(seconds: 8))
+        .timeout(kTimeoutProbe)
         .ignore();
   } catch (_) {}
 }
@@ -1283,7 +1282,7 @@ Future<Map<String, dynamic>?> fetchDropStatus(String id, {String? lib}) async {
     final r = await http
         .get(cfg.u('/api/drops?id=${Uri.encodeQueryComponent(id)}', lib: lib),
             headers: cfg.headersFor(lib))
-        .timeout(const Duration(seconds: 8));
+        .timeout(kTimeoutProbe);
     final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
@@ -1313,7 +1312,7 @@ Future<Map<String, dynamic>?> startServerSync(
               if (author != null) 'author': author,
               'full': full,
             }))
-        .timeout(const Duration(seconds: 15));
+        .timeout(kTimeoutWrite);
     final j = jsonOf(r);
     if (j is Map)
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
@@ -1326,7 +1325,7 @@ Future<Map<String, dynamic>?> serverSyncStatus() async {
   try {
     final r = await http
         .get(cfg.u('/api/sync'), headers: cfg.headers)
-        .timeout(const Duration(seconds: 8));
+        .timeout(kTimeoutRead);
     final j = jsonOf(r);
     if (j is Map) return Map<String, dynamic>.from(j);
   } catch (_) {}
@@ -1454,7 +1453,7 @@ Future<Map<String, dynamic>?> sendDrop(String id, String author,
             // 同上：小水滴统计要记在作品所属那台服务器上。
             headers: {...cfg.headersFor(lib), 'Content-Type': 'application/json'},
             body: jsonEncode({'id': id, 'author': author}))
-        .timeout(const Duration(seconds: 8));
+        .timeout(kTimeoutProbe);
     final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
@@ -1553,7 +1552,7 @@ Future<Set<String>> fetchManualWorkIds(String lib) async {
   try {
     final r = await http
         .get(cfg.u('/api/work/manual', lib: lib), headers: cfg.headersFor(lib))
-        .timeout(const Duration(seconds: 8));
+        .timeout(kTimeoutRead);
     if (r.statusCode != 200) return <String>{};
     final j = jsonOf(r);
     final list = (j is Map ? j['works'] : null);
@@ -1587,7 +1586,7 @@ Future<Map<String, dynamic>?> postWorkDelete(String lib, String id,
               'confirm': confirm,
               'manual': true,
             }))
-        .timeout(const Duration(seconds: 20));
+        .timeout(kTimeoutWrite);
     final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
@@ -1625,7 +1624,7 @@ Future<Map<String, dynamic>?> postWorkMove(String lib, String id, String toRel,
               'confirm': confirm,
               'manual': true,
             }))
-        .timeout(const Duration(seconds: 20));
+        .timeout(kTimeoutWrite);
     final j = jsonOf(r);
     if (j is Map) {
       return {'status': r.statusCode, ...Map<String, dynamic>.from(j)};
@@ -1888,14 +1887,14 @@ class _SettingsPageState extends State<SettingsPage> {
       };
       final rs = await Future.wait([
         http
-            .get(Uri.parse('${s.base}/api/index.json'), headers: headers)
-            .timeout(const Duration(seconds: 8)),
+            .get(Uri.parse(joinApiUrl(s.base, '/api/index.json')), headers: headers)
+            .timeout(kTimeoutProbe),
         http
             .get(
-                Uri.parse(
-                    '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+                Uri.parse(joinApiUrl(
+                    s.base, cacheBusted('/api/libraries.json'))),
                 headers: headers)
-            .timeout(const Duration(seconds: 8)),
+            .timeout(kTimeoutProbe),
       ]);
       if (rs[0].statusCode != 200) throw Exception(httpErrorText(rs[0].statusCode));
       final cols = listLengthOf(jsonOf(rs[0])['collections']);
@@ -4030,7 +4029,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       final r = await http
           .get(Uri.parse(joinApiUrl(_base, '/api/authors.json')),
               headers: _headers)
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) return;
       final j = jsonOf(r);
       if (j is! Map || !mounted) return;
@@ -4046,7 +4045,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       final r = await http
           .post(Uri.parse(joinApiUrl(_base, '/api/deleted/check')),
               headers: _headers)
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -4100,7 +4099,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       try {
         final r = await http
             .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 12));
+            .timeout(kTimeoutRead);
         if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
         dynamic raw;
         try {
@@ -4198,7 +4197,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     try {
       final r = await http
           .get(uri, headers: _headersFor(lib))
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutRead);
       if (!mounted) return;
       if (r.statusCode == 404) {
         _toast(kDeletedNotLocalMessage);
@@ -4262,7 +4261,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode(body))
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutWrite);
       dynamic parsed;
       try {
         parsed = jsonOf(r);
@@ -5514,7 +5513,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
     try {
       final r = await http
           .get(cfg.u('/api/settings'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutRead);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       _apply(jsonMapOf(r), setLoading: true);
     } catch (e) {
@@ -5543,7 +5542,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
         .post(cfg.u(path),
             headers: {...cfg.headers, 'Content-Type': 'application/json'},
             body: jsonEncode(body))
-        .timeout(const Duration(seconds: 20));
+        .timeout(kTimeoutWrite);
     if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     return jsonMapOf(r);
   }
@@ -5978,7 +5977,7 @@ class _LibraryPageState extends State<LibraryPage> {
             .post(uri,
                 headers: {...headers, 'Content-Type': 'application/json'},
                 body: jsonEncode(body))
-            .timeout(const Duration(seconds: 60));
+            .timeout(kTimeoutUpload);
         dynamic parsed;
         try {
           parsed = jsonOf(r);
@@ -6038,14 +6037,14 @@ class _LibraryPageState extends State<LibraryPage> {
         try {
           final rs = await Future.wait([
             http
-                .get(Uri.parse('${s.base}/api/libraries'), headers: h)
-                .timeout(const Duration(seconds: 10)),
+                .get(Uri.parse(joinApiUrl(s.base, '/api/libraries')), headers: h)
+                .timeout(kTimeoutReadSlow),
             http
                 .get(
-                    Uri.parse(
-                        '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+                    Uri.parse(joinApiUrl(
+                        s.base, cacheBusted('/api/libraries.json'))),
                     headers: h)
-                .timeout(const Duration(seconds: 10)),
+                .timeout(kTimeoutReadHeavy),
           ]);
           var list = <Map<String, dynamic>>[];
           var def = '';
@@ -6162,10 +6161,10 @@ class _LibraryPageState extends State<LibraryPage> {
         try {
           final r = await http
               .get(
-                  Uri.parse(
-                      '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+                  Uri.parse(joinApiUrl(
+                      s.base, cacheBusted('/api/libraries.json'))),
                   headers: h)
-              .timeout(const Duration(seconds: 8));
+              .timeout(kTimeoutReadHeavy);
           if (r.statusCode != 200) return (server: s, tree: null);
           final j = jsonOf(r);
           if (j is! Map) return (server: s, tree: null);
@@ -6513,8 +6512,8 @@ class _LibraryPageState extends State<LibraryPage> {
       };
       try {
         final r = await http
-            .get(Uri.parse('${s.base}/api/nodes'), headers: h)
-            .timeout(const Duration(seconds: 8));
+            .get(Uri.parse(joinApiUrl(s.base, '/api/nodes')), headers: h)
+            .timeout(kTimeoutReadHeavy);
         if (r.statusCode != 200) return null;
         return parseNodesPayload(jsonOf(r));
       } catch (_) {
@@ -6778,7 +6777,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({'id': l['id']}))
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       if (!mounted) return;
       showToast(this, '已将「${libraryDisplayName(id, '${l['name'] ?? ''}')}」'
@@ -6817,7 +6816,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({'id': l['id']}))
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -6917,7 +6916,7 @@ class _LibraryPageState extends State<LibraryPage> {
                 'base': base.text.trim(),
                 'dir': dir.text.trim(),
               }))
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -7270,8 +7269,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     var flags = const <String, bool>{};
     try {
       final r = await http
-          .get(Uri.parse('${s.base}/api/libraries'), headers: headers)
-          .timeout(const Duration(seconds: 10));
+          .get(Uri.parse(joinApiUrl(s.base, '/api/libraries')), headers: headers)
+          .timeout(kTimeoutReadSlow);
       if (r.statusCode == 200) {
         // 每条库记录都要打上来源连接：这一页有两条入口会把它交给
         // `CrawlerConfigPage` / `MaintenancePage`，那两页的地址与鉴权由
@@ -7305,7 +7304,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         final cr = await http
             .get(Uri.parse(libApiUrl(s.base, '/api/crawler', id)),
                 headers: headers)
-            .timeout(const Duration(seconds: 8));
+            .timeout(kTimeoutReadSlow);
         if (cr.statusCode == 200) return jsonMapOf(cr);
       } catch (_) {}
       return null;
@@ -7337,8 +7336,8 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
 
     try {
       final nr = await http
-          .get(Uri.parse('${s.base}/api/nodes'), headers: headers)
-          .timeout(const Duration(seconds: 8));
+          .get(Uri.parse(joinApiUrl(s.base, '/api/nodes')), headers: headers)
+          .timeout(kTimeoutReadHeavy);
       if (nr.statusCode == 200) flags = unitCrawlerFlags(jsonOf(nr));
     } catch (_) {}
     return _CrawlerServerPart(
@@ -7670,7 +7669,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
     try {
       final r = await http
           .get(_u('/api/crawler'), headers: _headers)
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutReadSlow);
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
       final c = mapOrNull(j['crawler']) ?? const <String, dynamic>{};
@@ -7703,7 +7702,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                 'intervalMin': intervalMin,
                 'note': note,
               }))
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -7831,7 +7830,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
       final r = await http
           .get(Uri.parse(withQueryFlag('${_u('/api/maintenance')}', deep ? 'deep=1' : '')),
               headers: _headers)
-          .timeout(Duration(seconds: deep ? 90 : 15));
+          .timeout(deep ? kTimeoutDeepScan : kTimeoutReadSlow);
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (mounted) setState(() => data = j);
@@ -7851,7 +7850,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({'action': 'run-crawler', 'lib': libId}))
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutReadHeavy);
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -8025,7 +8024,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final r = await http
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
+          .timeout(kTimeoutReadSlow);
       if (r.statusCode != 200) return;
       final lj = jsonMapOf(r);
       final ls = librariesWithDisplayNames(mapsOf(lj['libraries']));
@@ -8185,9 +8184,9 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
 
   Future<int> probe(ServerConn s) async {
     try {
-      final r = await http.get(Uri.parse('${s.base}/api/auth'), headers: {
+      final r = await http.get(Uri.parse(joinApiUrl(s.base, '/api/auth')), headers: {
         'Authorization': basicAuthHeader(s.user, s.pass),
-      }).timeout(const Duration(seconds: 6));
+      }).timeout(kTimeoutProbe);
       return r.statusCode;
     } catch (_) {
       return 0;
@@ -8196,11 +8195,10 @@ Future<TotalRefreshOutcome> performTotalRefresh() async {
 
   Future<int> countLibs(ServerConn s) async {
     final r = await http.get(
-        Uri.parse(
-            '${s.base}/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+        Uri.parse(joinApiUrl(s.base, cacheBusted('/api/libraries.json'))),
         headers: {
           'Authorization': basicAuthHeader(s.user, s.pass),
-        }).timeout(const Duration(seconds: 12));
+        }).timeout(kTimeoutReadHeavy);
     if (r.statusCode != 200) throw StateError(httpErrorText(r.statusCode));
     final j = jsonOf(r);
     if (j is! Map) return 0;
@@ -8308,7 +8306,7 @@ class _RankPageState extends State<RankPage> {
       // 是媒体库，和「各库排行」页列的是同一批东西。
       final r = await http
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
+          .timeout(kTimeoutReadSlow);
       final reg = r.statusCode == 200
           ? librariesWithDisplayNames(mapsOf(jsonMapOf(r)['libraries']))
           : const <Map<String, dynamic>>[];
@@ -8365,7 +8363,7 @@ class _RankPageState extends State<RankPage> {
       final scope = cfg.aggregate('/api/rank?period=$period&metric=$metric');
       final r = await http
           .get(scope.uri, headers: scope.headers)
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonOf(r);
       await _ensureMeta(cfg.lib);
@@ -8679,7 +8677,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
     try {
       final r = await http
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
+          .timeout(kTimeoutReadSlow);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       final j = jsonMapOf(r);
       final list = librariesWithDisplayNames(mapsOf(j['libraries']));
@@ -8706,7 +8704,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                     // 地址按该库路由，鉴权头也必须按该库：`cfg.headers` 是
                     // 当前库那条连接的账号，跨连接时会 401。
                     headers: cfg.headersFor(id))
-                .timeout(const Duration(seconds: 8));
+                .timeout(kTimeoutRead);
             if (sr.statusCode != 200) return null;
             return statsAuthors(jsonOf(sr));
           } catch (_) {
@@ -9363,7 +9361,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
             },
             body: jsonEncode({'lib': lib, 'name': nameCtl.text.trim()}),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       final j = jsonOf(r);
       if (r.statusCode == 409) throw Exception('该作者目录已存在');
       throwIfApiFailed(r.statusCode, j);
@@ -9393,7 +9391,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                 Uri.parse(libApiUrl(
                     cfg.baseFor(cfg.lib), '/api/crawler', cfg.lib)),
                 headers: cfg.headersFor(cfg.lib))
-            .timeout(const Duration(seconds: 8));
+            .timeout(kTimeoutReadSlow);
         if (cr.statusCode == 200) {
           final cj = jsonOf(cr);
           final scripts = (cj is Map ? cj['scripts'] : null);
@@ -9429,11 +9427,11 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       final arScope = cfg.aggregate('/api/authors.json');
       final ar = await http
           .get(arScope.uri, headers: arScope.headers)
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutReadHeavy);
       final sr = await http
           .get(cfg.u('/api/author_stats.json', lib: cfg.lib),
               headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
+          .timeout(kTimeoutRead);
       if (ar.statusCode != 200) throw Exception(httpErrorText(ar.statusCode));
       // 作者索引可能上千作者：解析放 isolate。
       final m = await parseJsonMapAsync(ar.bodyBytes);
@@ -9655,7 +9653,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
       final r = await http
           .get(cfg.u('/api/a/$idx.json', lib: lib),
               headers: cfg.headersFor(lib))
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutRead);
       if (r.statusCode != 200) return;
       final m = jsonOf(r);
       final pick = pickFallbackAvatar(avatarCandidatesFromWorks(
@@ -14658,7 +14656,7 @@ class _PlayerPageState extends State<PlayerPage>
             },
             body: jsonEncode(req.toBody()),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutWrite);
       if (r.statusCode != 200) {
         _toast('${req.failText}：${coverErrorText(r.statusCode)}');
         return;
@@ -16590,7 +16588,7 @@ class _RecommendPageState extends State<RecommendPage> {
         try {
           final lr = await http
               .get(cfg.u('/api/libraries'), headers: cfg.headers)
-              .timeout(const Duration(seconds: 8));
+              .timeout(kTimeoutReadSlow);
           if (lr.statusCode == 200) {
             final lj = jsonOf(lr);
             if (lj is Map && lj['libraries'] is List) {
@@ -16637,7 +16635,7 @@ class _RecommendPageState extends State<RecommendPage> {
     final scope = cfg.aggregate('/api/recommend?n=$n&seed=$seed');
     final r = await http
         .get(scope.uri, headers: scope.headers)
-        .timeout(const Duration(seconds: 20));
+        .timeout(kTimeoutReadHeavy);
     if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
     final j = jsonOf(r);
     final out = <Map<String, dynamic>>[];
@@ -16921,7 +16919,7 @@ class _SearchPageState extends State<SearchPage> {
     try {
       final r = await http
           .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(const Duration(seconds: 8));
+          .timeout(kTimeoutReadSlow);
       if (r.statusCode != 200) return;
       final j = jsonMapOf(r);
       final list = librariesWithDisplayNames(mapsOf(j['libraries']));
@@ -17045,7 +17043,7 @@ class _SearchPageState extends State<SearchPage> {
                     '?offset=$offset&limit=$pageSize',
                     lib: lib),
                 headers: cfg.headersFor(lib))
-            .timeout(const Duration(seconds: 20));
+            .timeout(kTimeoutReadHeavy);
         if (r.statusCode != 200) break;
         final j = jsonOf(r);
         final batch = listOf(j is Map ? j['works'] : null);
@@ -17358,7 +17356,7 @@ Future<bool> syncAuthorGradeFromServer({String? lib}) async {
     r = await http
         .get(cfg.u('/api/author-grade.json', lib: lib),
             headers: cfg.headersFor(lib))
-        .timeout(const Duration(seconds: 10));
+        .timeout(kTimeoutRead);
   } catch (_) {
     return false;
   }
@@ -17391,7 +17389,7 @@ Future<AuthorEditResult> uploadAuthorAvatarBytes({
             'data': base64Encode(pngBytes),
           }),
         )
-        .timeout(const Duration(seconds: 30));
+        .timeout(kTimeoutHeavyWrite);
   } catch (e) {
     return AuthorEditResult(false, failureLine('上传', errorText(e)));
   }
@@ -17421,7 +17419,7 @@ Future<AuthorEditResult> uploadAuthorBio({
           },
           body: jsonEncode({'lib': libId, 'author': author, 'bio': clean}),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(kTimeoutWrite);
   } catch (e) {
     return AuthorEditResult(false, failureLine('保存', errorText(e)));
   }
@@ -17459,7 +17457,7 @@ Future<AuthorEditResult> setAuthorAvatarFile({
           body: jsonEncode(authorAvatarSetBody(
               lib: libId, author: author, file: file)),
         )
-        .timeout(const Duration(seconds: 20));
+        .timeout(kTimeoutHeavyWrite);
   } catch (e) {
     return AuthorEditResult(false, failureLine('设置头像', errorText(e)));
   }
@@ -17490,7 +17488,7 @@ Future<AuthorEditResult> clearAuthorAvatar({
           },
           body: jsonEncode(authorAvatarClearBody(lib: libId, author: author)),
         )
-        .timeout(const Duration(seconds: 20));
+        .timeout(kTimeoutHeavyWrite);
   } catch (e) {
     return AuthorEditResult(false, failureLine('清除头像', errorText(e)));
   }
@@ -18233,7 +18231,7 @@ class _AuthorPageState extends State<AuthorPage> {
         final r = await http
             .get(cfg.u('/api/authors.json', lib: lib),
                 headers: cfg.headersFor(lib))
-            .timeout(const Duration(seconds: 20));
+            .timeout(kTimeoutReadHeavy);
         if (r.statusCode != 200) return _AuthorLibFetch.failed(lib);
         final idx = jsonMapOf(r);
         // 服务端作者索引存在 `作者` / `@作者` 两种键；名字可能来自作品 `a`
@@ -18243,7 +18241,7 @@ class _AuthorPageState extends State<AuthorPage> {
         final d = await http
             .get(cfg.u('/api/a/${info['i']}.json', lib: lib),
                 headers: cfg.headersFor(lib))
-            .timeout(const Duration(seconds: 20));
+            .timeout(kTimeoutReadHeavy);
         if (d.statusCode != 200) return _AuthorLibFetch.failed(lib);
         final m = jsonOf(d);
         // 本库作品打上 `_lib` 后整批交给合并器；去重与顺序由它保证。
@@ -18444,7 +18442,7 @@ class _AuthorPageState extends State<AuthorPage> {
     try {
       final r = await http
           .get(cfg.u('/api/cat/tree', lib: lib), headers: cfg.headersFor(lib))
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) {
         _toast(failureLine('读取目录', httpErrorText(r.statusCode)));
         return null;

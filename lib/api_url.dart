@@ -89,6 +89,16 @@ String withQueryFlag(String url, String flag) {
   return url.contains('?') ? '$url&$flag' : '$url?$flag';
 }
 
+/// 给「每次都该读最新」的接口地址加一个同毫秒时间戳（`?t=…`）。
+///
+/// 六处 `'/api/libraries.json?t=${DateTime.now().millisecondsSinceEpoch}'` 各写
+/// 一遍，其中三处是**手拼的 `'${s.base}/api/...'`**——base 带查询串时会拼出
+/// `base?k=v/api/libraries.json`，路径整个落进查询串。时间戳本身没有问题，
+/// 问题是它被和「怎么拼 base」混在同一行字符串里：一处忘了走 `joinApiUrl`，
+/// 看着只是多一个 `?t=`，实际请求打到了别处。
+String cacheBusted(String path, {DateTime? now}) => withQueryFlag(
+    path, 't=${(now ?? DateTime.now()).millisecondsSinceEpoch}');
+
 /// 往**已经拼好的地址**追加一个查询参数（键与值都编码，`?`/`&` 自动选）。
 ///
 /// 「已经带 `lib=` 的地址再加一个参数」此前有两处各写一遍：

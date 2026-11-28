@@ -8,6 +8,7 @@ import 'cover_admin.dart';
 import 'error_text.dart';
 import 'http_json.dart';
 import 'media_path.dart';
+import 'api_timeout.dart';
 
 /// C2：库卡片「本地选图上传封面」的结果。
 class CoverUploadResult {
@@ -154,7 +155,7 @@ Future<CoverUploadResult> uploadCoverBytes({
         )
         // 12MB 上限的 base64 请求体：给 60s，超时后界面报「网络异常」
         // 而不是永远停在「上传中…」。
-        .timeout(const Duration(seconds: 60));
+        .timeout(kTimeoutUpload);
   } catch (e) {
     return CoverUploadResult(
         false,

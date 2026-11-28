@@ -42,6 +42,7 @@ import 'lib_names.dart';
 import 'error_text.dart';
 import 'toast.dart';
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 /// 作者卡片头像：手动设置 > 爬虫脚本（服务端下发 `av`）> 自动生成（作品图兜底）。
 /// 同级按时间新→旧；都为空时由调用方回退到「首字」占位。
@@ -345,7 +346,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               },
               body: jsonEncode({'lib': lib, 'name': nameCtl.text.trim()}),
             )
-            .timeout(const Duration(seconds: 15));
+            .timeout(kTimeoutWrite);
         if (r.statusCode == 409) {
           existed++;
         } else if (r.statusCode == 200) {
@@ -370,7 +371,7 @@ class _BasicLibPageState extends State<BasicLibPage>
           .get(widget.urlOf('/api/lib/${widget.basic.id}/index.json',
               lib: widget.basic.id),
               headers: widget.headersOf(widget.basic.id))
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutRead);
       if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       // 解析放到 isolate：避免大 payload 在 UI 线程卡顿/掉帧。
       final j = await compute(_parseWorksPayload, r.bodyBytes);
@@ -448,7 +449,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       final r = await http
           .get(widget.urlOf('/api/authors.json', lib: widget.basic.id),
               headers: widget.headersOf(widget.basic.id))
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) return;
       final j = jsonOf(r);
       if (j is! Map) return;
@@ -480,7 +481,7 @@ class _BasicLibPageState extends State<BasicLibPage>
       final r = await http
           .get(widget.urlOf('/api/author_stats.json', lib: widget.basic.id),
               headers: widget.headersOf(widget.basic.id))
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutRead);
       if (r.statusCode != 200) return;
       final j = jsonOf(r);
       final authors = j is Map ? j['authors'] : null;
@@ -512,7 +513,7 @@ class _BasicLibPageState extends State<BasicLibPage>
                   '?offset=${reset ? 0 : works.length}&limit=$_pageSize',
                   lib: widget.basic.id),
               headers: widget.headersOf(widget.basic.id))
-          .timeout(const Duration(seconds: 20));
+          .timeout(kTimeoutReadHeavy);
       if (r.statusCode != 200) throw httpErrorText(r.statusCode);
       final j = jsonOf(r);
       final batch = listOf(j['works']);

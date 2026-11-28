@@ -56,8 +56,10 @@ void main() {
       final body = main.substring(start, start + 2600);
       expect(body.contains('})>(use, 4, (s) async {'), isTrue,
           reason: '输入是整张在线连接表，并发 4 路（与爬虫页同一口径）');
-      expect('.timeout(const Duration(seconds: 10))'.allMatches(body).length, 2,
-          reason: '并发不等于可以不限时：注册表与索引两条各有 10s 上限');
+      expect(RegExp(r'\.timeout\(kTimeout\w+\)').allMatches(body).length, 2,
+          reason: '并发不等于可以不限时：注册表与索引两条各走超时档（不是裸 Duration）');
+      expect(RegExp(r'\.timeout\(\s*(?:const\s+)?Duration\(').hasMatch(body),
+          isFalse, reason: '这一块不该再有手写秒数');
       expect(body.contains('final snaps = [for (final r in fetched) r.snap];'),
           isTrue,
           reason: '结果要保序回填，snaps 的顺序必须与 servers 一致');

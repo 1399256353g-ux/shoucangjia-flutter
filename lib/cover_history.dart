@@ -18,6 +18,7 @@ import 'lib_cover.dart'
 import 'error_text.dart';
 import 'http_error_text.dart';
 import 'cover_admin.dart' show coverScopeBody;
+import 'api_timeout.dart';
 
 /// `_cover/` 里的一个历史版本。
 class CoverVersion {
@@ -140,7 +141,7 @@ Future<CoverListResult> fetchCoverVersions({
   try {
     final r = await c
         .get(url, headers: headers)
-        .timeout(const Duration(seconds: 8));
+        .timeout(kTimeoutRead);
     if (r.statusCode != 200) {
       return CoverListResult(
           false, failureLine('读取封面历史', coverActionErrorText(r.statusCode)));
@@ -195,7 +196,7 @@ Future<CoverActionResult> restoreCoverVersion({
             extra: <String, dynamic>{'v': v, 'e': e},
           )),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(kTimeoutWrite);
     if (r.statusCode != 200) {
       return CoverActionResult(
           false, failureLine('切换封面', coverActionErrorText(r.statusCode)));
@@ -238,7 +239,7 @@ Future<CoverActionResult> clearCustomCover({
             extra: <String, dynamic>{'hard': hard},
           )),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(kTimeoutWrite);
     if (r.statusCode != 200) {
       return CoverActionResult(
           false, failureLine('操作', coverActionErrorText(r.statusCode)));

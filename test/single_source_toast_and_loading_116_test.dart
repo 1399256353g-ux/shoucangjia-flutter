@@ -25,6 +25,15 @@ List<File> libFiles() => Directory('lib')
     .where((f) => f.path.endsWith('.dart'))
     .toList();
 
+/// 断言里用的相对路径：**统一用 `/`**。
+///
+/// `File.path` 在 Windows 上是 `lib\loading_view.dart`，在 Linux/macOS 上
+/// 是 `lib/loading_view.dart`。此前这里直接比较 `f.path`，于是同一条断言
+/// 在 Linux 通过、在 Windows CI 上失败（`Expected: ['lib/loading_view.dart']`
+/// `Actual: ['lib\loading_view.dart']`）——**测试本身不可跨平台**，与产品
+/// 代码无关。所有「路径 == 字面量」的断言一律经过这里。
+String relPath(File f) => f.path.replaceAll('\\', '/');
+
 /// 去掉注释行：注释里引用旧写法（说明「曾经如此」）不算「还在实现」。
 String codeOnly(String src) => [
       for (final l in src.split('\n'))
@@ -37,7 +46,7 @@ void main() {
       final offenders = libFiles()
           .where((f) => !f.path.endsWith('toast.dart'))
           .where((f) => codeOnly(codeOf(f.path)).contains('showSnackBar'))
-          .map((f) => f.path)
+          .map(relPath)
           .toList();
       expect(offenders, isEmpty,
           reason: '提示又出现了第二份实现（应走 showToast/showToastIn）：'
@@ -51,7 +60,7 @@ void main() {
           .where((f) => !f.path.endsWith('toast.dart'))
           .where((f) => RegExp(r'\bSnackBar\s*\(')
               .hasMatch(codeOnly(codeOf(f.path))))
-          .map((f) => f.path)
+          .map(relPath)
           .toList();
       expect(offenders, isEmpty, reason: '还有地方自己构造 SnackBar：$offenders');
     });
@@ -134,7 +143,7 @@ void main() {
           .where((f) => !f.path.endsWith('loading_view.dart'))
           .where((f) => codeOnly(codeOf(f.path))
               .contains('Center(child: CircularProgressIndicator())'))
-          .map((f) => f.path)
+          .map(relPath)
           .toList();
       expect(offenders, isEmpty, reason: '整页转圈又各写一份：$offenders');
     });
@@ -144,7 +153,7 @@ void main() {
           .where((f) => !f.path.endsWith('loading_view.dart'))
           .where((f) => RegExp(r'CircularProgressIndicator\([^)]*strokeWidth')
               .hasMatch(codeOnly(codeOf(f.path))))
-          .map((f) => f.path)
+          .map(relPath)
           .toList();
       expect(offenders, isEmpty, reason: '行内细圈又各写一份：$offenders');
     });
@@ -154,7 +163,7 @@ void main() {
       final defs = libFiles()
           .where((f) =>
               codeOnly(codeOf(f.path)).contains('kInlineSpinnerStroke ='))
-          .map((f) => f.path)
+          .map(relPath)
           .toList();
       expect(defs, ['lib/loading_view.dart'],
           reason: '线宽常量应只在 loading_view.dart 定义');
@@ -215,7 +224,7 @@ void main() {
         final src = codeOnly(codeOf(f.path));
         return src.contains(r'[a-z0-9][a-z0-9_-]{0,31}') ||
             src.contains(kRegistryLibIdFormatText);
-      }).map((f) => f.path).toList();
+      }).map(relPath).toList();
       expect(others, isEmpty, reason: '库 id 规则/提示又写了一份：$others');
     });
 

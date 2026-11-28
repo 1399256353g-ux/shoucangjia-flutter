@@ -30,6 +30,7 @@ import 'rel_path.dart';
 import 'unit_author_groups.dart';
 import 'toast.dart';
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 /// 打开作者挂载面板。
 Future<bool?> showAuthorMountSheet({
@@ -97,7 +98,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
       final r = await _client
           .get(Uri.parse(authorMountsUrl(widget.base, widget.authorName)),
               headers: widget.headers)
-          .timeout(const Duration(seconds: 12));
+          .timeout(kTimeoutRead);
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       // 解码走唯一出口 jsonOf（字符集策略只有一处，见 http_json.dart）。
       final raw = jsonOf(r);
@@ -323,7 +324,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
             headers: {...widget.headers, 'Content-Type': 'application/json'},
             body: jsonEncode(req.toBody()),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(kTimeoutWrite);
       final j = jsonOf(r);
       throwIfApiFailed(r.statusCode, j);
       await load();

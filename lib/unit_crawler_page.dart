@@ -19,6 +19,7 @@ import 'error_text.dart';
 import 'load_error_view.dart';
 import 'toast.dart';
 import 'loading_view.dart';
+import 'api_timeout.dart';
 
 /// L5-D：单个单元库的爬虫配置页。
 ///
@@ -100,7 +101,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     try {
       final r = await _client
           .get(Uri.parse(_configUrl), headers: widget.headers)
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutReadSlow);
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -130,7 +131,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode(config.toJson()))
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutWrite);
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
@@ -153,7 +154,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     try {
       final r = await _client
           .post(Uri.parse(_runUrl), headers: widget.headers)
-          .timeout(const Duration(seconds: 10));
+          .timeout(kTimeoutWrite);
       final j = jsonMapOf(r);
       throwIfApiFailed(r.statusCode, j);
       if (!mounted) return;
