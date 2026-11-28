@@ -10,6 +10,27 @@ import 'library_badge.dart' show LibraryBadge;
 /// 那是真实的标识，不带假的库状态。
 const String legacyDouyinName = '抖音收藏';
 
+/// 服务端遗留的「注册库」记录：`douyin` 是旧收藏夹同步时代的元数据库
+/// （`dir` 指向 `/home/zzx/.local/share/gallery`，不在库根下）。
+///
+/// owner 2026-11-28：「当前根本就没有这个媒体库，douyin 现在就是个普通的
+/// 单元库而已」——它出现在爬虫设置分节标题、各库排行列表、诊断「当前连接」
+/// 后面，被当成了一个媒体库名字。
+///
+/// 判据只看结构（id 且 `base` 不是库根下的真实目录都算遗留），不看名字文本：
+/// 这里沿用旧 id 判定（与 `main.dart` 既有 `!= 'douyin'` 同一口径），
+/// 但出口收在这一个函数，新增入口不能各自再写一遍。
+bool isLegacyMetaLibrary(Map<String, dynamic> lib) =>
+    '${lib['id'] ?? ''}'.trim() == 'douyin';
+
+/// 去掉遗留元数据库后的注册库列表（展示与统计都用它）。
+List<Map<String, dynamic>> visibleLibraries(
+    List<Map<String, dynamic>> libs) =>
+    [
+      for (final l in libs)
+        if (!isLegacyMetaLibrary(l)) l
+    ];
+
 /// 把库名规范成可展示文案：
 /// - 修掉破碎 emoji；
 /// - 空名回落到 id（判定只在 [labelOrId] 一处）；
@@ -64,10 +85,12 @@ String libDisplayName(String? rawName) {
 }
 
 /// 复制一份库列表并把每项的 `name` 换成展示文案（不改原 map）。
+///
+/// 遗留元数据库（[isLegacyMetaLibrary]）在入口就滤掉，不让它被当成媒体库。
 List<Map<String, dynamic>> librariesWithDisplayNames(
     List<Map<String, dynamic>> libs) {
   return [
-    for (final l in libs)
+    for (final l in visibleLibraries(libs))
       {
         ...l,
         // 只做名称规范化；去 `(1) ` 序号是渲染时的事（`libraryDisplayName`）。

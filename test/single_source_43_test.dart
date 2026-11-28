@@ -224,8 +224,15 @@ void main() {
       final mainSrc = _code('lib/main.dart');
       expect(mainSrc.contains(r"k.startsWith('$markedSid"), isFalse);
       expect(mainSrc.contains(r"k.substring(k.indexOf("), isFalse);
-      expect(mainSrc.contains('nodeKeyHasServer('), isTrue);
-      expect(mainSrc.contains('nodeKeyRel('), isTrue);
+      // owner 2026-11-28：`main` 不再反解节点键。
+      //
+      // 旧写法用「树里的封面键」反推节点 rel（`nodeKeyRel` / `nodeKeyHasServer`），
+      // 结果把**从未勾选**的目录也做成了单元库卡片。节点来源现在只有
+      // `/api/nodes`，`main` 不再需要反解任何键。两个函数保留在 node_key.dart
+      // 供其它模块使用。
+      expect(mainSrc.contains('nodeKeyRel('), isFalse);
+      expect(mainSrc.contains('nodeKeyHasServer('), isFalse,
+          reason: '不得再用「树里带封面」反推节点（会把未勾选的目录做成卡片）');
     });
 
     test('树节点键与封面键各只有一处实现', () {

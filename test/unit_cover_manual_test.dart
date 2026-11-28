@@ -30,26 +30,32 @@ void main() {
   });
 
   group('节点解析与卡片取图', () {
-    test('nodesFromV2 把 cover.u 带进 LibNode.coverUrl', () {
+    test('nodesFromMarks 把 cover.u 带进 LibNode.coverUrl', () {
+      // owner 2026-11-28：手动模式的节点只来自 `/api/nodes`（`nodesFromMarks`），
+      // 不再读 `libraries.json` 的 `nodes`（旧自动节点残留会把未勾选的目录
+      // 变成卡片）。因此“节点带封面”的契约改在这里验。
+      final nodes = nodesFromMarks(
+        const ['(1) A', '(2) B'],
+        covers: const {
+          '(1) A': '/media/lib-008/a/cover.jpg',
+        },
+        serverBase: 'http://nas:8090',
+        serverId: 's1',
+      );
+      expect(nodes.first.coverUrl, '/media/lib-008/a/cover.jpg');
+      expect(nodes.last.coverUrl, '');
+    });
+
+    test('nodesFromV2 手动模式不再从 json.nodes 造节点', () {
       final json = {
         'nodesMode': 'manual',
         'nodes': [
-          {
-            'id': 'nd-001',
-            'rel': '(1) A',
-            'name': '(1) A',
-            'cover': {'u': '/media/lib-008/a/cover.jpg', 'at': 1700000000},
-          },
-          {'id': 'nd-002', 'rel': '(2) B', 'name': '(2) B', 'cover': {'v': 'v3'}},
+          {'id': 'nd-001', 'rel': '(1) A', 'name': '(1) A'},
         ],
         'bigLibraries': <dynamic>[],
         'groups': <dynamic>[],
       };
-      final nodes = nodesFromV2(json);
-      expect(nodes.first.coverUrl, '/media/lib-008/a/cover.jpg');
-      expect(nodes.first.coverVersion, '');
-      expect(nodes.last.coverUrl, '');
-      expect(nodes.last.coverVersion, 'v3');
+      expect(nodesFromV2(json), isEmpty);
     });
 
     test('没有播放记录时，手动单元库封面仍优先于空自动封面', () {

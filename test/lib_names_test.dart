@@ -33,14 +33,33 @@ void main() {
   group('librariesWithDisplayNames', () {
     test('替换 name 但不改动原列表', () {
       final src = <Map<String, dynamic>>[
-        {'id': 'douyin', 'name': '抖音收藏', 'count': 1502},
         {'id': 'lib-008', 'name': '(2) douyin'},
+        {'id': 'lib-009', 'name': '抖音收藏'},
       ];
       final out = librariesWithDisplayNames(src);
-      expect(out[0]['name'], 'douyin');
-      expect(out[0]['count'], 1502);
-      expect(out[1]['name'], '(2) douyin');
-      expect(src[0]['name'], '抖音收藏');
+      // `lib-009` 名字带旧名「抖音收藏」→ 回落 id。
+      expect(out[0]['name'], '(2) douyin');
+      expect(out[1]['name'], 'lib-009');
+      // 原列表不能被改。
+      expect(src[0]['name'], '(2) douyin');
+      expect(src[1]['name'], '抖音收藏');
+    });
+
+    test('遗留元数据库 douyin 在入口就被滤掉（不是媒体库）', () {
+      // owner 2026-11-28：「当前根本就没有这个媒体库，douyin 现在就是个普通的
+      // 单元库而已」。服务端 `/api/libraries` 里那条 `id=douyin`（`dir` 指向
+      // 元数据目录、不在库根下）不得当成媒体库出现在爬虫分节/各库排行/诊断。
+      final src = <Map<String, dynamic>>[
+        {'id': 'douyin', 'name': '抖音收藏'},
+        {'id': 'lib-008', 'name': '(2) douyin'},
+      ];
+      expect(isLegacyMetaLibrary(src[0]), isTrue);
+      expect(isLegacyMetaLibrary(src[1]), isFalse);
+      final out = librariesWithDisplayNames(src);
+      expect(out, hasLength(1));
+      expect(out.single['id'], 'lib-008');
+      // 原列表不动。
+      expect(src, hasLength(2));
     });
   });
 

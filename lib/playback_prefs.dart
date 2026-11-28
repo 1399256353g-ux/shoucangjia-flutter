@@ -2,27 +2,32 @@
 ///
 /// 需求原文：「添加设置记忆功能，重进播放界面记住沿用上次的播放设置」。
 ///
-/// 之前 `speed` / `LoopLink` / `shuffle` 都只存在播放页内存里，退出播放页
-/// 就回到默认值（1.0x、连播开、循环关、乱序关）。这里把三组状态落到
-/// SharedPreferences，进播放页时先读回。
+/// 之前 `LoopLink` / `shuffle` 只存在播放页内存里，退出播放页就回到默认值
+/// （连播开、循环关、乱序关）。这里把这些状态落到 SharedPreferences，
+/// 进播放页时先读回。倍速不在这里——它一直归 `AppSettings.defaultSpeed`
+/// （见下方 0.9.356 说明）。
 ///
 /// 设计要点：
 /// - 纯数据 + 纯函数，便于单测；落盘走 `prefs_json` 的唯一入口；
 /// - 坏数据一律回落默认值，不抛异常、不阻塞进页面；
-/// - 倍速夹在 0.5–3.0（与 `setSpeed` 的钳制范围一致）。
+/// - 旧 payload 里的 `speed` 字段读入时忽略（倍速已归 AppSettings）。
 library;
 
 import 'dart:convert';
 
-import 'json_num.dart';
 import 'loop_link.dart';
 import 'prefs_json.dart';
 
 /// 播放设置的完整快照。
+///
+/// 0.9.356：**倍速不在这里**。
+///
+/// 此前倍速有两份存储：设置页写 `AppSettings.defaultSpeed`（`app_settings_v1`），
+/// 播放页却用 `playback_prefs_v1` 的 `speed` 覆盖——首进播放页时那个值恒为
+/// 默认 1.0，于是「设置页选的倍速一次都不生效」，而设置页副标题还写着
+/// 「进入播放器时自动应用」。同一个用户可调的量只允许一个落盘处：
+/// 倍速归 `AppSettings.defaultSpeed`，本类只记连播/循环/乱序。
 class PlaybackPrefs {
-  /// 播放倍速，0.5–3.0。
-  final double speed;
-
   /// 循环/连播联动状态（含「打开循环前的连播」记忆值）。
   final LoopLink link;
 
@@ -30,25 +35,16 @@ class PlaybackPrefs {
   final bool shuffle;
 
   const PlaybackPrefs({
-    this.speed = 1.0,
     this.link = const LoopLink(),
     this.shuffle = false,
   });
 
   static const PlaybackPrefs defaults = PlaybackPrefs();
 
-  PlaybackPrefs copyWith({double? speed, LoopLink? link, bool? shuffle}) =>
-      PlaybackPrefs(
-        speed: speed ?? this.speed,
-        link: link ?? this.link,
-        shuffle: shuffle ?? this.shuffle,
-      );
-
   Map<String, dynamic> toJson() => {
         // 版本只写在**键名**（`playback_prefs_v1`）里。此前这里还多写一份
         // `'v': 1`，但 `fromJson` 从不读它——两份版本号，改结构时改一处
         // 就漂移。键名已经承担了迁移职责，payload 里不再重复。
-        'speed': speed,
         'loopOne': link.loopOne,
         'autoplay': link.autoplay,
         'restoreAutoplay': link.restoreAutoplay,
@@ -58,20 +54,16 @@ class PlaybackPrefs {
   /// 容错解析：任何字段坏了只影响它自己，其余照常恢复。
   static PlaybackPrefs fromJson(dynamic raw) {
     if (raw is! Map) return defaults;
-    final speedRaw = raw['speed'];
-    var speed = 1.0;
-    final speedNum = doubleOrNull(speedRaw);
-    if (speedNum != null) {
-      speed = speedNum.clamp(0.5, 3.0).toDouble();
-    }
+    // 旧版本在本文件里也存过 `speed`：这里**不读**它（倍速已归
+    // `AppSettings.defaultSpeed`），但坏/旧字段一律忽略而不是抛异常，
+    // 升级后的第一进页面不会因为旧 payload 失败而丢掉连播/乱序。
     // 本地 prefs 与「服务端字段」是两件事：prefs 是本机自己写的（永远是
     // bool），严格只认 bool 才是对的；`"yes"` 这种服务端形态不进 prefs。
-    // 服务端字段一律走 `json_num.boolOf`，不在这里做兼容。
+    // 服务端字段的兼容规则不走这里。
     final loopOne = _boolPref(raw['loopOne'], false);
     final autoplay = _boolPref(raw['autoplay'], true);
     final restore = _boolPref(raw['restoreAutoplay'], autoplay);
     return PlaybackPrefs(
-      speed: speed,
       link: LoopLink(
         loopOne: loopOne,
         autoplay: autoplay,
@@ -86,13 +78,10 @@ class PlaybackPrefs {
 
   @override
   bool operator ==(Object other) =>
-      other is PlaybackPrefs &&
-      other.speed == speed &&
-      other.link == link &&
-      other.shuffle == shuffle;
+      other is PlaybackPrefs && other.link == link && other.shuffle == shuffle;
 
   @override
-  int get hashCode => Object.hash(speed, link, shuffle);
+  int get hashCode => Object.hash(link, shuffle);
 }
 
 /// 落盘键（版本化，日后改结构可换键名平滑迁移）。
@@ -117,3 +106,9 @@ Future<void> savePlaybackPrefs(PlaybackPrefs p) async {
     // 编码失败也不阻塞播放。
   }
 }
+
+/// 界面上可选倍速的唯一清单（设置页「默认播放倍速」与播放页倍速菜单共用）。
+///
+/// 此前两份字面量都是 `[0.75, 1.0, 1.25, 1.5, 2.0]`，改一处就会出现
+/// 「设置页能选 2.5、播放页没有」这类两个入口给两套选项的问题。
+const List<double> kPlaybackSpeeds = <double>[0.75, 1.0, 1.25, 1.5, 2.0];

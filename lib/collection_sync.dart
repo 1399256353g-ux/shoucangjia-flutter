@@ -3,6 +3,7 @@ import 'http_json.dart';
 import 'count_label.dart';
 import 'json_num.dart';
 import 'index_prefix.dart';
+import 'lib_names.dart' show libDisplayName;
 import 'rel_path.dart';
 
 /// H11：同步源选择的纯逻辑。
@@ -110,6 +111,21 @@ List<CollectionSyncInfo> setAllSync(List<CollectionSyncInfo> rows, bool value) {
 /// 打出的全角 `＠` 此前完全剥不掉，同步源「＠作者」与目录「@作者」被当成两个
 /// 不同名字，表现为「有同步记录但匹配不上」。
 String syncUnitKey(String raw) => bareNameOf(raw).toLowerCase();
+
+/// 面板上显示的单元库名（0.9.356）。
+///
+/// 此前提示文案直接插 `widget.unitName`——那是**目录名原串**，`(2) 丝` 会原样
+/// 出现在「未找到与「(2) 丝」同名的同步源」里，而同一页的标题/卡片显示的是
+/// 去掉序号的 `丝`。匹配本身一直走 `syncUnitKey`（已归一），只有给人看的这
+/// 一句没归一，于是「名字明明对得上，却说找不到」。
+///
+/// 名字缺失时用 rel 末段（`lastRelName`，与删除监测页同一个取法）。
+String syncUnitLabel(String unitName, String unitRel) {
+  final n = libDisplayName(unitName);
+  if (n.isNotEmpty) return n;
+  final seg = libDisplayName(lastRelName(unitRel));
+  return seg.isEmpty ? '该单元库' : seg;
+}
 
 List<String> _unitKeys(String unitName, String unitRel) {
   final keys = <String>[];

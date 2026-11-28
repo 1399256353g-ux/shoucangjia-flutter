@@ -88,8 +88,14 @@ void main() {
           reason: '整树指针要传进去：/api/nodes 的 covers 只覆盖被标记的节点');
       expect(body.contains('nodesCovers: payload.covers'), isTrue,
           reason: '节点权威来源是 /api/nodes 的 covers');
-      expect(body.contains('nodeKeyHasServer(k, s.id)'), isTrue,
-          reason: '反向补 rel 时也只能认本连接自己的键');
+      // owner 2026-11-28：带封面但**未被勾选**的目录不得再被造节点。
+      // 旧断言要求这里存在「按本连接反向补 rel」的写法（`nodeKeyHasServer`）；
+      // 那正是「没设成单元库的文件夹却出现卡片」的成因，已删除。
+      // 现在 rels 只能来自 `/api/nodes`。
+      expect(body.contains('nodeKeyHasServer'), isFalse,
+          reason: '不得再用「树里带封面」反推节点（那会把未勾选的目录变成卡片）');
+      expect(body.contains('payload.rels'), isTrue,
+          reason: '节点来源只能是 /api/nodes 的勾选列表');
     });
 
     test('逐连接读取真的发给每一条连接（不是换个名字照旧读一条）', () {

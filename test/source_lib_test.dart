@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/source_lib.dart';
 
@@ -28,11 +30,12 @@ void main() {
     ],
   };
 
-  test('normalizeLibLabel 去掉编号前缀并折叠空白', () {
-    expect(normalizeLibLabel('(8) 🦶'), '🦶');
-    expect(normalizeLibLabel('( 14 )  擦边 '), '擦边');
-    expect(normalizeLibLabel('无前缀'), '无前缀');
-    expect(normalizeLibLabel(''), '');
+  test('normalizeLibLabel 已删除（lib/ 内零调用点，0.9.356）', () {
+    // 它只在测试里活着的时候，看起来像「产品还在用它做基础库匹配」。
+    // 去序号/折叠白空的唯一出口是 `index_prefix.stripIndexPrefix` 与
+    // `lib_names.libDisplayName`；留下一个同义函数只会再长回第三条规则。
+    final src = File('lib/source_lib.dart').readAsStringSync();
+    expect(src.contains('String normalizeLibLabel('), isFalse);
   });
 
   test('decodeMediaRel 解码且去掉查询串', () {

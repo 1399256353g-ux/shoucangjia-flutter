@@ -544,19 +544,21 @@ List<LibNode> nodesFromV2(Map<String, dynamic> json, {String root = ''}) {
   }
 
   // 手动模式（服务端 `nodesMode: manual`）：节点文件夹只认 owner 在「文件结构」
-  // 里勾选的目录（/api/nodes）；空数组＝只有顶级 SECRET，绝不回退自动节点。
+  // 里勾选的目录（`/api/nodes`）；空数组＝只有顶级 SECRET，绝不回退自动节点。
+  //
+  // owner 2026-11-28：「有些没被设为单元库的文件夹被当成单元库，在卡片选择
+  // 页面中存在对应单元库卡片」。
+  //
+  // 根因：`libraries.json` 里的 `nodes` 字段是旧自动扫描的残留（实测 48 条），
+  // 而 `/api/nodes`（`readNodes()`，owner 真正勾过的那份）是 31 条——差的
+  // 17 条正是从未勾选过的三级目录（如 `…/(1) sexual intercourse-性交`）。
+  // 手动模式下读 `libraries.json.nodes` 等于又把那些目录当成了单元库。
+  //
+  // 正确来源只有一个：调用方从 `/api/nodes` 拿到的 `markRels`（走
+  // `nodesFromMarks`）。手动模式在这里不读任何自动节点字段。
   final manual = '${json['nodesMode'] ?? ''}'.trim().toLowerCase() == 'manual';
+  if (manual) return out;
   final rawNodes = json['nodes'];
-  if (manual) {
-    if (rawNodes is List) {
-      for (final x in rawNodes) {
-        if (x is! Map) continue;
-        if ('${x['rel'] ?? ''}'.trim().isEmpty) continue;
-        add(x);
-      }
-    }
-    return out;
-  }
 
   // J14：优先用服务端扫出的「通用分类节点」（任意层级上级目录）。
   if (rawNodes is List && rawNodes.isNotEmpty) {

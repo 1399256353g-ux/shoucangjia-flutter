@@ -1,4 +1,3 @@
-import 'index_prefix.dart';
 import 'media_path.dart';
 import 'rel_path.dart';
 import 'stable_order.dart';
@@ -18,15 +17,6 @@ import 'lib_names.dart' show libDisplayName;
 /// `basic_lib.BasicLib`，转换点随之消失：`basicsUnderBase` 直接返回同一个模型。
 /// 迁移期保留 `BasicLibRef` 这个名字作为别名，避免调用点一次性改名。
 ///
-/// 去掉名称前的编号前缀「(12) 」并折叠空白，用于容错匹配。
-///
-/// 第十四批：规则转调 [stripIndexPrefix]——此前这里只认半角 `(1)`，
-/// `[3] 名称` / `（2）名称` / `01. 名称` 匹配不上但词条上已经去掉了序号。
-String normalizeLibLabel(String raw) {
-  final s = stripIndexPrefix(raw);
-  return s.replaceAll(RegExp(r'\s+'), ' ');
-}
-
 /// 把媒体 URL 解码为相对库根的路径（去掉 `/media/` 前缀）。
 /// 非法百分号编码时退化为原串，避免抛异常。
 String decodeMediaRel(String mediaPath) {

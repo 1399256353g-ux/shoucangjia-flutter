@@ -220,7 +220,8 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
               : err != null
                   ? '读取失败：$err'
                   : rows.isEmpty
-                      ? '未找到与「${widget.unitName}」同名的同步源'
+                      ? '未找到与「${syncUnitLabel(widget.unitName, widget.unitRel)}」'
+                          '同名的同步源'
                       : '该单元库对应 ${rows.length} 个同步源 · $enabled 个参与同步',
           style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
         ),

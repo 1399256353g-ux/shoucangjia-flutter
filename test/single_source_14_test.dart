@@ -6,7 +6,6 @@ import 'package:shoucangjia/color_codec.dart';
 import 'package:shoucangjia/sync_ledger.dart';
 import 'package:shoucangjia/unit_crawler.dart';
 import 'package:shoucangjia/deleted_monitor.dart';
-import 'package:shoucangjia/source_lib.dart';
 import 'package:shoucangjia/collection_sync.dart';
 import 'package:shoucangjia/library_badge.dart';
 import 'package:shoucangjia/library_corner_badge.dart';
@@ -28,16 +27,16 @@ void main() {
       expect(stripIndexPrefix('名称'), '名称');
     });
 
-    test('旧 normalizeLibLabel 只认 (1)：[3] / （2） / 01. 会漏', () {
-      // 旧实现的判据就是这条正则；新实现必须 Coverage 它覆盖不到的三类。
+    test('旧写法只认 (1)：[3] / （2） / 01. 会漏', () {
+      // 旧实现的判据就是这条正则；现在的唯一实现必须覆盖它覆盖不到的三类。
       final oldStyle = RegExp(r'^\(\s*\d+\s*\)\s*');
       expect(oldStyle.hasMatch('[3] 名称'), isFalse, reason: '旧写法确实漏方括号');
       expect(oldStyle.hasMatch('（2）名称'), isFalse, reason: '旧写法确实漏全角');
       expect(oldStyle.hasMatch('01. 名称'), isFalse, reason: '旧写法确实漏点号');
-      // 新实现在这三类上都生效，并与其他两个调用点结果一致。
-      expect(normalizeLibLabel('[3] 名称'), '名称');
-      expect(normalizeLibLabel('（2）名称'), '名称');
-      expect(normalizeLibLabel('01. 名称'), '名称');
+      // 唯一实现在这三类上都生效（`normalizeLibLabel` 已于 0.9.356 删除）。
+      expect(stripIndexPrefix('[3] 名称'), '名称');
+      expect(stripIndexPrefix('（2）名称'), '名称');
+      expect(stripIndexPrefix('01. 名称'), '名称');
       expect(syncUnitKey('[3] 名称'), '名称');
       expect(syncUnitKey('@（2）名称'), '名称');
     });
@@ -54,7 +53,8 @@ void main() {
       ]) {
         AppSettings.stripLibIndex = true;
         final a = LibraryBadge.stripIndex(raw);
-        final b = normalizeLibLabel(raw);
+        // 基础库匹配与词条显示同一份规则：两者都转发 stripIndexPrefix。
+        final b = stripIndexPrefix(raw).replaceAll(RegExp(r'\s+'), ' ');
         final c = syncUnitKey(raw);
         expect(a, b, reason: '词条显示与基础库匹配对不上：$raw');
         expect(b.toLowerCase(), c, reason: '基础库匹配与同步源匹配对不上：$raw');

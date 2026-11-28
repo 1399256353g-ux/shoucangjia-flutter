@@ -137,17 +137,27 @@ void main() {
       expect(nodesFromV2(json, root: '/r/Secret'), isEmpty);
     });
 
-    test('手动模式：只认 owner 勾选的节点', () {
+    test('手动模式：不读 libraries.json 的 nodes（旧自动节点残留）', () {
+      // owner 2026-11-28：「有些没被设为单元库的文件夹被当成单元库」。
+      //
+      // `/api/libraries.json` 里 `nodes` 是旧自动扫描残留（实测 48 条），
+      // 而 `/api/nodes`（owner 真正勾过的那份）只有 31 条。手动模式下若读
+      // `json['nodes']`，那 17 条从未勾选的三级目录会变成单元库卡片。
+      //
+      // 手动模式的节点唯一来源是调用方从 `/api/nodes` 拿到的 `markRels`
+      // （走 `nodesFromMarks`）。 `nodesFromV2` 在 manual 下必须返回空。
       final json = {
         'nodesMode': 'manual',
         'nodes': [
           {'id': 'nd-001', 'rel': '(1) A', 'name': '(1) A'},
+          {'id': 'nd-002', 'rel': '(1) A/(1) a', 'name': '(1) a'},
         ],
         'bigLibraries': <dynamic>[],
         'groups': <dynamic>[],
       };
       final nodes = nodesFromV2(json);
-      expect(nodes.map((n) => n.rel), ['(1) A']);
+      expect(nodes, isEmpty,
+          reason: '手动模式只认 /api/nodes，不得把旧自动节点当单元库');
     });
   });
 

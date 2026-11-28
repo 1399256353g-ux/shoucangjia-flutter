@@ -14,7 +14,6 @@ void main() {
   group('默认值', () {
     test('无记录时是 1.0x / 连播开 / 循环关 / 乱序关', () {
       const d = PlaybackPrefs.defaults;
-      expect(d.speed, 1.0);
       expect(d.link.autoplay, isTrue);
       expect(d.link.loopOne, isFalse);
       expect(d.shuffle, isFalse);
@@ -24,13 +23,11 @@ void main() {
   group('序列化往返', () {
     test('自定义设置存下再读回，逐字段一致', () {
       const p = PlaybackPrefs(
-        speed: 1.5,
         link: LoopLink(loopOne: true, autoplay: false, restoreAutoplay: true),
         shuffle: true,
       );
       final back = PlaybackPrefs.fromJson(p.toJson());
       expect(back, p);
-      expect(back.speed, 1.5);
       expect(back.link.loopOne, isTrue);
       expect(back.link.autoplay, isFalse);
       expect(back.link.restoreAutoplay, isTrue);
@@ -50,19 +47,13 @@ void main() {
       expect(PlaybackPrefs.fromJson(<int>[1, 2]), PlaybackPrefs.defaults);
     });
 
-    test('倍速超范围被夹到 0.5–3.0', () {
-      expect(PlaybackPrefs.fromJson({'speed': 99.0}).speed, 3.0);
-      expect(PlaybackPrefs.fromJson({'speed': 0.01}).speed, 0.5);
-      expect(PlaybackPrefs.fromJson({'speed': -5}).speed, 0.5);
-    });
-
-    test('倍速是非法值（NaN/字符串）时回落 1.0，其它字段照常恢复', () {
-      final p = PlaybackPrefs.fromJson({
-        'speed': 'fast',
-        'shuffle': true,
-      });
-      expect(p.speed, 1.0);
-      expect(p.shuffle, isTrue, reason: '坏倍速不该连累乱序开关');
+    test('旧 payload 里的 speed 被忽略，不连累其它字段（0.9.356）', () {
+      // 倍速已归 `AppSettings.defaultSpeed`；本文件曾经也存过一份，
+      // 那个值正是「设置页选的倍速不生效」的原因。
+      for (final old in <dynamic>[1.5, 'fast', 99.0, null]) {
+        final p = PlaybackPrefs.fromJson({'speed': old, 'shuffle': true});
+        expect(p.shuffle, isTrue, reason: '旧的坏 speed 不该连累乱序开关');
+      }
     });
 
     test('布尔字段类型不对时用默认值', () {

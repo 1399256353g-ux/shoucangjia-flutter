@@ -184,6 +184,8 @@ void main() {
     test('播放设置：本机 prefs 只认 bool，类型不对回默认', () {
       // 本机写入的 prefs 永远是 bool；`"true"` / 1 这种是服务端形态，
       // 进了 prefs 说明数据被别处改过，按默认值处理比“猜”更安全。
+      // 0.9.356：`speed` 已不在本类（倍速归 AppSettings.defaultSpeed），
+      // 旧 payload 里的这个键读入时忽略，且不影响其余三个开关。
       final p = PlaybackPrefs.fromJson({
         'speed': '1.5',
         'loopOne': 'true',
@@ -191,7 +193,6 @@ void main() {
         'restoreAutoplay': true,
         'shuffle': 'yes',
       });
-      expect(p.speed, 1.5);
       expect(p.link.loopOne, isFalse);
       expect(p.link.autoplay, isTrue);
       expect(p.link.restoreAutoplay, isTrue);

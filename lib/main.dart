@@ -4796,10 +4796,16 @@ class SettingsHubPage extends StatelessWidget {
           subtitle: const Text('动作记录 + 错误记录 · 崩溃/停播/封面异常排查'),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => DiagnosticsPage(
+                    // owner 2026-11-28：这里曾在地址后面接了个 `douyin`——
+                    // 那是遗留元数据库的 id（`cfg.libName` 为空时回落 `cfg.lib`），
+                    // 用户看到「当前连接的库」叫一个根本不存在的媒体库。
+                    // 只报服务器地址；库名这段只在它是真实媒体库时才接。
                     detail: cfg.base.isEmpty
                         ? '未连接服务器'
-                        : '${cfg.base} · '
-                            '${cfg.libName.isEmpty ? cfg.lib : cfg.libName}',
+                        : (cfg.libName.trim().isEmpty ||
+                                cfg.lib == 'douyin'
+                            ? cfg.base
+                            : '${cfg.base} · ${cfg.libName}'),
                     cacheStatsUri:
                         cfg.base.isEmpty ? null : cfg.u('/api/cache/stats'),
                     cachePruneUri:
@@ -5072,7 +5078,8 @@ class PlaybackSettingsPage extends StatefulWidget {
 }
 
 class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
-  static const _speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
+  // 选项清单来自 `playback_prefs.kPlaybackSpeeds`（播放页菜单读同一份）。
+  static const List<double> _speeds = kPlaybackSpeeds;
 
   Future<void> _persist() => AppSettings.save();
 
@@ -5099,7 +5106,9 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         Wrap(spacing: 8, children: [
           for (final s in _speeds)
             ChoiceChip(
-              label: Text('${s}x'),
+              // 文案与播放页倍速菜单同一个出口（`speedLabel`）：两页各写
+              // 一种格式就会出现「设置页 1.0x、播放页 1x」这类两个说法。
+              label: Text(speedLabel(s)),
               selected: (AppSettings.defaultSpeed - s).abs() < 0.001,
               onSelected: (_) {
                 setState(() => AppSettings.defaultSpeed = s);
@@ -6230,46 +6239,44 @@ class _LibraryPageState extends State<LibraryPage> {
         }
       }
 
-      /// 一条连接的节点：`/api/nodes` 标记 ∪ 该连接自己带封面指针的 rel。
+      /// 一条连接的节点：**只认 `/api/nodes` 里真正勾选过的节点**。
       ///
-      /// 补封面那部分不能省：树里有指针但没被标记的 rel 没有节点承载，
-      /// 卡片就拿不到那张封面。反向解析走 `node_key`（唯一实现）。
+      /// owner 2026-11-28：「有些没被设为单元库的文件夹被当成单元库，在卡片
+      /// 选择页面中存在对应单元库卡片」。
       ///
-      /// 0.9.327：rel 去重与封面优先级都收到 `unitCoverTable`（与
-      /// `LibMeta.load` 同一条链）——此前两处各排一遍，结果同一张卡在两个
-      /// 入口显示的封面不一样：首页认 `libraries.json` 的整树指针，从设置页
-      /// 进单元库页只认 `/api/nodes` 的 `covers`（那里只有节点才带）。
+      /// 根因：此前 `rels` 是「节点 ∪ 带封面指针的 rel」。`unit-covers.json`
+      /// 里有 2 条手动封面设在**从未勾选**的三级目录上（实测
+      /// `(2) AV/(2)CD/(1) Sexual Intercourse-性交` 等），它们不是节点却因为
+      /// 「有封面」被造了 LibNode → 直接变成单元库卡片。
+      ///
+      /// 现在 `rels` 只来自 `payload.rels`（`/api/nodes`，owner 勾过的那份）。
+      /// 未勾选的目录一律不造节点，因此不会出现在卡片选择页。
       List<LibNode> nodesOfServer(ServerConn s) {
         final payload = nodesPerServer[s.id] ?? NodesPayload.empty;
-        final rels = <String>{
-          ...payload.rels,
-          for (final k in treeCovers.keys)
-            if (nodeKeyHasServer(k, s.id)) nodeKeyRel(k),
-        }.toList(growable: false)
-          ..sort();
-        final covers = unitCoverTable(
-          serverId: s.id,
-          rels: rels,
-          treeCovers: treeCovers,
-          nodesCovers: payload.covers,
-        );
-        return [
-          for (final rel in rels)
-            LibNode(
-              id: 'node:$rel',
-              rel: rel,
-              name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
-              // owner 2026-11-24：必须带上服务端下发的封面指针，
-              // 否则选完过往封面返回界面就回落到自动封面。
-              coverUrl: covers[normalizeUnitRel(rel)] ?? '',
-              // serverId 必须是连接 id（buildUnitTree 按它归组与归属），
-              // 不能写成 cardLabel——那会让分层再次错位。
-              serverId: s.id,
-              serverBase: s.base,
-              serverLabel: s.cardLabel,
-            ),
-        ];
-      }
+        final rels = <String>{...payload.rels}.toList(growable: false)..sort();
+      final covers = unitCoverTable(
+        serverId: s.id,
+        rels: rels,
+        treeCovers: treeCovers,
+        nodesCovers: payload.covers,
+      );
+      return [
+        for (final rel in rels)
+          LibNode(
+            id: 'node:$rel',
+            rel: rel,
+            name: splitRel(rel).isEmpty ? rel : splitRel(rel).last,
+            // owner 2026-11-24：必须带上服务端下发的封面指针，
+            // 否则选完过往封面返回界面就回落到自动封面。
+            coverUrl: covers[normalizeUnitRel(rel)] ?? '',
+            // serverId 必须是连接 id（buildUnitTree 按它归组与归属），
+            // 不能写成 cardLabel——那会让分层再次错位。
+            serverId: s.id,
+            serverBase: s.base,
+            serverLabel: s.cardLabel,
+          ),
+      ];
+    }
 
       final nodes = [for (final s in servers) ...nodesOfServer(s)];
       final units = buildUnitTree(
@@ -7261,8 +7268,13 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         // `CrawlerConfigPage` / `MaintenancePage`，那两页的地址与鉴权由
         // `libraryBaseOf` / `libraryHeadersOf` 从记录自身取；不打标就只能
         // 回落绑定表，而绑定表里没有第二台服务器的库——请求打到默认那台。
+        //
+        // owner 2026-11-28：遗留元数据库 `douyin` 不是媒体库，这一页把它
+        // 单独顶到最上面「其它」节里当一条爬虫配置——用户看到的是「当前
+        // 根本没有这个媒体库」。入口就滤掉（`visibleLibraries`）。
         libs = [
-          for (final raw in mapsOf(jsonMapOf(r)['libraries']))
+          for (final raw in visibleLibraries(
+              mapsOf(jsonMapOf(r)['libraries'])))
             withServerOrigin(raw,
                 id: s.id,
                 base: s.base,
@@ -10578,8 +10590,11 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _restorePlaybackPrefs() async {
     final p = await loadPlaybackPrefs();
     if (!mounted) return;
+    // 0.9.356：倍速只从 `AppSettings.defaultSpeed` 来（设置页写的也是它）。
+    // 此前这里被 `p.speed` 覆盖，那个值在本机恒为默认 1.0 —— 设置页选的
+    // 倍速一次都到不了播放页，而副标题还写着「进入播放器时自动应用」。
     setState(() {
-      speed = p.speed;
+      speed = AppSettings.defaultSpeed;
       _link = p.link;
       shuffle = p.shuffle;
     });
@@ -10595,9 +10610,11 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 把当前播放设置落盘（用户每次改动后调用）。
+  ///
+  /// 倍速写 `AppSettings.defaultSpeed`（它自己的落盘处），本文件只存
+  /// 连播/循环/乱序——同一个量两个落盘处就一定会出现「改一处不生效」。
   void _persistPlaybackPrefs() {
     unawaited(savePlaybackPrefs(PlaybackPrefs(
-      speed: speed,
       link: _link,
       shuffle: shuffle,
     )));
@@ -13231,10 +13248,17 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   /// 设定倍速（播放设置菜单与键盘循环共用唯一入口）。
+  ///
+  /// 0.9.356：倍速的落盘处就是 `AppSettings.defaultSpeed`（设置页写同一个值）。
+  /// 在这里改倍速也应记成「下次进播放页的默认值」——owner 的原话是「沿用上次
+  /// 的播放设置」；只写 `_persistPlaybackPrefs()` 的话，下次进页读的是
+  /// AppSettings，这次改的倍速就白改了。
   void setSpeed(double value) {
     final next = value.clamp(0.5, 3.0).toDouble();
     setState(() => speed = next);
     player.setRate(next);
+    AppSettings.defaultSpeed = next;
+    unawaited(AppSettings.save());
     _persistPlaybackPrefs();
   }
 
@@ -13275,7 +13299,7 @@ class _PlayerPageState extends State<PlayerPage>
                 child: Row(children: [
                   const Text('倍速', style: TextStyle(fontSize: 13)),
                   const Spacer(),
-                  for (final v in const [0.75, 1.0, 1.25, 1.5, 2.0])
+                  for (final v in kPlaybackSpeeds)
                     Padding(
                       padding: const EdgeInsets.only(left: 6),
                       child: ChoiceChip(
