@@ -1356,11 +1356,15 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
     // 只列直属基础库；下级基础库跟随各自的单元库，避免 SECRET 直通全部。
     final sorted = unit.basics;
     // 每张基础库卡片的词条来自「直接上级单元库」。
-    final ownerLabel = <String, String>{};
+    //
+    // 0.9.355：这里曾有一份 `ownerLabel` 子树遍历表——注释说「每张卡片的词条
+    // 来自直接上级」，但那份表**从来没有被读过**（卡片取的是本页 `unit.name`，
+    // 遍历结果白白算一遍）。只有 `ownerKey`（封面菜单的作用域）真被用到。
+    // 删掉那份死表；词条名字改为与标题同一个出口 `libEntryTitle`——否则上级
+    // 名字为空时卡片词条会回落到**本库**的名字，看起来像另一层。
     final ownerKey = <String, String>{};
     void walkOwners(UnitLibrary u) {
       for (final b in u.basics) {
-        ownerLabel[b.id] = u.name;
         ownerKey[b.id] = u.id;
       }
       for (final c in u.children) {
@@ -1464,7 +1468,7 @@ class _UnitLibraryPageState extends State<UnitLibraryPage> {
                     coverUrl: coverOf?.call(sorted[i]) ?? '',
                     coverUrlOf: coverOf,
                     headers: headersOf?.call(sorted[i].id) ?? const {},
-                    unitLabel: unit.name,
+                    unitLabel: libEntryTitle(unit.id, unit.name),
                     unitKey: unit.id,
                     onTap: () => onTapBasic(sorted[i]),
                     coverMenu: widget.coverMenuOf == null

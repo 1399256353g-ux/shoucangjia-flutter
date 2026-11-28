@@ -7,6 +7,7 @@ import 'http_error_text.dart';
 
 import 'home_action.dart';
 import 'category_tree.dart';
+import 'lib_names.dart';
 import 'library_tree.dart';
 import 'error_text.dart';
 
@@ -182,7 +183,11 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
         tree == null ? null : filterCategoryTree(tree!, _filter.text);
     return Scaffold(
       appBar: AppBar(
-        title: Text('分类 · ${widget.basic.name}',
+        // 0.9.355：这一页标题原来自拼 `widget.basic.name`——只做原样输出，
+        // 既不按「省略编号」开关去序号，名字为空/纯空格时也不回落 id。
+        // 同一个基础库在单元库页标题、基础库卡标题、设置页行里都是
+        // `libEntryTitle` 的结果，只有这一页会显示成「分类 · 」或「分类 · (1) 名称」。
+        title: Text('分类 · ${libEntryTitle(widget.basic.id, widget.basic.name)}',
             maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           const HomeAction(),

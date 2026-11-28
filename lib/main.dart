@@ -1064,12 +1064,6 @@ class LibMeta {
   String bigIdFor(String mediaPath) =>
       basicById(basicIdForPath(mediaPath))?.bigId ?? '';
 
-  List<String> get order => filterBasics.map((e) => e.id).toList();
-
-  Map<String, String> get names => {
-        for (final b in filterBasics) b.id: basicLibLabel(b, b.name),
-      };
-
   String gradeFor(String author, int works) =>
       AuthorGrade.fromStats(stats[author], works: works);
 }
@@ -6769,7 +6763,9 @@ class _LibraryPageState extends State<LibraryPage> {
       if (r.statusCode != 200) throw Exception(httpErrorText(r.statusCode));
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('已将「${l['name']}」设为默认媒体库')));
+          .showSnackBar(SnackBar(
+              content: Text('已将「${libraryDisplayName(id, '${l['name'] ?? ''}')}」'
+                  '设为默认媒体库')));
       await load();
     } catch (e) {
       if (mounted) {
@@ -6783,7 +6779,7 @@ class _LibraryPageState extends State<LibraryPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text('删除库「${l['name']}」？'),
+        title: Text('删除库「${libraryDisplayName('${l['id']}', '${l['name'] ?? ''}')}」？'),
         content: const Text('仅从注册表移除，不删除数据目录和媒体文件。当前库或唯一库不能删除。'),
         actions: [
           TextButton(
@@ -17171,7 +17167,8 @@ class _SearchPageState extends State<SearchPage> {
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    label: Text('${l['name'] ?? l['id']}'),
+                    label: Text(libraryDisplayName(
+                        '${l['id'] ?? ''}', '${l['name'] ?? ''}')),
                     selected: sel == '${l['id']}',
                     onSelected: (_) => _select('${l['id']}'),
                   ),
