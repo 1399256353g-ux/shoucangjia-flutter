@@ -1066,10 +1066,17 @@ void main() {
     });
 
     test('setFiles 必须有真实入口（否则等于协议层摆设）', () {
+      // owner 2026-11-28 把「挂载设置页」的目录树那套整体删了（「删掉啊还留着干嘛」），
+      // setFiles 的真实入口现在只在**作者页挂载面板**（`author_mount_sheet`）：
+      // 那里按单个作者编辑「哪几处算同一人」，setFiles 才是对的动作。
+      final sheet = codeOf('lib/author_mount_sheet.dart');
+      expect(sheet.contains('UnitAuthorAction.setFiles'), isTrue,
+          reason: '作者页没有 setFiles 入口，编辑组成员无从下手');
+      expect(sheet.contains('_editMembers'), isTrue);
+      // 挂载设置页不得再留着旧入口（旧目录树已整体删除）。
       final page = codeOf('lib/unit_author_mount_page.dart');
-      expect(page.contains('UnitAuthorAction.setFiles'), isTrue,
-          reason: '页面没有 setFiles 入口，编辑组成员无从下手');
-      expect(page.contains('_openSetFiles'), isTrue);
+      expect(page.contains('UnitAuthorAction.setFiles'), isFalse,
+          reason: '挂载设置页的目录树对话框已删除，不该再有 setFiles');
     });
 
     test('不得再出现「仅本层 / 非末梢」这类与真实分发规则相反的文案', () {

@@ -69,29 +69,30 @@ void main() {
       expect(branches.map((b) => b.lib).toList(), ['lib-a', 'lib-b']);
     });
 
-    test('挂载页按基础库勾选，不再用目录树控件', () {
+    test('挂载页只按基础库操作，目录树那套已删除', () {
       // owner 2026-11-28：
-      // > 「不要用文件目录的方式进行设置了，列出直属单元库下所有基础库，
-      // >   让用户自己选作者作品存在于直接上级单元库下哪些基础库」
+      // > 「挂载还是不行，原来的那些设置逻辑特别混乱啊根本没法用，删掉啊还留着干嘛」
       //
-      // 因此挂载页的「候选」从 `AuthorFilePicker`（目录树）换成了基础库
-      // 勾选列表。作者主页的 `author_mount_sheet` 仍保留树形控件（那里是按
-      // 单个作者的已有目录拆分，语义未变）。
+      // 挂载页的候选从 `AuthorFilePicker`（目录树）整体换成基础库勾选，
+      // 旧的合并/拆出成员/编辑成员三个对话框一并删除。
+      // 作者主页的 `author_mount_sheet` 仍保留树形控件（那里按单个作者的
+      // 已有目录拆分，语义未变）。
       final page = _code('lib/unit_author_mount_page.dart');
       expect(page.contains('basicsOfUnitScope('), isTrue,
           reason: '范围必须来自所属单元库的基础库，不跨库');
       expect(page.contains('createAuthorBodies('), isTrue,
           reason: '勾选的基础库要能翻译成建目录请求');
-      // 合并 / 拆出 / 编辑成员三个对话框仍共用同一个树形控件。
-      expect(page.contains('AuthorFilePicker('), isTrue);
-      expect(page.contains("leafKeyPrefix: 'uag-pick'"), isTrue);
-      expect(page.contains("leafKeyPrefix: 'uag-split'"), isTrue);
-      expect(page.contains("leafKeyPrefix: 'uag-setfiles'"), isTrue);
-      // 分组规则只在 picker 里出现一次，页面不得自己按 lib 分组。
+      // 旧目录树控件与三个旧对话框前缀必须整体消失。
+      expect(page.contains('AuthorFilePicker('), isFalse,
+          reason: '挂载页不再用目录树（owner 要求删掉）');
+      expect(page.contains("leafKeyPrefix: 'uag-pick'"), isFalse);
+      expect(page.contains("leafKeyPrefix: 'uag-setfiles'"), isFalse);
+      // 新结构：按基础库勾选 + 按基础库拆出。
+      expect(page.contains("'uag-scope-"), isTrue);
+      expect(page.contains('uag-split-lib-'), isTrue);
+      // 分组规则只在 picker 里出现一次（作者页仍在用）。
       final picker = _code('lib/author_file_picker.dart');
       expect(picker.contains('List<AuthorFileBranch> authorFileBranches('), isTrue);
-      expect(page.contains('byLib'), isFalse,
-          reason: '页面不得自己再按 lib 分组一次');
     });
 
     test('控件自带「全选/全不选」作用域限定在本分支', () {
