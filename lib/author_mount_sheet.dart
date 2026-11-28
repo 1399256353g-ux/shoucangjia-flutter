@@ -35,11 +35,19 @@ import 'api_timeout.dart';
 import 'text_styles.dart';
 
 /// 打开作者挂载面板。
+///
+/// [scopeBasics]：该作者所属**直接上级单元库**下的全部基础库。
+///
+/// owner 2026-11-28：「作者页挂载功能也改为基础库制」。挂载不再按目录树
+/// 勾选，而是先列出这些基础库，由用户选「作者的作品存在于哪些基础库」。
+/// 空列表＝拿不到单元库树，面板只展示现状、不出新建入口（不拿单个库猜）。
 Future<bool?> showAuthorMountSheet({
   required BuildContext context,
   required String authorName,
   required String base,
   required Map<String, String> headers,
+  List<({String id, String name})> scopeBasics =
+      const <({String id, String name})>[],
   http.Client? client,
 }) {
   return showModalBottomSheet<bool>(
@@ -50,6 +58,7 @@ Future<bool?> showAuthorMountSheet({
       authorName: authorName,
       base: base,
       headers: headers,
+      scopeBasics: scopeBasics,
       client: client,
     ),
   );
@@ -60,12 +69,16 @@ class _AuthorMountSheet extends StatefulWidget {
     required this.authorName,
     required this.base,
     required this.headers,
+    this.scopeBasics = const <({String id, String name})>[],
     this.client,
   });
 
   final String authorName;
   final String base;
   final Map<String, String> headers;
+
+  /// 直接上级单元库下的全部基础库（id + 显示名）。
+  final List<({String id, String name})> scopeBasics;
   final http.Client? client;
 
   @override
@@ -77,6 +90,9 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
   bool loading = true;
   bool busy = false;
   String? err;
+
+  /// 「按基础库挂载」里勾选的基础库 id（owner 2026-11-28）。
+  final Set<String> _picked = <String>{};
 
   /// 注入的客户端优先；否则本页自建一个并在 dispose 关闭。
   http.Client? _ownClient;
@@ -317,8 +333,58 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
     await _send(req, unit);
   }
 
-  Future<void> _send(UnitAuthorRequest req, String unit) async {
+  /// 在勾选的基础库下建 `@作者` 目录（已存在直接用）。
+  ///
+  /// owner 2026-11-28：「选择后在对应基础库下创建作者文件夹，若已经存在则直接使用」。
+  /// 只调 `POST /api/unit/authors/create`（幂等：已存在返回 409），不删不改任何文件。
+  Future<void> _createDirs() async {
+    if (_picked.isEmpty || busy) return;
+    final dir = authorDirForName(widget.authorName);
+    final bad = authorDirError(dir);
+    if (bad != null) {
+      _toast(bad, bad: true);
+      return;
+    }
     setState(() => busy = true);
+    var made = 0;
+    var existed = 0;
+    var failed = 0;
+    try {
+      final bodies = createAuthorBodies(authorDir: dir, libs: _picked);
+      for (final body in bodies) {
+        try {
+          final r = await _client
+              .post(
+                Uri.parse(unitAuthorCreateUrl(widget.base)),
+                headers: {...widget.headers, 'Content-Type': 'application/json'},
+                body: jsonEncode(body),
+              )
+              .timeout(kTimeoutWrite);
+          if (r.statusCode == 409) {
+            existed++;
+          } else if (r.statusCode == 200) {
+            made++;
+          } else {
+            failed++;
+          }
+        } catch (_) {
+          failed++;
+        }
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+    if (!mounted) return;
+    final parts = <String>[
+      if (made > 0) '新建 $made 个',
+      if (existed > 0) '已存在 $existed 个',
+      if (failed > 0) '失败 $failed 个',
+    ];
+    _toast(parts.isEmpty ? '未创建任何目录' : parts.join(' · '), bad: failed > 0);
+    if (made > 0 || existed > 0) await load();
+  }
+
+  Future<void> _send(UnitAuthorRequest req, String unit) async {    setState(() => busy = true);
     try {
       final r = await _client
           .post(
@@ -415,6 +481,54 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
       shrinkWrap: true,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
       children: [
+        // owner 2026-11-28：「作者页挂载功能也改为基础库制」。
+        // 与挂载设置页同一套：先列直属单元库下的基础库，勾哪些有他的作品。
+        if (widget.scopeBasics.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 6),
+            child: Row(children: [
+              const Icon(Icons.create_new_folder_outlined, size: 15),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text('按基础库挂载',
+                    style:
+                        TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              ),
+              TextButton(
+                key: const ValueKey('ams-scope-create'),
+                onPressed: busy ? null : _createDirs,
+                child: Text('建目录'
+                    '${_picked.isEmpty ? '' : '（${_picked.length}）'}'),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+            child: Text(
+              '勾选该作者在哪些基础库有作品，点「建目录」在对应库里建 '
+              '@${widget.authorName}（已存在则直接用）。同名目录视为同一作者。',
+              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+            ),
+          ),
+          for (final b in widget.scopeBasics)
+            CheckboxListTile(
+              key: ValueKey('ams-scope-${b.id}'),
+              dense: true,
+              value: _picked.contains(b.id),
+              title: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              controlAffinity: ListTileControlAffinity.leading,
+              onChanged: busy
+                  ? null
+                  : (v) => setState(() {
+                        if (v == true) {
+                          _picked.add(b.id);
+                        } else {
+                          _picked.remove(b.id);
+                        }
+                      }),
+            ),
+          const Divider(height: 20),
+        ],
         // 概要：几库几处
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
