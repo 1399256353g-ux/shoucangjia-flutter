@@ -17,7 +17,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-String _lib(String name) => File('lib/$name').readAsStringSync();
+String _lib(String name) =>
+    File('lib/$name').readAsStringSync().replaceAll('\r\n', '\n');
 
 void main() {
   group('await 之后的 setState 都守 mounted', () {

@@ -21,6 +21,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shoucangjia/status_color.dart';
 
+/// 断言里用的相对路径：**统一用 `/`**。
+///
+/// `File.path` 在 Windows 上是 `lib\status_color.dart`，在 Linux/macOS 上是
+/// `lib/status_color.dart`。直接比 `f.path` 会让同一条断言只在一边通过
+/// （Windows CI 实测 `Expected: ['lib/status_color.dart']` /
+/// `Actual: ['lib\\status_color.dart']`）——**测试本身不可跨平台**，与产品
+/// 代码无关。所有「路径 == 字面量」的断言一律经过这里。
+String relPath(File f) => f.path.replaceAll('\\', '/');
+
 void main() {
   group('状态色只有一个来源', () {
     test('三个常量取自 Material 同名色（本次收口不改变观感）', () {
@@ -49,7 +58,7 @@ void main() {
       for (final f in files) {
         final s = f.readAsStringSync();
         final m = bare.firstMatch(s);
-        if (m != null) hits.add('${f.path}: ${m.group(0)}');
+        if (m != null) hits.add('${relPath(f)}: ${m.group(0)}');
       }
       expect(hits, isEmpty,
           reason: '状态色回到了页面里：${hits.join(' / ')}'
@@ -68,7 +77,7 @@ void main() {
         if (RegExp(r'withValues\(alpha: 0\.12\)')
             .allMatches(s)
             .isNotEmpty) {
-          hits.add(f.path);
+          hits.add(relPath(f));
         }
       }
       expect(hits, ['lib/status_color.dart'],
