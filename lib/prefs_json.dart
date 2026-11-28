@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 字符串配置的读写：所有「落盘」都走这里。
@@ -33,6 +35,28 @@ Future<String?> readPrefString(String key) async {
   try {
     final sp = await SharedPreferences.getInstance();
     return sp.getString(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 偏好里的 JSON 文本 → 解析结果；空串/坏 JSON 返回 null（**唯一实现**）。
+///
+/// 本机持久化的五张表（连接表 `servers_v1`、库绑定 `lib_bindings_v1`、
+/// 观看进度 `watch_progress_v1`、继续观看 `continue_watching_v1`、
+/// 本地播放量 `work_plays_v2`、头像覆盖表）此前各写一遍
+/// `if (raw == null || raw.isEmpty) return …; try { jsonDecode(raw) } catch (_) { return … }`
+/// ——四五份「读盘 → 能不能用」的判断，只差空串的判定用 `isEmpty` 还是
+/// `trim().isEmpty`（纯空格的那份 `jsonDecode('   ')` 抛异常、被 catch 成空表，
+/// 结果一致但多一次异常）。现在只在这里判一次。
+///
+/// 返回 `Object?`：对象/数组由调用方自己 `is Map` / `is List` 分流（那才是
+/// 各表真正的结构差异），这里只负责「这段文本能不能变成 JSON」。
+Object? decodePrefJson(String? raw) {
+  final s = raw?.trim() ?? '';
+  if (s.isEmpty) return null;
+  try {
+    return jsonDecode(s);
   } catch (_) {
     return null;
   }

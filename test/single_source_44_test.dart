@@ -348,10 +348,14 @@ void main() {
       // 唯一实现必须在 thumb_prefetch 里。
       expect(_code('lib/thumb_prefetch.dart').contains('int prefetchThumbItems('),
           isTrue);
-      // 库卡片预热也走同一个「去重 + provider」实现。
+      // 0.9.378：库卡片预热也转发同一个「去重 + provider」实现。
+      // 此前这里断言「库卡片预热是唯一允许直接排队的模块」——那正是第二份
+      // 排队代码的来源：它自己维护 urls + headers 表并构造 provider。
       final libPrefetch = _code('lib/lib_card_prefetch.dart');
-      expect(libPrefetch.contains('ThumbPrefetch.instance.run('), isTrue,
-          reason: '库卡片预热是唯一允许直接排队的模块（几何来自 LibGridSpec）');
+      expect(libPrefetch.contains('prefetchThumbItems('), isTrue,
+          reason: '库卡片预热必须复用 thumb_prefetch 的排队入口');
+      expect(libPrefetch.contains('ThumbPrefetch.instance.run('), isFalse,
+          reason: '排队只允许一处（thumb_prefetch）');
     });
 
     test('预热入口的返回张数与 limit 一致（不超发）', () {

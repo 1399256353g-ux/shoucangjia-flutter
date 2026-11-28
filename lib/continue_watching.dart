@@ -152,13 +152,7 @@ class ContinueItem {
 
 /// 解析整表；非法 JSON / 非法条目直接丢弃。
 List<ContinueItem> parseContinueItems(String? raw) {
-  if (raw == null || raw.trim().isEmpty) return const [];
-  dynamic decoded;
-  try {
-    decoded = jsonDecode(raw);
-  } catch (_) {
-    return const [];
-  }
+  final decoded = decodePrefJson(raw);
   if (decoded is! List) return const [];
   final out = <ContinueItem>[];
   final seen = <String>{};

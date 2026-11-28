@@ -17,8 +17,6 @@
 /// 合并结果从 `/api/unit/authors.json?unit=` 读（那是唯一会变的地方）。
 library;
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -37,6 +35,7 @@ import 'ui_copy.dart';
 import 'confirm_dialog.dart';
 import 'split_libs_dialog.dart';
 import 'unit_author_groups.dart';
+import 'unit_author_post.dart';
 
 /// 一个单元库里「这位作者」的合并卡。
 class _UnitCard {
@@ -216,15 +215,13 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
   Future<void> _send(UnitAuthorRequest req, String unit) async {
     setState(() => busy = true);
     try {
-      final r = await _client
-          .post(
-            Uri.parse(unitAuthorGroupsUrl(widget.base, unit)),
-            headers: {...widget.headers, 'Content-Type': 'application/json'},
-            body: jsonEncode(req.toBody()),
-          )
-          .timeout(kTimeoutWrite);
-      final j = jsonOf(r);
-      throwIfApiFailed(r.statusCode, j);
+      await postUnitAuthorRequest(
+        _client,
+        base: widget.base,
+        unit: unit,
+        headers: widget.headers,
+        req: req,
+      );
       await load();
       if (!mounted) return;
       _toast('已保存');

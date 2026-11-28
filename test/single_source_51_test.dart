@@ -81,8 +81,12 @@ void main() {
       expect(RegExp(r'\bseen\b').hasMatch(lib), isFalse,
           reason: '库卡片预热又用「看过几张」当配额，与另两个入口语义不同');
       expect(lib.contains('if (urls.length >= n)'), isFalse);
-      // 唯一实现仍只在这里排队。
-      expect(lib.contains('ThumbPrefetch.instance.run('), isTrue);
+      // 0.9.378：排队本身只有一处（thumb_prefetch.prefetchThumbItems），
+      // 本文件此前又写了一遍「去重 → 查头 → provider → run」。
+      expect(lib.contains('prefetchThumbItems('), isTrue,
+          reason: '库卡片预热必须复用同一个排队入口');
+      expect(lib.contains('ThumbPrefetch.instance.run('), isFalse,
+          reason: '排队只允许在 thumb_prefetch 里');
       // 预热请求构造抽成了纯函数，页面/测试都能直接断言。
       expect(lib.contains('List<ThumbPrefetchItem> libCoverPrefetchRequests('),
           isTrue);

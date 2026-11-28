@@ -35,6 +35,7 @@ import 'toast.dart';
 import 'ui_copy.dart';
 import 'split_libs_dialog.dart';
 import 'unit_author_groups.dart';
+import 'unit_author_post.dart';
 import 'unit_library.dart';
 
 /// 作者挂载面板（单元库入口）。
@@ -126,15 +127,13 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   Future<void> _send(UnitAuthorRequest req) async {
     setState(() => busy = true);
     try {
-      final r = await _client
-          .post(
-            Uri.parse(unitAuthorGroupsUrl(widget.base, _unitRel)),
-            headers: {...widget.headers, 'Content-Type': 'application/json'},
-            body: jsonEncode(req.toBody()),
-          )
-          .timeout(kTimeoutWrite);
-      final j = jsonOf(r);
-      throwIfApiFailed(r.statusCode, j);
+      await postUnitAuthorRequest(
+        _client,
+        base: widget.base,
+        unit: _unitRel,
+        headers: widget.headers,
+        req: req,
+      );
       await load();
       if (!mounted) return;
       _toast('已保存');

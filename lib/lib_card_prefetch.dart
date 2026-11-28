@@ -23,10 +23,8 @@ library;
 
 import 'package:flutter/widgets.dart';
 
-import 'cover_cache.dart';
 import 'grid_spec.dart';
 import 'media_resize.dart';
-import 'thumb_image.dart';
 import 'thumb_prefetch.dart';
 
 /// 一张待预热的库卡片：封面原始地址 + 该卡片的鉴权头。
@@ -91,17 +89,9 @@ int prefetchLibCovers({
   if (n <= 0) return 0;
   final requests = libCoverPrefetchRequests(items, limit: n);
   if (requests.isEmpty) return 0;
-  final urls = [for (final r in requests) r.url];
-  final headers = {for (final r in requests) r.url: r.headers};
-  ThumbPrefetch.instance.run(
-    urls,
-    limit: urls.length,
-    provider: (u) => thumbImageProvider(
-      u,
-      decodeWidth: decodeWidth,
-      headers: headers[u] ?? const <String, String>{},
-      cacheManager: DiziCache.manager,
-    ),
-  );
-  return urls.length;
+  // 排队只走 `prefetchThumbItems`：本文件此前把「去重 → 查鉴权头 →
+  // 构造 provider → ThumbPrefetch.run」又写了一遍，与 `thumb_prefetch` 里
+  // 的作品/头像两个入口逐字相同。三份里改一份（比如统一加 http 头或改
+  // 队列容量）另两份不会跟着变，而它们看起来都"能跑"。
+  return prefetchThumbItems(requests, limit: requests.length, decodeWidth: decodeWidth);
 }

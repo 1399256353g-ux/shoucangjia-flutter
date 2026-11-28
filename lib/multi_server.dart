@@ -16,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'json_num.dart';
 import 'media_path.dart' show isMediaPath;
 import 'node_key.dart' show nodeKey;
+import 'prefs_json.dart' show decodePrefJson;
 import 'rel_path.dart' show normalizeRelPath;
 import 'server_origin.dart';
 import 'text_fold.dart';
@@ -191,24 +192,19 @@ String normalizeBase(String raw) {
 
 /// 解析连接列表；坏数据跳过，重复地址只保留第一条。
 List<ServerConn> decodeServers(String? raw) {
-  if (raw == null || raw.trim().isEmpty) return const [];
-  try {
-    final j = jsonDecode(raw);
-    if (j is! List) return const [];
-    final out = <ServerConn>[];
-    final seenBase = <String>{};
-    final seenId = <String>{};
-    for (final e in j) {
-      final s = ServerConn.fromJson(e);
-      if (s == null) continue;
-      if (!seenBase.add(s.base)) continue;
-      if (!seenId.add(s.id)) continue;
-      out.add(s);
-    }
-    return out;
-  } catch (_) {
-    return const [];
+  final j = decodePrefJson(raw);
+  if (j is! List) return const [];
+  final out = <ServerConn>[];
+  final seenBase = <String>{};
+  final seenId = <String>{};
+  for (final e in j) {
+    final s = ServerConn.fromJson(e);
+    if (s == null) continue;
+    if (!seenBase.add(s.base)) continue;
+    if (!seenId.add(s.id)) continue;
+    out.add(s);
   }
+  return out;
 }
 
 String encodeServers(List<ServerConn> servers) =>
@@ -477,27 +473,22 @@ Map<String, Map<String, String>> pruneBindings(
 /// base/user/pass/server，每次重启后 `serverLabelFor()` 一律返回空串，
 /// 首页媒体库卡片上的连接名在首次启动后消失（写进去、读不回来）。
 Map<String, Map<String, String>> decodeBindings(String? raw) {
-  if (raw == null || raw.trim().isEmpty) return const {};
-  try {
-    final j = jsonDecode(raw);
-    if (j is! Map) return const {};
-    final out = <String, Map<String, String>>{};
-    j.forEach((k, v) {
-      if (v is! Map) return;
-      final base = normalizeBase('${v['base'] ?? ''}');
-      if (base.isEmpty) return;
-      out['$k'] = {
-        'base': base,
-        'user': '${v['user'] ?? 'zzx'}',
-        'pass': '${v['pass'] ?? ''}',
-        'server': '${v['server'] ?? ''}',
-        'label': '${v['label'] ?? ''}',
-      };
-    });
-    return out;
-  } catch (_) {
-    return const {};
-  }
+  final j = decodePrefJson(raw);
+  if (j is! Map) return const {};
+  final out = <String, Map<String, String>>{};
+  j.forEach((k, v) {
+    if (v is! Map) return;
+    final base = normalizeBase('${v['base'] ?? ''}');
+    if (base.isEmpty) return;
+    out['$k'] = {
+      'base': base,
+      'user': '${v['user'] ?? 'zzx'}',
+      'pass': '${v['pass'] ?? ''}',
+      'server': '${v['server'] ?? ''}',
+      'label': '${v['label'] ?? ''}',
+    };
+  });
+  return out;
 }
 
 String encodeBindings(Map<String, Map<String, String>> bindings) =>

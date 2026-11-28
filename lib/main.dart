@@ -11885,6 +11885,10 @@ class _PlayerPageState extends State<PlayerPage>
         } catch (_) {}
       }
       _mediaToken = my;
+      // 停靠旧槽位是 `await`：那两行 pause/setVolume 期间页面可能已被 pop
+      // （back 退出时 setState 会直接抛「setState() called after dispose()」）。
+      // 与文件里其余几十处同一写法，只补守卫，不加第二套判活机制。
+      if (!mounted) return;
       setState(() {
         pos = Duration.zero;
         final d0 = player.state.duration;

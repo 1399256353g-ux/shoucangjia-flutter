@@ -71,19 +71,13 @@ bool _validAvatarValue(String v) {
 /// 解析偏好里的覆盖表；坏数据按空表处理（不抛异常、不影响启动）。
 Map<String, String> parseAuthorAvatarOverrides(String? raw) {
   final out = <String, String>{};
-  final s = raw?.trim() ?? '';
-  if (s.isEmpty) return out;
-  try {
-    final j = jsonDecode(s);
-    if (j is! Map) return out;
-    for (final e in j.entries) {
-      final k = authorAvatarKey('${e.key}');
-      final v = '${e.value}';
-      if (k.isEmpty || !_validAvatarValue(v)) continue;
-      out[k] = v.trim();
-    }
-  } catch (_) {
-    return out;
+  final j = decodePrefJson(raw);
+  if (j is! Map) return out;
+  for (final e in j.entries) {
+    final k = authorAvatarKey('${e.key}');
+    final v = '${e.value}';
+    if (k.isEmpty || !_validAvatarValue(v)) continue;
+    out[k] = v.trim();
   }
   return out;
 }

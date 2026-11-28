@@ -85,13 +85,7 @@ class WorkPlay {
 /// 容错解析整表；非 JSON / 非法条目直接丢弃。
 Map<String, WorkPlay> parseWorkPlays(String? raw) {
   final out = <String, WorkPlay>{};
-  if (raw == null || raw.trim().isEmpty) return out;
-  dynamic decoded;
-  try {
-    decoded = jsonDecode(raw);
-  } catch (_) {
-    return out;
-  }
+  final decoded = decodePrefJson(raw);
   if (decoded is! Map) return out;
   decoded.forEach((k, v) {
     final key = '$k'.trim();

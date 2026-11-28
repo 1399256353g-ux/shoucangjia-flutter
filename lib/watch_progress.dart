@@ -105,13 +105,7 @@ int resumeMs(WatchProgress? p) {
 /// 容错解析整表；非法 JSON / 非法条目直接丢弃。
 Map<String, WatchProgress> parseWatchProgress(String? raw) {
   final out = <String, WatchProgress>{};
-  if (raw == null || raw.trim().isEmpty) return out;
-  dynamic decoded;
-  try {
-    decoded = jsonDecode(raw);
-  } catch (_) {
-    return out;
-  }
+  final decoded = decodePrefJson(raw);
   if (decoded is! Map) return out;
   decoded.forEach((k, v) {
     final key = '$k'.trim();
