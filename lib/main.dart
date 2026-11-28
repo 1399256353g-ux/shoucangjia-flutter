@@ -15792,6 +15792,16 @@ class _PlayerPageState extends State<PlayerPage>
             if (pointers > 0) pointers--;
           },
           child: MouseRegion(
+            // owner 2026-11-28：「全屏下鼠标也随任务栏一定时间后一起隐藏」。
+            //
+            // 之前只淡出任务栏与功能区，鼠标箭头一直留在屏幕上——全屏看片
+            // 时一个白箭头挂在画面中间，和「沉浸」正好相反。
+            // 条件是「全屏且功能区已隐藏」：与任务栏同一个状态，不另建计时器
+            // （`ui=false` 已经是那条计时器的结果），所以两者必定同时隐藏、
+            // 同时出现。非全屏不动光标——窗口模式下把箭头藏起来会让人找不到鼠标。
+            cursor: (fs && !ui)
+                ? SystemMouseCursors.none
+                : MouseCursor.defer,
             onHover: (e) {
               // 只在指针实际移动时唤醒功能区，静止后能正常自动隐藏
               final d = (e.localPosition.dx - _hoverDx).abs() +
