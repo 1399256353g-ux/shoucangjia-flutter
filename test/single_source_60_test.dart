@@ -83,11 +83,30 @@ void main() {
       final start = main.indexOf('class _RankPageState');
       final end = main.indexOf('class LibraryRankPage');
       final body = main.substring(start, end);
-      expect(body.contains("cfg.u('/api/libraries')"), isTrue);
       expect(body.contains('bigNames'), isFalse,
           reason: '服务端已不下发 big_id，bigNames 恒空 → 列表恒空');
-      expect(body.contains('libraryDisplayName('), isTrue,
-          reason: '库名走唯一出口（规范化 + 去序号）');
+      // 0.9.372：这一页**没有任何库选择器**（`sel` 只从 `initialLib` 进），
+      // 所以「库列表」本身也是死数据：`loadLibs` 拉 `/api/libraries` 存进
+      // `libs`，而 `libs` 唯一的读取方是每行算 `libName`（那个字段
+      // `AuthorRankTile` 从没读过）。两件事一起删掉；**不能**改回
+      // `/api/libraries`，也不能复活 `bigNames`——真正需要的是「别拉」。
+      expect(body.contains("cfg.u('/api/libraries')"), isFalse,
+          reason: '本页不需要注册库列表（无选择器、无 libName 消费方）');
+      expect(body.contains('List<Map<String, dynamic>> libs'), isFalse,
+          reason: '死列表已删；留着会诱使下一个人再往里填数据');
+    });
+
+    test('来源基础库逐个贴词条（不是只贴 fallbackId）', () {
+      final start = main.indexOf('class _RankPageState');
+      final end = main.indexOf('class LibraryRankPage');
+      final body = main.substring(start, end);
+      expect(body.contains("libs: stringsOf(e['libs'])"), isTrue,
+          reason: 'owner：「挂几个文件夹就贴几个词条」；本页此前只给 fallbackId');
+      final tile = main.substring(main.indexOf('class AuthorRankTile'));
+      expect(tile.contains('basicIds: libs,'), isTrue,
+          reason: '词条入口必须传 basicIds，否则多来源作者只有一条');
+      expect(tile.contains('libName'), isFalse,
+          reason: 'libName 是死字段（构造后从未读取），已删');
     });
   });
 

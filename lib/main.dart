@@ -109,7 +109,6 @@ import 'unit_crawler_page.dart';
 import 'unit_author_mount_page.dart';
 import 'unit_author_groups.dart'
     show authorDirForName, authorDirError, unitAuthorCreateUrl;
-import 'stable_order.dart';
 import 'unit_library.dart';
 import 'unit_library_view.dart';
 import 'header_collapse.dart';
@@ -8210,7 +8209,6 @@ class _RankPageState extends State<RankPage> {
   };
   String period = 'week';
   String metric = 'play';
-  List<Map<String, dynamic>> libs = [];
   String sel = '';
   List rows = [];
   final Map<String, LibMeta> metas = {};
@@ -8250,37 +8248,12 @@ class _RankPageState extends State<RankPage> {
   void initState() {
     super.initState();
     sel = widget.initialLib ?? 'all';
-    loadLibs();
     load();
-  }
-
-  Future<void> loadLibs() async {
-    try {
-      // 库列表＝**注册库**（`/api/libraries` 的 `libraries`），不是历史分组。
-      //
-      // 此前这里从 `meta.bigNames`（`basicLibraries[].big_id`）造列表，而服务端
-      // 早已不再下发 `big_id`（`grep big_id` = 0）：列表恒空、`libName` 恒回落到
-      // id，从「各库排行」点进来的选中项也不在列表里。排行榜的「按库看」说的
-      // 是媒体库，和「各库排行」页列的是同一批东西。
-      final r = await http
-          .get(cfg.u('/api/libraries'), headers: cfg.headers)
-          .timeout(kTimeoutReadSlow);
-      final reg = r.statusCode == 200
-          ? librariesWithDisplayNames(mapsOf(jsonMapOf(r)['libraries']))
-          : const <Map<String, dynamic>>[];
-      await _ensureMeta(cfg.lib);
-      if (!mounted) return;
-      // 同名媒体库之间没有次序依据；`List.sort` 不稳定 → 下拉刷新一次换一次
-      // 顺序、选中项还跟着跳。稳定排序 + id 作为最终键。
-      final list = stableSort(reg, (a, b) {
-        final c = '${a['name']}'.compareTo('${b['name']}');
-        return c != 0 ? c : '${a['id']}'.compareTo('${b['id']}');
-      });
-      setState(() => libs = list);
-      if (sel.isNotEmpty && sel != 'all' && !metas.containsKey(sel)) {
-        _loadMetaFor(sel);
-      }
-    } catch (_) {}
+    // 从「各库排行」点某一行进来时 `sel` 是注册库 id：这一页要靠它的
+    // 基础库集合收敛作者，元数据必须跟着装。原来这段挂在 `loadLibs` 的
+    // 尾上，而 `loadLibs` 唯一的作用是把 `/api/libraries` 存进一个
+    // **没人读**的列表（见下），于是整条请求连同这段一起消失。
+    if (sel.isNotEmpty && sel != 'all') _loadMetaFor(sel);
   }
 
   /// 为某个库装载元数据并写进 [metas]（**本页唯一的写入点**）。
@@ -8564,27 +8537,19 @@ class _RankPageState extends State<RankPage> {
                             // 0.9.15：排行榜每行都用有效 meta（缺行库时回退到当前库），
                             // 否则作者词条会退化成 SECRET/旧词条。
                             final meta = _rowMeta(_rowMap(e));
-                            // 行库名先查注册库列表（媒体库），再查该行 meta 的
-                            // 基础库名（`lib=all` 行的 `lib` 是基础库 id）。
-                            String libName(String id) {
-                              for (final l in libs) {
-                                if ('${l['id']}' == id) {
-                                  return libraryDisplayName(
-                                      '${l['id']}', '${l['name'] ?? ''}');
-                                }
-                              }
-                              final b = meta?.basicById(id);
-                              if (b != null) return displayLibraryName(b.id, b.name);
-                              return displayLibraryName(id, id);
-                            }
-
+                            // 逐行扫一遍注册库列表只为算一个 `libName`，
+                            // 而 `AuthorRankTile` 从来没有读过它（词条标题由
+                            // `AuthorBadges`/`LibraryBadge` 从 meta 取）——
+                            // N 行 × M 库的循环是纯浪费，整段删掉。
                             return AuthorRankTile(
                               rank: i + 1,
                               rankColor: rankColorFor(context, i),
                               name: name,
                               avatar: av,
                               lib: rowLib,
-                              libName: libName(rowLib),
+                              // 来源基础库（`lib=all` 下每行自带 `libs`）：
+                              // 词条按来源逐个贴，与作者页同一口径。
+                              libs: stringsOf(e['libs']),
                               meta: meta,
                               works: intOf(e['works']),
                               plays: intOf(e['plays']),
@@ -8964,7 +8929,14 @@ class AuthorRankTile extends StatelessWidget {
   final String name;
   final String avatar;
   final String lib;
-  final String libName;
+
+  /// 该行作者的全部来源基础库（服务端 `lib=all` 下发的 `libs`）。
+  ///
+  /// owner 2026-11-27：「多挂载作者挂几个文件夹就贴几个到主页和卡片」。
+  /// 排行榜此前只把 `lib` 交给 `AuthorBadges` 的 `fallbackId`，而
+  /// `fallbackId` 只在「路径解析不出归属」时才被读——挂了三处文件夹的作者
+  /// 在这一页永远只有一条词条，与作者页（传 `basicIds: _libs`）不一致。
+  final List<String> libs;
   final LibMeta? meta;
   final int works;
   final int plays;
@@ -8981,7 +8953,7 @@ class AuthorRankTile extends StatelessWidget {
     required this.name,
     required this.avatar,
     required this.lib,
-    required this.libName,
+    this.libs = const <String>[],
     required this.meta,
     required this.works,
     required this.plays,
@@ -9021,6 +8993,9 @@ class AuthorRankTile extends StatelessWidget {
           name: name,
           mediaPath: avatar,
           fallbackId: lib,
+          // 与作者页同一个入口：几条来源基础库就贴几条词条，
+          // 只给 fallbackId 的话本页永远只显示一条。
+          basicIds: libs,
           works: works,
         ),
         const SizedBox(height: 2),

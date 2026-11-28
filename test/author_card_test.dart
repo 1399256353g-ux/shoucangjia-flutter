@@ -91,7 +91,6 @@ void main() {
           name: '作者丙',
           avatar: '',
           lib: 'lib-001',
-          libName: '库一',
           meta: LibMeta(basics: const [], stats: const {
             '作者丙': {'p': 2000, 'dr': 4},
           }),

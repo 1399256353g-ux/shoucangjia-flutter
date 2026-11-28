@@ -43,7 +43,7 @@ Widget row(LibMeta? meta) => MaterialApp(
             name: 'A',
             avatar: '',
             lib: 'b1',
-            libName: 'b1',
+            libs: const ['b1'],
             meta: meta,
             works: 3,
             plays: 5,

@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// 0.9.321 第八十五批（项 4）：
 ///
-/// 排行榜页 `initState` 同时启动 `loadLibs()` 与 `load()`，两者**各自**
+/// 排行榜页 `initState` 原先同时启动 `loadLibs()` 与 `load()`，两者**各自**
 /// `LibMeta.load(cfg.lib)` 再各自 `metas[cfg.lib] = meta`：
 ///
 /// ```
@@ -43,12 +43,13 @@ void main() {
     expect(rank.contains('metas[lib] = meta'), isTrue);
   });
 
-  test('loadLibs 与 load 都走 _ensureMeta，不再各自 LibMeta.load', () {
-    final libs = _body(rank, 'Future<void> loadLibs() async {',
-        'Future<LibMeta?> _ensureMeta(');
-    expect(libs.contains('LibMeta.load('), isFalse,
-        reason: 'loadLibs 自己又拉了一次');
-    expect(libs.contains('_ensureMeta(cfg.lib)'), isTrue);
+  test('本页只剩 load 一处装载，不再拉注册库列表', () {
+    // 0.9.372：`loadLibs` 已整段删除——它唯一的产物是 `libs` 列表，
+    // 而那个列表唯一的读取方是逐行算 `libName`（`AuthorRankTile` 从未读过
+    // 该字段）。删掉之后 `initState` 只启动 `load()`，元数据仍只经
+    // `_ensureMeta` 装一次。
+    expect(rank.contains('loadLibs'), isFalse,
+        reason: '本页没有库选择器，注册库列表是死数据');
 
     final load = _body(
         rank, 'Future<void> load() async {', 'void _prefetchRankAvatars()');
