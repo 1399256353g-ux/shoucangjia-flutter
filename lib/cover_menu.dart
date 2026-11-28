@@ -18,6 +18,7 @@ import 'cover_history.dart';
 import 'cover_upload.dart';
 import 'media_resize.dart';
 import 'toast.dart';
+import 'confirm_dialog.dart';
 import 'loading_view.dart';
 
 /// 菜单执行成功后告诉卡片该怎么显示：
@@ -268,23 +269,20 @@ Future<CoverMenuOutcome?> _pickHistory(
 }
 
 /// 清除自定义封面：不可撤销，必须二次确认。
-Future<bool?> _confirmClear(BuildContext context) {
-  return showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('清除自定义封面？'),
-      content: const Text('会删除该库/单元库的自定义封面文件，并恢复为自动封面。此操作不可撤销。'),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消')),
-        FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('清除')),
-      ],
-    ),
-  );
-}
+///
+/// 本函数原先自己拼了一遍 `showDialog<bool>`；那个弹框与其它页面完全同形，
+/// 已收到 [confirmAction]。保留这层是因为调用点关心的是 `bool?`（null 与
+/// false 都当取消，实际上没有第二个结果）。
+Future<bool?> _confirmClear(BuildContext context) async =>
+    (await confirmAction(
+      context,
+      title: '清除自定义封面？',
+      message: '会删除该库/单元库的自定义封面文件，并恢复为自动封面。此操作不可撤销。',
+      confirmLabel: '清除',
+      destructive: true,
+    ))
+        ? true
+        : false;
 
 void _toast(BuildContext context, String text) =>
     showToastIn(context, text);

@@ -21,6 +21,7 @@ import 'toast.dart';
 import 'loading_view.dart';
 import 'api_timeout.dart';
 import 'status_color.dart';
+import 'text_styles.dart';
 
 /// L5-D：单个单元库的爬虫配置页。
 ///
@@ -201,8 +202,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                           key: const ValueKey('unit-crawler-path'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.grey)),
+                          style: kHintTextStyle),
                     const SizedBox(height: 12),
                     _capabilityBanner(),
                     if (!hasScript) ...[
@@ -351,7 +351,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     const SizedBox(height: 8),
                     const Text(
                       '脚本写入该单元库的 crawler/ 目录；每个单元库独立运行，互不影响。',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                      style: kHintTextStyle,
                     ),
                   ],
                 ),
@@ -431,7 +431,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
         const SizedBox(height: 6),
         if (list.isEmpty)
           const Text('未发现脚本（支持 .sh / .py / .js）',
-              style: TextStyle(fontSize: 12, color: Colors.grey))
+              style: kHintTextStyle)
         else
           DropdownButtonFormField<String>(
             key: const ValueKey('unit-crawler-script'),

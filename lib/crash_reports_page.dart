@@ -12,7 +12,9 @@ import 'count_label.dart';
 import 'resize_cache_api.dart';
 import 'thumb_prefetch.dart';
 import 'toast.dart';
+import 'confirm_dialog.dart';
 import 'loading_view.dart';
+import 'ui_copy.dart';
 
 class CrashReportsPage extends StatelessWidget {
   /// 顶部一行环境信息（如服务器地址），可为空。
@@ -259,23 +261,14 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
   Future<void> _prune() async {
     final uri = widget.pruneUri;
     if (uri == null || pruning) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('清理缩图缓存'),
-        content: const Text('只会删除服务端生成的缩图缓存（卡片、头像、海报的小图），'
-            '不会删除或改动任何作品原图。下次浏览会按需重新生成。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('清理')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '清理缩图缓存',
+      message: '只会删除服务端生成的缩图缓存（卡片、头像、海报的小图），'
+          '不会删除或改动任何作品原图。下次浏览会按需重新生成。',
+      confirmLabel: '清理',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     setState(() => pruning = true);
     final msg = await pruneResizeCache(uri, widget.headers, client: _client);
     if (!mounted) return;
@@ -318,7 +311,7 @@ class _ResizeCacheTileState extends State<_ResizeCacheTile> {
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            tooltip: '刷新',
+            tooltip: kRefreshTooltip,
             icon: const Icon(Icons.refresh, size: 20),
             onPressed: loading ? null : _refresh,
           ),
@@ -402,7 +395,7 @@ class _CrashLogFileTileState extends State<_CrashLogFileTile> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                tooltip: '刷新',
+                tooltip: kRefreshTooltip,
                 icon: const Icon(Icons.refresh, size: 20),
                 onPressed: _loading ? null : _load,
               ),

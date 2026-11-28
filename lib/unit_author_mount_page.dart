@@ -31,9 +31,11 @@ import 'ui_copy.dart';
 import 'unit_author_groups.dart';
 import 'unit_library.dart';
 import 'toast.dart';
+import 'confirm_dialog.dart';
 import 'basic_lib.dart' show BasicLib;
 import 'loading_view.dart';
 import 'api_timeout.dart';
+import 'text_styles.dart';
 
 /// 作者文件夹挂载面板。
 class UnitAuthorMountPage extends StatefulWidget {
@@ -244,7 +246,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             width: 420,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Text('将在选中的 ${_pickedBasics.length} 个基础库下建 @作者 目录',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: kHintTextStyle),
               const SizedBox(height: 8),
               TextField(
                 key: const ValueKey('uag-create-dir-name'),
@@ -327,7 +329,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
         title: const Text(kAuthorMountTitle),
         actions: [
           IconButton(
-            tooltip: '刷新',
+            tooltip: kRefreshTooltip,
             onPressed: loading || busy ? null : load,
             icon: const Icon(Icons.refresh),
           ),
@@ -381,7 +383,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 2, 16, 10),
             child: Text('这个单元库下没有可选的基础库。',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
+                style: kHintTextStyle),
           )
         else ...[
           const Padding(
@@ -389,7 +391,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
             child: Text(
                 '勾选哪些基础库有该作者的目录；勾完点右下角「建作者目录」，'
                 '已存在的目录会直接使用。同名目录默认为同一作者，可手动拆分。',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
+                style: kHintTextStyle),
           ),
           for (final b in _scopeBasics)
             CheckboxListTile(
@@ -415,7 +417,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 2, 16, 10),
             child: Text('还没有手动合并的作者组。点右下角「合并作者」把同名作者并到一组。',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
+                style: kHintTextStyle),
           ),
         for (final g in manual) _groupTile(g),
         const Divider(height: 24),
@@ -424,7 +426,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 2, 16, 10),
             child: Text('当前单元库内没有同名作者。',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
+                style: kHintTextStyle),
           ),
         for (final g in auto) _autoTile(g),
       ],
@@ -529,7 +531,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text('勾选要合并的文件夹（至少 1 个）。服务端会按成员重新聚合作品数与封面。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: kHintTextStyle),
               ),
               const SizedBox(height: 8),
               Flexible(
@@ -607,7 +609,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text('勾选的成员会搬到新组，原组保留其余成员（不能全拆走，那是删除）。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: kHintTextStyle),
               ),
               const SizedBox(height: 8),
               Flexible(
@@ -705,7 +707,7 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text('保存后的勾选就是完整成员表；取消勾选即移出该组（不会删任何目录）。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: kHintTextStyle),
               ),
               const SizedBox(height: 8),
               Flexible(
@@ -770,25 +772,16 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   }
 
   Future<void> _confirmDelete(UnitAuthorGroup g) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('删除作者组'),
-        content: Text('删除「${g.name.isEmpty ? '未命名组' : g.name}」？'
-            '只删分组记录，不动任何作者目录与作品文件。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('取消')),
-          FilledButton(
-            key: const ValueKey('uag-delete-ok'),
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '删除作者组',
+      message: '删除「${g.name.isEmpty ? '未命名组' : g.name}」？'
+          '只删分组记录，不动任何作者目录与作品文件。',
+      confirmLabel: '删除',
+      // 这个确认键的 key 已被外部测试/自动化引用，通过参数保留。
+      confirmKey: const ValueKey('uag-delete-ok'),
     );
-    if (ok != true) return;
+    if (!ok) return;
     await _send(UnitAuthorRequest(
       unit: _unitRel,
       action: UnitAuthorAction.delete,

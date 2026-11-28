@@ -13,6 +13,8 @@ import 'error_text.dart';
 import 'toast.dart';
 import 'loading_view.dart';
 import 'api_timeout.dart';
+import 'text_styles.dart';
+import 'ui_copy.dart';
 
 /// J14：通用分类树页面。
 ///
@@ -201,7 +203,7 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
                       child: InlineSpinner())),
             ),
           IconButton(
-            tooltip: '刷新',
+            tooltip: kRefreshTooltip,
             onPressed: loading ? null : _load,
             icon: const Icon(Icons.refresh),
           ),
@@ -242,13 +244,13 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
         padding: const EdgeInsets.all(24),
         child: Text(err ?? '加载失败',
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
       ));
     }
     if (node.children.isEmpty && node.authors.isEmpty) {
       return const Center(
           child: Text('库根下没有分类或作者',
-              style: TextStyle(fontSize: 12, color: Colors.grey)));
+              style: kHintTextStyle));
     }
     return ListView(
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 24),

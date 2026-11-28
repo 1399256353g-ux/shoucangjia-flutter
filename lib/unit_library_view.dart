@@ -28,6 +28,7 @@ import 'ui_copy.dart';
 import 'unit_library.dart';
 import 'work_plays.dart';
 import 'toast.dart';
+import 'text_styles.dart';
 
 /// L5-C：卡片封面（空串表示用默认图）。由调用方解析 `_cover/` 与播放量。
 typedef CoverOf = String Function(BasicLib basic);
@@ -533,7 +534,7 @@ class _UnitLibraryHomeViewState extends State<UnitLibraryHomeView> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 24, 16, 24),
             child: Text('当前连接下没有可显示的${levelName(LibEntryKind.top)}',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
+                style: kHintTextStyle),
           ),
         // 与其他卡片一样铺成网格，单元库卡片尺寸更大。
         if (units.isNotEmpty)
@@ -746,7 +747,7 @@ class _StarredUnitsPageState extends State<StarredUnitsPage> {
                 child: Text(
                   '还没有星标的单元库\n在单元库卡片右侧点星标即可加入',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: kHintTextStyle,
                 ),
               ),
             )

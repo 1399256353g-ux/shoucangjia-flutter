@@ -34,6 +34,7 @@ import 'deleted_monitor.dart';
 import 'deleted_cover.dart';
 import 'sync_ledger.dart';
 import 'concurrency.dart';
+import 'confirm_dialog.dart';
 import 'breadcrumb.dart';
 import 'crash_guard.dart';
 import 'crash_reports_page.dart';
@@ -163,6 +164,7 @@ import 'load_error_view.dart';
 import 'unit_fraction.dart';
 import 'loading_view.dart';
 import 'status_color.dart';
+import 'text_styles.dart';
 
 /// `encodeMediaPath` 的唯一实现在 `media_path.dart`；main.dart 继续转发，
 /// 免得既有 import 点（含测试）全部改路径。
@@ -1337,23 +1339,14 @@ Future<Map<String, dynamic>?> serverSyncStatus() async {
 Future<void> syncAllCollectionsFlow(BuildContext context,
     {Future<void> Function()? onFinished}) async {
   if (cfg.base.isEmpty) return;
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('立即同步全部同步源'),
-      content: const Text('将同步全部同步源的最新作品，并刷新封面、索引与作者信息。\n\n'
-          '同步在 NAS 后台运行，可能需要较长时间；期间可继续浏览。'),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消')),
-        FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('开始同步')),
-      ],
-    ),
+  final ok = await confirmAction(
+    context,
+    title: '立即同步全部同步源',
+    message: '将同步全部同步源的最新作品，并刷新封面、索引与作者信息。\n\n'
+        '同步在 NAS 后台运行，可能需要较长时间；期间可继续浏览。',
+    confirmLabel: '开始同步',
   );
-  if (ok != true || !context.mounted) return;
+  if (!ok || !context.mounted) return;
   final j = await startServerSync(target: 'all');
   if (!context.mounted) return;
   if (j == null || !serviceSaidOk(j)) {
@@ -2014,21 +2007,13 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _delete(ServerConn s) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text('删除连接「${s.title}」？'),
-        content: const Text('只删除本机保存的地址与账号，不删除 NAS 上的媒体和库。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true), child: const Text('删除')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '删除连接「${s.title}」？',
+      message: '只删除本机保存的地址与账号，不删除 NAS 上的媒体和库。',
+      confirmLabel: '删除',
     );
-    if (ok != true) return;
+    if (!ok) return;
     // 对话框期间页面可能已被 pop（连接设置从别处关掉/窗口被切走）：
     // 不检查宿主是否还在就 setState，会把「关一个连接」变成一次框架异常。
     if (!mounted) return;
@@ -2041,23 +2026,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
   /// P5：关闭连接＝与该服务端断连（清密码、不再请求），右上角变叉号。
   Future<void> _disconnect(ServerConn s) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text('断开「${s.title}」？'),
-        content: const Text('断开后不再向该地址发送任何请求，该连接的库从主页移除；'
-            '本机保存的密码会立即清除。重新开启需要重新输入密码。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('断开')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '断开「${s.title}」？',
+      message: '断开后不再向该地址发送任何请求，该连接的库从主页移除；'
+          '本机保存的密码会立即清除。重新开启需要重新输入密码。',
+      confirmLabel: '断开',
     );
-    if (ok != true) return;
+    if (!ok) return;
     // 与 [_delete] 同一条：await 回来后先确认宿主还在，再改状态。
     if (!mounted) return;
     setState(() {
@@ -2080,7 +2056,7 @@ class _SettingsPageState extends State<SettingsPage> {
         title: Text('连接「${s.title}」'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(s.base,
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              style: kHintTextStyle),
           const SizedBox(height: 12),
           TextField(
             controller: pass,
@@ -2150,7 +2126,7 @@ class _SettingsPageState extends State<SettingsPage> {
             '可添加多个 NAS 地址（IP）。主页与媒体库会聚合所有可见连接的库；'
             '同名/同 id 的库只显示一份。关闭一条连接＝与该服务端断连：'
             '不再发请求、密码立即清除，重新开启需重新输入密码。',
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
         const SizedBox(height: 12),
         if (servers.isEmpty)
           const Padding(
@@ -2216,7 +2192,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 materialTapTargetSize: MaterialTapTargetSize.shrinkWrap),
           ]),
           Text(s.base,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: kHintTextStyle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis),
           Text(
@@ -2390,7 +2366,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('库词条配色'), actions: [
         IconButton(
-            tooltip: '刷新',
+            tooltip: kRefreshTooltip,
             onPressed: _loadLibs,
             icon: const Icon(Icons.refresh)),
       ]),
@@ -2408,7 +2384,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                         '分发规则：任何单元库设的色都会向下分发给它的基础库/作品/作者，'
                         '更近的一层设过色时以更近的那层为准。'
                         '四种词条形状与尺寸一致，只用边框/底纹区分。',
-                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        style: kHintTextStyle),
                   ),
                   const _SectionHeader('词条外观（四类边框 / 底纹）'),
                   _entryStyleSection(),
@@ -2422,7 +2398,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                       padding: EdgeInsets.all(24),
                       child: Text('未发现单元库：请先在「文件结构」里勾选节点文件夹。',
                           textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          style: kHintTextStyle),
                     ),
                   if (otherUnits.isNotEmpty || otherBasics.isNotEmpty) ...[
                     const _SectionHeader(kOtherSectionTitle),
@@ -2446,7 +2422,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
               '固定一致，只能调边框粗细、边框颜色、边框深浅与底纹浓度'
               '（词条底色仍在下方按库设置）。作者那一档指作者卡上的等级词条。'
               '边框加粗只改视觉、不改变词条占位。调完即时生效，也可单层级恢复默认。',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
+              style: kHintTextStyle),
         ),
         for (final kind in LibEntryKind.values)
           _entryStyleTile(kind, levelName(kind)),
@@ -2519,8 +2495,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
               child: Padding(
                 padding: const EdgeInsets.only(top: 6, bottom: 2),
                 child: Text('边框颜色',
-                    style: const TextStyle(
-                        fontSize: 12, color: Colors.grey)),
+                    style: kHintTextStyle),
               ),
             ),
             Wrap(spacing: 8, runSpacing: 8, children: [
@@ -2583,7 +2558,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
-        Text(shown, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        Text(shown, style: kHintTextStyle),
       ]),
       Slider(
           value: value.clamp(min, max).toDouble(),
@@ -2955,7 +2930,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text('颜色来源',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: kHintTextStyle),
                 ),
                 const SizedBox(height: 6),
                 SegmentedButton<BadgeColorSource>(
@@ -2988,7 +2963,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text('颜色',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: kHintTextStyle),
                 ),
                 const SizedBox(height: 6),
                 Wrap(spacing: 10, runSpacing: 10, children: [
@@ -3073,7 +3048,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text('emoji 后缀（可留空；支持任意标准 emoji，可直接输入）',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: kHintTextStyle),
                 ),
                 const SizedBox(height: 6),
                 TextField(
@@ -3656,7 +3631,7 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
                   '作者卡片库词条后显示 D–S 等级。分数 = 播放×权重 + 水滴×权重 + '
                   '作品×权重；达到门槛即升一级。等级配置（含 D–S 配色）由服务端'
                   '统一管理，此处只读，修改后所有客户端同步生效。',
-                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: kHintTextStyle),
               if (_note != null) ...[
                 const SizedBox(height: 6),
                 Text(_note!,
@@ -3693,7 +3668,7 @@ class _AuthorGradeSettingsPageState extends State<AuthorGradeSettingsPage> {
                   '示例：播放 100、水滴 5、作品 10 → '
                   '${AuthorGrade.score(plays: 100, drops: 5, works: 10)} 分 → '
                   '${AuthorGrade.gradeFor(plays: 100, drops: 5, works: 10)} 级',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: kHintTextStyle),
               const SizedBox(height: 20),
               const Text(
                   '服务端文件：<媒体库元数据目录>/author-grade.json\n'
@@ -3856,7 +3831,7 @@ class _BreadcrumbTabState extends State<_BreadcrumbTab> {
       Align(
         alignment: Alignment.centerRight,
         child: IconButton(
-            tooltip: '刷新', onPressed: _load, icon: const Icon(Icons.refresh)),
+            tooltip: kRefreshTooltip, onPressed: _load, icon: const Icon(Icons.refresh)),
       ),
       Expanded(
         child: _lines.isEmpty
@@ -4454,7 +4429,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
                     child: InlineSpinner())
                 : const Icon(Icons.travel_explore)),
         IconButton(
-            tooltip: '刷新',
+            tooltip: kRefreshTooltip,
             onPressed: loading ? null : load,
             icon: const Icon(Icons.refresh)),
         const HomeAction(),
@@ -5095,7 +5070,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         const Text('默认播放倍速', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
         const Text('进入播放器时自动应用，播放中仍可用倍速按钮临时切换。',
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
         const SizedBox(height: 10),
         Wrap(spacing: 8, children: [
           for (final s in _speeds)
@@ -5133,7 +5108,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
           onChangeEnd: (_) => _persist(),
         ),
         const Text('图文作品停留多久后自动展示下一张（到末尾自动切下一条）。',
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
         const Divider(height: 32),
         Row(children: [
           const Expanded(
@@ -5154,7 +5129,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
           onChangeEnd: (_) => _persist(),
         ),
         const Text('全屏播放时无操作多久后自动隐藏进度条与控制栏；点击屏幕可再次呼出。',
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
         const Divider(height: 32),
         Row(children: [
           const Expanded(
@@ -5177,7 +5152,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
           onChangeEnd: (_) => _persist(),
         ),
         const Text('按滑动方向提前打开前后各 N 条媒体，切条时首帧已就绪；0 为关闭。',
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
         const SizedBox(height: 12),
         const Text('预加载内存上限', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
@@ -5194,7 +5169,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
             ),
         ]),
         const Text('超出上限时优先淘汰离当前条目最远的缓存，正在播放的条目不受影响。',
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
         const Divider(height: 32),
         const Text('视频填充', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 6),
@@ -5212,7 +5187,7 @@ class _PlaybackSettingsPageState extends State<PlaybackSettingsPage> {
         ]),
         const Text(
             '铺满：竖屏视频裁剪填满屏幕（默认）；适应：始终按源比例完整显示，横屏/方形视频自动留黑边。手动选择后优先于按比例自动判定。',
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
       ]),
     );
   }
@@ -5262,7 +5237,7 @@ class _KeyBindingsPageState extends State<KeyBindingsPage> {
               '再按主键（如 Ctrl+Shift+F）。冲突按「修饰键+主键」整体判断，'
               'Ctrl+J 不会与单键 J 冲突。（需硬件键盘；触屏设备可忽略）'
               '方向键与 Esc 是固定键位，不允许绑定；已保存的旧配置里这类绑定会被丢弃。',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
+              style: kHintTextStyle),
         ),
         const Divider(height: 1),
         for (final a in PlayerAction.values)
@@ -5398,7 +5373,7 @@ class _CornerBadgeSettingsPageState extends State<CornerBadgeSettingsPage> {
           child: Text(
               '角标显示在库卡片左上角，表示库的种类。所有层级形状与尺寸一致，'
               '只有图案与颜色不同；改完立即生效。',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
+              style: kHintTextStyle),
         ),
         const Divider(height: 1),
         for (final kind in LibBadgeKind.values)
@@ -5673,24 +5648,15 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
   }
 
   Future<void> _delete(CollectionSyncInfo c) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('移除同步源'),
-        content: Text('将从 App 中移除「${c.name}」，清除该同步源的索引数据并关闭同步。\n\n'
-            'NAS 上的原始视频、图片和文案不会被删除。\n此操作不可撤销。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('删除')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '移除同步源',
+      message: '将从 App 中移除「${c.name}」，清除该同步源的索引数据并关闭同步。\n\n'
+          'NAS 上的原始视频、图片和文案不会被删除。\n此操作不可撤销。',
+      confirmLabel: '删除',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     try {
       final j = await _send('/api/collections/delete', {'idx': c.idx});
       _apply(j);
@@ -5748,8 +5714,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
                             child: Text(
                                 '账号共 $accountCount 个同步源 · $enabled 个参与同步。'
                                 '关闭后不参与同步，也不出现在主页/库选择页；名称与账号一致。',
-                                style: const TextStyle(
-                                    fontSize: 12, color: Colors.grey)),
+                                style: kHintTextStyle),
                           ),
                         ]),
                       ),
@@ -6805,21 +6770,14 @@ class _LibraryPageState extends State<LibraryPage> {
   }
 
   Future<void> _delete(Map<String, dynamic> l) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text('删除库「${libraryDisplayName('${l['id']}', '${l['name'] ?? ''}')}」？'),
-        content: const Text('仅从注册表移除，不删除数据目录和媒体文件。当前库或唯一库不能删除。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true), child: const Text('删除')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title:
+          '删除库「${libraryDisplayName('${l['id']}', '${l['name'] ?? ''}')}」？',
+      message: '仅从注册表移除，不删除数据目录和媒体文件。当前库或唯一库不能删除。',
+      confirmLabel: '删除',
     );
-    if (ok != true) return;
+    if (!ok) return;
     try {
       final id = '${l['id']}';
       final sb = serverOriginOf(l).base;
@@ -6954,7 +6912,7 @@ class _LibraryPageState extends State<LibraryPage> {
       child: Scaffold(
         appBar: AppBar(title: const Text('媒体库'), actions: [
           IconButton(
-              icon: const Icon(Icons.refresh), onPressed: load, tooltip: '刷新'),
+              icon: const Icon(Icons.refresh), onPressed: load, tooltip: kRefreshTooltip),
           IconButton(
               icon: const Icon(Icons.dns_outlined),
               tooltip: '网络连接',
@@ -7032,7 +6990,7 @@ class _LibraryPageState extends State<LibraryPage> {
               child: Text(
                 '还没有可显示的单元库\n先在设置 → 媒体库连接，或在「文件结构」里指定节点文件夹',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+                style: kHintTextStyle,
               ),
             ),
           ),
@@ -7399,7 +7357,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
         Padding(
           padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
           child: Text('没有可显示的媒体库（未连接或服务端未下发库树）',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
+              style: kHintTextStyle),
         ),
       ];
     }
@@ -7614,7 +7572,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('爬虫设置'), actions: [
         IconButton(
-            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+            tooltip: kRefreshTooltip, onPressed: load, icon: const Icon(Icons.refresh)),
         const HomeAction(),
       ]),
       body: loading
@@ -7627,7 +7585,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
                     child: Text('$libCount 个库 · $unitCount 个单元库'
                         ' · $withScripts 个有爬虫脚本',
                         style:
-                            const TextStyle(fontSize: 12, color: Colors.grey)),
+                            kHintTextStyle),
                   ),
                   // owner 2026-11-25：「设置里也按各个媒体库分类好，哪个媒体库
                   // 的设置就归到对应的下面去」。
@@ -7749,7 +7707,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
               ? const LoadingView()
               : ListView(padding: const EdgeInsets.all(16), children: [
                   Text('库根：${widget.lib['base']}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: kHintTextStyle),
                   const SizedBox(height: 10),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -7790,7 +7748,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
                   const SizedBox(height: 6),
                   if (scripts.isEmpty)
                     const Text('未发现脚本（保存后服务端会在库根 crawler/ 生成模板）',
-                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        style: kHintTextStyle),
                   for (final s in scripts)
                     ListTile(
                       dense: true,
@@ -7968,7 +7926,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
                   ),
                   const SizedBox(height: 8),
                   const Text('运行前请确认脚本已在库根 crawler/ 中就绪；日志写在 crawler/run.log。',
-                      style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: kHintTextStyle),
                 ]),
     );
   }
@@ -8517,7 +8475,7 @@ class _RankPageState extends State<RankPage> {
                 MaterialPageRoute(builder: (_) => const LibraryRankPage())),
             icon: const Icon(Icons.stacked_bar_chart)),
         IconButton(
-            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+            tooltip: kRefreshTooltip, onPressed: load, icon: const Icon(Icons.refresh)),
         const HomeAction(),
       ]),
       body: Column(children: [
@@ -8604,8 +8562,7 @@ class _RankPageState extends State<RankPage> {
                               // 一处表达：页面不再自己拼分支。
                               rankEmptyText(metric,
                                   scoped: sel.isNotEmpty && sel != 'all'),
-                              style: const TextStyle(
-                                  color: Colors.grey, fontSize: 12)))
+                              style: kHintTextStyle))
                       : ListView.separated(
                           padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                           itemCount: visible.length,
@@ -8765,7 +8722,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('各库排行'), actions: [
         IconButton(
-            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+            tooltip: kRefreshTooltip, onPressed: load, icon: const Icon(Icons.refresh)),
         const HomeAction(),
       ]),
       body: Column(children: [
@@ -8824,7 +8781,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
                       ? const Center(
                           child: Text('暂无可参与排行的库',
                               style:
-                                  TextStyle(color: Colors.grey, fontSize: 12)))
+                                  kHintTextStyle))
                       : ListView.separated(
                           padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                           itemCount: rows.length,
@@ -9232,23 +9189,14 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
 
   Future<void> _syncAuthors() async {
     if (syncing) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('立即同步作者'),
-        content: const Text('只补抓缺少头像/简介的作者，速度较快。\n'
-            '需要整位作者全量刷新，请进入该作者主页同步。\n\n同步在 NAS 后台运行。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('开始同步')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '立即同步作者',
+      message: '只补抓缺少头像/简介的作者，速度较快。\n'
+          '需要整位作者全量刷新，请进入该作者主页同步。\n\n同步在 NAS 后台运行。',
+      confirmLabel: '开始同步',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     final j = await startServerSync(target: 'authors');
     if (j == null || !serviceSaidOk(j)) {
       if (mounted) {
@@ -9746,7 +9694,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
                     child: InlineSpinner())
                 : const Icon(Icons.cloud_sync_outlined)),
         IconButton(
-            tooltip: '刷新', onPressed: load, icon: const Icon(Icons.refresh)),
+            tooltip: kRefreshTooltip, onPressed: load, icon: const Icon(Icons.refresh)),
       ]),
       body: loading
           // 作者总览的网格是 `kAuthorGrid`（150 / 间距 10 / 固定行高 170），
@@ -14629,26 +14577,17 @@ class _PlayerPageState extends State<PlayerPage>
   Future<void> _confirmClearCover(String lib,
       {CoverScope scope = CoverScope.basic}) async {
     final unit = scope == CoverScope.unit;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(unit ? '清除单元库封面？' : '清除自定义封面？'),
-        content: Text(unit
-            ? '该单元库会恢复自动封面（子树最高播放基础库 → 第一个有封面的基础库）。'
-                '作品原图不受影响。'
-            : '会恢复该库的自动封面（爬虫封面 → 最高播放作品）。'
-                '已生成的封面图片仍保留在库里，之后再设回来不会丢。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('清除')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: unit ? '清除单元库封面？' : '清除自定义封面？',
+      message: unit
+          ? '该单元库会恢复自动封面（子树最高播放基础库 → 第一个有封面的基础库）。'
+              '作品原图不受影响。'
+          : '会恢复该库的自动封面（爬虫封面 → 最高播放作品）。'
+              '已生成的封面图片仍保留在库里，之后再设回来不会丢。',
+      confirmLabel: '清除',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     await _applyCover(CoverRequest.clear(lib: lib, scope: scope));
   }
 
@@ -18413,22 +18352,13 @@ class _AuthorPageState extends State<AuthorPage> {
         return;
       }
       if (!mounted) return;
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('批量删除'),
-          content: Text(batchDeleteConfirmText(selectedWorks.length, files)),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('取消')),
-            FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('确认删除')),
-          ],
-        ),
+      final ok = await confirmAction(
+        context,
+        title: '批量删除',
+        message: batchDeleteConfirmText(selectedWorks.length, files),
+        confirmLabel: '确认删除',
       );
-      if (ok != true) return;
+      if (!ok) return;
       var done = 0;
       for (final e in groups.entries) {
         for (final id in e.value) {
@@ -18535,22 +18465,13 @@ class _AuthorPageState extends State<AuthorPage> {
       final target = await _pickMoveTarget(lib);
       if (target == null || !canBatchMove(selectedWorks, target)) return;
       if (!mounted) return;
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('批量移动'),
-          content: Text(batchMoveConfirmText(ids.length, target)),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('取消')),
-            FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('确认移动')),
-          ],
-        ),
+      final ok = await confirmAction(
+        context,
+        title: '批量移动',
+        message: batchMoveConfirmText(ids.length, target),
+        confirmLabel: '确认移动',
       );
-      if (ok != true) return;
+      if (!ok) return;
       var done = 0;
       final errors = <String>[];
       for (final id in ids) {
@@ -18893,7 +18814,7 @@ class _AuthorPageState extends State<AuthorPage> {
                   const SizedBox(height: 6),
                   Row(children: [
                     const Text('作者简介',
-                        style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        style: kHintTextStyle),
                     const SizedBox(width: 4),
                     InkWell(
                       onTap: _editBio,
@@ -18907,7 +18828,7 @@ class _AuthorPageState extends State<AuthorPage> {
                           SizedBox(width: 2),
                           Text('编辑',
                               style:
-                                  TextStyle(fontSize: 12, color: Colors.grey)),
+                                  kHintTextStyle),
                         ]),
                       ),
                     ),

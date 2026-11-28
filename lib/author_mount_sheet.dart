@@ -13,8 +13,9 @@
 ///  3. 已合并的组可拆回去（拆出来的那份永远不再自动合并）。
 library;
 
-import 'ui_copy.dart';
 import 'dart:convert';
+
+import 'ui_copy.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -31,6 +32,7 @@ import 'unit_author_groups.dart';
 import 'toast.dart';
 import 'loading_view.dart';
 import 'api_timeout.dart';
+import 'text_styles.dart';
 
 /// 打开作者挂载面板。
 Future<bool?> showAuthorMountSheet({
@@ -230,7 +232,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
                 child: Text(
                     '勾选的文件夹算同一位作者（合并显示）；取消勾选即移出该组。'
                     '只改显示与归类，不会删除或移动任何目录。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: kHintTextStyle),
               ),
               const SizedBox(height: 8),
               Flexible(
@@ -393,7 +395,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(failureLine('读取', err!),
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              style: kHintTextStyle),
           const SizedBox(height: 12),
           FilledButton(onPressed: load, child: const Text('重试')),
         ]),
@@ -404,7 +406,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
         padding: EdgeInsets.all(24),
         child: Text('没有找到这个作者的目录',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: Colors.grey)),
+            style: kHintTextStyle),
       );
     }
 

@@ -13,9 +13,12 @@ import 'rel_path.dart';
 import 'top_node.dart';
 import 'error_text.dart';
 import 'load_error_view.dart';
+import 'confirm_dialog.dart';
 import 'toast.dart';
 import 'loading_view.dart';
 import 'api_timeout.dart';
+import 'text_styles.dart';
+import 'ui_copy.dart';
 
 /// 文件结构列表：把库里所有文件夹平铺成可折叠的树，
 /// 供 owner 指定「节点文件夹」（单元库）。
@@ -409,24 +412,13 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   /// 有未保存改动时，离开页面或刷新会丢掉这些改动：先向 owner 确认。
   Future<bool> _confirmDiscard(String action) async {
     if (!dirty) return true;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('还有未保存的改动'),
-        content: Text('$action会丢弃当前未保存的节点设置，确定继续吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('放弃改动'),
-          ),
-        ],
-      ),
+    return confirmAction(
+      context,
+      title: '还有未保存的改动',
+      message: '$action会丢弃当前未保存的节点设置，确定继续吗？',
+      confirmLabel: '放弃改动',
+      destructive: true,
     );
-    return ok == true;
   }
 
   /// 刷新前先确认：避免把未保存的勾选一并刷掉。
@@ -503,24 +495,16 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
   }
 
   Future<void> _confirmUnlock(_FolderRow r) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('解锁「${r.name}」？'),
-        content: const Text('该目录当前被识别为基础库，锁定为不可设为节点。\n'
-            '强制解锁后可以把它设为节点文件夹（单元库）；'
-            '如果它确实还是基础库，建议不要这样做。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('解锁')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '解锁「${r.name}」？',
+      message: '该目录当前被识别为基础库，锁定为不可设为节点。\n'
+          '强制解锁后可以把它设为节点文件夹（单元库）；'
+          '如果它确实还是基础库，建议不要这样做。',
+      confirmLabel: '解锁',
+      destructive: true,
     );
-    if (ok == true && mounted) _forceUnlock(r);
+    if (ok && mounted) _forceUnlock(r);
   }
 
   Widget _buildRow(_FolderRow r) {
@@ -653,7 +637,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                 ),
           actions: [
             IconButton(
-              tooltip: '刷新',
+              tooltip: kRefreshTooltip,
               onPressed: loading ? null : _refresh,
               icon: const Icon(Icons.refresh),
             ),
@@ -740,7 +724,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
                           child: Text('该库下没有子文件夹',
                               textAlign: TextAlign.center,
                               style:
-                                  TextStyle(fontSize: 12, color: Colors.grey)),
+                                  kHintTextStyle),
                         ),
                     ],
                   ),

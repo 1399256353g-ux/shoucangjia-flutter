@@ -43,6 +43,7 @@ import 'error_text.dart';
 import 'toast.dart';
 import 'loading_view.dart';
 import 'api_timeout.dart';
+import 'text_styles.dart';
 
 /// 作者卡片头像：手动设置 > 爬虫脚本（服务端下发 `av`）> 自动生成（作品图兜底）。
 /// 同级按时间新→旧；都为空时由调用方回退到「首字」占位。
@@ -283,7 +284,7 @@ class _BasicLibPageState extends State<BasicLibPage>
               const Align(
                 alignment: Alignment.centerLeft,
                 child: Text('哪些基础库有他的作品（可多选）',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: kHintTextStyle),
               ),
               const SizedBox(height: 4),
               ConstrainedBox(
@@ -640,7 +641,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     if (authors.isEmpty) {
       return Center(
           child: Text(err ?? '该基础库下没有作者',
-              style: const TextStyle(fontSize: 12, color: Colors.grey)));
+              style: kHintTextStyle));
     }
     final shown = _shownAuthors;
     final letters = authorIndexLetters(_authorShownKeys);
@@ -662,7 +663,7 @@ class _BasicLibPageState extends State<BasicLibPage>
             return Center(
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 const Text('无匹配作者',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                    style: kHintTextStyle),
                 const SizedBox(height: 8),
                 TextButton(
                     key: const ValueKey('basic-author-empty-clear'),
@@ -928,7 +929,7 @@ class _BasicLibPageState extends State<BasicLibPage>
     if (works.isEmpty) {
       return Center(
           child: Text(err ?? '该基础库下没有作品',
-              style: const TextStyle(fontSize: 12, color: Colors.grey)));
+              style: kHintTextStyle));
     }
     final shown = filtered;
     return Column(children: [
@@ -938,7 +939,7 @@ class _BasicLibPageState extends State<BasicLibPage>
           child: Center(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Text('该类型下暂无作品',
-                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: kHintTextStyle),
               const SizedBox(height: 8),
               TextButton(
                   onPressed: _typeFilter.isEmpty ? null : _clearTypeFilter,

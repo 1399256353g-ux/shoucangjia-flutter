@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'cover_cache.dart';
 import 'home_action.dart';
 import 'toast.dart';
+import 'confirm_dialog.dart';
+import 'text_styles.dart';
 
 class CacheSettingsPage extends StatefulWidget {
   const CacheSettingsPage({super.key});
@@ -35,23 +37,14 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
   }
 
   Future<void> _clear() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('立即清空缓存'),
-        content: Text('将删除 ${usage.human} 的全部封面缓存，'
-            '下次浏览会重新下载。确定继续？'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('清空')),
-        ],
-      ),
+    final ok = await confirmAction(
+      context,
+      title: '立即清空缓存',
+      message: '将删除 ${usage.human} 的全部封面缓存，下次浏览会重新下载。确定继续？',
+      confirmLabel: '清空',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     final freed = await DiziCache.clearAll();
     await _refresh();
     if (!mounted) return;
@@ -69,7 +62,7 @@ class _CacheSettingsPageState extends State<CacheSettingsPage> {
           child: Text(
               '封面与缩略图缓存只写入本 App 的缓存目录；Windows 固定落 E 盘，'
               '不会写 C 盘。超出上限按「最久未使用」淘汰。',
-              style: TextStyle(fontSize: 12, color: Colors.grey)),
+              style: kHintTextStyle),
         ),
         ListTile(
           leading: const Icon(Icons.folder_open),
