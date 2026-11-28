@@ -23,6 +23,7 @@ library;
 import 'author_filter.dart';
 import 'author_big_nodes.dart';
 import 'basic_lib.dart';
+import 'label_fallback.dart';
 import 'source_lib.dart' show basicLibLabel;
 import 'unit_library.dart';
 
@@ -97,8 +98,7 @@ AuthorFilterOptions authorFilterOptionsFrom({
   final topSeen = <String>{};
   for (final t in tops) {
     if (t.id.isEmpty || !topSeen.add(t.id)) continue;
-    topNodes.add(AuthorLibNode(
-        id: t.id, name: t.name.trim().isEmpty ? t.id : t.name));
+    topNodes.add(AuthorLibNode(id: t.id, name: labelOrId(t.id, t.name)));
   }
 
   return AuthorFilterOptions(

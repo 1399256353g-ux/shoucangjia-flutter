@@ -18,6 +18,7 @@
 library;
 
 import 'author_filter.dart';
+import 'label_fallback.dart';
 import 'stable_order.dart';
 
 /// 由基础库列表汇总出「大库 / 单元库」筛选项。
@@ -34,8 +35,10 @@ List<AuthorBigNode> authorBigNodes(
   for (final b in basics) {
     final id = b.bigId.trim();
     if (id.isEmpty || !seen.add(id)) continue;
-    final name = nameOf(id);
-    out.add(AuthorBigNode(id: id, name: name.trim().isEmpty ? id : name));
+    // 回落规则只有 [labelOrId] 一处（去空白后仍空才回落 id）：
+    // 写成 `trim().isEmpty` 与 `isEmpty` 的两个调用点，在「名字是纯空格」
+    // 那条数据上会给出两个答案。
+    out.add(AuthorBigNode(id: id, name: labelOrId(id, nameOf(id))));
   }
   return stableSort<AuthorBigNode>(out, (a, b) {
     final c = a.name.compareTo(b.name);

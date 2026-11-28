@@ -1,4 +1,5 @@
 import 'emoji_text.dart';
+import 'label_fallback.dart';
 import 'library_badge.dart' show LibraryBadge;
 
 /// 0.9.6 起：旧注册表（`/api/libraries`）里的「抖音收藏」不再作为展示文案。
@@ -11,10 +12,15 @@ const String legacyDouyinName = '抖音收藏';
 
 /// 把库名规范成可展示文案：
 /// - 修掉破碎 emoji；
-/// - 空名回落到 id；
+/// - 空名回落到 id（判定只在 [labelOrId] 一处）；
 /// - 旧版「抖音收藏」→ 库 id（其它库带同样字样时同样回落到 id）。
 String displayLibraryName(String id, String? rawName) {
-  final name = fixDisplayName('${rawName ?? ''}', fallback: id);
+  // 先只做「修 emoji / 去首尾空白」，回落交给 `labelOrId`：此前这里用
+  // `fixDisplayName(fallback: id)` 自己做了一次回落，而筛选面板/设置页/
+  // 各库排行又各自做了两次（一个判 `trim()`、一个判裸空），三份对「名字
+  // 是纯空格」给出两个答案。现在「空名 → id」全项目只有一个决定点。
+  final fixed = fixDisplayName('${rawName ?? ''}', fallback: '');
+  final name = labelOrId(id, fixed);
   if (name.contains(legacyDouyinName)) return id;
   return name;
 }

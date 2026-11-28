@@ -72,15 +72,25 @@ void main() {
   group('2. 作者页的元数据回落只有一处', () {
     test('「当前库优先 → 任意一份」只写在一个函数里', () {
       final main = codeOf('lib/main.dart');
-      // 原形态：两处各写一遍 `metas[cfg.lib] ?? (metas.isEmpty ? null : …)`。
+      // 0.9.351：回落本体从 `_metaForAuthorPage` 移到了 `metaFirstOf`——
+      // 排行榜页 `_rowMeta` 的末级回落（`metas.isEmpty ? null : values.first`）
+      // 与作者页那份是同一件事，两处各写一遍时榜单词条与作者卡会来自
+      // 不同的库。现在偏好顺序由调用方给，回落只剩 `metaFirstOf` 一处。
+      // 注释里引用旧写法不算实现。
+      final code = main
+          .split('\n')
+          .where((l) => !l.trimLeft().startsWith('//'))
+          .join('\n');
       expect(
-          RegExp(r'metas\[cfg\.lib\]\s*\?\?\s*\(metas\.isEmpty').allMatches(main).length,
+          RegExp(r'metas\.isEmpty\s*\?\s*null\s*:\s*metas\.values\.first')
+              .allMatches(code)
+              .length,
           1,
-          reason: '回落表达式必须在 `_metaForAuthorPage` 里只出现一次');
-      expect(main.contains('LibMeta? _metaForAuthorPage()'), isTrue);
-      // 两个使用点都走它。
-      expect('_metaForAuthorPage()'.allMatches(main).length, greaterThanOrEqualTo(3),
-          reason: '定义 1 处 + 使用 2 处（建目录下拉 / 作者卡词条）');
+          reason: '回落表达式必须在 `metaFirstOf` 里只出现一次');
+      expect(main.contains('LibMeta? metaFirstOf('), isTrue);
+      // 作者页与排行榜页都走它（定义 1 处 + 两个调用点）。
+      expect('metaFirstOf('.allMatches(main).length, greaterThanOrEqualTo(3),
+          reason: '定义 1 处 + 使用 2 处（作者页 / 排行榜行）');
     });
   });
 }

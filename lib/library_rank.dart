@@ -14,6 +14,7 @@ library;
 
 import 'http_json.dart';
 import 'json_num.dart';
+import 'label_fallback.dart';
 
 class LibraryRankRow {
   final String id;
@@ -146,7 +147,9 @@ List<LibraryRankRow> buildLibraryRank({
     final t = libraryTotals(st);
     rows.add(LibraryRankRow(
       id: id,
-      name: '${lib['name'] ?? id}'.trim().isEmpty ? id : '${lib['name'] ?? id}',
+      // 回落规则与设置页/筛选面板共用 `labelOrId`：只判 `isEmpty` 时，
+      // 服务端下发纯空格名字会把一条看不见的空白画成榜上库名。
+      name: labelOrId(id, '${lib['name'] ?? ''}'),
       plays: t.plays,
       drops: t.drops,
       online: online,

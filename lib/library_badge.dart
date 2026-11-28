@@ -26,6 +26,7 @@ import 'package:flutter/material.dart'
 import 'app_settings.dart';
 import 'color_codec.dart';
 import 'index_prefix.dart';
+import 'label_fallback.dart';
 import 'unit_fraction.dart';
 import 'json_num.dart';
 import 'lib_id.dart';
@@ -870,8 +871,9 @@ class LibraryBadge {
     }
     final out = <String>[];
     for (var i = 0; i < ids.length && i < max; i++) {
-      final name = names[ids[i]] ?? '';
-      out.add(stripIndex(name.isEmpty ? ids[i] : name));
+      // 名字为空回落 id 的规则只有 `labelOrId` 一处：这里旧写法是裸
+      // `name.isEmpty`，与服务端下发纯空格名字时的其他入口不一致。
+      out.add(stripIndex(labelOrId(ids[i], names[ids[i]])));
     }
     if (ids.length > max) out.add('+${ids.length - max}');
     return out;

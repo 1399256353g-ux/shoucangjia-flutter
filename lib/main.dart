@@ -78,6 +78,7 @@ import 'continue_watching.dart';
 import 'cover_badges.dart';
 import 'decode_fallback.dart';
 import 'home_action.dart';
+import 'label_fallback.dart';
 import 'lib_names.dart';
 import 'infinite.dart';
 import 'library_badge.dart';
@@ -1040,7 +1041,7 @@ class LibMeta {
   String topLabelFor(String topId) {
     if (topId.isEmpty) return '';
     for (final t in tops) {
-      if (t.id == topId) return t.name.trim().isEmpty ? topId : t.name;
+      if (t.id == topId) return labelOrId(topId, t.name);
     }
     return topId;
   }
@@ -1088,6 +1089,23 @@ AuthorFilterOptions authorFilterOptionsOfMetas(List<LibMeta> ms) =>
       bigNames: {for (final m in ms) ...m.bigNames},
       unitNameOf: (id) => unitNameInMetas(ms, id),
     );
+
+/// N 份元数据里取「第一个命中」的那一份；一个都没命中时取任意一份。
+///
+/// 0.9.351：这条回落链（优先 id 逐个查 → 退到任意一份）此前在排行榜页与
+/// 作者页各写一份，而两处对末级回落写得不一样：排行榜是裸
+/// `metas.isEmpty ? null : metas.values.first`，作者页写进
+/// `_metaForAuthorPage`。结果是「榜单词条按一份 meta 算、作者卡按另一份算」
+/// 的又一处入口：多连接时排行榜的作者卡词条可能来自另一台服务器的库。
+/// 现在偏好顺序由调用方给，回落只在这里。
+LibMeta? metaFirstOf(Map<String, LibMeta> metas, Iterable<String> preferred) {
+  for (final id in preferred) {
+    if (id.trim().isEmpty) continue;
+    final hit = metas[id];
+    if (hit != null) return hit;
+  }
+  return metas.isEmpty ? null : metas.values.first;
+}
 
 /// 单元库名称：先问定义了它的那份 meta。
 ///
@@ -2585,7 +2603,9 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
   Widget _topSection(UnitLibrary top) {
     final subUnits = unitsByTop[top.id] ?? const <UnitLibrary>[];
     final subBasics = basicsByTop[top.id] ?? const <BasicLib>[];
-    final name = top.name.isEmpty ? top.id : top.name;
+    // 回落规则只有 `labelOrId` 一处：这里旧写法是裸 `isEmpty`，
+    // 与筛选面板的 `trim().isEmpty` 在「名字是纯空格」那条数据上不一致。
+    final name = labelOrId(top.id, top.name);
     final expanded = expandedTopSections.contains(top.id);
     // 折叠时也要能看出「这个媒体库设过什么」：按本组内已自定义的条目数
     // 给一句摘要，不展开也能判断要不要进去改。
@@ -2680,9 +2700,20 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
     );
   }
 
+  /// 设置页里「这层的色继承自谁」的显示名：**唯一实现**。
+  ///
+  /// 单元库行与基础库行各写一遍
+  /// `inheritedFrom.isEmpty ? '' : LibraryBadge.stripIndex(meta?.unitNameOf(...) ?? '')`
+  /// （字节相同）。两处一旦分叉，同一个分发源在两行会显示成两个名字——
+  /// 一个带序号、一个不带，用户会以为它们继承了不同层。
+  String _inheritedSourceName(String inheritedFrom) =>
+      inheritedFrom.isEmpty
+          ? ''
+          : LibraryBadge.stripIndex(meta?.unitNameOf(inheritedFrom) ?? '');
+
   Widget _libTile(UnitLibrary u, {bool isTop = false, bool indent = false}) {
     final id = u.id;
-    final name = u.name.isEmpty ? id : u.name;
+    final name = labelOrId(id, u.name);
     // D1：自定义色可能以 rel / node:rel 任一形式落盘，统一走归一化查询。
     // 顶级与下级各写一遍 `topColorFor(...) ?? …` 是两处口径：顶级换了来源
     // 之后其中一处必然漏（实测顶级选「自动分配」仍显示旧自定义色）。
@@ -2698,9 +2729,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       LibraryBadge.sourceFor(id),
       hasOwn: ownColor,
       inherits: inheritedFrom.isNotEmpty,
-      sourceName: inheritedFrom.isEmpty
-          ? ''
-          : LibraryBadge.stripIndex(meta?.unitNameOf(inheritedFrom) ?? ''),
+      sourceName: _inheritedSourceName(inheritedFrom),
     );
     // 分发语义只有一条（owner 2026-11-27）：从直接上级逐级上行，第一个设过色
     // 的那层就是分发源。因此任何单元库设的色都能被下级拿到，不再区分
@@ -2793,9 +2822,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       LibraryBadge.sourceForBasic(b.id),
       hasOwn: own,
       inherits: inheritedFrom.isNotEmpty,
-      sourceName: inheritedFrom.isEmpty
-          ? ''
-          : LibraryBadge.stripIndex(meta?.unitNameOf(inheritedFrom) ?? ''),
+      sourceName: _inheritedSourceName(inheritedFrom),
     );
     final name = LibraryBadge.stripIndex(b.name);
     return ListTile(
@@ -8403,19 +8430,12 @@ class _RankPageState extends State<RankPage> {
   ///
   /// 「选中库优先」是从「各库排行」点进来的场景（`sel` 是那个注册库）；
   /// 行自己的库用于 `lib=all` 下跨连接作者（词条要按作者所在库的颜色/名称）。
-  LibMeta? _rowMeta(Map<String, dynamic> e) {
-    final want = [
-      if (sel.isNotEmpty && sel != 'all') sel,
-      '${e['lib'] ?? ''}'.trim(),
-      cfg.lib,
-    ];
-    for (final id in want) {
-      if (id.isEmpty) continue;
-      final hit = metas[id];
-      if (hit != null) return hit;
-    }
-    return metas.isEmpty ? null : metas.values.first;
-  }
+  /// 末级回落（当前库 → 任意一份）只有 [metaFirstOf] 一处，与作者页同一个。
+  LibMeta? _rowMeta(Map<String, dynamic> e) => metaFirstOf(metas, [
+        if (sel.isNotEmpty && sel != 'all') sel,
+        '${e['lib'] ?? ''}'.trim(),
+        cfg.lib,
+      ]);
 
   /// 按选中库收敛作者（`sel == 'all'` 时全量）。
   ///
@@ -9255,9 +9275,12 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// 这里是**唯一**入口（服务端 `POST /api/unit/authors/create`）。
   Future<void> _createAuthor() async {
     final meta = _metaForAuthorPage();
-    final basics = meta == null
-        ? const <BasicLib>[]
-        : (meta.allBasics.isNotEmpty ? meta.allBasics : meta.basics);
+    // 回落规则只有 `LibMeta.filterBasics` 一处：这里旧写法又重写了一遍
+    // `allBasics.isNotEmpty ? allBasics : basics`，与 `filterBasics` 字节等价。
+    // 同一判定两份拷贝后，「全量优先」的规则改一处就有一处继续按旧口径算
+    // （建目录下拉里看不到跨单元库的基础库）。
+    final basics =
+        meta == null ? const <BasicLib>[] : meta.filterBasics;
     if (basics.isEmpty) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('还没有可用的基础库')));
@@ -9652,8 +9675,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
   /// `metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first)`：
   /// 字节相同的两行，改一处就变成「下拉里可选的基础库」与「卡片上贴的词条」
   /// 来自不同的库——两边都自洽，界面上只是「这个词条怎么不是我这个库的」。
-  LibMeta? _metaForAuthorPage() =>
-      metas[cfg.lib] ?? (metas.isEmpty ? null : metas.values.first);
+  LibMeta? _metaForAuthorPage() => metaFirstOf(metas, [cfg.lib]);
 
   Widget _authorCell(MapEntry<String, Map<String, dynamic>> e) {
     final av = '${e.value['av'] ?? ''}';
