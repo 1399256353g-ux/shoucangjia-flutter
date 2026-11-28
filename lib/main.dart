@@ -6732,6 +6732,11 @@ class _LibraryPageState extends State<LibraryPage> {
                 builder: (_) => AuthorPage(name: name, libs: [b.id]))),
         onPlay: (works, index) => Navigator.of(context).push(instantRoute<void>(
             (_) => PlayerPage(works: works, start: index, lib: b.id))),
+        // owner 2026-11-28：新建作者时可选「在哪些基础库有作品」——列出
+        // 同一个**直接上级单元库**下的全部基础库（拿不到单元库时只有本库）。
+        siblingBasics: (unit?.allBasics.isNotEmpty == true)
+            ? unit!.allBasics
+            : <BasicLib>[b],
       ),
     ));
   }

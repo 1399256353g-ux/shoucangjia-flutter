@@ -69,22 +69,25 @@ void main() {
       expect(branches.map((b) => b.lib).toList(), ['lib-a', 'lib-b']);
     });
 
-    test('三个对话框都转发同一个控件，不再各写平铺 CheckboxListTile', () {
-      for (final path in const [
-        'lib/unit_author_mount_page.dart',
-        'lib/author_mount_sheet.dart',
-      ]) {
-        final src = _code(path);
-        expect(src.contains('AuthorFilePicker('), isTrue, reason: path);
-        expect(src.contains('CheckboxListTile('), isFalse,
-            reason: '$path 不得再自己平铺候选列表');
-      }
+    test('挂载页按基础库勾选，不再用目录树控件', () {
+      // owner 2026-11-28：
+      // > 「不要用文件目录的方式进行设置了，列出直属单元库下所有基础库，
+      // >   让用户自己选作者作品存在于直接上级单元库下哪些基础库」
+      //
+      // 因此挂载页的「候选」从 `AuthorFilePicker`（目录树）换成了基础库
+      // 勾选列表。作者主页的 `author_mount_sheet` 仍保留树形控件（那里是按
+      // 单个作者的已有目录拆分，语义未变）。
       final page = _code('lib/unit_author_mount_page.dart');
-      // 三处入口（合并 / 拆出 / 编辑成员）各自一个前缀；叶子键与改造前逐字相同。
+      expect(page.contains('basicsOfUnitScope('), isTrue,
+          reason: '范围必须来自所属单元库的基础库，不跨库');
+      expect(page.contains('createAuthorBodies('), isTrue,
+          reason: '勾选的基础库要能翻译成建目录请求');
+      // 合并 / 拆出 / 编辑成员三个对话框仍共用同一个树形控件。
+      expect(page.contains('AuthorFilePicker('), isTrue);
       expect(page.contains("leafKeyPrefix: 'uag-pick'"), isTrue);
       expect(page.contains("leafKeyPrefix: 'uag-split'"), isTrue);
       expect(page.contains("leafKeyPrefix: 'uag-setfiles'"), isTrue);
-      // 分组规则只在本文件里出现一次，页面不得自己按 lib 分组。
+      // 分组规则只在 picker 里出现一次，页面不得自己按 lib 分组。
       final picker = _code('lib/author_file_picker.dart');
       expect(picker.contains('List<AuthorFileBranch> authorFileBranches('), isTrue);
       expect(page.contains('byLib'), isFalse,

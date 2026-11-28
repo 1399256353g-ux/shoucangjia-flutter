@@ -29,6 +29,7 @@ import 'label_fallback.dart';
 import 'load_error_view.dart';
 import 'unit_author_groups.dart';
 import 'unit_library.dart';
+import 'basic_lib.dart' show BasicLib;
 
 /// 作者文件夹挂载面板。
 class UnitAuthorMountPage extends StatefulWidget {
@@ -62,6 +63,11 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
   bool loading = true;
   bool busy = false;
   String? err;
+
+  /// 挂载页「按基础库挂载」里勾选的基础库 id。
+  ///
+  /// owner 2026-11-28：不再按目录树勾，而是先选基础库、再建作者目录。
+  final Set<String> _pickedBasics = <String>{};
 
   /// 注入的客户端优先；否则本页自建一个并在 dispose 关闭。
   http.Client? _ownClient;
@@ -218,8 +224,99 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     }
   }
 
-  void _toast(String msg, {bool bad = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+  /// 按勾选的基础库建作者目录（已存在的直接用）。
+  ///
+  /// owner 2026-11-28：「选择后在对应基础库下创建作者文件夹，若已经存在则直接使用」。
+  /// 只调 `POST /api/unit/authors/create`（幂等：已存在返回 409）；不删不改任何已有文件。
+  Future<void> _createAuthorDirs() async {
+    if (_pickedBasics.isEmpty) return;
+    final nameCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('建作者目录'),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('将在选中的 ${_pickedBasics.length} 个基础库下建 @作者 目录',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              TextField(
+                key: const ValueKey('uag-create-dir-name'),
+                controller: nameCtl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: '作者名（会建成 @作者名 目录）',
+                  isDense: true,
+                ),
+                onChanged: (_) => setD(() {}),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('取消')),
+            FilledButton(
+              key: const ValueKey('uag-create-dir-ok'),
+              onPressed: nameCtl.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.pop(c, true),
+              child: const Text('创建'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final dir = authorDirForName(nameCtl.text);
+    final bad = authorDirError(dir);
+    if (bad != null) {
+      _toast(bad, bad: true);
+      return;
+    }
+    setState(() => busy = true);
+    var made = 0;
+    var existed = 0;
+    final failed = <String>[];
+    try {
+      final bodies = createAuthorBodies(authorDir: dir, libs: _pickedBasics);
+      for (final body in bodies) {
+        try {
+          final r = await _client
+              .post(
+                Uri.parse(unitAuthorCreateUrl(widget.base)),
+                headers: {...widget.headers, 'Content-Type': 'application/json'},
+                body: jsonEncode(body),
+              )
+              .timeout(const Duration(seconds: 15));
+          if (r.statusCode == 409) {
+            existed++;
+          } else if (r.statusCode == 200) {
+            made++;
+          } else {
+            failed.add('${body['lib']}');
+          }
+        } catch (_) {
+          failed.add('${body['lib']}');
+        }
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+    if (!mounted) return;
+    final parts = <String>[
+      if (made > 0) '新建 $made 个',
+      if (existed > 0) '已存在 $existed 个',
+      if (failed.isNotEmpty) '失败 ${failed.length} 个',
+    ];
+    _toast(parts.isEmpty ? '未创建任何目录' : parts.join(' · '),
+        bad: failed.isNotEmpty);
+    if (made > 0 || existed > 0) await load();
+  }
+
+  void _toast(String msg, {bool bad = false}) {    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
       backgroundColor: bad ? Colors.red.shade700 : null,
     ));
@@ -240,11 +337,25 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       ),
       floatingActionButton: loading || err != null
           ? null
-          : FloatingActionButton.extended(
-              onPressed: busy ? null : _openMerge,
-              icon: const Icon(Icons.merge_type),
-              label: const Text('合并作者'),
-            ),
+          : Column(mainAxisSize: MainAxisSize.min, children: [
+              FloatingActionButton.extended(
+                key: const ValueKey('uag-create-dirs'),
+                heroTag: 'uag-create',
+                onPressed: (busy || _pickedBasics.isEmpty)
+                    ? null
+                    : _createAuthorDirs,
+                icon: const Icon(Icons.create_new_folder_outlined),
+                label: Text(
+                    '建作者目录 ${_pickedBasics.isEmpty ? '' : '(${_pickedBasics.length})'}'),
+              ),
+              const SizedBox(height: 8),
+              FloatingActionButton.extended(
+                heroTag: 'uag-merge',
+                onPressed: busy ? null : _openMerge,
+                icon: const Icon(Icons.merge_type),
+                label: const Text('合并作者'),
+              ),
+            ]),
       body: _body(),
     );
   }
@@ -265,6 +376,42 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(0, 8, 0, 88),
       children: [
+        // owner 2026-11-28：挂载不再按目录树，而按**基础库**选。
+        // 先列出直属上级单元库下的全部基础库，让用户选「哪些基础库有他的作品」。
+        _sectionTitle('按基础库挂载 ${_scopeBasics.length}'),
+        if (_scopeBasics.isEmpty)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 2, 16, 10),
+            child: Text('这个单元库下没有可选的基础库。',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+          )
+        else ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
+            child: Text(
+                '勾选哪些基础库有该作者的目录；勾完点右下角「建作者目录」，'
+                '已存在的目录会直接使用。同名目录默认为同一作者，可手动拆分。',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ),
+          for (final b in _scopeBasics)
+            CheckboxListTile(
+              key: ValueKey('uag-scope-${b.id}'),
+              dense: true,
+              value: _pickedBasics.contains(b.id),
+              title: Text(b.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              controlAffinity: ListTileControlAffinity.leading,
+              onChanged: busy
+                  ? null
+                  : (v) => setState(() {
+                        if (v == true) {
+                          _pickedBasics.add(b.id);
+                        } else {
+                          _pickedBasics.remove(b.id);
+                        }
+                      }),
+            ),
+          const Divider(height: 24),
+        ],
         _sectionTitle('已挂载的手动组 ${manual.length}'),
         if (manual.isEmpty)
           const Padding(
@@ -285,6 +432,9 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
       ],
     );
   }
+
+  /// 直属上级单元库下的全部基础库（作品不得跨出这个范围）。
+  List<BasicLib> get _scopeBasics => basicsOfUnitScope(widget.unit.allBasics);
 
   Widget _sectionTitle(String text) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),

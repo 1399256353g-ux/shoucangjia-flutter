@@ -703,3 +703,42 @@ String authorMountsUrl(String base, String name) {
   return joinApiUrl(base, '/api/author/mounts',
       query: n.isEmpty ? null : {'name': n});
 }
+
+/// 挂载设置不再按「目录树」勾选，而是按**基础库**勾选。
+///
+/// owner 2026-11-28：
+/// > 「不要用文件目录的方式进行设置了，列出直属单元库下所有基础库，让用户
+/// >   自己选作者作品存在于直接上级单元库下哪些基础库，选择后在对应基础库下
+/// >   创建作者文件夹，若已经存在则直接使用，除 others 之外，各基础库同名文件夹
+/// >   默认自动归属同一作者，保留一张作者卡，可手动拆分，作品不可跨过直接上级
+/// >   单元库分布，只能分布在直属单元库下的基础库内。」
+///
+/// 所以挂载页只需要两件事：
+///  1. 列出**直属**上级单元库下的全部基础库（下面这个函数）；
+///  2. 用户勾选哪些基础库有该作者 → 在这些库里建 `@作者`（已存在则直接用）。
+///
+/// 「直接上级单元库」的范围由 [basicsOfUnitScope] 定死：一个单元库的
+/// `allBasics`（自己 + 下级单元库的基础库）。作品不得跨出这个集合。
+List<T> basicsOfUnitScope<T>(Iterable<T> allBasicsOfUnit) =>
+    [for (final b in allBasicsOfUnit) b];
+
+/// 把「勾选了哪些基础库」翻译成建目录请求。
+///
+/// 一个作者在 N 个基础库里各有一个 `@作者名` 目录；同名即同一作者
+/// （服务端 `sanitizeAuthorDir` 用同一个目录名规则）。返回去重后的目录名
+/// 与每个基础库一组请求体，便于调用方逐个 POST（已存在=409，静默跳过）。
+///
+/// [authorDir] 必须已经过 `authorDirError` 校验；这里不再猜名字。
+List<Map<String, String>> createAuthorBodies({
+  required String authorDir,
+  required Iterable<String> libs,
+}) {
+  final seen = <String>{};
+  final out = <Map<String, String>>[];
+  for (final l in libs) {
+    final lib = l.trim();
+    if (lib.isEmpty || !seen.add(lib)) continue;
+    out.add(<String, String>{'lib': lib, 'name': authorDir});
+  }
+  return out;
+}

@@ -213,7 +213,8 @@ void main() {
     await t.pumpWidget(host(client));
     await t.pumpAndSettle();
 
-    await t.tap(find.byType(FloatingActionButton));
+    // 两个 FAB（建作者目录 / 合并作者）：这里走合并。
+    await t.tap(find.widgetWithText(FloatingActionButton, '合并作者'));
     await t.pumpAndSettle();
     // 勾选第一张卡（它的 key 由 lib|authorDir 组成）。
     await t.tap(find.byKey(const ValueKey('uag-pick-lib-1|@a')));

@@ -1,5 +1,6 @@
 
 import 'count_label.dart';
+import 'dart:convert';
 import 'json_num.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,8 @@ import 'work_card.dart';
 import 'work_forms.dart';
 import 'work_cover.dart';
 import 'author_grade.dart';
+import 'unit_author_groups.dart'
+    show authorDirForName, authorDirError, unitAuthorCreateUrl;
 import 'author_badge_row.dart';
 import 'library_badge.dart';
 import 'lib_names.dart';
@@ -94,6 +97,15 @@ class BasicLibPage extends StatefulWidget {
   final String sourceMediaLabel;
   final String sourceMediaId;
 
+  /// 同一**直接上级单元库**下的全部基础库（新建作者时可多选）。
+  ///
+  /// owner 2026-11-28：「新建时可以选择在哪些基础库有作品，列出所属单元库下
+  /// 所有基础库以供选择，选择后本地自动创建好文件夹」。
+  ///
+  /// 由调用方（持有单元库树的那一层）传入；空列表＝页面建不了作者目录，
+  /// 右上角入口直接不显示（不拿本页单个基础库去猜）。
+  final List<BasicLib> siblingBasics;
+
   /// 媒体库词条配色（由调用方按同一份顺序算出）。
   ///
   /// 必须由调用方传，不能在本页自己 `colorForUnit(sourceMediaId)`：不带
@@ -115,6 +127,7 @@ class BasicLibPage extends StatefulWidget {
     this.sourceMediaLabel = '',
     this.sourceMediaId = '',
     this.sourceMediaColor = LibraryBadge.gray,
+    this.siblingBasics = const <BasicLib>[],
   });
 
   @override
@@ -228,8 +241,133 @@ class _BasicLibPageState extends State<BasicLibPage>
     if (pos.pixels >= pos.maxScrollExtent - 600) _loadWorks();
   }
 
-  Future<void> _loadAuthors() async {
-    try {
+  /// 新建作者：选基础库（可多选）+ 名字，在选中的每个基础库下建 `@作者` 目录。
+  ///
+  /// owner 2026-11-28：「新建时可以选择在哪些基础库有作品，列出所属单元库下
+  /// 所有基础库以供选择，选择后本地自动创建好文件夹」。
+  ///
+  /// 只调服务端已有的 `POST /api/unit/authors/create`（它幂等：目录已存在返回
+  /// 409，不改任何已有文件）。不失败已创建的那几个。
+  Future<void> _openNewAuthor() async {
+    final basics = widget.siblingBasics;
+    if (basics.isEmpty) return;
+    final picked = <String>{widget.basic.id}; // 默认带上本页这个库
+    final nameCtl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: const Text('新建作者'),
+          content: SizedBox(
+            width: 440,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(
+                key: const ValueKey('new-author-name'),
+                controller: nameCtl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: '作者名（会建成 @作者名 目录）',
+                  isDense: true,
+                ),
+                onChanged: (_) => setD(() {}),
+              ),
+              const SizedBox(height: 12),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('哪些基础库有他的作品（可多选）',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ),
+              const SizedBox(height: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: SingleChildScrollView(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    for (final b in basics)
+                      CheckboxListTile(
+                        key: ValueKey('new-author-lib-${b.id}'),
+                        dense: true,
+                        value: picked.contains(b.id),
+                        title: Text(b.name,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        onChanged: (v) => setD(() {
+                          if (v == true) {
+                            picked.add(b.id);
+                          } else {
+                            picked.remove(b.id);
+                          }
+                        }),
+                      ),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('取消')),
+            FilledButton(
+              key: const ValueKey('new-author-ok'),
+              onPressed: (nameCtl.text.trim().isEmpty || picked.isEmpty)
+                  ? null
+                  : () => Navigator.pop(c, true),
+              child: const Text('创建'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final dir = authorDirForName(nameCtl.text);
+    final bad = authorDirError(dir);
+    if (bad != null) {
+      _snack(bad);
+      return;
+    }
+    var made = 0;
+    var existed = 0;
+    final failed = <String>[];
+    for (final lib in picked) {
+      try {
+        final r = await http
+            .post(
+              Uri.parse(unitAuthorCreateUrl(widget.urlOf('').toString())),
+              headers: {
+                ...widget.headersOf(lib),
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({'lib': lib, 'name': nameCtl.text.trim()}),
+            )
+            .timeout(const Duration(seconds: 15));
+        if (r.statusCode == 409) {
+          existed++;
+        } else if (r.statusCode == 200) {
+          made++;
+        } else {
+          failed.add(lib);
+        }
+      } catch (_) {
+        failed.add(lib);
+      }
+    }
+    if (!mounted) return;
+    final parts = <String>[
+      if (made > 0) '新建 $made 个',
+      if (existed > 0) '已存在 $existed 个',
+      if (failed.isNotEmpty) '失败 ${failed.length} 个',
+    ];
+    _snack(parts.isEmpty ? '未创建任何目录' : parts.join(' · '));
+    if (made > 0) await _loadAuthors();
+  }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _loadAuthors() async {    try {
       final r = await http
           .get(widget.urlOf('/api/lib/${widget.basic.id}/index.json',
               lib: widget.basic.id),
@@ -447,6 +585,18 @@ class _BasicLibPageState extends State<BasicLibPage>
             maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           const HomeAction(),
+          // owner 2026-11-28：「新建作者怎么还没添加，加到基础库首页右上角，
+          // 新建时可以选择在哪些基础库有作品，列出所属单元库下所有基础库以供
+          // 选择，选择后本地自动创建好文件夹」。
+          //
+          // 没有同级基础库列表时不显示（不拿本页单个库去猜）。
+          if (widget.siblingBasics.isNotEmpty)
+            IconButton(
+              key: const ValueKey('basic-new-author'),
+              tooltip: '新建作者',
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              onPressed: _openNewAuthor,
+            ),
           IconButton(
             key: const ValueKey('basic-categories'),
             tooltip: '分类树',
