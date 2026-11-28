@@ -399,7 +399,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
       if (!mounted) return;
       setState(() => saving = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('保存失败：${errorText(e)}')));
+          .showSnackBar(SnackBar(content: Text(failureLine('保存', errorText(e)))));
     }
   }
 
@@ -676,7 +676,7 @@ class _FolderStructurePageState extends State<FolderStructurePage> {
         body: loading
             ? const Center(child: CircularProgressIndicator())
             : err != null
-                ? LoadErrorView(message: '加载失败：$err')
+                ? LoadErrorView.loadFailed(err!)
                 : ListView(
                     padding: const EdgeInsets.only(bottom: 24),
                     children: [

@@ -17,6 +17,7 @@ import 'cover_cache.dart';
 import 'cover_history.dart';
 import 'cover_upload.dart';
 import 'media_resize.dart';
+import 'toast.dart';
 
 /// 菜单执行成功后告诉卡片该怎么显示：
 /// - [url] 非空：直接换成这张封面；
@@ -284,8 +285,5 @@ Future<bool?> _confirmClear(BuildContext context) {
   );
 }
 
-void _toast(BuildContext context, String text) {
-  if (text.isEmpty) return;
-  ScaffoldMessenger.maybeOf(context)
-      ?.showSnackBar(SnackBar(content: Text(text)));
-}
+void _toast(BuildContext context, String text) =>
+    showToastIn(context, text);

@@ -58,6 +58,7 @@ import 'author_drag.dart';
 import 'author_merge.dart';
 import 'author_mount_sheet.dart';
 import 'ui_copy.dart';
+import 'toast.dart';
 import 'author_dir_filter.dart';
 import 'author_avatar.dart';
 import 'author_avatar_store.dart';
@@ -531,7 +532,7 @@ Future<CoverUploadResult> uploadCoverFromPicker({
 }
 
 /// J9：作者来源词条所需的基础库映射与统计。
-/// 一次加载后按库缓存，词条显示「基础库」名称（如「🦶」），不是大库名。
+/// 一次加载后按库缓存，词条显示「基础库」名称（如「🦶」），不是上层目录名。
 class LibMeta {
   final List<BasicLib> basics;
 
@@ -541,7 +542,7 @@ class LibMeta {
   final List<BasicLib> allBasics;
   final Map<String, dynamic> stats;
 
-  /// J10：大库 id → 名称，用于作者筛选里的「大库」多选。
+  /// J10：旧分组 id（`big_id`）→ 名称，用于作者筛选里的历史分组多选。
   final Map<String, String> bigNames;
 
   /// L5：单元库树（作者筛选与词条来源）。为空表示服务端未提供节点信息。
@@ -1355,7 +1356,7 @@ Future<void> syncAllCollectionsFlow(BuildContext context,
   if (!context.mounted) return;
   if (j == null || !serviceSaidOk(j)) {
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('同步启动失败：${failureTextOf(j)}')));
+        SnackBar(content: Text(failureLine('同步启动', failureTextOf(j)))));
     return;
   }
   final exit = await showDialog<int>(
@@ -1916,7 +1917,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) {
         setState(() {
           testOk[s.id] = false;
-          testMsg[s.id] = '连接失败：${errorText(e)}';
+          testMsg[s.id] = failureLine('连接', errorText(e));
         });
       }
     } finally {
@@ -2390,9 +2391,7 @@ class _LibraryBadgeColorsPageState extends State<LibraryBadgeColorsPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? LoadErrorView(
-                  message: '加载失败：$err',
-                  onRetry: _loadLibs)
+              ? LoadErrorView.loadFailed(err!, onRetry: _loadLibs)
               : ListView(children: [
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
@@ -4061,7 +4060,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('检测启动失败：${errorText(e)}')));
+          .showSnackBar(SnackBar(content: Text(failureLine('检测启动', errorText(e)))));
     } finally {
       if (mounted) setState(() => checking = false);
     }
@@ -4187,10 +4186,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
 
   /// 按「同步批次」分组展示：每条记录都归到发现它的那一轮同步，
   /// 组头直接写明「本次同步 · 11-20 22:57」，不再只有一串时间。
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
+  void _toast(String msg) => showToast(this, msg);
 
   /// 单击整行：用 `libId`+`workId` 打开作品；作品不在本地索引时给明确提示，
   /// 不再像以前那样把「打开作品」错做成「进作者页」。
@@ -4250,7 +4246,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
         builder: (_) => PlayerPage(works: list, start: start, lib: lib),
       ));
     } catch (err) {
-      if (mounted) _toast('打开作品失败：${errorText(err)}');
+      if (mounted) _toast(failureLine('打开作品', errorText(err)));
     }
   }
 
@@ -4278,7 +4274,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       } catch (_) {}
       _toast(syncRetryResultLabel(r.statusCode, parsed));
     } catch (err) {
-      _toast('重试失败：${errorText(err)}');
+      _toast(failureLine('重试', errorText(err)));
     }
   }
 
@@ -4463,9 +4459,7 @@ class _DeletedMonitorPageState extends State<DeletedMonitorPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? LoadErrorView(
-                  message: '加载失败：$err',
-                  onRetry: load)
+              ? LoadErrorView.loadFailed(err!, onRetry: load)
               : Column(children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
@@ -5585,7 +5579,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       if (!mounted || seq != _seq) return;
       _apply(j);
     } catch (e) {
-      if (mounted && seq == _seq) _toast('保存失败：${errorText(e)}');
+      if (mounted && seq == _seq) _toast(failureLine('保存', errorText(e)));
     } finally {
       if (mounted && seq == _seq) setState(() => saving = false);
     }
@@ -5672,7 +5666,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       });
       _apply(j);
     } catch (e) {
-      _toast('重命名失败：${errorText(e)}');
+      _toast(failureLine('重命名', errorText(e)));
     }
   }
 
@@ -5700,7 +5694,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       _apply(j);
       _toast('已移除「${c.name}」并关闭同步');
     } catch (e) {
-      _toast('删除失败：${errorText(e)}');
+      _toast(failureLine('删除', errorText(e)));
     }
   }
 
@@ -5738,9 +5732,7 @@ class _CollectionAdminPageState extends State<CollectionAdminPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? LoadErrorView(
-                  message: '加载失败：$err',
-                  onRetry: load)
+              ? LoadErrorView.loadFailed(err!, onRetry: load)
               : cols.isEmpty
                   ? const Center(child: Text('没有同步源'))
                   : Column(children: [
@@ -5868,7 +5860,7 @@ class _LibraryPageState extends State<LibraryPage> {
   bool _hasSnapshot = false;
   bool _refreshing = false;
 
-  /// J2：大库/基础库两级选择。v1 服务端没有 bigLibraries 时为 null，走原列表。
+  /// J2：上层分组/基础库两级选择。v1 服务端没有 bigLibraries 时为 null，走原列表。
   LibraryTree? tree;
 
   /// P5：本次加载用到的「已连接」连接（只用于聚合与请求）。
@@ -6133,7 +6125,7 @@ class _LibraryPageState extends State<LibraryPage> {
         libs = merged;
         _hasSnapshot = true;
         if (failures.isNotEmpty) {
-          warn = '部分连接失败：${failures.join('、')}（其余库已照常显示）';
+          warn = '部分${failureLine('连接', failures.join('、'))}（其余库已照常显示）';
         }
       });
     } catch (e) {
@@ -6141,7 +6133,7 @@ class _LibraryPageState extends State<LibraryPage> {
         setState(() {
           // 刷新失败时保留上次结果，不把已显示的菜单换成错误页。
           if (_hasSnapshot) {
-            warn = '刷新失败：${errorText(e)}（显示的是上次结果）';
+            warn = '${failureLine('刷新', errorText(e))}（显示的是上次结果）';
           } else {
             err = errorText(e);
           }
@@ -6157,7 +6149,7 @@ class _LibraryPageState extends State<LibraryPage> {
     }
   }
 
-  /// 读取 v2 索引与本地星标；任何失败都只影响大库区，不影响已注册库。
+  /// 读取 v2 索引与本地星标；任何失败都只影响分组区，不影响已注册库。
   Future<void> _loadTree() async {
     try {
       // 0.9.6：星标统一从 StarStore 读，保证各页面看到同一份数据。
@@ -6808,7 +6800,7 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('设置失败：${errorText(e)}')));
+            .showSnackBar(SnackBar(content: Text(failureLine('设置', errorText(e)))));
       }
     }
   }
@@ -6849,7 +6841,7 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('删除失败：${errorText(e)}')));
+            .showSnackBar(SnackBar(content: Text(failureLine('删除', errorText(e)))));
       }
     }
   }
@@ -6903,8 +6895,11 @@ class _LibraryPageState extends State<LibraryPage> {
       return;
     }
     if (name.text.trim().isEmpty) {
+      // 与目录/分类建的「名称不能为空」同句不同源：这里是注册新库
+      // （服务端 `/api/libraries`），那里是分类目录。同类校验只保留
+      // 一个措辞常量，避免以后改成「名称不能为空」以外的说法时漏掉一处。
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('名称不能为空')));
+          .showSnackBar(const SnackBar(content: Text(kEmptyNameText)));
       return;
     }
     try {
@@ -6947,7 +6942,7 @@ class _LibraryPageState extends State<LibraryPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('添加失败：${errorText(e)}')));
+            .showSnackBar(SnackBar(content: Text(failureLine('添加', errorText(e)))));
       }
     }
   }
@@ -6990,7 +6985,7 @@ class _LibraryPageState extends State<LibraryPage> {
 
   /// 内容区：主页内嵌与独立「媒体库」页共用。
   Widget _body() {
-    if (err != null) return LoadErrorView(message: '加载失败：$err');
+    if (err != null) return LoadErrorView.loadFailed(err!);
     if (loading) return const Center(child: CircularProgressIndicator());
     final list = ListView(
       controller: _menuScroll,
@@ -7629,7 +7624,7 @@ class _MediaCrawlerSettingsPageState extends State<MediaCrawlerSettingsPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? LoadErrorView(message: '加载失败：$err')
+              ? LoadErrorView.loadFailed(err!)
               : ListView(children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
@@ -7735,7 +7730,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('保存失败：${errorText(e)}')));
+            .showSnackBar(SnackBar(content: Text(failureLine('保存', errorText(e)))));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -7755,7 +7750,7 @@ class _CrawlerConfigPageState extends State<CrawlerConfigPage> {
             child: Text(saving ? '保存中…' : '保存')),
       ]),
       body: err != null
-          ? LoadErrorView(message: '加载失败：$err')
+          ? LoadErrorView.loadFailed(err!)
           : loading
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(16), children: [
@@ -7884,7 +7879,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('启动失败：${errorText(e)}')));
+            .showSnackBar(SnackBar(content: Text(failureLine('启动', errorText(e)))));
       }
     }
     if (mounted) setState(() => running = false);
@@ -7914,7 +7909,7 @@ class _MaintenancePageState extends State<MaintenancePage> {
             tooltip: '重新扫描'),
       ]),
       body: err != null
-          ? LoadErrorView(message: '加载失败：$err')
+          ? LoadErrorView.loadFailed(err!)
           : loading
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(16), children: [
@@ -8388,7 +8383,7 @@ class _RankPageState extends State<RankPage> {
   Future<void> load() async {
     if (mounted) setState(() => err = null);
     try {
-      // 0.9.8：排行榜数据源改为全部基础库；大库筛选在本地按作者所属基础库收敛。
+      // 0.9.8：排行榜数据源改为全部基础库；分组筛选在本地按作者所属基础库收敛。
       // `lib=all` 的地址是激活连接、`cfg.headers` 却是当前库那条；两者
       // 分属两台机器时名次与数字来自 A、凭据是 B 的（401 或串库）。
       final scope = cfg.aggregate('/api/rank?period=$period&metric=$metric');
@@ -8611,9 +8606,7 @@ class _RankPageState extends State<RankPage> {
             return loading
               ? const Center(child: CircularProgressIndicator())
               : err != null
-                  ? LoadErrorView(
-                      message: '加载失败：$err',
-                      onRetry: load)
+                  ? LoadErrorView.loadFailed(err!, onRetry: load)
                   : visible.isEmpty && metaLoading
                       ? const Center(child: CircularProgressIndicator())
                   : visible.isEmpty
@@ -8838,9 +8831,7 @@ class _LibraryRankPageState extends State<LibraryRankPage> {
           child: loading
               ? const Center(child: CircularProgressIndicator())
               : err != null
-                  ? LoadErrorView(
-                      message: '加载失败：$err',
-                      onRetry: load)
+                  ? LoadErrorView.loadFailed(err!, onRetry: load)
                   : rows.isEmpty
                       ? const Center(
                           child: Text('暂无可参与排行的库',
@@ -9274,7 +9265,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
     if (j == null || !serviceSaidOk(j)) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('同步启动失败：${failureTextOf(j)}')));
+            SnackBar(content: Text(failureLine('同步启动', failureTextOf(j)))));
       }
       return;
     }
@@ -9783,9 +9774,7 @@ class _AuthorGridPageState extends State<AuthorGridPage> {
           ? const WorkGridSkeleton(
               count: 18, grid: kAuthorGrid, padding: kAuthorGridPagePadding)
           : err != null
-              ? LoadErrorView(
-                  message: '加载失败：$err',
-                  onRetry: load)
+              ? LoadErrorView.loadFailed(err!, onRetry: load)
               : Column(children: [
                   SizedBox(
                     height: 46,
@@ -12514,13 +12503,13 @@ class _PlayerPageState extends State<PlayerPage>
           .get(Uri.parse(url), headers: cfg.headersFor(_libFor(w)))
           .timeout(const Duration(minutes: 5));
       if (resp.statusCode != 200) {
-        _toast('保存失败：${httpErrorText(resp.statusCode)}');
+        _toast(failureLine('保存', httpErrorText(resp.statusCode)));
         return;
       }
       await file.writeAsBytes(resp.bodyBytes, flush: true);
       _toast('已保存到 ${file.path}');
     } catch (e) {
-      _toast('保存失败：${errorText(e)}');
+      _toast(failureLine('保存', errorText(e)));
     }
   }
 
@@ -16853,9 +16842,7 @@ class _RecommendPageState extends State<RecommendPage> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : err != null
-              ? LoadErrorView(
-                  message: '加载失败：$err',
-                  onRetry: () => load(refresh: false))
+              ? LoadErrorView.loadFailed(err!, onRetry: () => load(refresh: false))
               : Column(children: [
                   // J11：推荐与总览/排行/搜索共用同一套作者筛选与状态
                   AuthorFilterBar(
@@ -17438,11 +17425,11 @@ Future<AuthorEditResult> uploadAuthorAvatarBytes({
         )
         .timeout(const Duration(seconds: 30));
   } catch (e) {
-    return AuthorEditResult(false, '上传失败：${errorText(e)}');
+    return AuthorEditResult(false, failureLine('上传', errorText(e)));
   }
   final j = jsonObjectOrEmpty(r);
   final bad = apiFailureText(r.statusCode, j);
-  if (bad != null) return AuthorEditResult(false, '头像上传失败：$bad');
+  if (bad != null) return AuthorEditResult(false, failureLine('头像上传', bad));
   return AuthorEditResult(true, '头像已更新', path: '${j['u'] ?? ''}');
 }
 
@@ -17468,11 +17455,11 @@ Future<AuthorEditResult> uploadAuthorBio({
         )
         .timeout(const Duration(seconds: 15));
   } catch (e) {
-    return AuthorEditResult(false, '保存失败：${errorText(e)}');
+    return AuthorEditResult(false, failureLine('保存', errorText(e)));
   }
   final j = jsonObjectOrEmpty(r);
   final fail = apiFailureText(r.statusCode, j);
-  if (fail != null) return AuthorEditResult(false, '保存失败：$fail');
+  if (fail != null) return AuthorEditResult(false, failureLine('保存', fail));
   final saved = j['bio'] is String ? j['bio'] as String : clean;
   return AuthorEditResult(true, '简介已更新', path: saved);
 }
@@ -17506,12 +17493,12 @@ Future<AuthorEditResult> setAuthorAvatarFile({
         )
         .timeout(const Duration(seconds: 20));
   } catch (e) {
-    return AuthorEditResult(false, '设置头像失败：${errorText(e)}');
+    return AuthorEditResult(false, failureLine('设置头像', errorText(e)));
   }
   final j = jsonObjectOrEmpty(r);
   final bad = apiFailureText(r.statusCode, j,
       statusText: authorAvatarApiErrorText);
-  if (bad != null) return AuthorEditResult(false, '设置头像失败：$bad');
+  if (bad != null) return AuthorEditResult(false, failureLine('设置头像', bad));
   return AuthorEditResult(true, '已设为该作者头像', path: '${j['u'] ?? ''}');
 }
 
@@ -17537,12 +17524,12 @@ Future<AuthorEditResult> clearAuthorAvatar({
         )
         .timeout(const Duration(seconds: 20));
   } catch (e) {
-    return AuthorEditResult(false, '清除头像失败：${errorText(e)}');
+    return AuthorEditResult(false, failureLine('清除头像', errorText(e)));
   }
   final j = jsonObjectOrEmpty(r);
   final bad = apiFailureText(r.statusCode, j,
       statusText: authorAvatarApiErrorText);
-  if (bad != null) return AuthorEditResult(false, '清除头像失败：$bad');
+  if (bad != null) return AuthorEditResult(false, failureLine('清除头像', bad));
   return const AuthorEditResult(true, '已恢复自动头像');
 }
 
@@ -17582,7 +17569,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
       }
       setState(() => _image = frame.image);
     } catch (e) {
-      if (mounted) setState(() => _error = '图片解码失败：${errorText(e)}');
+      if (mounted) setState(() => _error = failureLine('图片解码', errorText(e)));
     }
   }
 
@@ -17674,7 +17661,7 @@ class _AvatarCropPageState extends State<AvatarCropPage> {
       setState(() => _busy = false);
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('生成头像失败：${errorText(e)}')));
+        ..showSnackBar(SnackBar(content: Text(failureLine('生成头像', errorText(e)))));
     }
   }
 
@@ -18072,7 +18059,7 @@ class _AuthorPageState extends State<AuthorPage> {
         XTypeGroup(label: '图片', extensions: ['jpg', 'jpeg', 'png', 'webp']),
       ]);
     } catch (e) {
-      _toast('打开文件选择器失败：${errorText(e)}');
+      _toast(failureLine('打开文件选择器', errorText(e)));
       return;
     }
     if (picked == null) return;
@@ -18080,7 +18067,7 @@ class _AuthorPageState extends State<AuthorPage> {
     try {
       bytes = await picked.readAsBytes();
     } catch (e) {
-      _toast('读取图片失败：${errorText(e)}');
+      _toast(failureLine('读取图片', errorText(e)));
       return;
     }
     // 与封面选图同一条判定（`imageBytesError`）：上限与魔数只该有一处。
@@ -18456,7 +18443,7 @@ class _AuthorPageState extends State<AuthorPage> {
         }
       }
       if (errors.isNotEmpty) {
-        _toast('预检失败：${errors.first}');
+        _toast(failureLine('预检', errors.first));
         return;
       }
       if (!mounted) return;
@@ -18493,7 +18480,7 @@ class _AuthorPageState extends State<AuthorPage> {
       await load();
       _toast(errors.isEmpty
           ? '已删除 $done 个作品（可在内容维护里撤销）'
-          : '已删除 $done 个，失败：${errors.first}');
+          : '已删除 $done 个，${failureLine('', errors.first)}');
     } finally {
       if (mounted) setState(() => _batchBusy = false);
     }
@@ -18505,7 +18492,7 @@ class _AuthorPageState extends State<AuthorPage> {
           .get(cfg.u('/api/cat/tree', lib: lib), headers: cfg.headersFor(lib))
           .timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) {
-        _toast('读取目录失败：${httpErrorText(r.statusCode)}');
+        _toast(failureLine('读取目录', httpErrorText(r.statusCode)));
         return null;
       }
       dynamic tree = jsonOf(r);
@@ -18563,7 +18550,7 @@ class _AuthorPageState extends State<AuthorPage> {
         ),
       );
     } catch (e) {
-      _toast('读取目录失败：${errorText(e)}');
+      _toast(failureLine('读取目录', errorText(e)));
       return null;
     }
   }
@@ -18618,7 +18605,7 @@ class _AuthorPageState extends State<AuthorPage> {
       await load();
       _toast(errors.isEmpty
           ? '已移动 $done 个作品到「$target」'
-          : '已移动 $done 个，失败：${errors.first}');
+          : '已移动 $done 个，${failureLine('', errors.first)}');
     } finally {
       if (mounted) setState(() => _batchBusy = false);
     }

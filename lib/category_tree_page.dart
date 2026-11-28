@@ -10,6 +10,7 @@ import 'category_tree.dart';
 import 'lib_names.dart';
 import 'library_tree.dart';
 import 'error_text.dart';
+import 'toast.dart';
 
 /// J14：通用分类树页面。
 ///
@@ -168,14 +169,11 @@ class _CategoryTreePageState extends State<CategoryTreePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => renaming = false);
-      _toast('重命名失败：${errorText(e)}');
+      _toast(failureLine('重命名', errorText(e)));
     }
   }
 
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
+  void _toast(String msg) => showToast(this, msg);
 
   @override
   Widget build(BuildContext context) {

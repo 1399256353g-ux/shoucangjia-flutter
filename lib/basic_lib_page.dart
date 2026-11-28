@@ -69,7 +69,7 @@ String pickAuthorAvatar({
 /// 本页不直接依赖全局 cfg：URL/鉴权/媒体地址由调用方注入，
 /// 避免 lib 包与 main.dart 之间形成循环导入。
 /// 在 isolate 里解析 works.json：把 UTF-8 解码 + JSON 解析都移出 UI 线程。
-/// 大库单页几十到上百条，主线程解析会直接卡住首帧。
+/// 基础库单页几十到上百条，主线程解析会直接卡住首帧。
 Map<String, dynamic> _parseWorksPayload(List<int> bytes) =>
     jsonOfBytes(bytes) as Map<String, dynamic>;
 
@@ -142,7 +142,7 @@ class BasicLibPage extends StatefulWidget {
 class _BasicLibPageState extends State<BasicLibPage>
     with SingleTickerProviderStateMixin {
   // owner 2026-11-19：单页从 120 降到 60，降低一次性解码/建卡的数量，
-  // 避免大库（几百到上千件）翻页时内存与解码压力叠加导致崩溃。
+  // 避免基础库（几百到上千件）翻页时内存与解码压力叠加导致崩溃。
   static const int _pageSize = 60;
 
   // owner 2026-11-19：「作品」在前，「作者」在后；进入基础库默认停在作品页。
@@ -1051,7 +1051,7 @@ class _BasicLibPageState extends State<BasicLibPage>
   WorkSort _sortMode = WorkSort.ingest;
 
   /// 排序/筛选结果缓存：作品分页追加、类型筛选、排序方式变化时置空，
-  /// build 与首屏预热只读缓存，避免每次重排整张列表（大库上千件）。
+  /// build 与首屏预热只读缓存，避免每次重排整张列表（基础库上千件）。
   List<dynamic>? _filteredCache;
 
   List<dynamic> get filtered => _filteredCache ??=

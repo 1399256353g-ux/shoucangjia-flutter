@@ -7,6 +7,7 @@
 library;
 
 import 'api_url.dart';
+import 'error_text.dart';
 import 'json_num.dart';
 import 'rel_path.dart';
 import 'time_labels.dart';
@@ -337,7 +338,7 @@ String syncRetryResultLabel(int status, dynamic body) {
     return '已开始重试 $n 条（任务 ${body['retryRunId'] ?? ''}）';
   }
   final err = apiFailureText(status, body, requireOk: false) ?? '';
-  return '重试失败：$err';
+  return failureLine('重试', err);
 }
 
 /// 把响应体按 UTF-8 解码成 JSON。

@@ -30,6 +30,7 @@ import 'load_error_view.dart';
 import 'ui_copy.dart';
 import 'unit_author_groups.dart';
 import 'unit_library.dart';
+import 'toast.dart';
 import 'basic_lib.dart' show BasicLib;
 
 /// 作者文件夹挂载面板。
@@ -314,11 +315,8 @@ class _UnitAuthorMountPageState extends State<UnitAuthorMountPage> {
     if (made > 0 || existed > 0) await load();
   }
 
-  void _toast(String msg, {bool bad = false}) {    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: bad ? Colors.red.shade700 : null,
-    ));
-  }
+  void _toast(String msg, {bool bad = false}) =>
+      showToast(this, msg, bad: bad);
 
   @override
   Widget build(BuildContext context) {

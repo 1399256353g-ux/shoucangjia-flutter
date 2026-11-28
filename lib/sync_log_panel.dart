@@ -129,7 +129,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('重试失败：${errorText(e)}')));
+          .showSnackBar(SnackBar(content: Text(failureLine('重试', errorText(e)))));
     } finally {
       if (mounted) setState(() => retrying = false);
     }
@@ -194,7 +194,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
             padding: const EdgeInsets.symmetric(vertical: 6),
             child: Row(children: [
               Expanded(
-                  child: Text('同步日志读取失败：$err',
+                  child: Text(failureLine('同步日志读取', err!),
                       style: const TextStyle(fontSize: 11))),
               TextButton(onPressed: load, child: const Text('重试')),
             ]),
@@ -309,7 +309,7 @@ class SyncLogPanelState extends State<SyncLogPanel> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('设置失败：${errorText(e)}')));
+          .showSnackBar(SnackBar(content: Text(failureLine('设置', errorText(e)))));
     } finally {
       if (mounted) setState(() => busy = false);
     }

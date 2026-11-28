@@ -37,7 +37,7 @@ class TotalRefreshOutcome {
 
   /// 完成提示：成功报库数，失败报第一条错误。
   String get message {
-    if (firstError != null) return '刷新失败：$firstError';
+    if (firstError != null) return failureLine('刷新', firstError!);
     if (servers == 0) return '没有可用的连接';
     return '已刷新 $libraries 个库';
   }
@@ -120,12 +120,12 @@ Future<TotalRefreshOutcome> runTotalRefresh({
   try {
     await clearCoverCache();
   } catch (e) {
-    firstError ??= '清除封面缓存失败：${errorText(e)}';
+    firstError ??= failureLine('清除封面缓存', errorText(e));
   }
   try {
     await reloadAuthors();
   } catch (e) {
-    firstError ??= '重拉作者索引失败：${errorText(e)}';
+    firstError ??= failureLine('重拉作者索引', errorText(e));
   }
 
   return TotalRefreshOutcome(

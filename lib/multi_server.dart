@@ -275,7 +275,7 @@ List<Map<String, dynamic>> mergeRegisteredLibraries(
   return out;
 }
 
-/// 聚合 v2 库树：大库与基础库都按 id 去重。
+/// 聚合 v2 库树：单元库与基础库都按 id 去重。
 ///
 /// 同时把**整棵树的单元库封面指针**（`nodes` / `bigLibraries` / `groups` 里
 /// 的 `cover.u`）合并成一张表随结果带出。

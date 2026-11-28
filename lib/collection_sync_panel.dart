@@ -160,7 +160,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
       if (!mounted) return;
       setState(() => saving = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('同步源保存失败：${errorText(e)}')));
+          .showSnackBar(SnackBar(content: Text(failureLine('同步源保存', errorText(e)))));
     }
   }
 
@@ -218,7 +218,7 @@ class _CollectionSyncPanelState extends State<CollectionSyncPanel> {
           loading
               ? '正在读取账号同步源…'
               : err != null
-                  ? '读取失败：$err'
+                  ? failureLine('读取', err!)
                   : rows.isEmpty
                       ? '未找到与「${syncUnitLabel(widget.unitName, widget.unitRel)}」'
                           '同名的同步源'

@@ -16,6 +16,7 @@ import 'json_num.dart';
 import 'rel_path.dart';
 import 'stable_order.dart';
 import 'text_fold.dart';
+import 'ui_copy.dart';
 
 /// 一个分类节点（对应磁盘上的一个真实目录）。
 class CategoryNode {
@@ -143,7 +144,7 @@ List<String> _stringList(dynamic v) {
 /// 校验分类新名称；合法返回 null，否则返回原因（中文，可直接展示）。
 String? validateCategoryName(String name) {
   final s = name.trim();
-  if (s.isEmpty) return '名称不能为空';
+  if (s.isEmpty) return kEmptyNameText;
   if (s == '.' || s == '..') return '名称不能是 . 或 ..';
   if (RegExp(r'[\\/:*?"<>|]').hasMatch(s)) return '名称不能包含 \\ / : * ? " < > |';
   if (RegExp(r'[\x00-\x1f]').hasMatch(s)) return '名称不能包含控制字符';

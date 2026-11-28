@@ -15,6 +15,7 @@ import 'http_json.dart';
 import 'lib_cover.dart'
     show normalizeCoverVersionName, normalizeCoverExt, coverVersionFileName;
 
+import 'error_text.dart';
 import 'http_error_text.dart';
 import 'cover_admin.dart' show coverScopeBody;
 
@@ -142,12 +143,13 @@ Future<CoverListResult> fetchCoverVersions({
         .timeout(const Duration(seconds: 8));
     if (r.statusCode != 200) {
       return CoverListResult(
-          false, '读取封面历史失败：${coverActionErrorText(r.statusCode)}');
+          false, failureLine('读取封面历史', coverActionErrorText(r.statusCode)));
     }
     final json = jsonOf(r);
     return CoverListResult(true, '', versions: parseCoverVersions(json));
   } catch (_) {
-    return const CoverListResult(false, '读取封面历史失败：网络异常');
+    return CoverListResult(
+        false, failureLine('读取封面历史', kNetworkAbnormalText));
   } finally {
     if (client == null) c.close();
   }
@@ -196,7 +198,7 @@ Future<CoverActionResult> restoreCoverVersion({
         .timeout(const Duration(seconds: 15));
     if (r.statusCode != 200) {
       return CoverActionResult(
-          false, '切换封面失败：${coverActionErrorText(r.statusCode)}');
+          false, failureLine('切换封面', coverActionErrorText(r.statusCode)));
     }
     String u = '';
     try {
@@ -205,7 +207,8 @@ Future<CoverActionResult> restoreCoverVersion({
     } catch (_) {}
     return CoverActionResult(true, '已切换到该封面', url: u);
   } catch (_) {
-    return const CoverActionResult(false, '切换封面失败：网络异常');
+    return CoverActionResult(
+        false, failureLine('切换封面', kNetworkAbnormalText));
   } finally {
     if (client == null) c.close();
   }
@@ -238,11 +241,12 @@ Future<CoverActionResult> clearCustomCover({
         .timeout(const Duration(seconds: 15));
     if (r.statusCode != 200) {
       return CoverActionResult(
-          false, '操作失败：${coverActionErrorText(r.statusCode)}');
+          false, failureLine('操作', coverActionErrorText(r.statusCode)));
     }
     return CoverActionResult(true, hard ? '已清除自定义封面' : '已恢复自动封面');
   } catch (_) {
-    return const CoverActionResult(false, '操作失败：网络异常');
+    return CoverActionResult(
+        false, failureLine('操作', kNetworkAbnormalText));
   } finally {
     if (client == null) c.close();
   }

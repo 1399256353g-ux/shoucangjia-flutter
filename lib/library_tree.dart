@@ -6,7 +6,7 @@ import 'server_origin.dart';
 //
 // 数据来源：/api/libraries.json（v2，由 NAS `lib_scan.py` 生成）
 //  - basicLibraries: 基础库（全量，**【必需】**）
-//  - bigLibraries:   旧版「大库」分组（**可缺**，新服务端已不再下发）
+//  - bigLibraries:   旧版分组（**可缺**，新服务端已不再下发）
 //
 // 0.9.321（第八十五批）：`parse` 曾经把 `bigLibraries` 当作必需字段——
 // 它不是 List 就整棵返回 null。新服务端只下发 `basicLibraries`，于是首页
@@ -16,9 +16,9 @@ import 'server_origin.dart';
 // 分组缺失只是没有旧分组，不再连带丢掉全部基础库。
 //
 // 规则：
-//  - 主页默认只展示大库（全部折叠），点开才看到基础库，减少首屏长度（J3）
+//  - 主页默认只展示上层分组（全部折叠），点开才看到基础库，减少首屏长度（J3）
 //  - 星标标记「基础库」：被标记的基础库收集到顶部「星标」区，按标记时间倒序
-//  - 已星标的基础库不再重复出现在大库分组里，避免同一项出现两次
+//  - 已星标的基础库不再重复出现在旧分组里，避免同一项出现两次
 //  - 找不到 big_id 的基础库归入「未归属」分组，不丢数据
 //  - 旧版（v1，只有 libraries 注册表、没有任何基础库）解析返回 null
 //
@@ -33,7 +33,7 @@ class BigLib {
   final String name;
   final String path;
 
-  /// 服务端 v2 索引里的统计字段。仅保留结构，不再生成旧「大库描述」。
+  /// 服务端 v2 索引里的统计字段。仅保留结构，不再生成旧的「N 个基础库」描述。
   final int authors;
   final int works;
   final List<BasicLib> basics;

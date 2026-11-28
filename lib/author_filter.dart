@@ -1,7 +1,7 @@
 /// J10：作者筛选工具的纯逻辑。
 ///
 /// 维度：
-///   - 基础库多选 / 大库多选（同一维度内取并集，任一命中即可）
+///   - 基础库多选 / 旧分组多选（同一维度内取并集，任一命中即可）
 ///   - 等级多选（D/C/B/A/S）
 ///   - 作品类型多选（视频/图片/合集/图文）
 /// 不同维度之间叠加（AND）；某个维度空集合表示不限制。
@@ -37,7 +37,7 @@ class AuthorLibNode {
 
 /// 作者筛选状态；全部为空即“未筛选”。
 class AuthorFilterState {
-  /// J10 旧维度：基础库/大库（保留以兼容历史数据与测试）。
+  /// J10 旧维度：基础库 / 旧分组 `big_id`（保留以兼容历史数据与测试）。
   final Set<String> basics;
   final Set<String> bigs;
 
@@ -150,7 +150,7 @@ class AuthorFilterState {
       final byUnit = unitId.isNotEmpty && units.contains(unitId);
       // P3：顶级节点是单元库的祖先，选中它即收敛整棵子树。
       final byTop = topId.isNotEmpty && tops.contains(topId);
-      // 库维度内取并集：基础库/大库/单元库/顶级节点任一命中即可。
+      // 库维度内取并集：基础库 / 旧分组 / 单元库 / 媒体库任一命中即可。
       if (!byBasic && !byBig && !byUnit && !byTop) return false;
     }
     if (grades.isNotEmpty) {
@@ -174,7 +174,7 @@ class AuthorFilterState {
     Map<String, String> topNames = const {},
   }) {
     final parts = <String>[
-      // 0.9.313：界面上不再出现「顶级节点」「大库」这类内部叫法。
+      // 0.9.313：界面上不再出现内部结构术语，统一叫「媒体库」。
       // 一级 = 每个连接的库根 → 「媒体库」；旧 `bigs` 只剩历史筛选。
       if (tops.isNotEmpty)
         _namesPart(levelName(LibEntryKind.top), tops, topNames),
@@ -210,7 +210,7 @@ String _namesPart(String label, Set<String> ids, Map<String, String> names) {
   return '$label ${list.join('/')}';
 }
 
-/// 把基础库 id/名称/大库 id 组装成节点列表，按 rel/名称稳定排序。
+/// 把基础库 id/名称/旧分组 id 组装成节点列表，按 rel/名称稳定排序。
 List<AuthorLibNode> authorLibNodes(Iterable<AuthorLibNode> nodes) {
   final seen = <String>{};
   final out = <AuthorLibNode>[];

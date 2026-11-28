@@ -102,7 +102,7 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
     f = _migrateLegacyBigs(f);
   }
 
-  /// 把旧的「大库」选择并进「单元库」维度（0.9.313）。
+  /// 把旧的分组（`big_id`）选择并进「单元库」维度（0.9.313）。
   ///
   /// 背景：`bigs` 是单库时代的维度（服务端 `big_id`），而它的 id 就是第一层
   /// 单元库 id——同一个节点在两个下拉里各出现一次，名字还一个叫「媒体库
@@ -174,7 +174,7 @@ class _AuthorFilterSheetState extends State<_AuthorFilterSheet> {
     ];
     final bigChips = [
       for (final b in widget.bigs)
-        // 已被单元库维度接管的大库不再画一次（同一个节点两个词条）。
+        // 已被单元库维度接管的旧分组不再画一次（同一个节点两个词条）。
         if (!_takenOver.contains(b.id))
           _chip(b.name, f.bigs.contains(b.id), () => f.toggleBig(b.id)),
     ];

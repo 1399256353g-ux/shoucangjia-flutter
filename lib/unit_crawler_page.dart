@@ -141,7 +141,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('保存失败：${errorText(e)}')));
+            .showSnackBar(SnackBar(content: Text(failureLine('保存', errorText(e)))));
       }
     }
     if (mounted) setState(() => saving = false);
@@ -166,7 +166,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
       if (!mounted) return;
       setState(() => running = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('启动失败：${errorText(e)}')));
+          .showSnackBar(SnackBar(content: Text(failureLine('启动', errorText(e)))));
     }
   }
 
@@ -320,7 +320,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
                     Wrap(spacing: 8, runSpacing: 6, children: [
                       for (final m in kCooldownOptions)
                         ChoiceChip(
-                          label: Text('$m 分钟'),
+                          label: Text(minutesLabel(m)),
                           selected: config.cooldownMin == m,
                           onSelected: hasScript
                               ? (_) => setState(() =>
@@ -359,7 +359,7 @@ class _UnitCrawlerPageState extends State<UnitCrawlerPage> {
     );
   }
 
-  Widget _errorView() => LoadErrorView(message: '加载失败：$err', onRetry: load);
+  Widget _errorView() => LoadErrorView.loadFailed(err!, onRetry: load);
 
   Widget _capabilityBanner() {
     final ok = hasScript;

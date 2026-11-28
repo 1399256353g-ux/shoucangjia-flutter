@@ -38,3 +38,11 @@ String everyMinutesLabel(int minutes) {
   if (minutes >= 60) return '每 ${minutes ~/ 60} 小时';
   return '每 $minutes 分钟';
 }
+
+/// 纯时长：「N 分钟」。**不是**频率（频率是「每 N 分钟」，见 [everyMinutesLabel]）。
+///
+/// 0.9.362：快检冷却的档位 chip 写 `'$m 分钟'`，而同一页底部汇总行写
+/// `'冷却 $cooldownMin 分钟'` —— 同一个时长、同一个单位后缀，两处各拼一遍。
+/// 单位改成「分」或加上秒数时只能改到一处，另一处会留着旧说法。
+/// 这里只管「数字 + 单位」，前缀（`冷却`）由调用方加。
+String minutesLabel(int minutes) => '$minutes 分钟';

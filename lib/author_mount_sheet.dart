@@ -28,6 +28,7 @@ import 'count_label.dart';
 import 'label_fallback.dart';
 import 'rel_path.dart';
 import 'unit_author_groups.dart';
+import 'toast.dart';
 
 /// 打开作者挂载面板。
 Future<bool?> showAuthorMountSheet({
@@ -335,12 +336,8 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
     }
   }
 
-  void _toast(String msg, {bool bad = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: bad ? Colors.red.shade700 : null,
-    ));
-  }
+  void _toast(String msg, {bool bad = false}) =>
+      showToast(this, msg, bad: bad);
 
   @override
   Widget build(BuildContext context) {
@@ -392,7 +389,7 @@ class _AuthorMountSheetState extends State<_AuthorMountSheet> {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text('读取失败：$err',
+          Text(failureLine('读取', err!),
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 12, color: Colors.grey)),
           const SizedBox(height: 12),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'error_text.dart';
+
 /// 「加载失败」的唯一样式。
 ///
 /// 此前这个块在 `main.dart` 里被手写了 **11 次**，分三种形态：
@@ -21,6 +23,18 @@ class LoadErrorView extends StatelessWidget {
 
   /// 已经翻译成人话的错误文案（不要传 `'$e'`）。
   final String message;
+
+  /// 加载失败页的入口：**唯一**的「加载失败：<原因>」拼法。
+  ///
+  /// 0.9.362：调用点原来各自写 `LoadErrorView(message: '加载失败：$err')`，
+  /// 14 处各拼一遍同一句话。页面上这句话的措辞（`加载失败`）与分隔符
+  /// 应该只在一处——否则改成「加载出错」时只改到几处，同一 App 里两种说法。
+  factory LoadErrorView.loadFailed(
+    String err, {
+    Key? key,
+    VoidCallback? onRetry,
+  }) =>
+      LoadErrorView(key: key, message: failureLine('加载', err), onRetry: onRetry);
 
   /// 为空时不显示重试按钮（页面级错误，靠外层重新加载）。
   final VoidCallback? onRetry;

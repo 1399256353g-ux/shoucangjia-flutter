@@ -108,7 +108,7 @@ class UnitCrawlerConfig {
   String get intervalLabel =>
       '快检${quickCheck ? everyMinutesLabel(quickMin) : '关闭'}'
       ' · 全量${everyMinutesLabel(fullMin)}'
-      ' · 冷却 $cooldownMin 分钟';
+      ' · 冷却 ${minutesLabel(cooldownMin)}';
 }
 
 /// 单元库 `crawler/` 下的脚本文件。

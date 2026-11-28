@@ -5,6 +5,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'cover_admin.dart';
+import 'error_text.dart';
 import 'http_json.dart';
 import 'media_path.dart';
 
@@ -155,7 +156,9 @@ Future<CoverUploadResult> uploadCoverBytes({
         // 而不是永远停在「上传中…」。
         .timeout(const Duration(seconds: 60));
   } catch (e) {
-    return const CoverUploadResult(false, '上传失败：网络异常，请检查连接后重试');
+    return CoverUploadResult(
+        false,
+        '${failureLine('上传', kNetworkAbnormalText)}，请检查连接后重试');
   }
   if (r.statusCode != 200) {
     // 状态码文案的归类只有一个出口（与作者头像/封面历史同源）：
@@ -163,7 +166,7 @@ Future<CoverUploadResult> uploadCoverBytes({
     // 在头像上传显示「图片过大」。
     final msg = apiFailureText(r.statusCode, jsonObjectOrEmpty(r),
         requireOk: false, statusText: coverErrorText);
-    return CoverUploadResult(false, '上传失败：$msg');
+    return CoverUploadResult(false, failureLine('上传', msg!));
   }
   var coverPath = '';
   try {

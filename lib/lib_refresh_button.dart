@@ -43,7 +43,7 @@ class _LibQuickRefreshButtonState extends State<LibQuickRefreshButton> {
     try {
       msg = await fn();
     } catch (e) {
-      msg = '刷新失败：${errorText(e)}';
+      msg = failureLine('刷新', errorText(e));
     }
     if (!mounted) return;
     setState(() => _busy = false);

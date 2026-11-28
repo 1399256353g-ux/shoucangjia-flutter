@@ -624,11 +624,20 @@ void main() {
           .map((f) => f.path)
           .toList();
       expect(offenders, isEmpty, reason: '错误块又手写回来了：$offenders');
-      // 真实路径仍在：控件被多处使用。
+      // 0.9.362：`加载失败：` 的拼法也收进了 `LoadErrorView.loadFailed`。
+      // 调用点不该再自己拼这句话（此前 14 处各拼一遍，措辞只能靠全局搜索改）。
+      final handPinned = libDartFiles()
+          .where((f) => !f.path.endsWith('load_error_view.dart'))
+          .where((f) => RegExp(r"message:\s*'加载失败：").hasMatch(codeOf(f)))
+          .map((f) => f.path)
+          .toList();
+      expect(handPinned, isEmpty,
+          reason: '「加载失败：」又被手拼回调用点了：$handPinned');
+      // 真实路径仍在：控件被多处使用（构造 + loadFailed 合计）。
       final src = libDartFiles().map(codeOf).join('\n');
-      final uses = RegExp(r'LoadErrorView\(').allMatches(src).length;
-      expect(uses, greaterThanOrEqualTo(13),
-          reason: 'LoadErrorView 使用点从 13 处掉到 $uses 处');
+      final uses = RegExp(r'LoadErrorView\.(loadFailed|\()').allMatches(src).length;
+      expect(uses, greaterThanOrEqualTo(14),
+          reason: 'LoadErrorView 使用点从 14 处掉到 $uses 处');
     });
 
     test('异常转文案只走 errorText（页面不得再写原始异常插值）', () {
